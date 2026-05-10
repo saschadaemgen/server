@@ -1,0 +1,28 @@
+# Cross-compile all unifix binaries for linux/arm64 (Raspberry Pi)
+
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $repoRoot
+
+$env:GOOS = "linux"
+$env:GOARCH = "arm64"
+$env:CGO_ENABLED = "0"
+
+New-Item -ItemType Directory -Force -Path "bin" | Out-Null
+
+Write-Host "Building unifix-server..."
+go build -o bin\unifix-server-linux-arm64 .\server\cmd\unifix-server
+
+Write-Host "Building mock..."
+go build -o bin\mock-linux-arm64 .\mock\cmd\mock
+
+Write-Host "Building license-server..."
+go build -o bin\license-server-linux-arm64 .\license-server\cmd\license-server
+
+# Reset env so subsequent native builds work
+$env:GOOS = ""
+$env:GOARCH = ""
+$env:CGO_ENABLED = ""
+
+Write-Host "Done. Binaries in bin\"
+Get-ChildItem bin\

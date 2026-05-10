@@ -1,0 +1,20 @@
+# Build artifacts
+bin/
+*.exe
+
+# State and runtime data
+state/
+certs/
+*.log
+
+# Go workspace
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
