@@ -14,6 +14,8 @@ const (
 	DefaultModel      = "UA-Int-Viewer"
 	DefaultAppVersion = "v1.0"
 	DefaultFirmware   = "DA.qca805x.v1.5.30.000000.19700121.113317"
+	DefaultHWType     = "GA" // TLV 0x2e
+	DefaultBOMRev     = "05" // TLV 0x2f
 )
 
 // MockIdentity captures the wer-bin-ich-Karte of one mock device.
@@ -28,6 +30,8 @@ type MockIdentity struct {
 	Model       string
 	AppVersion  string
 	Firmware    string
+	HWType      string // TLV 0x2e, e.g. "GA"
+	BOMRev      string // TLV 0x2f, e.g. "05"
 }
 
 // NewMockIdentity validates inputs, derives ID from the MAC, fills
@@ -73,6 +77,8 @@ func NewMockIdentity(
 		Model:       DefaultModel,
 		AppVersion:  DefaultAppVersion,
 		Firmware:    DefaultFirmware,
+		HWType:      DefaultHWType,
+		BOMRev:      DefaultBOMRev,
 	}, nil
 }
 

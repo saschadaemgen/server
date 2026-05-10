@@ -1,16 +1,27 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"unifix.local/mock/internal/crypto"
 	"unifix.local/mock/internal/identity"
+	"unifix.local/mock/internal/stages/discovery"
 )
+
+type simpleLogger struct{}
+
+func (simpleLogger) Infof(f string, a ...any)  { log.Printf("INFO  "+f, a...) }
+func (simpleLogger) Warnf(f string, a ...any)  { log.Printf("WARN  "+f, a...) }
+func (simpleLogger) Errorf(f string, a ...any) { log.Printf("ERROR "+f, a...) }
 
 func main() {
 	macFlag := flag.String("mac", "", "device MAC address (required), e.g. 0c:ea:14:42:42:42")
@@ -19,6 +30,7 @@ func main() {
 	nameFlag := flag.String("name", "", "device name (default derived from MAC)")
 	guidFlag := flag.String("guid", "", "device GUID (default freshly generated)")
 	showJWTFlag := flag.Bool("show-jwt", false, "sign and print a sample JWT, then exit")
+	runFlag := flag.Bool("run", false, "run the mock daemon (otherwise prints identity and exits)")
 	flag.Parse()
 
 	if *macFlag == "" || *ipFlag == "" {
@@ -52,4 +64,24 @@ func main() {
 		fmt.Printf("jwt: %s\n", token)
 		return
 	}
+
+	if !*runFlag {
+		return
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	log.Printf("starting stage 1 discovery listener for %s", id)
+	lst, err := discovery.New(id, simpleLogger{})
+	if err != nil {
+		log.Fatalf("mock: discovery listener init: %v", err)
+	}
+	defer lst.Close()
+
+	if err := lst.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Fatalf("mock: discovery listener run: %v", err)
+	}
+	log.Println("mock: shutdown clean")
 }

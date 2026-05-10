@@ -7,15 +7,23 @@ import "fmt"
 // live capture verification.
 
 const (
-	TLVTypeMAC           uint8 = 0x21 // device MAC, hex string no colons
-	TLVTypeMACIP         uint8 = 0x02 // MAC + IP combined
-	TLVTypeName          uint8 = 0x0b // "UA Intercom Viewer 4242"
-	TLVTypeFirmware      uint8 = 0x03 // "DA.qca805x.v1.5.30..."
-	TLVTypeModel         uint8 = 0x15 // "UA-Int-Viewer"
-	TLVTypeServicePort   uint8 = 0x24 // 8080, big-endian 32-bit
-	TLVTypeAppVersion    uint8 = 0x16 // "v1.0"
-	TLVTypeGUID          uint8 = 0x2b // 16-byte UUID
-	TLVTypeAdopted       uint8 = 0x17 // single byte, INVERSE bool
+	TLVTypeMAC           uint8 = 0x21 // UTF-8 string of MAC hex without colons (12 bytes ASCII)
+	TLVTypeMACIP         uint8 = 0x02 // 6 bytes MAC + 4 bytes IPv4
+	TLVTypeFirmware      uint8 = 0x03 // ASCII firmware string
+	TLVTypeUptime        uint8 = 0x0a // 8-byte BE uptime seconds
+	TLVTypeName          uint8 = 0x0b // device display name
+	TLVTypeModel         uint8 = 0x15 // ASCII model code
+	TLVTypeAppVersion    uint8 = 0x16 // ASCII app version
+	TLVTypeReady         uint8 = 0x17 // single byte, 0x01 = ready (pcap-verified saison 9)
+	TLVTypeServicePort   uint8 = 0x24 // 4-byte BE service port
+	TLVTypeTimestamp1    uint8 = 0x27 // 4 zero bytes + 4-byte BE unix timestamp
+	TLVTypeEmpty28       uint8 = 0x28 // empty value
+	TLVTypeUser          uint8 = 0x2a // ASCII "user"
+	TLVTypeGUID          uint8 = 0x2b // 16 raw GUID bytes
+	TLVTypeOnes          uint8 = 0x2c // single 0x01 byte
+	TLVTypeTimestamp2    uint8 = 0x2d // 4 zero bytes + 4-byte BE (timestamp - 60)
+	TLVTypeHWType        uint8 = 0x2e // ASCII hardware type (e.g. "GA")
+	TLVTypeBOMRev        uint8 = 0x2f // ASCII BOM revision (e.g. "05")
 	TLVTypeDiscriminator uint8 = 0x82 // AP (0x01) vs normal device
 )
 

@@ -38,6 +38,12 @@ func TestNewMockIdentity_ValidInputs(t *testing.T) {
 	if id.Firmware != DefaultFirmware {
 		t.Errorf("Firmware = %q, want %q", id.Firmware, DefaultFirmware)
 	}
+	if id.HWType != DefaultHWType {
+		t.Errorf("HWType = %q, want %q", id.HWType, DefaultHWType)
+	}
+	if id.BOMRev != DefaultBOMRev {
+		t.Errorf("BOMRev = %q, want %q", id.BOMRev, DefaultBOMRev)
+	}
 	if !id.IPv4.Equal(net.ParseIP("192.168.1.42")) {
 		t.Errorf("IPv4 = %v, want 192.168.1.42", id.IPv4)
 	}

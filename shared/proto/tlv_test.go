@@ -14,7 +14,7 @@ func TestTLVRoundtrip(t *testing.T) {
 		{Type: TLVTypeName, Value: []byte("UA Intercom Viewer 4242")},
 		{Type: TLVTypeMAC, Value: []byte("0cea1442 4242")},
 		{Type: TLVTypeServicePort, Value: portBuf},
-		{Type: TLVTypeAdopted, Value: []byte{0x00}},
+		{Type: TLVTypeReady, Value: []byte{0x01}},
 	}
 
 	encoded := EncodeTLVs(in)
