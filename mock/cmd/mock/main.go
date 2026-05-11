@@ -17,6 +17,7 @@ import (
 	"unifix.local/mock/internal/crypto"
 	"unifix.local/mock/internal/handlers"
 	"unifix.local/mock/internal/identity"
+	"unifix.local/mock/internal/outgoing"
 	"unifix.local/mock/internal/stages/adoption"
 	"unifix.local/mock/internal/stages/discovery"
 	"unifix.local/mock/internal/stages/mqtt"
@@ -103,21 +104,18 @@ func main() {
 	}
 	defer disc.Close()
 
-	var adoptSrv *adoption.Server
-	if !complete {
-		log.Printf("starting stage 4 adoption endpoint on :%d", id.ServicePort)
-		bindAddr := fmt.Sprintf(":%d", id.ServicePort)
-		certDir := store.CertDir(id.ID)
-		adoptSrv, err = adoption.New(id, store, simpleLogger{}, bindAddr, certDir)
-		if err != nil {
-			log.Fatalf("mock: adoption init: %v", err)
-		}
-		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = adoptSrv.Close(ctx)
-		}()
+	log.Printf("starting stage 4 adoption endpoint on :%d", id.ServicePort)
+	bindAddr := fmt.Sprintf(":%d", id.ServicePort)
+	certDir := store.CertDir(id.ID)
+	adoptSrv, err := adoption.New(id, store, simpleLogger{}, bindAddr, certDir)
+	if err != nil {
+		log.Fatalf("mock: adoption init: %v", err)
 	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = adoptSrv.Close(ctx)
+	}()
 
 	ctx, cancel := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
@@ -125,9 +123,7 @@ func main() {
 
 	errCh := make(chan error, 4)
 	go func() { errCh <- disc.Run(ctx) }()
-	if adoptSrv != nil {
-		go func() { errCh <- adoptSrv.Run(ctx) }()
-	}
+	go func() { errCh <- adoptSrv.Run(ctx) }()
 
 	go runStages56(ctx, id, store, initialBundle, adoptSrv, errCh)
 
@@ -156,9 +152,6 @@ func runStages56(
 ) {
 	bundle := initial
 	if bundle == nil {
-		if adoptSrv == nil {
-			return
-		}
 		select {
 		case <-ctx.Done():
 			return
@@ -202,6 +195,10 @@ func runStages56(
 	registry.Register("/remote_view", mh.RemoteView)
 	registry.Register("/cancel_doorbell_notification", mh.CancelDoorbell)
 	mqttClient.SetHandler(registry)
+
+	relay := outgoing.NewRelayPublisher(mqttClient, id.ID, bundle.ControllerID, simpleLogger{})
+	adoptSrv.SetUnlocker(relay)
+	log.Printf("mock: /api/v1/unlock wired (sender=%s udm=%s)", id.ID, bundle.ControllerID)
 
 	log.Printf("starting stage 6 mqtt client")
 	errCh <- mqttClient.Run(ctx)

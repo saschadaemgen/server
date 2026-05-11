@@ -24,6 +24,7 @@ import (
 
 const (
 	adoptPath    = "/api/v2/adopt"
+	unlockPath   = "/api/v1/unlock"
 	maxBodyBytes = 64 * 1024
 	// fwResponse is the firmware string returned in the adopt
 	// response. UDM displays this in its UI; saison 9 used this
@@ -40,7 +41,9 @@ type Logger interface {
 
 // Server hosts the HTTPS adoption endpoint that UDM POSTs to.
 // One-shot in the sense that after a successful adoption the
-// state is persisted and UDM does not normally POST again.
+// state is persisted and UDM does not normally POST again. The
+// server keeps running after adoption so saison-11-07 outbound
+// endpoints (/api/v1/unlock) remain reachable.
 type Server struct {
 	identity  *identity.MockIdentity
 	store     *state.Store
@@ -52,6 +55,30 @@ type Server struct {
 
 	adopted     chan struct{}
 	adoptedOnce sync.Once
+
+	unlockMu sync.Mutex
+	unlocker Unlocker
+}
+
+// Unlocker is implemented by outgoing.RelayPublisher. Adoption
+// keeps the interface narrow so the outgoing package stays the
+// only place that knows /relay/unlock wire format.
+type Unlocker interface {
+	Unlock(hubMAC, intercomMAC, bellID string) (requestID string, err error)
+}
+
+// unlockRequest is the saison-11-07 POST /api/v1/unlock body.
+type unlockRequest struct {
+	HubMAC      string `json:"hub_mac"`
+	IntercomMAC string `json:"intercom_mac"`
+	BellID      string `json:"bell_id"`
+}
+
+// unlockResponse is the saison-11-07 POST /api/v1/unlock response.
+type unlockResponse struct {
+	OK        bool   `json:"ok"`
+	RequestID string `json:"request_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // adoptResponse is the saison 9 schema UDM expects.
@@ -111,6 +138,7 @@ func New(
 	}
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc(adoptPath, s.handleAdopt)
+	s.mux.HandleFunc(unlockPath, s.handleUnlock)
 	s.httpSrv = &http.Server{
 		Addr:              bindAddr,
 		Handler:           s.mux,
@@ -240,6 +268,73 @@ func validateBundle(b *state.Bundle) error {
 
 func looksLikePEM(s string) bool {
 	return strings.Contains(s, "-----BEGIN")
+}
+
+// SetUnlocker wires the outgoing /relay/unlock publisher into the
+// adoption HTTPS server. Safe to call any time after New(); before
+// it is called, /api/v1/unlock responds 503 so the route is always
+// registered but only functional once MQTT is up.
+func (s *Server) SetUnlocker(u Unlocker) {
+	s.unlockMu.Lock()
+	s.unlocker = u
+	s.unlockMu.Unlock()
+}
+
+func (s *Server) handleUnlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.unlockMu.Lock()
+	unlocker := s.unlocker
+	s.unlockMu.Unlock()
+	if unlocker == nil {
+		writeUnlockError(w, http.StatusServiceUnavailable, "mqtt not connected")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeUnlockError(w, http.StatusBadRequest, "read body: "+err.Error())
+		return
+	}
+	var req unlockRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		s.log.Warnf("http: /api/v1/unlock malformed json: %v", err)
+		writeUnlockError(w, http.StatusBadRequest, "malformed json")
+		return
+	}
+	if req.HubMAC == "" || req.IntercomMAC == "" {
+		writeUnlockError(w, http.StatusBadRequest, "hub_mac and intercom_mac are required")
+		return
+	}
+
+	s.log.Infof("http: unlock requested hub=%s intercom=%s bell=%s",
+		req.HubMAC, req.IntercomMAC, req.BellID)
+
+	requestID, err := unlocker.Unlock(req.HubMAC, req.IntercomMAC, req.BellID)
+	if err != nil {
+		s.log.Errorf("http: unlock publish failed: %v", err)
+		writeUnlockError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	writeUnlockResponse(w, http.StatusOK, unlockResponse{
+		OK:        true,
+		RequestID: requestID,
+	})
+}
+
+func writeUnlockResponse(w http.ResponseWriter, status int, body unlockResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	bytes, _ := json.Marshal(body)
+	_, _ = w.Write(bytes)
+}
+
+func writeUnlockError(w http.ResponseWriter, status int, msg string) {
+	writeUnlockResponse(w, status, unlockResponse{OK: false, Error: msg})
 }
 
 // buildAdoptResponse builds the success envelope UDM expects.

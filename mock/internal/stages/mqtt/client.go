@@ -348,6 +348,24 @@ func (c *Client) Stats() (heartbeats, rpcsRecv, rpcsAns int) {
 	return c.heartbeatsPublished, c.rpcsReceived, c.rpcsAnswered
 }
 
+// Publish sends payload to topic with QoS 0. Thread-safe; callable
+// from goroutines other than Run (e.g. an HTTPS handler dispatching
+// an outgoing RPC). Returns an error if the broker is not connected
+// or the publish-token times out.
+func (c *Client) Publish(topic string, payload []byte) error {
+	c.mu.Lock()
+	broker := c.broker
+	c.mu.Unlock()
+	if broker == nil || !broker.IsConnected() {
+		return errors.New("mqtt: not connected")
+	}
+	token := broker.Publish(topic, 0, false, payload)
+	if !token.WaitTimeout(publishTimeout) {
+		return errors.New("mqtt: publish timeout")
+	}
+	return token.Error()
+}
+
 // asciiPreview returns the payload with non-printable bytes
 // replaced by dots. Useful for spotting embedded path strings
 // like "/remote_view" inside the binary frame during saison-11

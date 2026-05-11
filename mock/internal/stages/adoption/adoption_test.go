@@ -280,6 +280,133 @@ func TestHandleAdopt_RejectsEmptyBody(t *testing.T) {
 	}
 }
 
+// fakeUnlocker captures the args of the most recent Unlock call
+// for assertion in HTTP-handler tests.
+type fakeUnlocker struct {
+	hubMAC      string
+	intercomMAC string
+	bellID      string
+	requestID   string
+	err         error
+	called      bool
+}
+
+func (f *fakeUnlocker) Unlock(hubMAC, intercomMAC, bellID string) (string, error) {
+	f.called = true
+	f.hubMAC = hubMAC
+	f.intercomMAC = intercomMAC
+	f.bellID = bellID
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.requestID == "" {
+		f.requestID = "ZZZZZ"
+	}
+	return f.requestID, nil
+}
+
+func doUnlockPOST(t *testing.T, srv *Server, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, unlockPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestHandleUnlock_ValidRequest(t *testing.T) {
+	srv, _ := newTestServer(t)
+	fake := &fakeUnlocker{requestID: "AbCdE"}
+	srv.SetUnlocker(fake)
+
+	body := []byte(`{"hub_mac":"0cea14476781","intercom_mac":"28704e31e29c","bell_id":"bell0"}`)
+	rec := doUnlockPOST(t, srv, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp unlockResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.OK {
+		t.Errorf("ok = false, want true")
+	}
+	if resp.RequestID != "AbCdE" {
+		t.Errorf("request_id = %q, want AbCdE", resp.RequestID)
+	}
+
+	if !fake.called {
+		t.Fatal("unlocker was not invoked")
+	}
+	if fake.hubMAC != "0cea14476781" {
+		t.Errorf("hubMAC = %q", fake.hubMAC)
+	}
+	if fake.intercomMAC != "28704e31e29c" {
+		t.Errorf("intercomMAC = %q", fake.intercomMAC)
+	}
+	if fake.bellID != "bell0" {
+		t.Errorf("bellID = %q", fake.bellID)
+	}
+}
+
+func TestHandleUnlock_MalformedJSON(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.SetUnlocker(&fakeUnlocker{})
+	rec := doUnlockPOST(t, srv, []byte("not json"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	var resp unlockResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.OK {
+		t.Error("ok = true, want false on malformed json")
+	}
+	if resp.Error == "" {
+		t.Error("error string should be set")
+	}
+}
+
+func TestHandleUnlock_MissingRequiredFields(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.SetUnlocker(&fakeUnlocker{})
+	body := []byte(`{"bell_id":"bell0"}`)
+	rec := doUnlockPOST(t, srv, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for missing hub_mac/intercom_mac", rec.Code)
+	}
+}
+
+func TestHandleUnlock_NoUnlockerReturns503(t *testing.T) {
+	srv, _ := newTestServer(t)
+	// Do NOT call SetUnlocker: MQTT is not yet wired.
+	body := []byte(`{"hub_mac":"0cea14476781","intercom_mac":"28704e31e29c","bell_id":"bell0"}`)
+	rec := doUnlockPOST(t, srv, body)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when no unlocker bound", rec.Code)
+	}
+	var resp unlockResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.OK {
+		t.Error("ok = true, want false")
+	}
+	if resp.Error != "mqtt not connected" {
+		t.Errorf("error = %q, want %q", resp.Error, "mqtt not connected")
+	}
+}
+
+func TestHandleUnlock_RejectsNonPOST(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.SetUnlocker(&fakeUnlocker{})
+	req := httptest.NewRequest(http.MethodGet, unlockPath, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rec.Code)
+	}
+}
+
 // Sanity check: io is imported for completeness if tests need to
 // stream bodies in the future.
 var _ = io.Discard
