@@ -18,6 +18,7 @@ import (
 	"unifix.local/mock/internal/identity"
 	"unifix.local/mock/internal/stages/adoption"
 	"unifix.local/mock/internal/stages/discovery"
+	"unifix.local/mock/internal/stages/mqtt"
 	"unifix.local/mock/internal/stages/websocket"
 	"unifix.local/mock/internal/state"
 )
@@ -121,13 +122,13 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	go func() { errCh <- disc.Run(ctx) }()
 	if adoptSrv != nil {
 		go func() { errCh <- adoptSrv.Run(ctx) }()
 	}
 
-	go runStage5(ctx, id, store, initialBundle, adoptSrv, errCh)
+	go runStages56(ctx, id, store, initialBundle, adoptSrv, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -140,10 +141,11 @@ func main() {
 	log.Println("mock: shutdown clean")
 }
 
-// runStage5 waits for a complete adoption bundle (either provided
-// at startup or signalled via AdoptedChan), then launches the
-// WebSocket client.
-func runStage5(
+// runStages56 waits for a complete adoption bundle (either
+// provided at startup or signalled via AdoptedChan), then launches
+// the WebSocket client (stage 5) and MQTT client (stage 6) in
+// parallel.
+func runStages56(
 	ctx context.Context,
 	id *identity.MockIdentity,
 	store *state.Store,
@@ -175,12 +177,22 @@ func runStage5(
 		}
 	}
 
-	caCertPath := filepath.Join(store.CertDir(id.ID), "broker_ca.crt")
+	certDir := store.CertDir(id.ID)
+	caCertPath := filepath.Join(certDir, "broker_ca.crt")
+
 	wsClient, err := websocket.New(id, bundle, caCertPath, simpleLogger{})
 	if err != nil {
 		log.Printf("mock: ws init: %v", err)
 		return
 	}
 	log.Printf("starting stage 5 websocket client")
-	errCh <- wsClient.Run(ctx)
+	go func() { errCh <- wsClient.Run(ctx) }()
+
+	mqttClient, err := mqtt.New(id, bundle, certDir, simpleLogger{})
+	if err != nil {
+		log.Printf("mock: mqtt init: %v", err)
+		return
+	}
+	log.Printf("starting stage 6 mqtt client")
+	errCh <- mqttClient.Run(ctx)
 }

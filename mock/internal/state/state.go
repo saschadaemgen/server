@@ -42,6 +42,7 @@ type Bundle struct {
 	ControllerID   string `json:"controller_id"`
 	ControllerType string `json:"controller_type"`
 	Extras         Extras `json:"extras"`
+	LocationID     string `json:"location_id,omitempty"`
 	Name           string `json:"name"`
 	SSHPassword    string `json:"ssh_password"`
 	SSHUser        string `json:"ssh_user"`
