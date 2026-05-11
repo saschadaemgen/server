@@ -54,27 +54,42 @@ type JWTRecord struct {
 //
 // MQTTRequestID is the top-level requestId from the /remote_view
 // RPC envelope (UDM's MQTT-level tracking id). RequestID,
-// ClearRequestID, DeviceID, RoomID, ReasonCode are extracted from
-// the inner protobuf submessage carried in the same RPC.
+// DeviceID, RoomID, CancelToken, CreateTime, Capabilities,
+// DeviceType, ClearRequestID are extracted from the inner
+// protobuf submessage carried in the same RPC.
 //
-// Field-number mapping (saison 11-04 hypothesis, cross-check with
-// cancel-body pending):
+// Field-number mapping verified by saison-11-05 live capture
+// (13:54 - 13:55, 11. May 2026):
 //
-//	field_1 -> RequestID         (UUID, session-id UDM uses for the call)
-//	field_4 -> ReasonCode        (varint)
-//	field_5 -> DeviceID          (12-char MAC hex of the calling intercom)
-//	field_7 -> ClearRequestID    (UUID expected to match cancel body)
-//	field_9 -> RoomID            (WebRTC room string)
+//	field_1  -> RequestID        (UUID, session id UDM uses for the call)
+//	field_5  -> DeviceID         (12-char MAC hex of the calling intercom)
+//	field_7  -> ClearRequestID   (UUID for persistent session cleanup; NOT the match key)
+//	field_9  -> RoomID           (WebRTC room string)
+//	field_10 -> CancelToken      (32-char one-shot token; matches cancel.field_1)
+//	field_13 -> Capabilities     (repeated string)
+//	field_14 -> CreateTime       (unix seconds, varint)
+//	field_15 -> DeviceType       (e.g. "UA-Intercom")
+//
+// Hypotheses (not live-confirmed):
+//
+//	field_4  -> ReasonCode       (varint, initial value 0, semantics unclear)
+//	field_12 -> in_or_out        (suspected)
+//	field_16 -> ReasonCode alt   (suspected)
 //
 // Cancel-side fields are nil until a /cancel_doorbell_notification
-// arrives.
+// arrives. The cancel body carries the cancel-token at field_1;
+// see CancelDoorbell match logic.
 type DoorbellRecord struct {
 	ReceivedAt          string         `json:"received_at"`
 	MQTTRequestID       string         `json:"mqtt_request_id,omitempty"`
 	RequestID           string         `json:"request_id,omitempty"`
 	ClearRequestID      string         `json:"clear_request_id,omitempty"`
 	DeviceID            string         `json:"device_id,omitempty"`
+	DeviceType          string         `json:"device_type,omitempty"`
 	RoomID              string         `json:"room_id,omitempty"`
+	CancelToken         string         `json:"cancel_token,omitempty"`
+	CreateTime          int64          `json:"create_time,omitempty"`
+	Capabilities        []string       `json:"capabilities,omitempty"`
 	ReasonCode          int            `json:"reason_code,omitempty"`
 	RawBody             string         `json:"raw_body,omitempty"`
 	SubmessageFields    map[string]any `json:"submessage_fields,omitempty"`
@@ -172,7 +187,11 @@ func (h *Handler) RemoteView(requestID string, body []byte) ([]byte, error) {
 		RequestID:        stringField(sub, "field_1"),
 		ClearRequestID:   stringField(sub, "field_7"),
 		DeviceID:         stringField(sub, "field_5"),
+		DeviceType:       stringField(sub, "field_15"),
 		RoomID:           stringField(sub, "field_9"),
+		CancelToken:      stringField(sub, "field_10"),
+		CreateTime:       int64Field(sub, "field_14"),
+		Capabilities:     stringsField(sub, "field_13"),
 		ReasonCode:       intField(sub, "field_4"),
 		RawBody:          base64.StdEncoding.EncodeToString(body),
 		SubmessageFields: sub,
@@ -227,13 +246,13 @@ func (h *Handler) CancelDoorbell(requestID string, body []byte) ([]byte, error) 
 	rec.CancelRawBody = &cancelRawB64
 	rec.CancelFields = cancelSub
 
-	if rec.ClearRequestID != "" && cancelSub != nil {
-		if got := stringField(cancelSub, "field_7"); got != "" {
-			if got == rec.ClearRequestID {
-				h.Log.Infof("mqtt: cancel matched clear_request_id=%s", got)
+	if rec.CancelToken != "" && cancelSub != nil {
+		if got := stringField(cancelSub, "field_1"); got != "" {
+			if got == rec.CancelToken {
+				h.Log.Infof("mqtt: cancel matched cancel_token=%s", got)
 			} else {
-				h.Log.Warnf("mqtt: cancel field_7=%s does NOT match remote_view clear_request_id=%s",
-					got, rec.ClearRequestID)
+				h.Log.Warnf("mqtt: cancel field_1=%s does NOT match remote_view cancel_token=%s",
+					got, rec.CancelToken)
 			}
 		}
 	}
@@ -273,6 +292,43 @@ func intField(sub map[string]any, name string) int {
 		return n
 	}
 	return 0
+}
+
+// int64Field returns sub[name] as int64 (varint values land as
+// int64 from the protobuf submessage decoder).
+func int64Field(sub map[string]any, name string) int64 {
+	if sub == nil {
+		return 0
+	}
+	switch v := sub[name].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	}
+	return 0
+}
+
+// stringsField returns sub[name] as []string. A repeated wire
+// field from the submessage decoder arrives as []any holding
+// strings; a single non-repeated occurrence arrives as string.
+func stringsField(sub map[string]any, name string) []string {
+	if sub == nil {
+		return nil
+	}
+	switch v := sub[name].(type) {
+	case string:
+		return []string{v}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // mergeRuntimeConfig reads any prior runtime_config.json, overlays
