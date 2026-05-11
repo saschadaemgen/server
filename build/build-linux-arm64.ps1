@@ -19,6 +19,9 @@ go build @buildFlags -o bin\unifix-server-linux-arm64 .\server\cmd\unifix-server
 Write-Host "Building mock..."
 go build @buildFlags -o bin\mock-linux-arm64 .\mock\cmd\mock
 
+Write-Host "Building mqtt-spy..."
+go build @buildFlags -o bin\mqtt-spy-linux-arm64 .\mock\cmd\mqtt-spy
+
 Write-Host "Building license-server..."
 go build @buildFlags -o bin\license-server-linux-arm64 .\license-server\cmd\license-server
 
