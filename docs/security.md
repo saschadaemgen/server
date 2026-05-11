@@ -44,6 +44,27 @@ Saison 14+:    TLS mit Kunden-Eigen-CA, vom Lizenz-Server ausgegeben.
                Cert-Pinning machen.
 ```
 
+#### 2.2.4 API-Token-Sicherheit
+
+Saison 12+ verwendet die offizielle UniFi Access Developer API
+(siehe wire-format.md und CLAUDE.md Sektion 21). Auth ist
+API-Key-Header oder Bearer-Token, generiert im UniFi Portal vom
+Anlagen-Admin.
+
+Das API-Token gibt VOLLEN Zugriff auf User-CRUD, Door-Unlock,
+Doorbell-Trigger usw. Es muss daher:
+
+- niemals im Browser oder Endgeraet landen
+- niemals in Logs oder Error-Reports erscheinen
+- niemals in Saison-Protokollen oder Goldminen-Files persistieren
+- nur im unifix-server-Process-Speicher leben, am besten in einer
+  read-only-config geladen beim Start
+- pro Anlage einmalig vom Admin gesetzt werden, nicht generierbar
+  vom unifix-server selbst
+
+Der Browser/Endgeraet-Klient redet ausschliesslich mit dem
+unifix-server (eigener Magic-Link), nicht direkt mit der UDM-API.
+
 ### 2.3 Lizenz-Server-Seite (RPi <-> Cloud)
 
 TLS PFLICHT ab Tag eins der Saison 14. Lizenz-Validierung ohne

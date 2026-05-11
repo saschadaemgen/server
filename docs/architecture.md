@@ -78,8 +78,10 @@ Lizenz-Server (Saison 14+):
 3. Mock-RPC-Handler reicht Event an unifix-server weiter
 4. unifix-server pusht via SSE oder Long-Poll an Mieter-Endgeraet
 5. Mieter sieht Live-Bild, klickt "Tuer auf"
-6. Endgeraet sendet POST /unlock an unifix-server
-7. unifix-server sendet RPC /unlock via Mock an UDM
+6. Endgeraet sendet POST /api/v1/doors/<id>/unlock an unifix-server
+7. unifix-server proxied via PUT /api/v1/developer/doors/<id>/unlock
+   gegen die UniFi Access Developer-API auf der UDM (Alternative:
+   Mock-RPC fuer Test-Setups ohne offizielle API)
 8. UDM oeffnet via UA Hub Door die echte Tuer
 
 ## 7. Saisons-Roadmap (Go-Aera)
@@ -88,8 +90,17 @@ Siehe CLAUDE.md Sektion 15. Kurz:
 
 ```
 Saison 10:  Skelett + Server-Pool + Mock-Stages + Smoketest
-Saison 11:  Stream-Bridge, /remote_view-Body dekodieren
+Saison 11:  Klingel-Lifecycle komplett dekodiert
+            Mock kann selbst Tueren oeffnen
+            Mediaserver "ms" identifiziert (RTSPS 7441, LiveFLV 7550)
+            Offizielle UniFi Access Developer-API entdeckt
+            STATUS: abgeschlossen 12. Mai 2026
 Saison 12:  Mieter-Browser-UI, Magic-Link, Klingel im Browser
+            STRATEGISCHE MAXIME: maximal Original-API uebernehmen
+            (UniFi Access Developer API v4.2.16 als Hauptquelle)
+            - HTTPS-Client gegen /api/v1/developer/* fuer Mieter-CRUD
+            - Webhook-Empfang von access.doorbell.incoming
+            - RTSPS-Stream-Empfang Port 7441 via go2rtc-Bridge
 Saison 13:  ESP-Endgeraete-Anbindung
 Saison 14:  Lizenz-Server-Fleisch, CA pro Lizenz, TLS-Klient
 Saison 15+: Hardware-Bindung, Plattform-Erweiterungen
