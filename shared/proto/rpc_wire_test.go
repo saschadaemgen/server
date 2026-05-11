@@ -120,3 +120,48 @@ func TestDecodeRPCRequest_UnknownLeadByte(t *testing.T) {
 		t.Errorf("error %q should mention the unexpected lead byte 0xff", err.Error())
 	}
 }
+
+func TestDecodeRPCRequestBody_GoldmineUpdateTokens(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "saison10_update_tokens.bin"))
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	body, err := DecodeRPCRequestBody(data)
+	if err != nil {
+		t.Fatalf("DecodeRPCRequestBody: %v", err)
+	}
+	// Top-level map entries must be present.
+	if got, _ := body["path"].(string); got != "/update_tokens" {
+		t.Errorf("body[path] = %q, want %q", got, "/update_tokens")
+	}
+	if got, _ := body["requestId"].(string); got == "" {
+		t.Errorf("body[requestId] missing or not a string")
+	}
+	// At least one nested config field from the bundle should be
+	// flattened in. Spot-check a few known-present strings.
+	knownFields := []string{
+		"timezone_name",
+		"live_view_timeout",
+		"room_name",
+		"http_cert_fingerprint",
+		"intercoms",
+	}
+	foundAny := false
+	for _, f := range knownFields {
+		if _, ok := body[f]; ok {
+			foundAny = true
+			break
+		}
+	}
+	if !foundAny {
+		t.Errorf("expected at least one nested config field, got keys: %v", mapKeys(body))
+	}
+}
+
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

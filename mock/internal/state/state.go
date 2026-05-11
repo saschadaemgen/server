@@ -123,7 +123,7 @@ func (s *Store) SaveBundle(mockID string, b *Bundle) error {
 	if err != nil {
 		return fmt.Errorf("state: marshal bundle: %w", err)
 	}
-	if err := writeFileAtomic(filepath.Join(mockDir, "bundle.json"), bundleBytes); err != nil {
+	if err := writeFileAtomic(filepath.Join(mockDir, "bundle.json"), bundleBytes, fileMode); err != nil {
 		return err
 	}
 
@@ -136,7 +136,7 @@ func (s *Store) SaveBundle(mockID string, b *Bundle) error {
 	if err != nil {
 		return fmt.Errorf("state: marshal meta: %w", err)
 	}
-	if err := writeFileAtomic(filepath.Join(mockDir, "meta.json"), metaBytes); err != nil {
+	if err := writeFileAtomic(filepath.Join(mockDir, "meta.json"), metaBytes, fileMode); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (s *Store) SaveBundle(mockID string, b *Bundle) error {
 		{"broker_ca.crt", b.BrokerCertCA},
 	}
 	for _, f := range certFiles {
-		if err := writeFileAtomic(filepath.Join(certDir, f.name), []byte(f.content)); err != nil {
+		if err := writeFileAtomic(filepath.Join(certDir, f.name), []byte(f.content), fileMode); err != nil {
 			return err
 		}
 	}
@@ -205,11 +205,30 @@ func (s *Store) BundleComplete(mockID string) (bool, error) {
 	return m.BundleComplete, nil
 }
 
+// WriteFile writes data atomically to <baseDir>/<mockID>/<filename>
+// with the given permission mode. The mock dir is created if
+// missing. Atomicity is via temp-file plus os.Rename.
+func (s *Store) WriteFile(mockID, filename string, data []byte, mode os.FileMode) error {
+	if mockID == "" {
+		return errors.New("state: mockID must not be empty")
+	}
+	if filename == "" {
+		return errors.New("state: filename must not be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir := s.MockDir(mockID)
+	if err := os.MkdirAll(dir, dirMode); err != nil {
+		return fmt.Errorf("state: mkdir %s: %w", dir, err)
+	}
+	return writeFileAtomic(filepath.Join(dir, filename), data, mode)
+}
+
 // writeFileAtomic writes data to a temp file in the same directory
 // and renames it into place. The rename is atomic on POSIX, so a
-// crash mid-write cannot leave a partial target file. Sets 0600
-// permissions on the final file.
-func writeFileAtomic(path string, data []byte) error {
+// crash mid-write cannot leave a partial target file. Applies the
+// given permission mode to the final file.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
 	if err != nil {
@@ -221,7 +240,7 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("state: write temp: %w", err)
 	}
-	if err := tmp.Chmod(fileMode); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("state: chmod temp: %w", err)

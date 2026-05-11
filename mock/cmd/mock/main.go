@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"unifix.local/mock/internal/crypto"
+	"unifix.local/mock/internal/handlers"
 	"unifix.local/mock/internal/identity"
 	"unifix.local/mock/internal/stages/adoption"
 	"unifix.local/mock/internal/stages/discovery"
@@ -193,6 +194,15 @@ func runStages56(
 		log.Printf("mock: mqtt init: %v", err)
 		return
 	}
+
+	mh := &handlers.Handler{Store: store, MockID: id.ID, Log: simpleLogger{}}
+	registry := mqtt.NewMethodRegistry(mqtt.DefaultHandler{}, simpleLogger{})
+	registry.Register("/update_tokens", mh.UpdateTokens)
+	registry.Register("/update_configs", mh.UpdateConfigs)
+	registry.Register("/remote_view", mh.RemoteView)
+	registry.Register("/cancel_doorbell_notification", mh.CancelDoorbell)
+	mqttClient.SetHandler(registry)
+
 	log.Printf("starting stage 6 mqtt client")
 	errCh <- mqttClient.Run(ctx)
 }

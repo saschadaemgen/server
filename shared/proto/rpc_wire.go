@@ -148,6 +148,115 @@ func decodeMapEntry(entry []byte) (key, value string, err error) {
 	return string(keyBytes), string(valBytes), nil
 }
 
+// DecodeRPCRequestBody walks the RPC body and flattens every
+// map-entry-shaped length-delimited field into a key/value map.
+// Outer wrapper (0x12+varint) is skipped if present. Sub-messages
+// (0x12-tagged or any other length-delimited field whose payload
+// is not itself a single map-entry) are recursed into so config
+// strings nested inside the bundle land in the result map.
+//
+// Best-effort: returns the partial map even on truncated or
+// malformed input. Non-map-entry fields (varints, fixed-width
+// values, raw strings such as the JWT) are silently skipped;
+// callers that need those values must inspect the raw bytes
+// themselves (e.g. via a regex for a JWT pattern).
+func DecodeRPCRequestBody(data []byte) (map[string]any, error) {
+	out := make(map[string]any)
+	if len(data) == 0 {
+		return out, nil
+	}
+	if data[0] == rpcOuterTag {
+		body, _, err := readLengthDelimited(data[1:])
+		if err == nil {
+			walkProtoFields(body, out)
+			return out, nil
+		}
+	}
+	walkProtoFields(data, out)
+	return out, nil
+}
+
+// walkProtoFields iterates a protobuf wire stream, extracting any
+// length-delimited field whose payload matches the strict
+// "0x0a + len + key + 0x12 + len + value" shape into out. All
+// other length-delimited fields are recursed into; varints,
+// fixed32, fixed64 are skipped. Stops silently on parse errors.
+func walkProtoFields(data []byte, out map[string]any) {
+	for len(data) > 0 {
+		tag, n := binary.Uvarint(data)
+		if n <= 0 {
+			return
+		}
+		data = data[n:]
+		switch tag & 0x07 {
+		case 0:
+			_, vn := binary.Uvarint(data)
+			if vn <= 0 {
+				return
+			}
+			data = data[vn:]
+		case 1:
+			if len(data) < 8 {
+				return
+			}
+			data = data[8:]
+		case 2:
+			length, ln := binary.Uvarint(data)
+			if ln <= 0 {
+				return
+			}
+			end := ln + int(length)
+			if end > len(data) {
+				return
+			}
+			payload := data[ln:end]
+			data = data[end:]
+			if k, v, ok := tryParseMapEntry(payload); ok {
+				out[k] = v
+				continue
+			}
+			walkProtoFields(payload, out)
+		case 5:
+			if len(data) < 4 {
+				return
+			}
+			data = data[4:]
+		default:
+			return
+		}
+	}
+}
+
+// tryParseMapEntry returns (key, value, true) iff data is exactly
+// a strict map-entry: 0x0a + varint(len) + key + 0x12 +
+// varint(len) + value, with no trailing bytes. Multi-field
+// records (e.g. method-registry entries with name+path+method)
+// are rejected so they get recursed instead.
+func tryParseMapEntry(data []byte) (key, value string, ok bool) {
+	if len(data) < 4 || data[0] != rpcEntryKeyTag {
+		return "", "", false
+	}
+	keyLen, n := binary.Uvarint(data[1:])
+	if n <= 0 {
+		return "", "", false
+	}
+	keyStart := 1 + n
+	keyEnd := keyStart + int(keyLen)
+	if keyEnd >= len(data) || data[keyEnd] != rpcEntryValTag {
+		return "", "", false
+	}
+	valLen, n2 := binary.Uvarint(data[keyEnd+1:])
+	if n2 <= 0 {
+		return "", "", false
+	}
+	valStart := keyEnd + 1 + n2
+	valEnd := valStart + int(valLen)
+	if valEnd != len(data) {
+		return "", "", false
+	}
+	return string(data[keyStart:keyEnd]), string(data[valStart:valEnd]), true
+}
+
 // encodeLengthDelimited writes one tag-prefixed, varint-length-
 // delimited byte slice.
 func encodeLengthDelimited(tag byte, payload []byte) []byte {

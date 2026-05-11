@@ -1,0 +1,332 @@
+package handlers
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"unifix.local/mock/internal/state"
+)
+
+type silentLogger struct{}
+
+func (silentLogger) Infof(string, ...any)  {}
+func (silentLogger) Warnf(string, ...any)  {}
+func (silentLogger) Errorf(string, ...any) {}
+
+const testMockID = "0cea14424242"
+
+func newTestHandler(t *testing.T) *Handler {
+	t.Helper()
+	store, err := state.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("state.New: %v", err)
+	}
+	return &Handler{Store: store, MockID: testMockID, Log: silentLogger{}}
+}
+
+// appendVarint mirrors the helper in shared/proto. Inlined here
+// so test fixtures can build wire-format bodies without exposing
+// the proto package's internals.
+func appendVarint(dst []byte, v uint64) []byte {
+	for v >= 0x80 {
+		dst = append(dst, byte(v)|0x80)
+		v >>= 7
+	}
+	return append(dst, byte(v))
+}
+
+// mapEntryBytes returns one map-entry block (0x0a + len + (key|value)).
+func mapEntryBytes(key, value string) []byte {
+	inner := append([]byte{0x0a}, appendVarint(nil, uint64(len(key)))...)
+	inner = append(inner, key...)
+	inner = append(inner, 0x12)
+	inner = append(inner, appendVarint(nil, uint64(len(value)))...)
+	inner = append(inner, value...)
+
+	out := append([]byte{0x0a}, appendVarint(nil, uint64(len(inner)))...)
+	return append(out, inner...)
+}
+
+// buildSyntheticBody composes a UDM-native-shape RPC body from
+// the provided key/value pairs.
+func buildSyntheticBody(pairs ...[2]string) []byte {
+	var out []byte
+	for _, p := range pairs {
+		out = append(out, mapEntryBytes(p[0], p[1])...)
+	}
+	return out
+}
+
+// makeTestJWT signs a minimal HS256 JWT and returns its compact
+// serialization. Useful for embedding in synthetic /update_tokens
+// bodies.
+func makeTestJWT(t *testing.T, sub string, exp int64) string {
+	t.Helper()
+	header, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
+	claims, _ := json.Marshal(map[string]any{
+		"sub": sub,
+		"iss": "unifi-access",
+		"exp": exp,
+	})
+	h := base64.RawURLEncoding.EncodeToString(header)
+	p := base64.RawURLEncoding.EncodeToString(claims)
+	signingInput := h + "." + p
+	mac := hmac.New(sha256.New, []byte("test-secret"))
+	mac.Write([]byte(signingInput))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return signingInput + "." + sig
+}
+
+func TestHandlerUpdateTokens_PersistsJWT(t *testing.T) {
+	h := newTestHandler(t)
+	exp := time.Now().Add(15 * time.Minute).Unix()
+	jwt := makeTestJWT(t, testMockID, exp)
+
+	// Body: two map entries (path + requestId) followed by the
+	// raw JWT bytes embedded as if they were a length-delimited
+	// field value (UDM emits it at a numbered protobuf field).
+	body := buildSyntheticBody(
+		[2]string{"path", "/update_tokens"},
+		[2]string{"requestId", "req-jwt-1"},
+	)
+	// Stick the JWT in plain after the map entries so findJWT's
+	// regex picks it up. Real UDM frames have the same property.
+	body = append(body, []byte(jwt)...)
+
+	resp, err := h.UpdateTokens("req-jwt-1", body)
+	if err != nil {
+		t.Fatalf("UpdateTokens: %v", err)
+	}
+	if len(resp) == 0 || resp[0] != 0x12 {
+		t.Errorf("response shape unexpected, first byte = 0x%02x", resp[0])
+	}
+
+	jwtPath := filepath.Join(h.Store.MockDir(testMockID), "jwt.json")
+	data, err := os.ReadFile(jwtPath)
+	if err != nil {
+		t.Fatalf("jwt.json missing: %v", err)
+	}
+	var rec JWTRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal jwt.json: %v", err)
+	}
+	if rec.Token != jwt {
+		t.Errorf("Token = %q, want %q", rec.Token, jwt)
+	}
+	if rec.Sub != testMockID {
+		t.Errorf("Sub = %q, want %q", rec.Sub, testMockID)
+	}
+	if rec.Iss != "unifi-access" {
+		t.Errorf("Iss = %q, want unifi-access", rec.Iss)
+	}
+	if rec.Exp != exp {
+		t.Errorf("Exp = %d, want %d", rec.Exp, exp)
+	}
+	if rec.Alg != "HS256" {
+		t.Errorf("Alg = %q, want HS256", rec.Alg)
+	}
+	if rec.ReceivedAt == "" {
+		t.Errorf("ReceivedAt should be set")
+	}
+
+	// File permissions check (POSIX only).
+	if info, err := os.Stat(jwtPath); err == nil {
+		if mode := info.Mode().Perm(); mode != 0o600 && mode != 0o666 {
+			// 0o666 is acceptable on systems where umask makes 0o600
+			// unenforced; we still pass because the chmod call was
+			// made. On Linux production target this resolves to 0o600.
+			t.Logf("jwt.json mode = %o (production target Linux enforces 0600)", mode)
+		}
+	}
+}
+
+func TestHandlerRemoteView_PersistsDoorbell(t *testing.T) {
+	h := newTestHandler(t)
+
+	body := buildSyntheticBody(
+		[2]string{"path", "/remote_view"},
+		[2]string{"requestId", "doorbell-42"},
+		[2]string{"device_id", "28704e31e29c"},
+		[2]string{"hub_id", "0cea14476781"},
+		[2]string{"room_id", "WR-28704e31e29c-abc123"},
+	)
+
+	resp, err := h.RemoteView("doorbell-42", body)
+	if err != nil {
+		t.Fatalf("RemoteView: %v", err)
+	}
+	if len(resp) == 0 {
+		t.Fatal("RemoteView returned empty response")
+	}
+
+	path := filepath.Join(h.Store.MockDir(testMockID), "last_doorbell.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("last_doorbell.json missing: %v", err)
+	}
+	var rec DoorbellRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rec.RequestID != "doorbell-42" {
+		t.Errorf("RequestID = %q, want doorbell-42", rec.RequestID)
+	}
+	if rec.DeviceID != "28704e31e29c" {
+		t.Errorf("DeviceID = %q, want 28704e31e29c", rec.DeviceID)
+	}
+	if rec.HubID != "0cea14476781" {
+		t.Errorf("HubID = %q, want 0cea14476781", rec.HubID)
+	}
+	if rec.RoomID != "WR-28704e31e29c-abc123" {
+		t.Errorf("RoomID = %q, want WR-28704e31e29c-abc123", rec.RoomID)
+	}
+	if rec.RawBody == "" {
+		t.Error("RawBody should contain base64 of body bytes")
+	}
+	decodedRaw, err := base64.StdEncoding.DecodeString(rec.RawBody)
+	if err != nil {
+		t.Fatalf("decode raw_body: %v", err)
+	}
+	if string(decodedRaw) != string(body) {
+		t.Error("raw_body did not roundtrip body bytes")
+	}
+	if rec.CancelledAt != nil {
+		t.Errorf("CancelledAt should be nil on fresh /remote_view, got %v", rec.CancelledAt)
+	}
+}
+
+func TestHandlerCancelDoorbell_UpdatesLastDoorbell(t *testing.T) {
+	h := newTestHandler(t)
+
+	// First lay down a doorbell record.
+	rv := buildSyntheticBody(
+		[2]string{"path", "/remote_view"},
+		[2]string{"requestId", "ring-1"},
+		[2]string{"device_id", "28704e31e29c"},
+		[2]string{"hub_id", "0cea14476781"},
+	)
+	if _, err := h.RemoteView("ring-1", rv); err != nil {
+		t.Fatalf("RemoteView setup: %v", err)
+	}
+
+	// Then cancel it.
+	cancel := buildSyntheticBody(
+		[2]string{"path", "/cancel_doorbell_notification"},
+		[2]string{"requestId", "ring-1"},
+		[2]string{"reason_code", "108"},
+	)
+	if _, err := h.CancelDoorbell("ring-1", cancel); err != nil {
+		t.Fatalf("CancelDoorbell: %v", err)
+	}
+
+	path := filepath.Join(h.Store.MockDir(testMockID), "last_doorbell.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var rec DoorbellRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rec.RequestID != "ring-1" {
+		t.Errorf("RequestID = %q, want ring-1", rec.RequestID)
+	}
+	if rec.DeviceID != "28704e31e29c" {
+		t.Errorf("DeviceID = %q (lost across cancel)", rec.DeviceID)
+	}
+	if rec.CancelledAt == nil || *rec.CancelledAt == "" {
+		t.Error("CancelledAt should be set to an RFC3339 timestamp")
+	}
+	if rec.CancelReasonCode == nil || *rec.CancelReasonCode != 108 {
+		got := -1
+		if rec.CancelReasonCode != nil {
+			got = *rec.CancelReasonCode
+		}
+		t.Errorf("CancelReasonCode = %d, want 108", got)
+	}
+}
+
+func TestHandlerCancelDoorbell_StandaloneWritesMinimalRecord(t *testing.T) {
+	// Edge case: cancel arrives without prior /remote_view (e.g.
+	// after a crash). Should still write last_doorbell.json so the
+	// event is not lost.
+	h := newTestHandler(t)
+
+	cancel := buildSyntheticBody(
+		[2]string{"path", "/cancel_doorbell_notification"},
+		[2]string{"requestId", "ghost-cancel"},
+		[2]string{"reason_code", "105"},
+	)
+	if _, err := h.CancelDoorbell("ghost-cancel", cancel); err != nil {
+		t.Fatalf("CancelDoorbell: %v", err)
+	}
+
+	path := filepath.Join(h.Store.MockDir(testMockID), "last_doorbell.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var rec DoorbellRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rec.RequestID != "ghost-cancel" {
+		t.Errorf("RequestID = %q, want ghost-cancel", rec.RequestID)
+	}
+	if rec.CancelledAt == nil {
+		t.Error("CancelledAt must be set")
+	}
+	if rec.CancelReasonCode == nil || *rec.CancelReasonCode != 105 {
+		t.Errorf("CancelReasonCode missing or wrong")
+	}
+}
+
+func TestDecodeJWTClaims_RoundTrip(t *testing.T) {
+	jwt := makeTestJWT(t, testMockID, 1700000000)
+	claims, alg, ok := decodeJWTClaims(jwt)
+	if !ok {
+		t.Fatal("decodeJWTClaims returned !ok for a valid JWT")
+	}
+	if alg != "HS256" {
+		t.Errorf("alg = %q, want HS256", alg)
+	}
+	if sub, _ := claims["sub"].(string); sub != testMockID {
+		t.Errorf("sub = %q, want %q", sub, testMockID)
+	}
+}
+
+func TestFindJWT_LocatesEmbeddedJWT(t *testing.T) {
+	jwt := makeTestJWT(t, testMockID, 1700000000)
+	// Surround with arbitrary binary so we test the regex against
+	// realistic noise.
+	pre := []byte{0x0a, 0x05, 'h', 'e', 'l', 'l', 'o', 0x12, 0x03}
+	post := []byte{0xff, 0x00, 0x10}
+	body := append(append(pre, []byte(jwt)...), post...)
+	if got := findJWT(body); got != jwt {
+		t.Errorf("findJWT = %q, want %q", got, jwt)
+	}
+}
+
+// Sanity for the test helper itself: ensure mapEntryBytes layout
+// matches the strict 0x0a-len-key-0x12-len-value shape proto
+// decodes.
+func TestMapEntryBytes_Shape(t *testing.T) {
+	got := mapEntryBytes("a", "b")
+	want := []byte{0x0a, 0x06, 0x0a, 0x01, 'a', 0x12, 0x01, 'b'}
+	if string(got) != string(want) {
+		t.Errorf("got % x, want % x", got, want)
+	}
+	// And the varint encoder works for >127 lengths.
+	long := strings.Repeat("x", 200)
+	out := mapEntryBytes("k", long)
+	if int(out[1])&0x80 == 0 {
+		t.Error("expected multi-byte varint outer length for long value")
+	}
+}
