@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -259,7 +260,11 @@ func (c *Client) handleRPCMessage(_ paho.Client, msg paho.Message) {
 
 	req, err := proto.DecodeRPCRequest(msg.Payload())
 	if err != nil {
+		payload := msg.Payload()
 		c.log.Warnf("mqtt: rpc decode failed topic=%s: %v", msg.Topic(), err)
+		c.log.Warnf("mqtt: rpc raw payload (%d bytes): %s",
+			len(payload), hex.EncodeToString(payload))
+		c.log.Warnf("mqtt: rpc raw ascii preview: %q", asciiPreview(payload))
 		return
 	}
 	c.log.Infof("mqtt: rpc received path=%s request_id=%s topic=%s",
@@ -341,4 +346,20 @@ func (c *Client) Stats() (heartbeats, rpcsRecv, rpcsAns int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.heartbeatsPublished, c.rpcsReceived, c.rpcsAnswered
+}
+
+// asciiPreview returns the payload with non-printable bytes
+// replaced by dots. Useful for spotting embedded path strings
+// like "/remote_view" inside the binary frame during saison-11
+// reverse engineering of the UDM request wire format.
+func asciiPreview(b []byte) string {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c >= 0x20 && c < 0x7f {
+			out[i] = c
+		} else {
+			out[i] = '.'
+		}
+	}
+	return string(out)
 }

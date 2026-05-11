@@ -339,3 +339,36 @@ type handlerFunc func(path, requestID string, body []byte) []byte
 func (f handlerFunc) Handle(path, requestID string, body []byte) []byte {
 	return f(path, requestID, body)
 }
+
+func TestAsciiPreview_AllPrintable(t *testing.T) {
+	if got := asciiPreview([]byte("hello")); got != "hello" {
+		t.Errorf("asciiPreview = %q, want %q", got, "hello")
+	}
+}
+
+func TestAsciiPreview_MixedBinary(t *testing.T) {
+	got := asciiPreview([]byte{0x0a, 'h', 'i', 0xff})
+	if got != ".hi." {
+		t.Errorf("asciiPreview = %q, want %q", got, ".hi.")
+	}
+}
+
+func TestAsciiPreview_Empty(t *testing.T) {
+	if got := asciiPreview(nil); got != "" {
+		t.Errorf("asciiPreview(nil) = %q, want \"\"", got)
+	}
+	if got := asciiPreview([]byte{}); got != "" {
+		t.Errorf("asciiPreview([]byte{}) = %q, want \"\"", got)
+	}
+}
+
+func TestAsciiPreview_PathInBody(t *testing.T) {
+	// Saison-11 diagnostic pattern: spot the path string embedded
+	// inside a protobuf-ish binary frame.
+	payload := append([]byte{0x0a, 0x0c}, []byte("/remote_view")...)
+	payload = append(payload, 0x12, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04)
+	got := asciiPreview(payload)
+	if !strings.Contains(got, "/remote_view") {
+		t.Errorf("asciiPreview = %q, want substring %q", got, "/remote_view")
+	}
+}
