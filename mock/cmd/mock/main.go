@@ -18,6 +18,7 @@ import (
 	"unifix.local/mock/internal/identity"
 	"unifix.local/mock/internal/stages/adoption"
 	"unifix.local/mock/internal/stages/discovery"
+	"unifix.local/mock/internal/stages/websocket"
 	"unifix.local/mock/internal/state"
 )
 
@@ -83,8 +84,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("mock: state check: %v", err)
 	}
+
+	var initialBundle *state.Bundle
 	if complete {
 		log.Printf("mock: bundle already complete for %s, skipping stage 4", id.ID)
+		initialBundle, err = store.LoadBundle(id.ID)
+		if err != nil {
+			log.Fatalf("mock: load bundle: %v", err)
+		}
 	}
 
 	log.Printf("starting stage 1 discovery listener")
@@ -114,21 +121,13 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- disc.Run(ctx) }()
 	if adoptSrv != nil {
 		go func() { errCh <- adoptSrv.Run(ctx) }()
-
-		go func() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-adoptSrv.AdoptedChan():
-				log.Printf("mock: ADOPTION COMPLETE, bundle persisted to %s",
-					filepath.Join(*stateDirFlag, id.ID, "bundle.json"))
-			}
-		}()
 	}
+
+	go runStage5(ctx, id, store, initialBundle, adoptSrv, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -139,4 +138,49 @@ func main() {
 		}
 	}
 	log.Println("mock: shutdown clean")
+}
+
+// runStage5 waits for a complete adoption bundle (either provided
+// at startup or signalled via AdoptedChan), then launches the
+// WebSocket client.
+func runStage5(
+	ctx context.Context,
+	id *identity.MockIdentity,
+	store *state.Store,
+	initial *state.Bundle,
+	adoptSrv *adoption.Server,
+	errCh chan<- error,
+) {
+	bundle := initial
+	if bundle == nil {
+		if adoptSrv == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-adoptSrv.AdoptedChan():
+			b, err := store.LoadBundle(id.ID)
+			if err != nil {
+				log.Printf("mock: post-adopt load bundle: %v", err)
+				return
+			}
+			if b == nil {
+				log.Printf("mock: bundle missing after adoption")
+				return
+			}
+			bundle = b
+			log.Printf("mock: ADOPTION COMPLETE, bundle persisted to %s",
+				filepath.Join(store.BaseDir(), id.ID, "bundle.json"))
+		}
+	}
+
+	caCertPath := filepath.Join(store.CertDir(id.ID), "broker_ca.crt")
+	wsClient, err := websocket.New(id, bundle, caCertPath, simpleLogger{})
+	if err != nil {
+		log.Printf("mock: ws init: %v", err)
+		return
+	}
+	log.Printf("starting stage 5 websocket client")
+	errCh <- wsClient.Run(ctx)
 }
