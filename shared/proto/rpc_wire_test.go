@@ -165,3 +165,121 @@ func mapKeys(m map[string]any) []string {
 	}
 	return keys
 }
+
+// protoVarintField encodes one wire-type-0 field for tests.
+func protoVarintField(fieldNum uint64, value uint64) []byte {
+	tag := (fieldNum << 3) | 0
+	var buf [16]byte
+	n := 0
+	for tag >= 0x80 {
+		buf[n] = byte(tag) | 0x80
+		tag >>= 7
+		n++
+	}
+	buf[n] = byte(tag)
+	n++
+	for value >= 0x80 {
+		buf[n] = byte(value) | 0x80
+		value >>= 7
+		n++
+	}
+	buf[n] = byte(value)
+	n++
+	return append([]byte{}, buf[:n]...)
+}
+
+// protoStringField encodes one wire-type-2 field for tests.
+func protoStringField(fieldNum uint64, value string) []byte {
+	tag := (fieldNum << 3) | 2
+	var out []byte
+	for tag >= 0x80 {
+		out = append(out, byte(tag)|0x80)
+		tag >>= 7
+	}
+	out = append(out, byte(tag))
+	length := uint64(len(value))
+	for length >= 0x80 {
+		out = append(out, byte(length)|0x80)
+		length >>= 7
+	}
+	out = append(out, byte(length))
+	return append(out, value...)
+}
+
+// protoFixed64Field encodes one wire-type-1 (8-byte) field used
+// to exercise the skip path.
+func protoFixed64Field(fieldNum uint64, payload [8]byte) []byte {
+	tag := (fieldNum << 3) | 1
+	var out []byte
+	for tag >= 0x80 {
+		out = append(out, byte(tag)|0x80)
+		tag >>= 7
+	}
+	out = append(out, byte(tag))
+	return append(out, payload[:]...)
+}
+
+func TestDecodeProtobufSubmessage_RemoteViewFields(t *testing.T) {
+	var raw []byte
+	raw = append(raw, protoStringField(1, "c187eb6e-323a-4994-bfea-abdfe4bdcfd3")...)
+	raw = append(raw, protoVarintField(4, 82)...)
+	raw = append(raw, protoStringField(5, "28704e31e29c")...)
+	raw = append(raw, protoStringField(9, "WR-28704e31e29c-abc")...)
+
+	sub, err := DecodeProtobufSubmessage(raw)
+	if err != nil {
+		t.Fatalf("DecodeProtobufSubmessage: %v", err)
+	}
+	if got, _ := sub["field_1"].(string); got != "c187eb6e-323a-4994-bfea-abdfe4bdcfd3" {
+		t.Errorf("field_1 = %q, want UUID", got)
+	}
+	if got, _ := sub["field_4"].(int64); got != 82 {
+		t.Errorf("field_4 = %v, want int64(82)", sub["field_4"])
+	}
+	if got, _ := sub["field_5"].(string); got != "28704e31e29c" {
+		t.Errorf("field_5 = %q, want MAC", got)
+	}
+	if got, _ := sub["field_9"].(string); got != "WR-28704e31e29c-abc" {
+		t.Errorf("field_9 = %q, want room id", got)
+	}
+}
+
+func TestDecodeProtobufSubmessage_UnknownWireTypeIsSkipped(t *testing.T) {
+	// Build: string field_1, fixed64 field_6 (8 bytes payload),
+	// string field_5. The fixed64 must be skipped without
+	// disturbing field_5 extraction.
+	var raw []byte
+	raw = append(raw, protoStringField(1, "first")...)
+	raw = append(raw, protoFixed64Field(6, [8]byte{0xde, 0xad, 0xbe, 0xef, 0x00, 0x00, 0x00, 0x00})...)
+	raw = append(raw, protoStringField(5, "fifth")...)
+
+	sub, err := DecodeProtobufSubmessage(raw)
+	if err != nil {
+		t.Fatalf("DecodeProtobufSubmessage: %v (sub=%v)", err, sub)
+	}
+	if got, _ := sub["field_1"].(string); got != "first" {
+		t.Errorf("field_1 = %q, want 'first'", got)
+	}
+	if got, _ := sub["field_5"].(string); got != "fifth" {
+		t.Errorf("field_5 = %q, want 'fifth' (fixed64 should have been skipped)", got)
+	}
+}
+
+func TestDecodeProtobufSubmessage_RepeatedFieldCoalesces(t *testing.T) {
+	var raw []byte
+	raw = append(raw, protoStringField(3, "first")...)
+	raw = append(raw, protoStringField(3, "second")...)
+	raw = append(raw, protoStringField(3, "third")...)
+
+	sub, err := DecodeProtobufSubmessage(raw)
+	if err != nil {
+		t.Fatalf("DecodeProtobufSubmessage: %v", err)
+	}
+	list, ok := sub["field_3"].([]any)
+	if !ok {
+		t.Fatalf("field_3 = %T, want []any (repeated)", sub["field_3"])
+	}
+	if len(list) != 3 || list[0] != "first" || list[2] != "third" {
+		t.Errorf("repeated field contents wrong: %v", list)
+	}
+}

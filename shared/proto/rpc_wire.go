@@ -148,32 +148,166 @@ func decodeMapEntry(entry []byte) (key, value string, err error) {
 	return string(keyBytes), string(valBytes), nil
 }
 
-// DecodeRPCRequestBody walks the RPC body and flattens every
-// map-entry-shaped length-delimited field into a key/value map.
-// Outer wrapper (0x12+varint) is skipped if present. Sub-messages
-// (0x12-tagged or any other length-delimited field whose payload
-// is not itself a single map-entry) are recursed into so config
-// strings nested inside the bundle land in the result map.
+// DecodeRPCRequestBody walks the RPC body and produces a flat
+// key/value map plus an optional "_submessage" entry.
 //
-// Best-effort: returns the partial map even on truncated or
-// malformed input. Non-map-entry fields (varints, fixed-width
-// values, raw strings such as the JWT) are silently skipped;
-// callers that need those values must inspect the raw bytes
-// themselves (e.g. via a regex for a JWT pattern).
+// Two passes run over the body:
+//
+//  1. The S11-03 strict-map-entry walker harvests every
+//     length-delimited field whose payload looks like
+//     0x0a+len+key+0x12+len+value into the top-level out map.
+//     This catches path, requestId (top-level), and any nested
+//     config strings (saison-10 bundle d2-01-tagged entries).
+//
+//  2. The S11-04 inner-submessage extractor finds the first
+//     top-level wire-type-2 field whose payload is NOT a strict
+//     map-entry, decodes it as standard protobuf with numbered
+//     fields, and stores the result under out["_submessage"].
+//     This exposes /remote_view's UUID, MAC, room-id fields by
+//     their wire field numbers (field_1, field_5, field_9 ...).
+//
+// Outer wrapper (0x12+varint) is skipped if present. Best-effort:
+// returns the partial map even on truncated or malformed input.
 func DecodeRPCRequestBody(data []byte) (map[string]any, error) {
 	out := make(map[string]any)
 	if len(data) == 0 {
 		return out, nil
 	}
+	body := data
 	if data[0] == rpcOuterTag {
-		body, _, err := readLengthDelimited(data[1:])
+		b, _, err := readLengthDelimited(data[1:])
 		if err == nil {
-			walkProtoFields(body, out)
-			return out, nil
+			body = b
 		}
 	}
-	walkProtoFields(data, out)
+	walkProtoFields(body, out)
+	if sub := extractInnerSubmessage(body); sub != nil && len(sub) > 0 {
+		out["_submessage"] = sub
+	}
 	return out, nil
+}
+
+// extractInnerSubmessage walks the top-level fields of body and
+// returns the first non-map-entry wire-type-2 field's payload
+// decoded as a standard-protobuf submessage. Returns nil if no
+// suitable field is found.
+func extractInnerSubmessage(data []byte) map[string]any {
+	for len(data) > 0 {
+		tag, n := binary.Uvarint(data)
+		if n <= 0 {
+			return nil
+		}
+		data = data[n:]
+		switch tag & 0x07 {
+		case 0:
+			_, vn := binary.Uvarint(data)
+			if vn <= 0 {
+				return nil
+			}
+			data = data[vn:]
+		case 1:
+			if len(data) < 8 {
+				return nil
+			}
+			data = data[8:]
+		case 5:
+			if len(data) < 4 {
+				return nil
+			}
+			data = data[4:]
+		case 2:
+			length, ln := binary.Uvarint(data)
+			if ln <= 0 {
+				return nil
+			}
+			end := ln + int(length)
+			if end > len(data) {
+				return nil
+			}
+			payload := data[ln:end]
+			data = data[end:]
+			if _, _, ok := tryParseMapEntry(payload); ok {
+				continue
+			}
+			sub, _ := DecodeProtobufSubmessage(payload)
+			if len(sub) > 0 {
+				return sub
+			}
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// DecodeProtobufSubmessage parses a standard-protobuf-encoded
+// submessage and returns a map keyed by "field_N" where N is the
+// wire field number. Wire type 0 (varint) values become int64,
+// wire type 2 (length-delimited) values become string. Wire types
+// 1 (64-bit) and 5 (32-bit) are length-skipped; unknown or
+// deprecated wire types stop the walk.
+//
+// Repeated occurrences of the same field number coalesce into a
+// []any holding all observed values in order.
+//
+// Best-effort: returns the partial map plus an error on truncated
+// or malformed input.
+func DecodeProtobufSubmessage(raw []byte) (map[string]any, error) {
+	out := make(map[string]any)
+	for len(raw) > 0 {
+		tag, n := binary.Uvarint(raw)
+		if n <= 0 {
+			return out, errors.New("proto: truncated tag")
+		}
+		raw = raw[n:]
+		fieldNum := tag >> 3
+		switch tag & 0x07 {
+		case 0:
+			v, vn := binary.Uvarint(raw)
+			if vn <= 0 {
+				return out, errors.New("proto: truncated varint value")
+			}
+			raw = raw[vn:]
+			addFieldByNumber(out, fieldNum, int64(v))
+		case 2:
+			length, ln := binary.Uvarint(raw)
+			if ln <= 0 {
+				return out, errors.New("proto: truncated length")
+			}
+			end := ln + int(length)
+			if end > len(raw) {
+				return out, errors.New("proto: length overruns buffer")
+			}
+			addFieldByNumber(out, fieldNum, string(raw[ln:end]))
+			raw = raw[end:]
+		case 1:
+			if len(raw) < 8 {
+				return out, errors.New("proto: truncated 64-bit value")
+			}
+			raw = raw[8:]
+		case 5:
+			if len(raw) < 4 {
+				return out, errors.New("proto: truncated 32-bit value")
+			}
+			raw = raw[4:]
+		default:
+			return out, fmt.Errorf("proto: unsupported wire type %d", tag&0x07)
+		}
+	}
+	return out, nil
+}
+
+func addFieldByNumber(out map[string]any, fieldNum uint64, value any) {
+	key := fmt.Sprintf("field_%d", fieldNum)
+	if existing, exists := out[key]; exists {
+		if list, isList := existing.([]any); isList {
+			out[key] = append(list, value)
+			return
+		}
+		out[key] = []any{existing, value}
+		return
+	}
+	out[key] = value
 }
 
 // walkProtoFields iterates a protobuf wire stream, extracting any

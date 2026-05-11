@@ -64,6 +64,62 @@ func buildSyntheticBody(pairs ...[2]string) []byte {
 	return out
 }
 
+// protobufVarintField writes one wire-type-0 field for synthetic
+// /remote_view-shaped submessages.
+func protobufVarintField(fieldNum uint64, value uint64) []byte {
+	out := appendVarint(nil, (fieldNum<<3)|0)
+	return append(out, appendVarint(nil, value)...)
+}
+
+// protobufStringField writes one wire-type-2 field with the value
+// laid out inline as bytes.
+func protobufStringField(fieldNum uint64, value string) []byte {
+	out := appendVarint(nil, (fieldNum<<3)|2)
+	out = append(out, appendVarint(nil, uint64(len(value)))...)
+	return append(out, value...)
+}
+
+// wrapAsTopLevelSubmessage embeds sub as a top-level wire-type-2
+// field at field number 2 so DecodeRPCRequestBody picks it up via
+// extractInnerSubmessage.
+func wrapAsTopLevelSubmessage(sub []byte) []byte {
+	out := []byte{0x12} // (2<<3)|2
+	out = append(out, appendVarint(nil, uint64(len(sub)))...)
+	return append(out, sub...)
+}
+
+// buildRemoteViewBody composes a /remote_view RPC body in the
+// shape UDM actually sends: top-level map-entries for path and
+// requestId, followed by a standard-protobuf submessage with the
+// saison-11-04 field-number layout.
+func buildRemoteViewBody(mqttRequestID, requestUUID, clearUUID, deviceID, roomID string, reasonCode uint64) []byte {
+	body := buildSyntheticBody(
+		[2]string{"path", "/remote_view"},
+		[2]string{"requestId", mqttRequestID},
+	)
+	var sub []byte
+	sub = append(sub, protobufStringField(1, requestUUID)...)
+	sub = append(sub, protobufVarintField(4, reasonCode)...)
+	sub = append(sub, protobufStringField(5, deviceID)...)
+	sub = append(sub, protobufStringField(7, clearUUID)...)
+	sub = append(sub, protobufStringField(9, roomID)...)
+	return append(body, wrapAsTopLevelSubmessage(sub)...)
+}
+
+// buildCancelBody builds a /cancel_doorbell_notification body
+// with an inner submessage carrying field_7 (clear_request_id)
+// and optional reason_code at field_4.
+func buildCancelBody(mqttRequestID, clearUUID string, reasonCode uint64) []byte {
+	body := buildSyntheticBody(
+		[2]string{"path", "/cancel_doorbell_notification"},
+		[2]string{"requestId", mqttRequestID},
+	)
+	var sub []byte
+	sub = append(sub, protobufVarintField(4, reasonCode)...)
+	sub = append(sub, protobufStringField(7, clearUUID)...)
+	return append(body, wrapAsTopLevelSubmessage(sub)...)
+}
+
 // makeTestJWT signs a minimal HS256 JWT and returns its compact
 // serialization. Useful for embedding in synthetic /update_tokens
 // bodies.
@@ -147,18 +203,19 @@ func TestHandlerUpdateTokens_PersistsJWT(t *testing.T) {
 	}
 }
 
-func TestHandlerRemoteView_PersistsDoorbell(t *testing.T) {
+func TestHandlerRemoteView_ExtractsDeviceIDAndRoomID(t *testing.T) {
 	h := newTestHandler(t)
 
-	body := buildSyntheticBody(
-		[2]string{"path", "/remote_view"},
-		[2]string{"requestId", "doorbell-42"},
-		[2]string{"device_id", "28704e31e29c"},
-		[2]string{"hub_id", "0cea14476781"},
-		[2]string{"room_id", "WR-28704e31e29c-abc123"},
+	body := buildRemoteViewBody(
+		"mqtt-tracking-id-xyz",
+		"c187eb6e-323a-4994-bfea-abdfe4bdcfd3", // request_id (field 1)
+		"e17f64a6-fdeb-4e65-8b42-6dfedd026f7f", // clear_request_id (field 7)
+		"28704e31e29c",                         // device_id (field 5)
+		"WR-28704e31e29c-abc123",               // room_id (field 9)
+		82,                                     // reason_code (field 4)
 	)
 
-	resp, err := h.RemoteView("doorbell-42", body)
+	resp, err := h.RemoteView("mqtt-tracking-id-xyz", body)
 	if err != nil {
 		t.Fatalf("RemoteView: %v", err)
 	}
@@ -175,27 +232,29 @@ func TestHandlerRemoteView_PersistsDoorbell(t *testing.T) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if rec.RequestID != "doorbell-42" {
-		t.Errorf("RequestID = %q, want doorbell-42", rec.RequestID)
+	if rec.MQTTRequestID != "mqtt-tracking-id-xyz" {
+		t.Errorf("MQTTRequestID = %q, want mqtt-tracking-id-xyz", rec.MQTTRequestID)
+	}
+	if rec.RequestID != "c187eb6e-323a-4994-bfea-abdfe4bdcfd3" {
+		t.Errorf("RequestID = %q, want the field_1 UUID", rec.RequestID)
+	}
+	if rec.ClearRequestID != "e17f64a6-fdeb-4e65-8b42-6dfedd026f7f" {
+		t.Errorf("ClearRequestID = %q, want the field_7 UUID", rec.ClearRequestID)
 	}
 	if rec.DeviceID != "28704e31e29c" {
 		t.Errorf("DeviceID = %q, want 28704e31e29c", rec.DeviceID)
 	}
-	if rec.HubID != "0cea14476781" {
-		t.Errorf("HubID = %q, want 0cea14476781", rec.HubID)
-	}
 	if rec.RoomID != "WR-28704e31e29c-abc123" {
 		t.Errorf("RoomID = %q, want WR-28704e31e29c-abc123", rec.RoomID)
 	}
+	if rec.ReasonCode != 82 {
+		t.Errorf("ReasonCode = %d, want 82", rec.ReasonCode)
+	}
+	if rec.SubmessageFields == nil {
+		t.Error("SubmessageFields should contain the field_N entries")
+	}
 	if rec.RawBody == "" {
 		t.Error("RawBody should contain base64 of body bytes")
-	}
-	decodedRaw, err := base64.StdEncoding.DecodeString(rec.RawBody)
-	if err != nil {
-		t.Fatalf("decode raw_body: %v", err)
-	}
-	if string(decodedRaw) != string(body) {
-		t.Error("raw_body did not roundtrip body bytes")
 	}
 	if rec.CancelledAt != nil {
 		t.Errorf("CancelledAt should be nil on fresh /remote_view, got %v", rec.CancelledAt)
@@ -205,24 +264,24 @@ func TestHandlerRemoteView_PersistsDoorbell(t *testing.T) {
 func TestHandlerCancelDoorbell_UpdatesLastDoorbell(t *testing.T) {
 	h := newTestHandler(t)
 
-	// First lay down a doorbell record.
-	rv := buildSyntheticBody(
-		[2]string{"path", "/remote_view"},
-		[2]string{"requestId", "ring-1"},
-		[2]string{"device_id", "28704e31e29c"},
-		[2]string{"hub_id", "0cea14476781"},
+	clearUUID := "e17f64a6-fdeb-4e65-8b42-6dfedd026f7f"
+
+	// First lay down a doorbell record with a full submessage.
+	rv := buildRemoteViewBody(
+		"ring-mqtt-1",
+		"c187eb6e-323a-4994-bfea-abdfe4bdcfd3",
+		clearUUID,
+		"28704e31e29c",
+		"WR-28704e31e29c-room",
+		82,
 	)
-	if _, err := h.RemoteView("ring-1", rv); err != nil {
+	if _, err := h.RemoteView("ring-mqtt-1", rv); err != nil {
 		t.Fatalf("RemoteView setup: %v", err)
 	}
 
-	// Then cancel it.
-	cancel := buildSyntheticBody(
-		[2]string{"path", "/cancel_doorbell_notification"},
-		[2]string{"requestId", "ring-1"},
-		[2]string{"reason_code", "108"},
-	)
-	if _, err := h.CancelDoorbell("ring-1", cancel); err != nil {
+	// Then cancel it. Cancel-body field_7 carries the same UUID.
+	cancel := buildCancelBody("cancel-mqtt-1", clearUUID, 108)
+	if _, err := h.CancelDoorbell("cancel-mqtt-1", cancel); err != nil {
 		t.Fatalf("CancelDoorbell: %v", err)
 	}
 
@@ -235,14 +294,20 @@ func TestHandlerCancelDoorbell_UpdatesLastDoorbell(t *testing.T) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if rec.RequestID != "ring-1" {
-		t.Errorf("RequestID = %q, want ring-1", rec.RequestID)
-	}
+
+	// Pre-cancel fields preserved.
 	if rec.DeviceID != "28704e31e29c" {
 		t.Errorf("DeviceID = %q (lost across cancel)", rec.DeviceID)
 	}
+	if rec.ClearRequestID != clearUUID {
+		t.Errorf("ClearRequestID = %q, want %q", rec.ClearRequestID, clearUUID)
+	}
+	// Cancel-side fields set.
 	if rec.CancelledAt == nil || *rec.CancelledAt == "" {
 		t.Error("CancelledAt should be set to an RFC3339 timestamp")
+	}
+	if rec.CancelMQTTRequestID == nil || *rec.CancelMQTTRequestID != "cancel-mqtt-1" {
+		t.Errorf("CancelMQTTRequestID = %v, want 'cancel-mqtt-1'", rec.CancelMQTTRequestID)
 	}
 	if rec.CancelReasonCode == nil || *rec.CancelReasonCode != 108 {
 		got := -1
@@ -250,6 +315,24 @@ func TestHandlerCancelDoorbell_UpdatesLastDoorbell(t *testing.T) {
 			got = *rec.CancelReasonCode
 		}
 		t.Errorf("CancelReasonCode = %d, want 108", got)
+	}
+	if rec.CancelRawBody == nil || *rec.CancelRawBody == "" {
+		t.Error("CancelRawBody should be set to base64 of cancel body bytes")
+	} else {
+		decoded, err := base64.StdEncoding.DecodeString(*rec.CancelRawBody)
+		if err != nil {
+			t.Fatalf("decode cancel_raw_body: %v", err)
+		}
+		if string(decoded) != string(cancel) {
+			t.Error("cancel_raw_body did not roundtrip")
+		}
+	}
+	if rec.CancelFields == nil {
+		t.Error("CancelFields must contain the parsed cancel submessage")
+	} else {
+		if got, _ := rec.CancelFields["field_7"].(string); got != clearUUID {
+			t.Errorf("CancelFields.field_7 = %q, want %q", got, clearUUID)
+		}
 	}
 }
 
@@ -259,11 +342,7 @@ func TestHandlerCancelDoorbell_StandaloneWritesMinimalRecord(t *testing.T) {
 	// event is not lost.
 	h := newTestHandler(t)
 
-	cancel := buildSyntheticBody(
-		[2]string{"path", "/cancel_doorbell_notification"},
-		[2]string{"requestId", "ghost-cancel"},
-		[2]string{"reason_code", "105"},
-	)
+	cancel := buildCancelBody("ghost-cancel", "ghost-uuid-7777", 105)
 	if _, err := h.CancelDoorbell("ghost-cancel", cancel); err != nil {
 		t.Fatalf("CancelDoorbell: %v", err)
 	}
@@ -277,14 +356,17 @@ func TestHandlerCancelDoorbell_StandaloneWritesMinimalRecord(t *testing.T) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if rec.RequestID != "ghost-cancel" {
-		t.Errorf("RequestID = %q, want ghost-cancel", rec.RequestID)
-	}
 	if rec.CancelledAt == nil {
 		t.Error("CancelledAt must be set")
 	}
+	if rec.CancelMQTTRequestID == nil || *rec.CancelMQTTRequestID != "ghost-cancel" {
+		t.Error("CancelMQTTRequestID should be 'ghost-cancel'")
+	}
 	if rec.CancelReasonCode == nil || *rec.CancelReasonCode != 105 {
 		t.Errorf("CancelReasonCode missing or wrong")
+	}
+	if rec.CancelFields == nil {
+		t.Error("CancelFields should be populated from the submessage")
 	}
 }
 

@@ -51,17 +51,38 @@ type JWTRecord struct {
 }
 
 // DoorbellRecord is the persisted shape of last_doorbell.json.
-// CancelledAt and CancelReasonCode are set by the cancel handler
-// only.
+//
+// MQTTRequestID is the top-level requestId from the /remote_view
+// RPC envelope (UDM's MQTT-level tracking id). RequestID,
+// ClearRequestID, DeviceID, RoomID, ReasonCode are extracted from
+// the inner protobuf submessage carried in the same RPC.
+//
+// Field-number mapping (saison 11-04 hypothesis, cross-check with
+// cancel-body pending):
+//
+//	field_1 -> RequestID         (UUID, session-id UDM uses for the call)
+//	field_4 -> ReasonCode        (varint)
+//	field_5 -> DeviceID          (12-char MAC hex of the calling intercom)
+//	field_7 -> ClearRequestID    (UUID expected to match cancel body)
+//	field_9 -> RoomID            (WebRTC room string)
+//
+// Cancel-side fields are nil until a /cancel_doorbell_notification
+// arrives.
 type DoorbellRecord struct {
-	ReceivedAt       string  `json:"received_at"`
-	RequestID        string  `json:"request_id"`
-	DeviceID         string  `json:"device_id,omitempty"`
-	HubID            string  `json:"hub_id,omitempty"`
-	RoomID           string  `json:"room_id,omitempty"`
-	RawBody          string  `json:"raw_body,omitempty"`
-	CancelledAt      *string `json:"cancelled_at"`
-	CancelReasonCode *int    `json:"cancel_reason_code"`
+	ReceivedAt          string         `json:"received_at"`
+	MQTTRequestID       string         `json:"mqtt_request_id,omitempty"`
+	RequestID           string         `json:"request_id,omitempty"`
+	ClearRequestID      string         `json:"clear_request_id,omitempty"`
+	DeviceID            string         `json:"device_id,omitempty"`
+	RoomID              string         `json:"room_id,omitempty"`
+	ReasonCode          int            `json:"reason_code,omitempty"`
+	RawBody             string         `json:"raw_body,omitempty"`
+	SubmessageFields    map[string]any `json:"submessage_fields,omitempty"`
+	CancelledAt         *string        `json:"cancelled_at"`
+	CancelMQTTRequestID *string        `json:"cancel_mqtt_request_id"`
+	CancelReasonCode    *int           `json:"cancel_reason_code"`
+	CancelRawBody       *string        `json:"cancel_raw_body"`
+	CancelFields        map[string]any `json:"cancel_fields"`
 }
 
 // RuntimeConfig is the persisted shape of runtime_config.json.
@@ -133,44 +154,59 @@ func (h *Handler) UpdateConfigs(requestID string, body []byte) ([]byte, error) {
 }
 
 // RemoteView persists one doorbell event to last_doorbell.json.
+// Extracts session-level identifiers from the inner protobuf
+// submessage via the field-number-to-name mapping documented on
+// DoorbellRecord. Falls back to empty strings for any missing
+// field; the raw body always lands in raw_body for offline
+// analysis.
 func (h *Handler) RemoteView(requestID string, body []byte) ([]byte, error) {
 	if h == nil || h.Store == nil {
 		return nil, errors.New("handlers: nil receiver or store")
 	}
 	fields, _ := proto.DecodeRPCRequestBody(body)
-	deviceID, _ := fields["device_id"].(string)
-	hubID, _ := fields["hub_id"].(string)
-	roomID, _ := fields["room_id"].(string)
+	sub, _ := fields["_submessage"].(map[string]any)
 
 	rec := DoorbellRecord{
-		ReceivedAt: time.Now().Format(time.RFC3339),
-		RequestID:  requestID,
-		DeviceID:   deviceID,
-		HubID:      hubID,
-		RoomID:     roomID,
-		RawBody:    base64.StdEncoding.EncodeToString(body),
+		ReceivedAt:       time.Now().Format(time.RFC3339),
+		MQTTRequestID:    requestID,
+		RequestID:        stringField(sub, "field_1"),
+		ClearRequestID:   stringField(sub, "field_7"),
+		DeviceID:         stringField(sub, "field_5"),
+		RoomID:           stringField(sub, "field_9"),
+		ReasonCode:       intField(sub, "field_4"),
+		RawBody:          base64.StdEncoding.EncodeToString(body),
+		SubmessageFields: sub,
 	}
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	if err := h.Store.WriteFile(h.MockID, "last_doorbell.json", data, 0o644); err != nil {
 		h.Log.Warnf("mqtt: handler /remote_view persist: %v", err)
 	}
-	h.Log.Infof("mqtt: handler /remote_view DOORBELL device_id=%s hub_id=%s request_id=%s",
-		deviceID, hubID, requestID)
+	h.Log.Infof("mqtt: handler /remote_view DOORBELL device_id=%s request_id=%s room_id=%s",
+		rec.DeviceID, rec.RequestID, rec.RoomID)
 	return proto.EncodeRPCResponse("/remote_view", requestID, "success"), nil
 }
 
-// CancelDoorbell stamps the cancel time and optional reason code
-// onto last_doorbell.json. If no prior record exists, writes a
-// minimal one so the cancel is never lost.
+// CancelDoorbell stamps the cancel time, mqtt-request-id, raw
+// body and submessage fields onto last_doorbell.json. If no
+// prior record exists, writes a minimal one so the cancel is
+// never lost. Logs whether field_7 of the cancel submessage
+// matches the persisted ClearRequestID for saison-11 hypothesis
+// verification.
 func (h *Handler) CancelDoorbell(requestID string, body []byte) ([]byte, error) {
 	if h == nil || h.Store == nil {
 		return nil, errors.New("handlers: nil receiver or store")
 	}
 	fields, _ := proto.DecodeRPCRequestBody(body)
+	cancelSub, _ := fields["_submessage"].(map[string]any)
+
 	reasonCode := 0
 	if rs, ok := fields["reason_code"].(string); ok {
 		reasonCode, _ = strconv.Atoi(rs)
 	}
+	if rc := intField(cancelSub, "field_4"); rc != 0 {
+		reasonCode = rc
+	}
+
 	now := time.Now().Format(time.RFC3339)
 
 	var rec DoorbellRecord
@@ -178,16 +214,29 @@ func (h *Handler) CancelDoorbell(requestID string, body []byte) ([]byte, error) 
 	if existing, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(existing, &rec)
 	}
-	if rec.RequestID == "" {
-		rec.RequestID = requestID
+	if rec.ReceivedAt == "" {
 		rec.ReceivedAt = now
-	} else if rec.RequestID != requestID {
-		h.Log.Warnf("mqtt: handler /cancel_doorbell_notification request_id mismatch (got %s, last was %s)",
-			requestID, rec.RequestID)
 	}
+
 	rec.CancelledAt = &now
+	cancelMqttID := requestID
+	rec.CancelMQTTRequestID = &cancelMqttID
 	rcCopy := reasonCode
 	rec.CancelReasonCode = &rcCopy
+	cancelRawB64 := base64.StdEncoding.EncodeToString(body)
+	rec.CancelRawBody = &cancelRawB64
+	rec.CancelFields = cancelSub
+
+	if rec.ClearRequestID != "" && cancelSub != nil {
+		if got := stringField(cancelSub, "field_7"); got != "" {
+			if got == rec.ClearRequestID {
+				h.Log.Infof("mqtt: cancel matched clear_request_id=%s", got)
+			} else {
+				h.Log.Warnf("mqtt: cancel field_7=%s does NOT match remote_view clear_request_id=%s",
+					got, rec.ClearRequestID)
+			}
+		}
+	}
 
 	data, _ := json.MarshalIndent(rec, "", "  ")
 	if err := h.Store.WriteFile(h.MockID, "last_doorbell.json", data, 0o644); err != nil {
@@ -196,6 +245,34 @@ func (h *Handler) CancelDoorbell(requestID string, body []byte) ([]byte, error) 
 	h.Log.Infof("mqtt: handler /cancel_doorbell_notification cancelled request_id=%s reason=%d",
 		requestID, reasonCode)
 	return proto.EncodeRPCResponse("/cancel_doorbell_notification", requestID, "success"), nil
+}
+
+// stringField returns sub[name] as a string, or "" if absent or
+// not a string.
+func stringField(sub map[string]any, name string) string {
+	if sub == nil {
+		return ""
+	}
+	s, _ := sub[name].(string)
+	return s
+}
+
+// intField returns sub[name] as an int (best-effort: accepts
+// int64 and numeric strings), or 0 if absent.
+func intField(sub map[string]any, name string) int {
+	if sub == nil {
+		return 0
+	}
+	switch v := sub[name].(type) {
+	case int64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		n, _ := strconv.Atoi(v)
+		return n
+	}
+	return 0
 }
 
 // mergeRuntimeConfig reads any prior runtime_config.json, overlays
