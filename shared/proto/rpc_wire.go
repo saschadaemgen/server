@@ -8,13 +8,20 @@ import (
 
 // RPC wire format (saison 8 reverse engineering, protobuf-like).
 //
-// Outer wrapper:    0x12 + varint(body_length) + body
+// Responses produced by the mock keep the saison-9 outer wrapper:
+//   0x12 + varint(body_length) + body
+//
+// UDM-side REQUESTS observed in saison 10 (live capture of
+// /update_tokens, /remote_view, /cancel_doorbell_notification)
+// arrive WITHOUT the outer wrapper. The whole frame is the body,
+// starting directly with the first map-entry tag 0x0a.
+//
 // Body map entry:   0x0a + length-delim + entry
 // Entry:            0x0a + len + key + 0x12 + len + value
 //
-// Default success response is accepted by UDM. The exact response
-// form is tolerant; this package provides helpers for the common
-// case of producing a well-formed RPC response.
+// DecodeRPCRequest accepts both shapes. EncodeRPCResponse still
+// emits the outer wrapper because UDM accepts that form for
+// responses and we have no reason to change a working encoder.
 
 // Wire-level key strings used inside the body map. Saison 9 did not
 // pin these down via live capture; the values below are placeholders
@@ -60,21 +67,42 @@ func EncodeRPCResponse(path string, requestID string, status string) []byte {
 
 // DecodeRPCRequest parses an incoming RPC request and extracts
 // the path and known map entries (requestId, etc.).
+//
+// Two wire shapes are accepted:
+//   - Legacy / response shape: 0x12 + varint(len) + body
+//   - UDM-native request shape: body starts directly with 0x0a
+//
+// Any other lead byte is rejected so the caller's hex+ascii
+// diagnostics still trigger on truly unexpected payloads.
 func DecodeRPCRequest(data []byte) (*RPCRequest, error) {
 	if len(data) == 0 {
 		return nil, errors.New("proto: empty rpc data")
 	}
-	if data[0] != rpcOuterTag {
-		return nil, fmt.Errorf("proto: missing outer tag 0x%02x, got 0x%02x", rpcOuterTag, data[0])
+	switch data[0] {
+	case rpcOuterTag:
+		body, _, err := readLengthDelimited(data[1:])
+		if err != nil {
+			return nil, fmt.Errorf("proto: outer body: %w", err)
+		}
+		return decodeRequestBody(body, data)
+	case rpcMapEntryTag:
+		return decodeRequestBody(data, data)
+	default:
+		return nil, fmt.Errorf("proto: unexpected lead byte 0x%02x", data[0])
 	}
-	body, _, err := readLengthDelimited(data[1:])
-	if err != nil {
-		return nil, fmt.Errorf("proto: outer body: %w", err)
-	}
-	req := &RPCRequest{Raw: append([]byte(nil), data...)}
+}
+
+// decodeRequestBody walks the leading 0x0a map-entry blocks and
+// pulls out path + request id. Anything past the first non-map-
+// entry tag is ignored: real UDM requests carry additional fields
+// (0x12 sub-message with tokens, settings, intercom list) that the
+// saison-10/11 mock does not need to introspect, only forward as
+// Raw for higher-level handlers.
+func decodeRequestBody(body, raw []byte) (*RPCRequest, error) {
+	req := &RPCRequest{Raw: append([]byte(nil), raw...)}
 	for len(body) > 0 {
 		if body[0] != rpcMapEntryTag {
-			return nil, fmt.Errorf("proto: expected map-entry tag 0x%02x, got 0x%02x", rpcMapEntryTag, body[0])
+			break
 		}
 		entry, consumed, err := readLengthDelimited(body[1:])
 		if err != nil {
