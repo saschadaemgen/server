@@ -38,6 +38,45 @@
 </div>
 
 <div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+  <h2 class="font-medium mb-4 flex items-center gap-2">
+    <span class="w-5 h-5 text-cyan-400">{{icon "bell"}}</span>
+    Klingel-Statistik
+  </h2>
+  <dl class="grid grid-cols-3 gap-4 text-sm mb-4">
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 24h</dt>
+      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total24h}}</dd>
+    </div>
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 7 Tage</dt>
+      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total7d}}</dd>
+    </div>
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 30 Tage</dt>
+      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total30d}}</dd>
+    </div>
+  </dl>
+  {{if .Doorbell.TopMocks}}
+  <div class="border-t border-zinc-800 pt-4">
+    <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">Top-Mocks der letzten 24h</h3>
+    <ul class="divide-y divide-zinc-800/60">
+      {{range .Doorbell.TopMocks}}
+      <li class="flex items-center justify-between py-2 text-sm">
+        <div class="min-w-0">
+          <div class="text-zinc-200 truncate">{{.Name}}</div>
+          <div class="text-xs text-zinc-500 font-mono truncate">{{.MAC}}</div>
+        </div>
+        <span class="font-mono tabular-nums text-zinc-300">{{.Count}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{else if .Doorbell.Ready}}
+  <p class="text-xs text-zinc-500">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
+  {{end}}
+</div>
+
+<div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5">
   <h2 class="font-medium mb-3">System</h2>
   <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
     <div>
