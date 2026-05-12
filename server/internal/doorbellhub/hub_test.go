@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"unifix.local/mock"
+	"unifix.local/server/internal/doorhistory"
 )
+
+var errBoom = errors.New("history boom")
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -66,7 +69,7 @@ const (
 
 func TestSubscribe_AddRemoveBalance(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	_, cleanupA := h.Subscribe(macA)
 	_, cleanupB := h.Subscribe(macB)
 	_, cleanupC := h.Subscribe(macA)
@@ -96,7 +99,7 @@ func TestSubscribe_AddRemoveBalance(t *testing.T) {
 
 func TestCleanup_IsIdempotent(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	_, cleanup := h.Subscribe(macA)
 	cleanup()
 	cleanup()
@@ -108,7 +111,7 @@ func TestCleanup_IsIdempotent(t *testing.T) {
 
 func TestCleanup_ClosesChannel(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	sub, cleanup := h.Subscribe(macA)
 	cleanup()
 	select {
@@ -125,7 +128,7 @@ func TestCleanup_ClosesChannel(t *testing.T) {
 
 func TestPublish_BroadcastToMatchingMock(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	subA, cleanupA := h.Subscribe(macA)
 	defer cleanupA()
 	subB, cleanupB := h.Subscribe(macB)
@@ -150,7 +153,7 @@ func TestPublish_BroadcastToMatchingMock(t *testing.T) {
 
 func TestPublish_DroppedWhenChannelFull(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	sub, cleanup := h.Subscribe(macA)
 	defer cleanup()
 	for i := 0; i < subscriberBuffer; i++ {
@@ -176,7 +179,7 @@ func TestPublish_DroppedWhenChannelFull(t *testing.T) {
 
 func TestRun_DispatchesByMockMAC(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	sub, cleanup := h.Subscribe(macA)
 	defer cleanup()
 
@@ -212,7 +215,7 @@ func TestRun_DispatchesByMockMAC(t *testing.T) {
 
 func TestRun_DispatchesCancelByMockMAC(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	sub, cleanup := h.Subscribe(macA)
 	defer cleanup()
 
@@ -241,7 +244,7 @@ func TestRun_DispatchesCancelByMockMAC(t *testing.T) {
 func TestRun_NoSubscribersLogsAndDrops(t *testing.T) {
 	src := newFakeSource()
 	logger, buf := newLoggerWithCapture()
-	h := New(src, logger)
+	h := New(src, nil, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -264,7 +267,7 @@ func TestRun_NoSubscribersLogsAndDrops(t *testing.T) {
 func TestRun_EmptyMockMACDropped(t *testing.T) {
 	src := newFakeSource()
 	logger, buf := newLoggerWithCapture()
-	h := New(src, logger)
+	h := New(src, nil, logger)
 	sub, cleanup := h.Subscribe(macA)
 	defer cleanup()
 
@@ -287,7 +290,7 @@ func TestRun_EmptyMockMACDropped(t *testing.T) {
 
 func TestRun_StopsCleanOnContextCancel(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- h.Run(ctx) }()
@@ -306,12 +309,182 @@ func TestRun_StopsCleanOnContextCancel(t *testing.T) {
 
 func TestStats_CountersIncrementOnPublish(t *testing.T) {
 	src := newFakeSource()
-	h := New(src, quietLogger())
+	h := New(src, nil, quietLogger())
 	_, cleanup := h.Subscribe(macA)
 	defer cleanup()
 	h.Publish(macA, Event{Type: TypeDoorbellStart})
 	h.Publish(macA, Event{Type: TypeDoorbellCancel})
 	if got := h.Stats().EventsTotal; got != 2 {
 		t.Errorf("EventsTotal = %d, want 2", got)
+	}
+}
+
+// ---------- History persistence (Saison 13-01) ----------
+
+// fakeHistory is a minimal doorhistory.Store stub: it records
+// Insert + UpdateCancel calls and exposes counters so tests can
+// assert that the hub wrote to history before fanning out.
+type fakeHistory struct {
+	mu        sync.Mutex
+	inserts   []fakeHistoryInsert
+	cancels   []fakeHistoryCancel
+	nextID    int64
+	insertErr error
+	cancelErr error
+}
+
+type fakeHistoryInsert struct {
+	mockMAC   string
+	eventType string
+	cancelTok string
+	rawLen    int
+}
+
+type fakeHistoryCancel struct {
+	mockMAC   string
+	cancelTok string
+}
+
+func (f *fakeHistory) Insert(_ context.Context, ev doorhistory.Event, raw []byte) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.insertErr != nil {
+		return 0, f.insertErr
+	}
+	f.nextID++
+	f.inserts = append(f.inserts, fakeHistoryInsert{
+		mockMAC:   ev.MockMAC,
+		eventType: ev.EventType,
+		cancelTok: ev.CancelToken,
+		rawLen:    len(raw),
+	})
+	return f.nextID, nil
+}
+
+func (f *fakeHistory) UpdateCancel(_ context.Context, mockMAC, cancelTok string, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cancelErr != nil {
+		return f.cancelErr
+	}
+	f.cancels = append(f.cancels, fakeHistoryCancel{mockMAC: mockMAC, cancelTok: cancelTok})
+	return nil
+}
+
+func (f *fakeHistory) MarkRead(context.Context, string, []int64) error      { return nil }
+func (f *fakeHistory) MarkAllRead(context.Context, string, time.Time) error { return nil }
+func (f *fakeHistory) ListForMock(context.Context, string, int) ([]doorhistory.Event, error) {
+	return nil, nil
+}
+func (f *fakeHistory) UnreadCount(context.Context, string) (int, error) { return 0, nil }
+func (f *fakeHistory) AggregateAdmin(context.Context, time.Time) (doorhistory.AdminStats, error) {
+	return doorhistory.AdminStats{}, nil
+}
+
+func TestRun_PersistsAndAssignsEventID(t *testing.T) {
+	src := newFakeSource()
+	hist := &fakeHistory{}
+	h := New(src, hist, quietLogger())
+	sub, cleanup := h.Subscribe(macA)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	src.events <- mock.DoorbellEvent{
+		MockMAC:     macA,
+		RequestID:   "req-1",
+		DeviceID:    "0c:ea:14:11:11:11",
+		CancelToken: "tok-abc",
+		ReceivedAt:  time.Unix(1747000000, 0),
+		RawBody:     []byte("frame"),
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.EventID == 0 {
+			t.Error("EventID = 0, want a persisted id")
+		}
+		if ev.CancelToken != "tok-abc" {
+			t.Errorf("CancelToken = %q", ev.CancelToken)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("no SSE event received")
+	}
+
+	hist.mu.Lock()
+	defer hist.mu.Unlock()
+	if len(hist.inserts) != 1 {
+		t.Fatalf("inserts = %d, want 1", len(hist.inserts))
+	}
+	if hist.inserts[0].cancelTok != "tok-abc" {
+		t.Errorf("inserted cancel_token = %q", hist.inserts[0].cancelTok)
+	}
+	if hist.inserts[0].rawLen != 5 {
+		t.Errorf("raw frame length = %d, want 5", hist.inserts[0].rawLen)
+	}
+}
+
+func TestRun_CancelInvokesUpdateCancel(t *testing.T) {
+	src := newFakeSource()
+	hist := &fakeHistory{}
+	h := New(src, hist, quietLogger())
+	sub, cleanup := h.Subscribe(macA)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	src.cancels <- mock.DoorbellCancelEvent{
+		MockMAC:     macA,
+		CancelToken: "tok-xyz",
+		ReceivedAt:  time.Unix(1747000050, 0),
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != TypeDoorbellCancel {
+			t.Errorf("Type = %q", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("no cancel event received")
+	}
+
+	hist.mu.Lock()
+	defer hist.mu.Unlock()
+	if len(hist.cancels) != 1 {
+		t.Fatalf("cancels = %d, want 1", len(hist.cancels))
+	}
+	if hist.cancels[0].cancelTok != "tok-xyz" {
+		t.Errorf("cancel token = %q", hist.cancels[0].cancelTok)
+	}
+}
+
+func TestRun_PersistFailureStillDispatches(t *testing.T) {
+	src := newFakeSource()
+	hist := &fakeHistory{insertErr: errBoom}
+	h := New(src, hist, quietLogger())
+	sub, cleanup := h.Subscribe(macA)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	src.events <- mock.DoorbellEvent{
+		MockMAC:    macA,
+		RequestID:  "req-fail",
+		ReceivedAt: time.Unix(1747000000, 0),
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.EventID != 0 {
+			t.Errorf("EventID after persist failure = %d, want 0", ev.EventID)
+		}
+		if ev.RequestID != "req-fail" {
+			t.Errorf("RequestID = %q", ev.RequestID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("persist failure swallowed the SSE dispatch")
 	}
 }
