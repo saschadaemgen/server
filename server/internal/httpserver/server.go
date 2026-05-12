@@ -21,6 +21,7 @@ import (
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/doorbellhub"
+	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/uaapi"
@@ -47,6 +48,10 @@ type Deps struct {
 	// Hub fans doorbell events from mockmanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
+	// History persists doorbell events for the /m/ list and the
+	// /a/ dashboard statistics (Saison 13-01). Nil means the UI
+	// shows an empty list and zero counters.
+	History doorhistory.Store
 	// EventsHeartbeat overrides the SSE keepalive interval.
 	// Zero falls back to defaultEventsHeartbeat (30s); tests
 	// inject something shorter.
@@ -65,6 +70,7 @@ type Server struct {
 	platformCfg     *platformconfig.Service
 	ua              *uaapi.Client
 	hub             *doorbellhub.Hub
+	history         doorhistory.Store
 	eventsHeartbeat time.Duration
 	log             *slog.Logger
 	mux             *http.ServeMux
@@ -91,6 +97,7 @@ func New(deps Deps) (*Server, error) {
 		platformCfg:     deps.PlatformConfig,
 		ua:              deps.UA,
 		hub:             deps.Hub,
+		history:         deps.History,
 		eventsHeartbeat: deps.EventsHeartbeat,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),

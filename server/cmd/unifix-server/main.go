@@ -17,6 +17,7 @@ import (
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
 	"unifix.local/server/internal/doorbellhub"
+	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/httpserver"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
@@ -55,6 +56,7 @@ func main() {
 	adminSessionSvc := adminsession.New(database)
 	adminSvc := admin.New(database)
 	platformCfg := platformconfig.New(database, secretsSvc)
+	historyStore := doorhistory.NewSQLStore(database.DB)
 
 	mockMgr := mockmanager.New(database, log, mockmanager.Options{
 		StateDirBase: cfg.MockStateDir,
@@ -75,7 +77,7 @@ func main() {
 		_ = mockMgr.Shutdown(shutCtx)
 	}()
 
-	hub := doorbellhub.New(mockMgr, log)
+	hub := doorbellhub.New(mockMgr, historyStore, log)
 	go func() {
 		if err := hub.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("doorbell hub stopped", "err", err)
@@ -104,6 +106,7 @@ func main() {
 		PlatformConfig: platformCfg,
 		UA:             uaClient,
 		Hub:            hub,
+		History:        historyStore,
 		Log:            log,
 	})
 	if err != nil {

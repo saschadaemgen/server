@@ -21,6 +21,7 @@ import (
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
 	"unifix.local/server/internal/doorbellhub"
+	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
@@ -76,6 +77,7 @@ type testEnv struct {
 	platformCfg *platformconfig.Service
 	mockMgr     *mockmanager.Manager
 	hub         *doorbellhub.Hub
+	history     *doorhistory.SQLStore
 	d           *db.DB
 	clock       *testClock
 }
@@ -113,7 +115,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Factory:      fakeManagerFactory,
 	})
 
-	hub := doorbellhub.New(mockMgr, quietLogger())
+	historyStore := doorhistory.NewSQLStore(d.DB)
+	hub := doorbellhub.New(mockMgr, historyStore, quietLogger())
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	go func() { _ = hub.Run(hubCtx) }()
 
@@ -133,6 +136,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Admin:           adminSvc,
 		PlatformConfig:  platformCfg,
 		Hub:             hub,
+		History:         historyStore,
 		EventsHeartbeat: 50 * time.Millisecond,
 		Log:             quietLogger(),
 	})
@@ -162,7 +166,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		srv: srv, ts: ts, client: client,
 		magic: magic, sess: sess, adminSess: adminSess, adminSvc: adminSvc,
 		platformCfg: platformCfg, mockMgr: mockMgr,
-		hub: hub,
+		hub:     hub,
+		history: historyStore,
 		d:   d, clock: clock,
 	}
 }
