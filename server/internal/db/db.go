@@ -8,6 +8,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
@@ -24,6 +26,11 @@ type DB struct {
 func Open(path string) (*DB, error) {
 	if path == "" {
 		return nil, fmt.Errorf("db: path must not be empty")
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("db: mkdir parent %s: %w", dir, err)
+		}
 	}
 	sqlDB, err := sql.Open("sqlite", path)
 	if err != nil {

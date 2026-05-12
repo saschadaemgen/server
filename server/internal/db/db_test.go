@@ -106,3 +106,21 @@ func TestOpen_EmptyPathRejected(t *testing.T) {
 		t.Fatal("Open with empty path returned nil error")
 	}
 }
+
+func TestOpen_CreatesParentDirIfMissing(t *testing.T) {
+	nested := filepath.Join(t.TempDir(), "deep", "state", "unifix.db")
+	if _, err := os.Stat(filepath.Dir(nested)); !os.IsNotExist(err) {
+		t.Fatalf("test setup: parent dir already exists")
+	}
+	d, err := Open(nested)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	if _, err := os.Stat(filepath.Dir(nested)); err != nil {
+		t.Errorf("parent dir not created: %v", err)
+	}
+	if _, err := os.Stat(nested); err != nil {
+		t.Errorf("db file not created: %v", err)
+	}
+}
