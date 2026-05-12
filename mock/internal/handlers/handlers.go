@@ -32,10 +32,19 @@ type Logger interface {
 
 // Handler carries the dependencies every method handler needs.
 // Constructed once at mock startup and passed by pointer.
+//
+// The OnDoorbell and OnDoorbellCancel callbacks are optional
+// hooks for library consumers (mock.Viewer) that need to mirror
+// doorbell pushes onto an event channel. Both callbacks run on
+// the RPC handler goroutine and must not block; library code
+// uses non-blocking channel sends.
 type Handler struct {
 	Store  *state.Store
 	MockID string
 	Log    Logger
+
+	OnDoorbell       func(rec DoorbellRecord, rawBody []byte)
+	OnDoorbellCancel func(rec DoorbellRecord, rawBody []byte)
 }
 
 // JWTRecord is the persisted shape of jwt.json. ReceivedAt is
@@ -202,6 +211,9 @@ func (h *Handler) RemoteView(requestID string, body []byte) ([]byte, error) {
 	}
 	h.Log.Infof("mqtt: handler /remote_view DOORBELL device_id=%s request_id=%s room_id=%s",
 		rec.DeviceID, rec.RequestID, rec.RoomID)
+	if h.OnDoorbell != nil {
+		h.OnDoorbell(rec, body)
+	}
 	return proto.EncodeRPCResponse("/remote_view", requestID, "success"), nil
 }
 
@@ -263,6 +275,9 @@ func (h *Handler) CancelDoorbell(requestID string, body []byte) ([]byte, error) 
 	}
 	h.Log.Infof("mqtt: handler /cancel_doorbell_notification cancelled request_id=%s reason=%d",
 		requestID, reasonCode)
+	if h.OnDoorbellCancel != nil {
+		h.OnDoorbellCancel(rec, body)
+	}
 	return proto.EncodeRPCResponse("/cancel_doorbell_notification", requestID, "success"), nil
 }
 
@@ -451,4 +466,3 @@ func decodeJWTClaims(token string) (map[string]any, string, bool) {
 	}
 	return claims, alg, true
 }
-
