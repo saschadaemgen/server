@@ -1,8 +1,12 @@
 // Package doorbellhub bridges the mockmanager event channels to
-// per-tenant SSE subscribers. The hub reads doorbell starts and
-// cancels from the manager, resolves the receiving mock viewer
-// to its bound ua_user_id, and fans the event out to every
-// subscriber registered for that user.
+// per-mock SSE subscribers. The hub reads doorbell starts and
+// cancels from the manager and fans them out to every subscriber
+// registered for the receiving mock's MAC.
+//
+// Saison 12-06 refactor: subscribers are indexed by mock_mac
+// (not ua_user_id). The Source interface no longer carries a
+// LookupUserByMAC indirection; the routing key is right there
+// on the incoming event.
 //
 // Sends to subscriber channels are non-blocking; a backed-up
 // browser is dropped with a warn log and a Stats counter bump
@@ -11,11 +15,9 @@ package doorbellhub
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"unifix.local/mock"
 )
@@ -26,7 +28,6 @@ import (
 type Source interface {
 	Events() <-chan mock.DoorbellEvent
 	Cancels() <-chan mock.DoorbellCancelEvent
-	LookupUserByMAC(ctx context.Context, mac string) (string, error)
 }
 
 // Subscriber buffers events destined for one HTTP/SSE
@@ -34,8 +35,8 @@ type Source interface {
 // stalled browser is dropped, not allowed to back-pressure the
 // rest of the platform.
 type Subscriber struct {
-	UAUserID string
-	Events   chan Event
+	MockMAC string
+	Events  chan Event
 }
 
 const subscriberBuffer = 8
@@ -61,7 +62,7 @@ const (
 // Stats is a debugging snapshot of the hub state.
 type Stats struct {
 	SubscriberCount int
-	UniqueUserCount int
+	UniqueMockCount int
 	EventsTotal     int64
 	EventsDropped   int64
 }
@@ -91,30 +92,30 @@ func New(src Source, log *slog.Logger) *Hub {
 	}
 }
 
-// Subscribe registers a Subscriber for the given ua_user_id.
+// Subscribe registers a Subscriber for the given mock-MAC.
 // The returned cleanup function must be called on disconnect;
 // it removes the subscriber and closes its event channel so
 // readers can drain via the ok-clause of a channel receive.
-func (h *Hub) Subscribe(uaUserID string) (*Subscriber, func()) {
+func (h *Hub) Subscribe(mockMAC string) (*Subscriber, func()) {
 	sub := &Subscriber{
-		UAUserID: uaUserID,
-		Events:   make(chan Event, subscriberBuffer),
+		MockMAC: mockMAC,
+		Events:  make(chan Event, subscriberBuffer),
 	}
 	h.mu.Lock()
-	if h.subscribers[uaUserID] == nil {
-		h.subscribers[uaUserID] = make(map[*Subscriber]struct{})
+	if h.subscribers[mockMAC] == nil {
+		h.subscribers[mockMAC] = make(map[*Subscriber]struct{})
 	}
-	h.subscribers[uaUserID][sub] = struct{}{}
+	h.subscribers[mockMAC][sub] = struct{}{}
 	h.mu.Unlock()
 
 	var once sync.Once
 	cleanup := func() {
 		once.Do(func() {
 			h.mu.Lock()
-			if set, ok := h.subscribers[uaUserID]; ok {
+			if set, ok := h.subscribers[mockMAC]; ok {
 				delete(set, sub)
 				if len(set) == 0 {
-					delete(h.subscribers, uaUserID)
+					delete(h.subscribers, mockMAC)
 				}
 			}
 			close(sub.Events)
@@ -134,19 +135,19 @@ func (h *Hub) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case ev := <-events:
-			h.dispatchDoorbell(ctx, ev)
+			h.dispatchDoorbell(ev)
 		case ev := <-cancels:
-			h.dispatchCancel(ctx, ev)
+			h.dispatchCancel(ev)
 		}
 	}
 }
 
-func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
-	uaUserID, err := h.lookupUser(ctx, ev.MockMAC)
-	if err != nil {
+func (h *Hub) dispatchDoorbell(ev mock.DoorbellEvent) {
+	if ev.MockMAC == "" {
+		h.log.Warn("doorbell event without mock_mac, dropping")
 		return
 	}
-	out := Event{
+	h.broadcast(ev.MockMAC, Event{
 		Type:        TypeDoorbellStart,
 		MockMAC:     ev.MockMAC,
 		RequestID:   ev.RequestID,
@@ -154,54 +155,38 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 		RoomID:      ev.RoomID,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
-	}
-	h.broadcast(uaUserID, out)
+	})
 }
 
-func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
-	uaUserID, err := h.lookupUser(ctx, ev.MockMAC)
-	if err != nil {
+func (h *Hub) dispatchCancel(ev mock.DoorbellCancelEvent) {
+	if ev.MockMAC == "" {
+		h.log.Warn("doorbell cancel event without mock_mac, dropping")
 		return
 	}
-	out := Event{
+	h.broadcast(ev.MockMAC, Event{
 		Type:        TypeDoorbellCancel,
 		MockMAC:     ev.MockMAC,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
-	}
-	h.broadcast(uaUserID, out)
+	})
 }
 
-// lookupUser maps a mock-MAC to its bound ua_user_id, logging
-// the two interesting non-routable cases (no binding, lookup
-// error) and returning a sentinel error so the caller can
-// short-circuit.
-func (h *Hub) lookupUser(ctx context.Context, mac string) (string, error) {
-	uaUserID, err := h.src.LookupUserByMAC(ctx, mac)
-	if err != nil {
-		h.log.Info("doorbell from unassigned mock",
-			"mac", mac, "err", err.Error())
-		return "", err
-	}
-	if uaUserID == "" {
-		h.log.Info("doorbell from mock without ua_user_id binding",
-			"mac", mac)
-		return "", errors.New("doorbellhub: no binding")
-	}
-	return uaUserID, nil
-}
-
-func (h *Hub) broadcast(uaUserID string, ev Event) {
+func (h *Hub) broadcast(mockMAC string, ev Event) {
 	h.eventsTotal.Add(1)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for sub := range h.subscribers[uaUserID] {
+	subs := h.subscribers[mockMAC]
+	if len(subs) == 0 {
+		h.log.Info("doorbell with no subscribers", "mac", mockMAC, "type", ev.Type)
+		return
+	}
+	for sub := range subs {
 		select {
 		case sub.Events <- ev:
 		default:
 			h.eventsDropped.Add(1)
 			h.log.Warn("subscriber channel full, dropping event",
-				"user_prefix", userPrefix(uaUserID),
+				"mac", mockMAC,
 				"type", ev.Type,
 			)
 		}
@@ -209,16 +194,16 @@ func (h *Hub) broadcast(uaUserID string, ev Event) {
 }
 
 // Publish lets callers feed events into the hub bypassing the
-// source channels. Saison 12 uses it from tests; saison 13+
-// could wire a webhook receiver through the same path.
-func (h *Hub) Publish(uaUserID string, ev Event) {
-	if uaUserID == "" {
+// source channels. Tests use it directly; saison 13+ could wire
+// a webhook receiver through the same path.
+func (h *Hub) Publish(mockMAC string, ev Event) {
+	if mockMAC == "" {
 		return
 	}
 	h.eventsTotal.Add(1)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for sub := range h.subscribers[uaUserID] {
+	for sub := range h.subscribers[mockMAC] {
 		select {
 		case sub.Events <- ev:
 		default:
@@ -238,21 +223,8 @@ func (h *Hub) Stats() Stats {
 	}
 	return Stats{
 		SubscriberCount: total,
-		UniqueUserCount: len(h.subscribers),
+		UniqueMockCount: len(h.subscribers),
 		EventsTotal:     h.eventsTotal.Load(),
 		EventsDropped:   h.eventsDropped.Load(),
 	}
 }
-
-// userPrefix returns the first 8 characters of a ua_user_id so
-// logs stay PII-light per the saison-12 logging convention.
-func userPrefix(uaUserID string) string {
-	if len(uaUserID) > 8 {
-		return uaUserID[:8]
-	}
-	return uaUserID
-}
-
-// hubClock is unused but exists so tests can prove the Run loop
-// is the only thing that blocks shutdown.
-var _ = time.Now

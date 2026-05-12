@@ -3,7 +3,12 @@
 // hosted by the server process; the manager loads persisted
 // viewer specs from the mock_viewers table on boot, starts the
 // goroutines, multiplexes their event channels, and handles
-// admin-driven add/remove/update operations.
+// admin-driven add/remove operations.
+//
+// Saison 12-06 refactor: ua_user_id is gone. Mock-MAC is the
+// only routing key. Tenants reach a mock via a magic-link the
+// admin generates; the link binds the resulting browser session
+// to mock_mac, not to a user.
 //
 // The manager exposes a Viewer interface and a ViewerFactory so
 // tests can inject a fake viewer instead of spinning up the real
@@ -12,7 +17,6 @@ package mockmanager
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -55,14 +59,11 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 	return mock.New(cfg, log)
 }
 
-// ViewerSpec describes one persisted mock viewer. ServicePort is
-// uint16 to match the mock.Config; the database stores it as
-// INTEGER and conversions happen at the boundary.
+// ViewerSpec describes one persisted mock viewer.
 type ViewerSpec struct {
 	MAC         string
 	Name        string
 	ServicePort uint16
-	UAUserID    string
 }
 
 // ViewerInfo is the public view of one running mock viewer for
@@ -71,7 +72,6 @@ type ViewerInfo struct {
 	MAC         string
 	Name        string
 	ServicePort uint16
-	UAUserID    string
 	Running     bool
 }
 
@@ -151,7 +151,7 @@ func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh 
 // goroutine per row. Called once at server boot.
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, ua_user_id FROM mock_viewers ORDER BY mac`)
+		`SELECT mac, name, service_port FROM mock_viewers ORDER BY mac`)
 	if err != nil {
 		return fmt.Errorf("mockmanager: load: %w", err)
 	}
@@ -161,14 +161,10 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 	for rows.Next() {
 		var spec ViewerSpec
 		var port int64
-		var uaUserID sql.NullString
-		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &uaUserID); err != nil {
+		if err := rows.Scan(&spec.MAC, &spec.Name, &port); err != nil {
 			return fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		spec.ServicePort = uint16(port)
-		if uaUserID.Valid {
-			spec.UAUserID = uaUserID.String
-		}
 		specs = append(specs, spec)
 	}
 	if err := rows.Err(); err != nil {
@@ -222,7 +218,9 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 }
 
 // RemoveViewer cancels the viewer goroutine, waits for it to
-// stop (or for ctx to expire), then deletes the row.
+// stop (or for ctx to expire), then deletes the row. The
+// foreign-key cascade in the schema sweeps any magic_link_tokens
+// and mieter_sessions bound to this mock with the same DELETE.
 func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	m.mu.Lock()
 	entry, ok := m.viewers[mac]
@@ -247,31 +245,8 @@ func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	return nil
 }
 
-// UpdateUserBinding rewrites mock_viewers.ua_user_id. The viewer
-// keeps running because the binding is platform-state only; UDM
-// does not care.
-func (m *Manager) UpdateUserBinding(ctx context.Context, mac string, uaUserID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	entry, ok := m.viewers[mac]
-	if !ok {
-		return ErrViewerNotFound
-	}
-	now := m.opts.Now().UnixMilli()
-	if _, err := m.db.ExecContext(ctx,
-		`UPDATE mock_viewers SET ua_user_id = ?, updated_at = ? WHERE mac = ?`,
-		nullable(uaUserID), now, mac,
-	); err != nil {
-		return fmt.Errorf("mockmanager: update: %w", err)
-	}
-	entry.spec.UAUserID = uaUserID
-	return nil
-}
-
 // GetViewerInfo returns the snapshot for one running viewer by
-// MAC, or ErrViewerNotFound if the MAC is unknown. Equivalent
-// to a filtered ListViewers but cheaper for the admin one-row
-// CRUD endpoints.
+// MAC, or ErrViewerNotFound if the MAC is unknown.
 func (m *Manager) GetViewerInfo(_ context.Context, mac string) (*ViewerInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -283,7 +258,6 @@ func (m *Manager) GetViewerInfo(_ context.Context, mac string) (*ViewerInfo, err
 		MAC:         e.spec.MAC,
 		Name:        e.spec.Name,
 		ServicePort: e.spec.ServicePort,
-		UAUserID:    e.spec.UAUserID,
 		Running:     true,
 	}, nil
 }
@@ -298,31 +272,10 @@ func (m *Manager) ListViewers(_ context.Context) ([]ViewerInfo, error) {
 			MAC:         e.spec.MAC,
 			Name:        e.spec.Name,
 			ServicePort: e.spec.ServicePort,
-			UAUserID:    e.spec.UAUserID,
 			Running:     true,
 		})
 	}
 	return out, nil
-}
-
-// LookupUserByMAC returns the ua_user_id bound to a mock-viewer
-// MAC, querying the DB directly so callers can route doorbells
-// without holding the manager mutex.
-func (m *Manager) LookupUserByMAC(ctx context.Context, mac string) (string, error) {
-	var uaUserID sql.NullString
-	err := m.db.QueryRowContext(ctx,
-		`SELECT ua_user_id FROM mock_viewers WHERE mac = ?`, mac,
-	).Scan(&uaUserID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrViewerNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("mockmanager: lookup: %w", err)
-	}
-	if !uaUserID.Valid {
-		return "", nil
-	}
-	return uaUserID.String, nil
 }
 
 // Shutdown cancels every viewer and waits for the goroutines to
@@ -358,9 +311,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error {
 	now := m.opts.Now().UnixMilli()
 	_, err := m.db.ExecContext(ctx,
-		`INSERT INTO mock_viewers (mac, name, service_port, ua_user_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		spec.MAC, spec.Name, int64(spec.ServicePort), nullable(spec.UAUserID), now, now,
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		spec.MAC, spec.Name, int64(spec.ServicePort), now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("mockmanager: insert: %w", err)
@@ -464,15 +417,4 @@ func validateSpec(spec ViewerSpec) error {
 		return errors.New("mockmanager: ServicePort must be > 0")
 	}
 	return nil
-}
-
-// nullable converts an empty string to a SQL NULL and any
-// non-empty string to itself. Avoids storing "" in nullable
-// ua_user_id columns where NULL is the documented "no binding"
-// sentinel.
-func nullable(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

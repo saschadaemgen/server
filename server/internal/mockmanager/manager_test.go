@@ -129,8 +129,8 @@ func TestLoadFromDB_StartsPersistedViewers(t *testing.T) {
 	}
 	for _, s := range specs {
 		_, err := mgr.db.Exec(
-			`INSERT INTO mock_viewers (mac, name, service_port, ua_user_id, created_at, updated_at)
-			 VALUES (?, ?, ?, NULL, ?, ?)`,
+			`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?)`,
 			s.MAC, s.Name, int64(s.ServicePort), now, now,
 		)
 		if err != nil {
@@ -183,7 +183,6 @@ func TestAddViewer_StartsGoroutine(t *testing.T) {
 	if v == nil {
 		t.Fatal("factory did not record a viewer")
 	}
-	// Run is started in a goroutine; give it a moment to enter.
 	for i := 0; i < 100; i++ {
 		if v.runs.Load() == 1 {
 			return
@@ -279,85 +278,73 @@ func TestRemoveViewer_UnknownReturnsError(t *testing.T) {
 	}
 }
 
-// ---------- UpdateUserBinding ----------
+func TestRemoveViewer_CascadesSessionsAndTokens(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:cc:dd:ee", 8082)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := mgr.db.Exec(
+		`INSERT INTO mieter_sessions (session_id, mock_mac, created_at, last_seen, expires_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"sess-x", spec.MAC, now, now, now,
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := mgr.db.Exec(
+		`INSERT INTO magic_link_tokens (token, mock_mac, created_at, expires_at)
+		 VALUES (?, ?, ?, ?)`,
+		"tok-x", spec.MAC, now, now,
+	); err != nil {
+		t.Fatalf("insert token: %v", err)
+	}
+	if err := mgr.RemoveViewer(context.Background(), spec.MAC); err != nil {
+		t.Fatalf("RemoveViewer: %v", err)
+	}
+	for _, q := range []struct {
+		label string
+		sql   string
+	}{
+		{"mieter_sessions", `SELECT COUNT(*) FROM mieter_sessions WHERE mock_mac = ?`},
+		{"magic_link_tokens", `SELECT COUNT(*) FROM magic_link_tokens WHERE mock_mac = ?`},
+	} {
+		var n int
+		if err := mgr.db.QueryRow(q.sql, spec.MAC).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", q.label, err)
+		}
+		if n != 0 {
+			t.Errorf("%s count after RemoveViewer = %d, want 0 (FK cascade)", q.label, n)
+		}
+	}
+}
 
-func TestUpdateUserBinding_UpdatesDB_DoesNotRestartViewer(t *testing.T) {
-	mgr, factory := newTestManager(t)
+// ---------- GetViewerInfo ----------
+
+func TestGetViewerInfo_HappyPath(t *testing.T) {
+	mgr, _ := newTestManager(t)
 	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
 	if err := mgr.AddViewer(context.Background(), spec); err != nil {
 		t.Fatalf("AddViewer: %v", err)
 	}
-	v := factory.viewer(spec.MAC)
-	for i := 0; i < 100 && v.runs.Load() != 1; i++ {
-		time.Sleep(5 * time.Millisecond)
-	}
-	startCount := v.runs.Load()
-	if err := mgr.UpdateUserBinding(context.Background(), spec.MAC, "ua-user-1"); err != nil {
-		t.Fatalf("UpdateUserBinding: %v", err)
-	}
-	// give the viewer a moment to (incorrectly) restart if the
-	// implementation regresses.
-	time.Sleep(50 * time.Millisecond)
-	if got := v.runs.Load(); got != startCount {
-		t.Errorf("Run invocations = %d, want %d (viewer must not restart)", got, startCount)
-	}
-	var uaUserID string
-	if err := mgr.db.QueryRow(
-		`SELECT ua_user_id FROM mock_viewers WHERE mac = ?`, spec.MAC,
-	).Scan(&uaUserID); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if uaUserID != "ua-user-1" {
-		t.Errorf("persisted ua_user_id = %q, want %q", uaUserID, "ua-user-1")
-	}
-}
-
-func TestUpdateUserBinding_UnknownMAC(t *testing.T) {
-	mgr, _ := newTestManager(t)
-	err := mgr.UpdateUserBinding(context.Background(), "0c:ea:14:99:99:99", "ua-user-1")
-	if !errors.Is(err, ErrViewerNotFound) {
-		t.Errorf("err = %v, want ErrViewerNotFound", err)
-	}
-}
-
-// ---------- LookupUserByMAC ----------
-
-func TestLookupUserByMAC_HappyPath(t *testing.T) {
-	mgr, _ := newTestManager(t)
-	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
-	if err := mgr.AddViewer(context.Background(), spec); err != nil {
-		t.Fatalf("AddViewer: %v", err)
-	}
-	if err := mgr.UpdateUserBinding(context.Background(), spec.MAC, "ua-user-1"); err != nil {
-		t.Fatalf("UpdateUserBinding: %v", err)
-	}
-	got, err := mgr.LookupUserByMAC(context.Background(), spec.MAC)
+	info, err := mgr.GetViewerInfo(context.Background(), spec.MAC)
 	if err != nil {
-		t.Fatalf("LookupUserByMAC: %v", err)
+		t.Fatalf("GetViewerInfo: %v", err)
 	}
-	if got != "ua-user-1" {
-		t.Errorf("ua_user_id = %q, want %q", got, "ua-user-1")
+	if info.Name != spec.Name {
+		t.Errorf("Name = %q, want %q", info.Name, spec.Name)
 	}
-}
-
-func TestLookupUserByMAC_NoBindingReturnsEmptyString(t *testing.T) {
-	mgr, _ := newTestManager(t)
-	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
-	if err := mgr.AddViewer(context.Background(), spec); err != nil {
-		t.Fatalf("AddViewer: %v", err)
+	if info.ServicePort != spec.ServicePort {
+		t.Errorf("ServicePort = %d, want %d", info.ServicePort, spec.ServicePort)
 	}
-	got, err := mgr.LookupUserByMAC(context.Background(), spec.MAC)
-	if err != nil {
-		t.Fatalf("LookupUserByMAC: %v", err)
-	}
-	if got != "" {
-		t.Errorf("ua_user_id = %q, want empty (no binding)", got)
+	if !info.Running {
+		t.Errorf("Running = false, want true")
 	}
 }
 
-func TestLookupUserByMAC_UnknownMAC(t *testing.T) {
+func TestGetViewerInfo_UnknownMAC(t *testing.T) {
 	mgr, _ := newTestManager(t)
-	_, err := mgr.LookupUserByMAC(context.Background(), "0c:ea:14:99:99:99")
+	_, err := mgr.GetViewerInfo(context.Background(), "0c:ea:14:99:99:99")
 	if !errors.Is(err, ErrViewerNotFound) {
 		t.Errorf("err = %v, want ErrViewerNotFound", err)
 	}
