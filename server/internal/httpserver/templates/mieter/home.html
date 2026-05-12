@@ -46,6 +46,13 @@ tailwind.config = {
   <div class="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
     <span class="font-semibold tracking-tight">unifix</span>
     <div class="flex items-center gap-4">
+      <span class="relative inline-flex items-center text-zinc-400" title="Ungelesene Klingeln">
+        <span class="w-5 h-5">{{icon "bell"}}</span>
+        <span id="unread-badge"
+              class="absolute -top-1.5 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-cyan-500 text-zinc-950 text-[10px] font-semibold flex items-center justify-center {{if eq .UnreadCount 0}}hidden{{end}}">
+          {{.UnreadCount}}
+        </span>
+      </span>
       <span id="status" class="inline-flex items-center gap-1.5 text-xs text-zinc-400">
         <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span> verbinde...
       </span>
@@ -66,6 +73,45 @@ tailwind.config = {
     <p>Geraet: <span class="text-zinc-100">{{.MockName}}</span></p>
     <p class="mt-2 text-zinc-500">Diese Seite bleibt offen und verbindet sich automatisch wieder, falls die Verbindung kurz abreisst.</p>
   </div>
+
+  <section class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+    <header class="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+      <h2 class="font-medium">Letzte Klingeln</h2>
+      <span class="text-xs text-zinc-500">letzte {{len .History}} Eintraege</span>
+    </header>
+    <ul id="history-list" class="divide-y divide-zinc-800">
+      {{if not .History}}
+      <li class="px-5 py-6 text-sm text-zinc-500 text-center">
+        Noch keine Klingeln aufgezeichnet.
+      </li>
+      {{end}}
+      {{range .History}}
+      <li id="history-row-{{.ID}}" class="px-5 py-3 flex items-center justify-between text-sm">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="w-4 h-4 text-zinc-500">{{icon "bell"}}</span>
+          <div class="min-w-0">
+            <div class="text-zinc-200 truncate">{{.OccurredAt}}</div>
+            <div class="text-xs text-zinc-500 truncate">
+              {{if .IntercomMAC}}Klingelschild <span class="font-mono">{{.IntercomMAC}}</span>{{else}}Klingelschild unbekannt{{end}}
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <span class="text-xs
+            {{if eq .Status "abgebrochen"}}text-zinc-400
+            {{else if eq .Status "beantwortet"}}text-emerald-300
+            {{else if eq .Status "beendet"}}text-zinc-300
+            {{else}}text-amber-300{{end}}">
+            {{.Status}}
+          </span>
+          {{if .Unread}}
+          <span class="text-[10px] uppercase tracking-wider bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded">neu</span>
+          {{end}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
 </main>
 
 <!-- Klingel-Overlay, zeigt sich beim doorbell_start, blendet aus bei doorbell_cancel oder lokaler Schliessen-Klick. -->
@@ -97,12 +143,14 @@ tailwind.config = {
 
 <script>
 (function() {
-  const evtSource = new EventSource('/m/events');
-  const statusEl  = document.getElementById('status');
-  const overlay   = document.getElementById('ring-overlay');
-  const mockEl    = document.getElementById('ring-mock-mac');
-  const timeEl    = document.getElementById('ring-time');
-  const closeBtn  = document.getElementById('ring-close');
+  const evtSource    = new EventSource('/m/events');
+  const statusEl     = document.getElementById('status');
+  const overlay      = document.getElementById('ring-overlay');
+  const mockEl       = document.getElementById('ring-mock-mac');
+  const timeEl       = document.getElementById('ring-time');
+  const closeBtn     = document.getElementById('ring-close');
+  const unreadBadge  = document.getElementById('unread-badge');
+  const historyList  = document.getElementById('history-list');
 
   function setStatus(state) {
     if (!statusEl) return;
@@ -113,6 +161,52 @@ tailwind.config = {
       statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> verbinde wieder...';
       statusEl.className = 'inline-flex items-center gap-1.5 text-xs text-amber-400';
     }
+  }
+
+  function bumpUnread(delta) {
+    if (!unreadBadge) return;
+    const current = parseInt(unreadBadge.textContent || '0', 10) || 0;
+    const next = Math.max(0, current + delta);
+    unreadBadge.textContent = next.toString();
+    if (next > 0) {
+      unreadBadge.classList.remove('hidden');
+    } else {
+      unreadBadge.classList.add('hidden');
+    }
+  }
+
+  function formatLocal(unixMillis) {
+    const d = new Date(unixMillis);
+    const pad = (n) => n.toString().padStart(2, '0');
+    return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function prependHistory(data) {
+    if (!historyList) return;
+    if (!data.event_id) return;
+    const empty = historyList.querySelector('li.text-zinc-500.text-center');
+    if (empty) empty.remove();
+    const li = document.createElement('li');
+    li.id = 'history-row-' + data.event_id;
+    li.className = 'px-5 py-3 flex items-center justify-between text-sm';
+    const occurred = data.created_at ? formatLocal(data.created_at) : '-';
+    const intercom = data.device_id
+      ? 'Klingelschild <span class="font-mono">' + data.device_id + '</span>'
+      : 'Klingelschild unbekannt';
+    li.innerHTML =
+      '<div class="flex items-center gap-3 min-w-0">' +
+        '<span class="w-4 h-4 text-zinc-500"></span>' +
+        '<div class="min-w-0">' +
+          '<div class="text-zinc-200 truncate">' + occurred + '</div>' +
+          '<div class="text-xs text-zinc-500 truncate">' + intercom + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="flex items-center gap-3 flex-shrink-0">' +
+        '<span class="text-xs text-amber-300">laeuft</span>' +
+        '<span class="text-[10px] uppercase tracking-wider bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded">neu</span>' +
+      '</div>';
+    historyList.insertBefore(li, historyList.firstChild);
   }
 
   function showRing(data) {
@@ -133,7 +227,12 @@ tailwind.config = {
   }
 
   evtSource.addEventListener('doorbell_start', (e) => {
-    try { showRing(JSON.parse(e.data)); } catch (_) {}
+    try {
+      const data = JSON.parse(e.data);
+      showRing(data);
+      prependHistory(data);
+      bumpUnread(1);
+    } catch (_) {}
   });
   evtSource.addEventListener('doorbell_cancel', () => hideRing());
   evtSource.onopen  = () => setStatus('live');
