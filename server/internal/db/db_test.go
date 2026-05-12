@@ -39,10 +39,10 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("schema_version = %d, want 1", version)
+	if version != 2 {
+		t.Errorf("schema_version = %d, want 2", version)
 	}
-	for _, table := range []string{"magic_link_tokens", "sessions"} {
+	for _, table := range []string{"magic_link_tokens", "sessions", "mock_viewers"} {
 		var name string
 		err := d.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
@@ -67,14 +67,16 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer d.Close()
-	var count int
-	if err := d.QueryRow(
-		`SELECT COUNT(*) FROM schema_version WHERE version = 1`,
-	).Scan(&count); err != nil {
-		t.Fatalf("query schema_version: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("schema_version v=1 row count = %d, want 1 (idempotency broken)", count)
+	for _, v := range []int{1, 2} {
+		var count int
+		if err := d.QueryRow(
+			`SELECT COUNT(*) FROM schema_version WHERE version = ?`, v,
+		).Scan(&count); err != nil {
+			t.Fatalf("query schema_version v=%d: %v", v, err)
+		}
+		if count != 1 {
+			t.Errorf("schema_version v=%d row count = %d, want 1 (idempotency broken)", v, count)
+		}
 	}
 }
 
@@ -122,5 +124,88 @@ func TestOpen_CreatesParentDirIfMissing(t *testing.T) {
 	}
 	if _, err := os.Stat(nested); err != nil {
 		t.Errorf("db file not created: %v", err)
+	}
+}
+
+func TestMigration002_Applied(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	var max int
+	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&max); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if max < 2 {
+		t.Errorf("MAX(version) = %d, want >= 2", max)
+	}
+}
+
+func TestMigration002_MockViewersTableExists(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	var name string
+	err = d.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='mock_viewers'`,
+	).Scan(&name)
+	if err != nil {
+		t.Fatalf("mock_viewers table missing: %v", err)
+	}
+	for _, idx := range []string{"idx_mock_viewers_ua_user", "idx_mock_viewers_port"} {
+		var idxName string
+		err := d.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, idx,
+		).Scan(&idxName)
+		if err != nil {
+			t.Errorf("index %s missing: %v", idx, err)
+		}
+	}
+}
+
+func TestMigration002_UniquePortConstraint(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	now := int64(1747000000000)
+	if _, err := d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "viewer-1", 8080, now, now,
+	); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	_, err = d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"0c:ea:14:42:42:43", "viewer-2", 8080, now, now,
+	)
+	if err == nil {
+		t.Fatal("second insert with same port succeeded, want unique-constraint error")
+	}
+}
+
+func TestMigration002_UniqueMACConstraint(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	now := int64(1747000000000)
+	if _, err := d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "viewer-1", 8080, now, now,
+	); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	_, err = d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "viewer-dup", 8081, now, now,
+	)
+	if err == nil {
+		t.Fatal("second insert with same MAC succeeded, want primary-key error")
 	}
 }
