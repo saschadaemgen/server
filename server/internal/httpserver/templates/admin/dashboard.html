@@ -1,100 +1,121 @@
 {{define "content"}}
-<div class="mb-8">
-  <h1 class="headline-xl">Dashboard</h1>
-  <p class="small-text text-app-text-2 mt-1">Willkommen, {{.AdminName}}.</p>
+<div class="page-header">
+  <h1 class="text-display">Dashboard</h1>
+  <p class="text-body text-secondary">Willkommen zurueck, {{.AdminName}}.</p>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-  <a href="/a/mocks" class="solid-card p-4 hover:bg-app-card transition-colors block">
-    <div class="flex items-center justify-between mb-3">
-      <span class="w-6 h-6 text-app-blue">{{icon "server"}}</span>
-      <span class="headline-xl font-mono tabular-nums">{{.MockCount}}</span>
+<div class="grid-3">
+  <a href="/a/mocks" class="app-card">
+    <div class="app-card-header">
+      <div class="app-card-icon-wrap">{{icon "server"}}</div>
+      <div class="app-card-titles">
+        <p class="text-caption text-tertiary">Mock-Viewer</p>
+        <p class="app-card-stat">{{.MockCount}}</p>
+      </div>
+      <div class="text-tertiary">{{icon "chevron-right"}}</div>
     </div>
-    <h2 class="headline-m">Mock-Viewer</h2>
-    <p class="small-text text-app-text-2 mt-1">virtuelle Geraete im Prozess</p>
+    <p class="text-callout text-secondary mt-2">virtuelle Geraete im Prozess</p>
   </a>
 
-  <a href="/a/users" class="solid-card p-4 hover:bg-app-card transition-colors block">
-    <div class="flex items-center justify-between mb-3">
-      <span class="w-6 h-6 text-app-blue">{{icon "users"}}</span>
-      <span class="headline-xl font-mono tabular-nums">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</span>
+  <a href="/a/users" class="app-card">
+    <div class="app-card-header">
+      <div class="app-card-icon-wrap green">{{icon "users"}}</div>
+      <div class="app-card-titles">
+        <p class="text-caption text-tertiary">Mieter (UA-User)</p>
+        <p class="app-card-stat">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</p>
+      </div>
+      <div class="text-tertiary">{{icon "chevron-right"}}</div>
     </div>
-    <h2 class="headline-m">Mieter (UA-User)</h2>
-    <p class="small-text text-app-text-2 mt-1">
-      {{if .UserCountReady}}per UA-API verwaltet{{else}}UA-API nicht konfiguriert{{end}}
+    <p class="text-callout text-secondary mt-2">
+      {{if .UserCountReady}}via UA-Developer-API verwaltet{{else}}UA-API noch nicht konfiguriert{{end}}
     </p>
   </a>
 
-  <a href="/a/settings" class="solid-card p-4 hover:bg-app-card transition-colors block">
-    <div class="flex items-center justify-between mb-3">
-      <span class="w-6 h-6 text-app-blue">{{icon "settings"}}</span>
-      <span class="caption {{if .UserCountReady}}text-app-green{{else}}text-app-amber{{end}}">
-        {{if .UserCountReady}}konfiguriert{{else}}setup noetig{{end}}
-      </span>
+  <a href="/a/settings" class="app-card">
+    <div class="app-card-header">
+      <div class="app-card-icon-wrap {{if .UserCountReady}}{{else}}amber{{end}}">{{icon "settings"}}</div>
+      <div class="app-card-titles">
+        <p class="text-caption text-tertiary">Einstellungen</p>
+        <p class="text-title-1 {{if .UserCountReady}}text-green{{else}}text-amber{{end}}">
+          {{if .UserCountReady}}konfiguriert{{else}}setup noetig{{end}}
+        </p>
+      </div>
+      <div class="text-tertiary">{{icon "chevron-right"}}</div>
     </div>
-    <h2 class="headline-m">Einstellungen</h2>
-    <p class="small-text text-app-text-2 mt-1">UA-Developer-API + Plattform</p>
+    <p class="text-callout text-secondary mt-2">UA-Developer-API + Plattform</p>
   </a>
 </div>
 
-<div class="mt-10 solid-card p-5">
-  <h2 class="headline-m mb-4 flex items-center gap-2">
-    <span class="w-6 h-6 text-app-blue">{{icon "bell"}}</span>
-    Klingel-Statistik
-  </h2>
-  <dl class="grid grid-cols-3 gap-4 mb-4">
+<div class="app-card">
+  <div class="app-card-header no-trailing">
+    <div class="app-card-icon-wrap">{{icon "bell"}}</div>
+    <div class="app-card-titles">
+      <h2 class="text-title-1">Klingel-Statistik</h2>
+      <p class="text-callout text-secondary">Aktivitaet ueber rollierende Zeitfenster.</p>
+    </div>
+  </div>
+  <div class="grid-3 mt-6">
     <div>
-      <dt class="caption">Letzte 24h</dt>
-      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total24h}}</dd>
+      <p class="text-caption text-tertiary">Letzte 24 Stunden</p>
+      <p class="app-card-stat mt-2">{{.Doorbell.Total24h}}</p>
     </div>
     <div>
-      <dt class="caption">Letzte 7 Tage</dt>
-      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total7d}}</dd>
+      <p class="text-caption text-tertiary">Letzte 7 Tage</p>
+      <p class="app-card-stat mt-2">{{.Doorbell.Total7d}}</p>
     </div>
     <div>
-      <dt class="caption">Letzte 30 Tage</dt>
-      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total30d}}</dd>
+      <p class="text-caption text-tertiary">Letzte 30 Tage</p>
+      <p class="app-card-stat mt-2">{{.Doorbell.Total30d}}</p>
     </div>
-  </dl>
+  </div>
   {{if .Doorbell.TopMocks}}
-  <div class="border-t border-app-border-2 pt-4">
-    <h3 class="caption mb-3">Top-Mocks der letzten 24h</h3>
-    <ul class="divide-y divide-app-border-2">
+  <div class="mt-6" style="border-top: 1px solid var(--border-card); padding-top: 16px;">
+    <p class="text-caption text-tertiary mb-6">Top-Mocks der letzten 24h</p>
+    <ul class="history-list">
       {{range .Doorbell.TopMocks}}
-      <li class="flex items-center justify-between py-2">
-        <div class="min-w-0">
-          <div class="body-text text-app-text truncate">{{.Name}}</div>
-          <div class="small-text text-app-text-3 font-mono truncate">{{.MAC}}</div>
+      <li class="history-item">
+        <div class="history-item-icon">{{icon "bell"}}</div>
+        <div>
+          <div class="history-item-title">{{.Name}}</div>
+          <div class="history-item-meta text-mono">{{.MAC}}</div>
         </div>
-        <span class="font-mono tabular-nums text-app-text">{{.Count}}</span>
+        <div class="text-mono text-primary tabular-nums" style="font-weight:600;">{{.Count}}</div>
       </li>
       {{end}}
     </ul>
   </div>
   {{else if .Doorbell.Ready}}
-  <p class="small-text text-app-text-3">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
+  <p class="text-callout text-tertiary mt-6">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
   {{end}}
 </div>
 
-<div class="mt-10 solid-card p-5">
-  <h2 class="headline-m mb-3">System</h2>
-  <dl class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="app-card">
+  <div class="app-card-header no-trailing">
+    <div class="app-card-icon-wrap">{{icon "settings"}}</div>
+    <div class="app-card-titles">
+      <h2 class="text-title-1">System</h2>
+      <p class="text-callout text-secondary">Aktueller Server-Stand.</p>
+    </div>
+  </div>
+  <div class="grid-4 mt-6">
     <div>
-      <dt class="caption">Schema-Version</dt>
-      <dd class="font-mono mt-1 text-app-text">{{.SchemaVersion}}</dd>
+      <p class="text-caption text-tertiary">Schema-Version</p>
+      <p class="text-headline text-mono mt-2">{{.SchemaVersion}}</p>
     </div>
     <div>
-      <dt class="caption">Server-IPv4</dt>
-      <dd class="font-mono mt-1 text-app-text">{{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-app-amber">nicht gesetzt</span>{{end}}</dd>
+      <p class="text-caption text-tertiary">Server-IPv4</p>
+      <p class="text-headline text-mono mt-2">
+        {{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-amber">nicht gesetzt</span>{{end}}
+      </p>
     </div>
     <div>
-      <dt class="caption">DevMode</dt>
-      <dd class="font-mono mt-1 text-app-text">{{if .DevMode}}true{{else}}false{{end}}</dd>
+      <p class="text-caption text-tertiary">DevMode</p>
+      <p class="text-headline text-mono mt-2">{{if .DevMode}}true{{else}}false{{end}}</p>
     </div>
     <div>
-      <dt class="caption">Saison</dt>
-      <dd class="font-mono mt-1 text-app-text">13-02</dd>
+      <p class="text-caption text-tertiary">Saison</p>
+      <p class="text-headline text-mono mt-2">13-02</p>
     </div>
-  </dl>
+  </div>
 </div>
 {{end}}

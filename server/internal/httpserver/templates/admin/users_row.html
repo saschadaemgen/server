@@ -1,23 +1,22 @@
 {{define "user_row"}}<tr id="user-{{.ID}}">
-  <td class="text-app-text">{{if .FullName}}{{.FullName}}{{else}}{{.FirstName}} {{.LastName}}{{end}}</td>
-  <td class="text-app-text-2 small-text">{{.UserEmail}}</td>
-  <td class="font-mono text-app-text-3" style="font-size: 12px;">{{.ID}}</td>
+  <td>{{if .FullName}}{{.FullName}}{{else}}{{.FirstName}} {{.LastName}}{{end}}</td>
+  <td class="text-secondary">{{.UserEmail}}</td>
+  <td class="col-mac">{{.ID}}</td>
   <td>
     {{if eq .Status "ACTIVE"}}
-    <span class="inline-flex items-center small-text text-app-text">
-      <span class="status-dot live"></span>aktiv
-    </span>
+    <span class="status-pill">aktiv</span>
     {{else}}
-    <span class="inline-flex items-center small-text text-app-text-3">
-      <span class="status-dot offline"></span>{{.Status}}
-    </span>
+    <span class="status-pill offline">{{.Status}}</span>
     {{end}}
   </td>
-  <td class="text-right">
-    <button hx-delete="/a/users/{{.ID}}" hx-target="#user-{{.ID}}" hx-swap="outerHTML"
-            hx-confirm="Mieter {{.FirstName}} {{.LastName}} wirklich loeschen?"
-            class="small-text text-app-text-3 hover:text-app-red inline-flex items-center gap-1">
-      <span class="w-4 h-4">{{icon "trash"}}</span> Loeschen
-    </button>
+  <td>
+    <div class="row-actions">
+      <button class="row-action destructive"
+              hx-delete="/a/users/{{.ID}}"
+              hx-target="#user-{{.ID}}" hx-swap="outerHTML"
+              hx-confirm="Mieter {{.FirstName}} {{.LastName}} wirklich loeschen?">
+        {{icon "trash"}}<span>Loeschen</span>
+      </button>
+    </div>
   </td>
 </tr>{{end}}

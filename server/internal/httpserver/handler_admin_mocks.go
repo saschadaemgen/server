@@ -22,9 +22,10 @@ var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 const servicePortStart = 8100
 
 type adminMocksData struct {
-	Title   string
-	ShowNav bool
-	Mocks   []mockRowData
+	Title     string
+	ShowNav   bool
+	ActiveNav string
+	Mocks     []mockRowData
 }
 
 // mockRowData is the per-row payload for templates/admin/mocks_row.html.
@@ -45,9 +46,10 @@ func (s *Server) handleAdminMocksList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := adminMocksData{
-		Title:   "Mock-Viewer",
-		ShowNav: true,
-		Mocks:   make([]mockRowData, 0, len(infos)),
+		Title:     "Mock-Viewer",
+		ShowNav:   true,
+		ActiveNav: "mocks",
+		Mocks:     make([]mockRowData, 0, len(infos)),
 	}
 	for _, info := range infos {
 		data.Mocks = append(data.Mocks, mockRowData{

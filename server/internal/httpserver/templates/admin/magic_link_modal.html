@@ -1,37 +1,32 @@
-{{define "magic_link_modal"}}<div id="modal-backdrop"
-     class="bell-backdrop"
-     style="z-index: 60;"
-     onclick="this.remove()">
-  <div class="glass-card p-6 max-w-2xl w-full"
-       style="box-shadow: var(--shadow-overlay);"
-       onclick="event.stopPropagation()">
-    <div class="flex items-start justify-between mb-5">
+{{define "magic_link_modal"}}<div id="modal-backdrop" class="modal-backdrop" onclick="this.remove()">
+  <div class="modal-glass" onclick="event.stopPropagation()">
+    <div class="modal-header">
       <div>
-        <h3 class="headline-m">Login-Link fuer {{.MockName}}</h3>
-        <p class="small-text text-app-text-2 mt-1">Gueltig 24 Stunden, einmalig verwendbar.</p>
+        <h3 class="text-title-1">Login-Link fuer {{.MockName}}</h3>
+        <p class="text-callout text-secondary mt-2">
+          Gueltig 24 Stunden, einmalig verwendbar.
+        </p>
       </div>
-      <button type="button" onclick="document.getElementById('modal-backdrop').remove()"
-              class="text-app-text-3 hover:text-app-text">
-        <span class="w-5 h-5 inline-block">{{icon "x"}}</span>
+      <button type="button" class="modal-close"
+              onclick="document.getElementById('modal-backdrop').remove()"
+              aria-label="Schliessen">
+        {{icon "x"}}
       </button>
     </div>
 
-    <input id="magic-link-url" type="text" readonly value="{{.URL}}"
-           onclick="this.select()"
-           class="w-full font-mono">
+    <div class="link-display">{{.URL}}</div>
 
-    <p class="small-text text-app-text-3 mt-2">
-      Mock-MAC: <span class="font-mono">{{.MockMAC}}</span>
+    <p class="text-caption text-tertiary">
+      Mock-MAC: <span class="text-mono">{{.MockMAC}}</span>
     </p>
 
-    <div class="flex gap-2 justify-end mt-5">
-      <button type="button" onclick="document.getElementById('modal-backdrop').remove()"
-              class="btn-pill btn-secondary">
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary"
+              onclick="document.getElementById('modal-backdrop').remove()">
         Schliessen
       </button>
-      <button type="button" id="copy-btn" onclick="copyMagicLink()"
-              class="btn-pill btn-primary">
-        <span class="w-4 h-4">{{icon "copy"}}</span>
+      <button type="button" id="copy-btn" class="btn btn-primary" onclick="copyMagicLink()">
+        {{icon "clipboard"}}
         <span id="copy-label">In Zwischenablage kopieren</span>
       </button>
     </div>
@@ -40,24 +35,33 @@
 
 <script>
 function copyMagicLink() {
-  var input = document.getElementById('magic-link-url');
-  input.select();
+  var box = document.querySelector('#modal-backdrop .link-display');
+  if (!box) return;
+  var text = box.textContent.trim();
   var label = document.getElementById('copy-label');
   var orig = label.textContent;
   function flash(msg) {
     label.textContent = msg;
-    setTimeout(function() { label.textContent = orig; }, 2000);
+    setTimeout(function() { label.textContent = orig; }, 1800);
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(input.value).then(function() {
-      flash('Kopiert.');
-    }, function() {
-      try { document.execCommand('copy'); flash('Kopiert.'); }
-      catch (_) { flash('Kopieren fehlgeschlagen'); }
-    });
+    navigator.clipboard.writeText(text).then(
+      function() { flash('Kopiert.'); },
+      function() { flash('Kopieren fehlgeschlagen'); }
+    );
   } else {
-    try { document.execCommand('copy'); flash('Kopiert.'); }
-    catch (_) { flash('Kopieren fehlgeschlagen'); }
+    var r = document.createRange();
+    r.selectNodeContents(box);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    try {
+      document.execCommand('copy');
+      flash('Kopiert.');
+    } catch (_) {
+      flash('Kopieren fehlgeschlagen');
+    }
+    sel.removeAllRanges();
   }
 }
 </script>

@@ -1,41 +1,46 @@
 {{define "content"}}
-<div class="mb-8">
-  <h1 class="headline-xl">Einstellungen</h1>
-  <p class="small-text text-app-text-2 mt-1">UniFi Access Developer API Konfiguration.</p>
+<div class="page-header">
+  <h1 class="text-display">Einstellungen</h1>
+  <p class="text-body text-secondary">UniFi Access Developer API Konfiguration.</p>
 </div>
 
 {{if .Flash}}
-<div class="solid-card mb-6 px-4 py-3 small-text
-            {{if eq .FlashType "green"}}text-app-green
-            {{else if eq .FlashType "red"}}text-app-red
-            {{else}}text-app-amber{{end}}">
-  {{.Flash}}
+<div class="app-card"
+     style="background:
+       {{if eq .FlashType "green"}}rgba(52,199,89,0.08){{else if eq .FlashType "red"}}var(--accent-red-tint){{else}}rgba(255,159,10,0.10){{end}};
+       border-color:
+       {{if eq .FlashType "green"}}rgba(52,199,89,0.35){{else if eq .FlashType "red"}}var(--accent-red-tint){{else}}rgba(255,159,10,0.35){{end}};">
+  <p class="text-callout
+    {{if eq .FlashType "green"}}text-green
+    {{else if eq .FlashType "red"}}text-red
+    {{else}}text-amber{{end}}">
+    {{.Flash}}
+  </p>
 </div>
 {{end}}
 
-<form method="POST" action="/a/settings" class="solid-card p-6 space-y-5 max-w-2xl">
-  <div>
-    <label class="block caption mb-1.5">Base URL</label>
-    <input type="text" name="base_url" value="{{.BaseURL}}"
-      placeholder="https://192.168.1.1:12445"
-      class="w-full font-mono">
-    <p class="small-text text-app-text-3 mt-1">UDM-URL inklusive Port (typisch 12445 direkt oder via Proxy ohne Port).</p>
-  </div>
-
-  <div>
-    <label class="block caption mb-1.5">API Token</label>
-    <input type="password" name="token" placeholder="{{if .TokenSet}}gespeichert (leer lassen um nicht zu aendern){{else}}aus UniFi Portal -> Access -> Settings -> Advanced -> API Token{{end}}"
-      class="w-full font-mono">
-    <p class="small-text text-app-text-3 mt-1">Wird verschluesselt in der Plattform-DB gespeichert. Nur Praefix wird im Log angezeigt.</p>
-  </div>
-
-  <div class="flex gap-3 pt-2">
-    <button type="submit" name="action" value="save" class="btn-pill btn-primary">
-      Speichern
-    </button>
-    <button type="submit" name="action" value="test" class="btn-pill btn-secondary">
-      <span class="w-4 h-4">{{icon "link"}}</span> Speichern und Verbindung testen
-    </button>
+<form method="POST" action="/a/settings" class="app-card" style="max-width: 720px;">
+  <div class="form-stack">
+    <div>
+      <label class="input-label">Base URL</label>
+      <input type="text" name="base_url" value="{{.BaseURL}}"
+        placeholder="https://192.168.1.1:12445" class="input mono">
+      <p class="input-hint">UDM-URL inklusive Port (typisch 12445 direkt oder via Proxy ohne Port).</p>
+    </div>
+    <div>
+      <label class="input-label">API Token</label>
+      <input type="password" name="token" class="input mono"
+        placeholder="{{if .TokenSet}}gespeichert (leer lassen um nicht zu aendern){{else}}aus UniFi Portal -> Access -> Settings -> Advanced -> API Token{{end}}">
+      <p class="input-hint">Wird AES-256-GCM-verschluesselt in der Plattform-DB gespeichert. Nur Praefix wird im Log angezeigt.</p>
+    </div>
+    <div class="flex gap-3 mt-2">
+      <button type="submit" name="action" value="save" class="btn btn-primary">
+        Speichern
+      </button>
+      <button type="submit" name="action" value="test" class="btn btn-secondary">
+        {{icon "link"}}<span>Speichern und Verbindung testen</span>
+      </button>
+    </div>
   </div>
 </form>
 {{end}}

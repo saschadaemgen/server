@@ -11,6 +11,7 @@ import (
 type adminSettingsData struct {
 	Title     string
 	ShowNav   bool
+	ActiveNav string
 	BaseURL   string
 	TokenSet  bool
 	Flash     string
@@ -79,9 +80,10 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	baseURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyUAAPIBaseURL)
 	tokenEnc, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyUAAPIToken)
 	return adminSettingsData{
-		Title:    "Einstellungen",
-		ShowNav:  true,
-		BaseURL:  baseURL,
-		TokenSet: tokenEnc != "",
+		Title:     "Einstellungen",
+		ShowNav:   true,
+		ActiveNav: "settings",
+		BaseURL:   baseURL,
+		TokenSet:  tokenEnc != "",
 	}
 }

@@ -11,12 +11,13 @@ import (
 type adminUsersData struct {
 	Title         string
 	ShowNav       bool
+	ActiveNav     string
 	NotConfigured bool
 	Users         []uaapi.User
 }
 
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
-	data := adminUsersData{Title: "Mieter", ShowNav: true}
+	data := adminUsersData{Title: "Mieter", ShowNav: true, ActiveNav: "users"}
 	if s.ua == nil {
 		data.NotConfigured = true
 		s.renderAdminPage(w, "users_list", data)

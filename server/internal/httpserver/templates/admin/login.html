@@ -1,52 +1,54 @@
 {{define "content"}}
-<div class="min-h-[70vh] flex items-center justify-center">
-  <div class="w-full max-w-sm">
-    <div class="mb-8 text-center">
-      <h1 class="headline-l">unifix admin</h1>
-      <p class="small-text text-app-text-2 mt-1">
-        {{if .Setup}}Erstmaliger Setup: lege den Admin-Account an.{{else}}Anmeldung erforderlich.{{end}}
+<div style="min-height: 70vh; display: grid; place-items: center;">
+  <div style="width: 100%; max-width: 380px;">
+    <div style="text-align: center; margin-bottom: 32px;">
+      <div style="display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 16px;
+                  background: var(--accent-blue); color: #fff; box-shadow: 0 12px 32px rgba(10,132,255,0.35);
+                  margin-bottom: 16px;">
+        <span style="width: 28px; height: 28px; display: grid; place-items: center;">{{icon "sparkle"}}</span>
+      </div>
+      <h1 class="text-display">unifix admin</h1>
+      <p class="text-callout text-secondary mt-2">
+        {{if .Setup}}Erstmaliger Setup. Leg den Admin-Account an.{{else}}Anmeldung erforderlich.{{end}}
       </p>
     </div>
 
-    <form method="POST" action="/a/login" class="solid-card p-6 space-y-4">
-      {{if .Setup}}
-      <input type="hidden" name="setup" value="1">
-      {{end}}
+    <form method="POST" action="/a/login" class="app-card">
+      {{if .Setup}}<input type="hidden" name="setup" value="1">{{end}}
 
-      {{if .Error}}
-      <div class="text-app-red small-text rounded-button border border-app-red/40 px-3 py-2"
-           style="background: color-mix(in srgb, var(--accent-red) 12%, transparent);">
-        {{.Error}}
+      <div class="form-stack">
+        {{if .Error}}
+        <div class="form-error">{{.Error}}</div>
+        {{end}}
+
+        <div>
+          <label class="input-label">Benutzername</label>
+          <input type="text" name="username" autocomplete="username" required autofocus
+            value="{{.Username}}" class="input">
+        </div>
+
+        <div>
+          <label class="input-label">Passwort</label>
+          <input type="password" name="password" required class="input"
+            autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}">
+        </div>
+
+        {{if .Setup}}
+        <div>
+          <label class="input-label">Passwort wiederholen</label>
+          <input type="password" name="password_confirm" autocomplete="new-password" required class="input">
+        </div>
+        {{end}}
+
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+          {{if .Setup}}Admin anlegen{{else}}Anmelden{{end}}
+        </button>
       </div>
-      {{end}}
-
-      <div>
-        <label class="block caption mb-1.5">Benutzername</label>
-        <input type="text" name="username" autocomplete="username" required autofocus
-          value="{{.Username}}"
-          class="w-full">
-      </div>
-
-      <div>
-        <label class="block caption mb-1.5">Passwort</label>
-        <input type="password" name="password" autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}" required
-          class="w-full">
-      </div>
-
-      {{if .Setup}}
-      <div>
-        <label class="block caption mb-1.5">Passwort wiederholen</label>
-        <input type="password" name="password_confirm" autocomplete="new-password" required
-          class="w-full">
-      </div>
-      {{end}}
-
-      <button type="submit" class="btn-pill btn-primary w-full">
-        {{if .Setup}}Admin anlegen{{else}}Anmelden{{end}}
-      </button>
     </form>
 
-    <p class="caption text-center mt-4">unifix Plattform - Saison 13</p>
+    <p class="text-caption text-tertiary" style="text-align: center; margin-top: 24px;">
+      unifix Plattform - Saison 13
+    </p>
   </div>
 </div>
 {{end}}

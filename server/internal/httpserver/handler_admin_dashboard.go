@@ -11,6 +11,7 @@ import (
 type adminDashboardData struct {
 	Title          string
 	ShowNav        bool
+	ActiveNav      string
 	AdminName      string
 	MockCount      int
 	UserCount      int
@@ -44,6 +45,7 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	data := adminDashboardData{
 		Title:      "Dashboard",
 		ShowNav:    true,
+		ActiveNav:  "dashboard",
 		AdminName:  username,
 		ServerIPv4: s.cfg.ServerIPv4,
 		DevMode:    s.cfg.DevMode,

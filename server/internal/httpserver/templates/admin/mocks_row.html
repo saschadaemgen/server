@@ -1,28 +1,26 @@
 {{define "mock_row"}}<tr id="mock-row-{{macID .MAC}}">
-  <td class="font-mono text-app-text-2" style="font-size: 12px;">{{.MAC}}</td>
-  <td class="text-app-text">{{.Name}}</td>
-  <td class="font-mono text-app-text-3" style="font-size: 12px;">{{.ServicePort}}</td>
+  <td class="col-mac">{{.MAC}}</td>
+  <td>{{.Name}}</td>
+  <td class="col-mac">{{.ServicePort}}</td>
   <td>
     {{if .Running}}
-    <span class="inline-flex items-center small-text text-app-text">
-      <span class="status-dot live"></span>laeuft
-    </span>
+    <span class="status-pill">laeuft</span>
     {{else}}
-    <span class="inline-flex items-center small-text text-app-text-3">
-      <span class="status-dot offline"></span>aus
-    </span>
+    <span class="status-pill offline">aus</span>
     {{end}}
   </td>
-  <td class="text-right">
-    <div class="flex items-center justify-end gap-3">
-      <button hx-post="/a/mocks/{{.MAC}}/magic-link" hx-target="#modal-slot" hx-swap="innerHTML"
-        class="small-text text-app-blue hover:text-app-blue-hover inline-flex items-center gap-1">
-        <span class="w-4 h-4">{{icon "link"}}</span> Login-Link
+  <td>
+    <div class="row-actions">
+      <button class="row-action"
+              hx-post="/a/mocks/{{.MAC}}/magic-link"
+              hx-target="#modal-slot" hx-swap="innerHTML">
+        {{icon "link"}}<span>Login-Link</span>
       </button>
-      <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-row-{{macID .MAC}}" hx-swap="outerHTML"
-              hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?"
-              class="small-text text-app-text-3 hover:text-app-red inline-flex items-center gap-1">
-        <span class="w-4 h-4">{{icon "trash"}}</span> Loeschen
+      <button class="row-action destructive"
+              hx-delete="/a/mocks/{{.MAC}}"
+              hx-target="#mock-row-{{macID .MAC}}" hx-swap="outerHTML"
+              hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?">
+        {{icon "trash"}}<span>Loeschen</span>
       </button>
     </div>
   </td>

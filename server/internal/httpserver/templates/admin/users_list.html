@@ -1,59 +1,70 @@
 {{define "content"}}
-<div class="flex items-center justify-between mb-8">
-  <div>
-    <h1 class="headline-xl">Mieter</h1>
-    <p class="small-text text-app-text-2 mt-1">UA-User aus der UniFi Access Developer API. Unabhaengig von den Mock-Viewern (rein zur Verwaltung).</p>
-  </div>
+<div class="page-header">
+  <h1 class="text-display">Mieter</h1>
+  <p class="text-body text-secondary">
+    UA-User aus der UniFi Access Developer API. Unabhaengig von den Mock-Viewern (rein zur Verwaltung).
+  </p>
 </div>
 
 {{if .NotConfigured}}
-<div class="solid-card p-5"
-     style="background: color-mix(in srgb, var(--accent-amber) 12%, var(--bg-elevated));
-            border-color: color-mix(in srgb, var(--accent-amber) 40%, transparent);">
-  <h2 class="headline-m text-app-amber">UA-API nicht konfiguriert</h2>
-  <p class="small-text text-app-text-2 mt-2">
-    Setze Base-URL und API-Token unter <a href="/a/settings" class="underline text-app-blue hover:text-app-blue-hover">Einstellungen</a>,
-    danach erscheinen die Mieter hier.
-  </p>
+<div class="app-card" style="background: rgba(255,159,10,0.06); border-color: rgba(255,159,10,0.35);">
+  <div class="app-card-header no-trailing">
+    <div class="app-card-icon-wrap amber">{{icon "settings"}}</div>
+    <div class="app-card-titles">
+      <h2 class="text-title-2 text-amber">UA-API nicht konfiguriert</h2>
+      <p class="text-callout text-secondary mt-2">
+        Setze Base-URL und API-Token unter
+        <a href="/a/settings" class="text-blue">Einstellungen</a>,
+        danach erscheinen die Mieter hier.
+      </p>
+    </div>
+  </div>
 </div>
 {{else}}
-<div class="solid-card p-5 mb-6">
-  <h2 class="headline-m mb-4">Neuen Mieter anlegen</h2>
+<div class="app-card">
+  <div class="app-card-header no-trailing mb-6">
+    <div class="app-card-icon-wrap">{{icon "plus"}}</div>
+    <div class="app-card-titles">
+      <h2 class="text-title-2">Neuen Mieter anlegen</h2>
+      <p class="text-callout text-secondary">Wird sofort gegen die UA-Developer-API erzeugt.</p>
+    </div>
+  </div>
   <form hx-post="/a/users" hx-target="#users-tbody" hx-swap="beforeend"
         hx-on::after-request="if(event.detail.successful) this.reset()"
-        class="grid grid-cols-1 md:grid-cols-[1fr,1fr,1fr,auto] gap-3 items-end">
+        class="form-inline"
+        style="grid-template-columns: 1fr 1fr 1fr auto;">
     <div>
-      <label class="block caption mb-1.5">Vorname</label>
-      <input type="text" name="first_name" required maxlength="64" class="w-full">
+      <label class="input-label">Vorname</label>
+      <input type="text" name="first_name" required maxlength="64" class="input">
     </div>
     <div>
-      <label class="block caption mb-1.5">Nachname</label>
-      <input type="text" name="last_name" required maxlength="64" class="w-full">
+      <label class="input-label">Nachname</label>
+      <input type="text" name="last_name" required maxlength="64" class="input">
     </div>
     <div>
-      <label class="block caption mb-1.5">E-Mail (optional)</label>
-      <input type="email" name="email" class="w-full">
+      <label class="input-label">E-Mail (optional)</label>
+      <input type="email" name="email" class="input">
     </div>
-    <button type="submit" class="btn-pill btn-primary">
-      <span class="w-4 h-4">{{icon "plus"}}</span> Anlegen
+    <button type="submit" class="btn btn-primary">
+      {{icon "plus"}}<span>Anlegen</span>
     </button>
   </form>
 </div>
 
-<div class="solid-card overflow-hidden">
-  <table class="app-table">
+<div class="app-table">
+  <table class="app-table-inner">
     <thead>
       <tr>
         <th>Name</th>
         <th>E-Mail</th>
         <th>UA-ID</th>
         <th>Status</th>
-        <th class="text-right">Aktionen</th>
+        <th style="text-align: right;">Aktionen</th>
       </tr>
     </thead>
     <tbody id="users-tbody">
       {{if not .Users}}
-      <tr><td colspan="5" class="text-center text-app-text-3" style="padding: 40px 16px;">Noch keine Mieter.</td></tr>
+      <tr><td colspan="5" class="app-table-empty">Noch keine Mieter.</td></tr>
       {{end}}
       {{range .Users}}{{template "user_row" .}}{{end}}
     </tbody>

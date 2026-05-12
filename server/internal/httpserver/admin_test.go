@@ -177,8 +177,8 @@ func TestAdminDashboard_HappyPath(t *testing.T) {
 	if !strings.Contains(body, "Dashboard") {
 		t.Errorf("missing Dashboard heading")
 	}
-	if !strings.Contains(body, "Willkommen, saschsa") {
-		t.Errorf("missing personalized greeting")
+	if !strings.Contains(body, "saschsa") {
+		t.Errorf("missing personalized greeting (admin username)")
 	}
 }
 
