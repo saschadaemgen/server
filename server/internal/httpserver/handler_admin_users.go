@@ -55,7 +55,7 @@ func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	created, err := s.ua.CreateUser(r.Context(), uaapi.User{
-		FirstName: first, LastName: last, Email: email,
+		FirstName: first, LastName: last, UserEmail: email,
 	})
 	if err != nil {
 		if errors.Is(err, uaapi.ErrUnauthorized) {
