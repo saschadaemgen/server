@@ -39,10 +39,13 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 2 {
-		t.Errorf("schema_version = %d, want 2", version)
+	if version != 3 {
+		t.Errorf("schema_version = %d, want 3", version)
 	}
-	for _, table := range []string{"magic_link_tokens", "sessions", "mock_viewers"} {
+	for _, table := range []string{
+		"magic_link_tokens", "sessions", "mock_viewers",
+		"admin_users", "platform_config",
+	} {
 		var name string
 		err := d.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
@@ -67,7 +70,7 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer d.Close()
-	for _, v := range []int{1, 2} {
+	for _, v := range []int{1, 2, 3} {
 		var count int
 		if err := d.QueryRow(
 			`SELECT COUNT(*) FROM schema_version WHERE version = ?`, v,
@@ -77,6 +80,65 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		if count != 1 {
 			t.Errorf("schema_version v=%d row count = %d, want 1 (idempotency broken)", v, count)
 		}
+	}
+}
+
+func TestMigration003_Applied(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	for _, table := range []string{"admin_users", "platform_config"} {
+		var name string
+		err := d.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table,
+		).Scan(&name)
+		if err != nil {
+			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+}
+
+func TestMigration003_AdminUsersPrimaryKey(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	now := int64(1747000000000)
+	if _, err := d.Exec(
+		`INSERT INTO admin_users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"admin", "hash1", now, now,
+	); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	if _, err := d.Exec(
+		`INSERT INTO admin_users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		"admin", "hash2", now, now,
+	); err == nil {
+		t.Fatal("duplicate username insert succeeded, want primary-key error")
+	}
+}
+
+func TestMigration003_PlatformConfigPrimaryKey(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	now := int64(1747000000000)
+	if _, err := d.Exec(
+		`INSERT INTO platform_config (key, value, updated_at) VALUES (?, ?, ?)`,
+		"ua_api_base_url", "https://192.168.1.1:12445", now,
+	); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	if _, err := d.Exec(
+		`INSERT INTO platform_config (key, value, updated_at) VALUES (?, ?, ?)`,
+		"ua_api_base_url", "https://other", now,
+	); err == nil {
+		t.Fatal("duplicate key insert succeeded, want primary-key error")
 	}
 }
 
