@@ -1,10 +1,13 @@
 # unifix Security Plan
 
-**Status:** Saison 12 (Stand 12-03), lebendes Dokument.
+**Status:** Saison 12 abgeschlossen 12. Mai 2026 (S12-DOC-02).
+Lebendes Dokument, wird pro Saison ergaenzt.
 **Stand:** Strategische Eckpunkte gesetzt. Saison 12 hat den
-Auth-Backbone (Magic-Link + Session) und die TLS-Schicht im
-Server-Prozess umgesetzt; Hardware-Bindung und Lizenz-Server-TLS
-bleiben Saison 14+.
+Auth-Backbone (Magic-Link plus Mieter- und Admin-Session), die
+TLS-Schicht im Server-Prozess, das AES-256-GCM-Verschluesseln
+von UA-API-Tokens (platform_config) und den FK-CASCADE-Datenpfad
+fuer Mock-zu-Sessions/Tokens umgesetzt; Hardware-Bindung und
+Lizenz-Server-TLS bleiben Saison 14+.
 **Geltungsbereich:** intern, Geschaeftsgeheimnis.
 
 ## 1. Sicherheits-Philosophie
@@ -57,8 +60,12 @@ Saison 14+:    TLS mit Kunden-Eigen-CA, vom Lizenz-Server ausgegeben.
 
 Saison 12+ verwendet die offizielle UniFi Access Developer API
 (siehe wire-format.md und CLAUDE.md Sektion 21). Auth ist
-API-Key-Header oder Bearer-Token, generiert im UniFi Portal vom
-Anlagen-Admin.
+ausschliesslich `Authorization: Bearer <token>` mit einem im
+UniFi Portal vom Anlagen-Admin erzeugten Token. Der frueher
+mitdokumentierte `X-API-KEY`-Header ist NICHT in der offiziellen
+Doku v4.2.16 Sektion 2.7 erwaehnt und wurde im S12-04-Hotfix
+verworfen: UA antwortet auf X-API-KEY mit
+`CODE_UNAUTHORIZED` selbst wenn der Token an sich gueltig waere.
 
 Das API-Token gibt VOLLEN Zugriff auf User-CRUD, Door-Unlock,
 Doorbell-Trigger usw. Es muss daher:
@@ -66,19 +73,21 @@ Doorbell-Trigger usw. Es muss daher:
 - niemals im Browser oder Endgeraet landen
 - niemals in Logs oder Error-Reports erscheinen
 - niemals in Saison-Protokollen oder Goldminen-Files persistieren
-- nur im unifix-server-Process-Speicher leben, am besten in einer
-  read-only-config geladen beim Start
-- pro Anlage einmalig vom Admin gesetzt werden, nicht generierbar
-  vom unifix-server selbst
+- nur im unifix-server-Process-Speicher als entschluesselter
+  Wert leben; persistent gespeichert wird ausschliesslich die
+  AES-256-GCM-Variante in `platform_config.value_encrypted`
+  (Details Sektion 7.4)
+- pro Anlage einmalig vom Admin im Admin-UI `/a/settings`
+  gesetzt werden, nicht generierbar vom unifix-server selbst
 
 Der Browser/Endgeraet-Klient redet ausschliesslich mit dem
 unifix-server (eigener Magic-Link), nicht direkt mit der UDM-API.
 
 #### 2.2.5 Magic-Link und Session Klartext-Storage (Saison 12)
 
-Magic-Link-Tokens und Session-IDs werden in Saison 12 PLAIN in der
-SQLite-DB gespeichert. Beide sind 32 Bytes crypto/rand,
-base64url-encoded (43 Zeichen ASCII).
+Magic-Link-Tokens und Session-IDs werden in Saison 12 weiterhin
+PLAIN in der SQLite-DB gespeichert. Beide sind 32 Bytes
+crypto/rand, base64url-encoded (43 Zeichen ASCII).
 
 Bewusster Trade-off, Sascha-Beschluss 12. Mai 2026:
 
@@ -96,14 +105,25 @@ Risiko-Modell:    Single-Tenant pro Anlage. Die SQLite-Datei
 Konsequenz:       Hashing der Tokens wuerde keinen praktischen
                   Sicherheits-Gewinn bringen. Wir koennen den
                   Storage-Layer in einer spaeteren Sicherheits-
-                  Review-Saison auf Hash + Verify migrieren
-                  (Migration 003+) falls Multi-Tenant pro Anlage
-                  oder Cloud-Hosting-Modelle relevant werden.
+                  Review-Saison auf Hash und Verify migrieren
+                  falls Multi-Tenant pro Anlage oder Cloud-
+                  Hosting-Modelle relevant werden.
 
 Klartext-Logs:    Tokens und Session-IDs werden NIE im Klartext
                   geloggt. Falls geloggt, dann maximal die
                   ersten 8 Zeichen als Praefix (siehe
                   CLAUDE.md DON'T-Liste).
+
+S12-06-Refactor:  magic_link_tokens und mieter_sessions haengen
+                  beide per Foreign-Key mit ON DELETE CASCADE
+                  an mock_viewers.mac. Loescht der Admin einen
+                  Mock-Viewer, verschwinden alle aktiven
+                  Mieter-Sessions UND alle ausstehenden Magic-
+                  Link-Tokens dieses Mocks automatisch mit.
+                  Das ist gewollt: ein Mock-Viewer ist der
+                  Routing-Endpunkt, ohne ihn gibt es keinen
+                  legitimen Zugang. admin_sessions haengt analog
+                  per FK CASCADE an admin_users.
 ```
 
 #### 2.2.6 Cookie-Sicherheit (Saison 12)
@@ -112,10 +132,13 @@ Session-Cookies sind defensiv konfiguriert:
 
 ```
 Name:       unifix_m_session  (Mieter)
-            unifix_a_session  (Admin, S12-04)
+            unifix_a_session  (Admin)
 Pfad:       /m/  bzw.  /a/    (Pfad-Scoping verhindert dass das
                               Admin-Cookie unter /m/ gesendet wird
-                              und umgekehrt)
+                              und umgekehrt; strikt seit dem
+                              S12-06-Refactor mit getrennten
+                              mieter_sessions- und admin_sessions-
+                              Tabellen)
 HttpOnly:   true              (immer, kein JavaScript-Zugriff)
 Secure:     true in Production, false in DevMode
 SameSite:   Strict            (immer, kein Cross-Site-Sending)
@@ -315,31 +338,99 @@ Sensitive:      bundle.json und certs/broker.key enthalten
                 (siehe Saison 15+ Hardening).
 ```
 
+### 7.4 Plattform-Secrets-Verschluesselung (Saison 12-04)
+
+Das `secrets`-Paket implementiert AES-256-GCM-Verschluesselung
+fuer einzelne Werte in der `platform_config`-Tabelle. Hauptkunde
+ist aktuell der UA-API-Token; weitere sensitive Settings koennen
+auf demselben Pfad lagern.
+
+```
+Algorithmus:    AES-256-GCM (Authenticated Encryption with
+                Associated Data). 256-Bit-Key, 96-Bit-Nonce,
+                128-Bit-Tag. crypto/aes + crypto/cipher aus
+                der Go-Stdlib, kein externes Krypto-Modul.
+
+Master-Key:     Aus env-Variable UNIFIX_SECRETS_KEY (64 hex
+                chars, 32 Bytes raw). Wird im main.go beim
+                Server-Start gelesen; fehlt der Key, refused
+                der Server den Start.
+                Erzeugung: cmd/genkey-Tool liest 32 Bytes von
+                crypto/rand und gibt den hex-Encoded String
+                aus. Operator-Konvention: einmal generieren,
+                pro Anlage konstant halten.
+
+Nonce:          12 Bytes crypto/rand pro Wert. Wird als
+                Praefix vor den Ciphertext serialisiert, sodass
+                Decrypt selbst-tragend ist:
+                  hex(nonce || ciphertext || tag)
+                in platform_config.value_encrypted.
+
+API:            secrets.Service.Encrypt(plaintext) []byte
+                secrets.Service.Decrypt(ciphertext) []byte
+                platformconfig.SetSecret(ctx, key, value) und
+                .GetSecret(ctx, key) wrappen das fuer den
+                Datenbank-Pfad.
+
+Storage:        platform_config-Zeile setzt entweder value
+                (Klartext) oder value_encrypted (hex), nie
+                beides. Wer in beide schreibt: ist ein Bug
+                im Caller, kein DB-Constraint (Saison 13
+                koennte das verhaerten falls noetig).
+
+Key-Rotation:   Wechsel des UNIFIX_SECRETS_KEY macht alle
+                bestehenden value_encrypted-Werte ungueltig
+                (AES-GCM-Auth-Tag schlaegt fehl). Konsequenz:
+                Admin muss nach Key-Wechsel den UA-Token im
+                Admin-UI /a/settings neu eintragen. Es gibt
+                keinen Re-Encrypt-Pfad im Server (bewusst, weil
+                das Master-Key-Verlust-Szenario praktisch nicht
+                wiederherstellbar sein soll).
+
+Operator-      Master-Key ist Teil der Operator-Verantwortung,
+Verantwortung: NICHT im SQLite-File enthalten. Verliert der
+                Operator den Key, gehen alle verschluesselten
+                Werte verloren (Re-Setup noetig). Empfohlene
+                Aufbewahrung: 1Password / KeePass / sealed
+                envelope, nicht im selben Backup wie die DB.
+
+Klartext-Logs:  Master-Key NIEMALS loggen, auch nicht im
+                Debug-Mode. Verschluesselte Werte koennen
+                geloggt werden (sind ja gerade verschluesselt).
+                Bei der Operation auf dem Plaintext (z.B.
+                Outgoing UA-API-Call) gilt die 8-Zeichen-Praefix-
+                Regel wie fuer alle Tokens.
+```
+
 ---
 
-## 8. Audit-Trail-Vorbereitung (S12-07 Webhook-Audit, Ausblick)
+## 8. Audit-Trail-Vorbereitung (Saison 15 Webhook-Audit, Ausblick)
 
-S12-07 wird einen Webhook-Endpoint `POST /webhook/access` adden,
-der die offiziellen UA-Webhook-Events
+Saison 15 wird einen Webhook-Endpoint `POST /webhook/access`
+adden, der die offiziellen UA-Webhook-Events
 (access.doorbell.incoming, access.doorbell.completed,
 access.door.unlock, ...) entgegennimmt und in einer neuen
-door_events-Tabelle (Migration 003) persistiert.
+door_events-Tabelle (Migration 005) persistiert. Der Einbau
+wurde aus dem urspruenglichen S12-07-Plan in eine eigene Saison
+verschoben weil die Stream-Spike-Erkenntnisse aus Saison 13/14
+das Event-Design beeinflussen koennen.
 
 Geplante Pflicht-Felder:
 
 ```
 ts            Unix-Millisekunden des Events
-ua_user_id    Wer wurde ausgeloest oder hat geklingelt
+mock_mac      Welcher Mock-Viewer war am Routing-Pfad beteiligt
+              (NULL bei reinen UDM-Events ohne Mock-Bezug)
 action        "doorbell" / "unlock" / "cancel" / "reject"
 source        "ua" (von UA-Webhook) / "tenant" (Browser) /
               "admin" (Admin-UI) / "mock" (interner Test)
-request_id    Korrelations-ID, ggf. der MQTT-requestId oder
+request_id    Korrelations-ID, ggf. die MQTT-requestId oder
               UA-Webhook-request_id
 raw_payload   Original-JSON aus dem Webhook, fuer
               forensische Analyse
 ```
 
-Hash-Chain-Pattern (Saison 15+ Stempelkarten-Plugin):
+Hash-Chain-Pattern (Saison 16+ Stempelkarten-Plugin):
 
 ```
 hash_prev     SHA-256 des vorherigen Eintrags
@@ -351,22 +442,28 @@ kann durch lineares Verfolgen verifizieren ob die Chain intakt
 ist. Aenderungen werden so im Audit sofort sichtbar.
 ```
 
-In Saison 12-07 zunaechst OHNE Hash-Chain. Migration 004+ kann
-die Chain nachruesten, sobald die Stempelkarten-Anforderung
+In Saison 15 zunaechst OHNE Hash-Chain. Eine spaetere Migration
+kann die Chain nachruesten, sobald die Stempelkarten-Anforderung
 fest steht.
 
-### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer S12-07)
+### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer Saison 15)
 
 UA-Webhooks unterstuetzen Signed-Body via HMAC-SHA256 mit einem
-Shared-Secret. In S12-07 muss unifix-server:
+Shared-Secret. In Saison 15 muss unifix-server:
 
 ```
 - Pro Webhook-Registration ein eigenes Secret pflegen (gespeichert
-  in einer noch anzulegenden webhooks-Tabelle).
+  in einer noch anzulegenden webhooks-Tabelle, evtl. via
+  platform_config.value_encrypted-Pfad).
 - Eingehende Bodies gegen den HMAC-Header verifizieren BEVOR
   irgendetwas geparsed wird.
 - Bei Mismatch: 401 Unauthorized, kein Persist, Audit-Log.
 - Replay-Schutz: nonce oder timestamp-Fenster (typisch 5 min).
 ```
 
-Konkret-Spezifikation kommt im S12-07-Briefing.
+Der Webhook-Auth-Pfad ist getrennt vom Cookie-basierten Mieter-
+und Admin-Auth: HMAC-Signature im Header statt Session-Cookie,
+weil das UDM-Backend keine Cookies setzt. Mieter- und Admin-Pfade
+bleiben unveraendert.
+
+Konkret-Spezifikation kommt im Saison-15-Briefing.
