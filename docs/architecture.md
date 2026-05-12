@@ -57,9 +57,11 @@ Pro Sascha-Kunde (Multi-Anlage):
    Mehrere RPis, jeweils einer pro Anlage
    Optional zentraler Verwaltungs-Cockpit (spaeter)
 
-Lizenz-Server (Saison 14+):
+Lizenz-Server (spaetere Saison, zeitlich offen):
    Eine Cloud-Instanz, validiert Lizenzschluessel ALLER Kunden,
-   verteilt Updates und CA-Cert-Bundles
+   verteilt Updates und CA-Cert-Bundles. Der ursprueglich fuer
+   Saison 14 geplante Ausbau ist seit S13-DOC-00 in eine spaetere
+   Saison verschoben; das Skelett im Repo bleibt erhalten.
 ```
 
 ## 5. Lebenszyklus eines Mock-Viewers (Saison-12-Endstand)
@@ -117,7 +119,7 @@ Ansicht der UA-User aus der Developer-API. Sie ist seit Saison
 8. `handler_events.go` SSE-Loop schreibt
    `event: doorbell_start\ndata: <json>\n\n` zum Mieter-Browser
 9. Browser-JavaScript zeigt das Bell-Overlay mit dem Mock-Namen
-10. Mieter klickt "Tuer auf" (Saison 14: Button noch nicht live)
+10. Mieter klickt "Tuer auf" (Button kommt in Saison 13-03)
 11. Browser sendet POST `/m/doors/<id>/unlock` an unifix-server
 12. unifix-server proxied via
     `PUT /api/v1/developer/doors/<id>/unlock` gegen die UniFi
@@ -159,34 +161,71 @@ Saison 12:  Mieter-Plattform, Auth-Backbone, Mock-Embedding,
    S12-06-Refactor: mock-zentrisches Routing (Migration 004)    DONE
    S12-DOC-02: Abschluss-Doku-Synchronisation                   DONE
 
-Saison 13:  Stream-Spike (Forschungs-Saison).
-            Drei Pfade fuer Live-View prototypisieren:
-            - Companion-Webhook plus Agora (UA-empfohlener Pfad)
-            - UA-Intercom-Viewer/MQTT-Mock mit room_id-Capture
-            - Protect-URL gegen den ms-Mediaserver (7441 oder 7550)
-            Entscheidung am Saison-Ende welcher Pfad in S14
-            fest implementiert wird.
+Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
+            History, UI-Politur und Stream. Keine reine Forschungs-
+            Saison mehr.
+            Sub-Briefings:
+   S13-DOC-00: Roadmap-Fix (dieses Briefing).
+   S13-01:  Doorbell-History.
+            Migration 005 door_events-Tabelle, doorbellhub schreibt
+            Events parallel zur Persistierung. Mieter-UI: Liste der
+            letzten N Klingeln, Ungelesen-Indikator im Header.
+            Admin-Dashboard: Klingel-Statistik. Hash-Chain optional
+            (Vorbereitung fuer S16+ Stempelkarten).
+   S13-02:  UI-Politur.
+            Icon-Sizing-Konvention (Nav w-4 h-4, Card-Header w-6 h-6,
+            Hero-Overlay w-24 h-24), allgemeiner Konsistenz-Pass,
+            .gitattributes fuer CRLF-Drift.
+   S13-03:  Tueroeffnen-Button + Anruf-Lifecycle-Forschung.
+            "Tuer oeffnen" im Bell-Overlay (POST
+            /api/v1/developer/doors/{id}/unlock via uaapi).
+            Anruf-Lifecycle-RPCs erforschen (annehmen mit
+            Gegensprechen, ablehnen ohne anzunehmen, beenden
+            nach Annahme). Mieter-UI Anruf-Buttons funktional
+            ohne Stream. Multi-Door wird hier NUR notiert, nicht
+            implementiert (UA-Regel "jede Tuer einem Reader oder
+            Intercom" wird erst angegangen wenn ein Kunde mehrere
+            Tueren pro Intercom hat).
+   S13-04:  Stream-Spike (Forschung).
+            Drei Pfade pruefen:
+            - Companion via Agora (S1-Befund: RemoteViewData
+              hatte channel plus token)
+            - UA-Intercom-Viewer via MQTT room_id (S11-Befund:
+              field_9 = WR-<mac>-<id>)
+            - Protect-URL via ms-Daemon (RTSPS 7441, LiveFLV 7550)
+            tcpdump plus Wireshark plus offizielle Doku, Pcap
+            einer echten Klingel-Annahme. Resultat: Architektur-
+            Briefing fuer S13-05.
+   S13-05:  Stream-Integration.
+            Live-View im Bell-Overlay basierend auf S13-04.
+            Video plus Audio. "Annehmen"-Button startet Stream.
+            Eigener WebRTC-Teardown im Mieter-Browser
+            (track.stop, pc.close, Inaktivitaets-Cleanup).
 
-Saison 14:  Live-View-Implementation.
-            Video plus Audio im Mieter-Browser, Tueroeffnen-
-            Button (PUT /api/v1/developer/doors/:id/unlock),
-            Hang-up-Button mit sauberem track.stop + pc.close.
-
-Saison 15:  Webhook-Endpoint + Klingel-History-Tabelle.
+Saison 14:  Webhook-Endpoint.
             POST /webhook/access fuer access.doorbell.* und
-            access.door.unlock-Events, door_events-Tabelle
-            (Migration 005). Event-Type-Dispatch als Vorbereitung
-            fuer S16+ Plugins.
+            access.door.unlock-Events. Schreibt in die in S13-01
+            angelegte door_events-Tabelle. Event-Type-Dispatch-
+            Pattern als Vorbereitung fuer S16+ Plugins.
 
-Saison 16:  Design-Politur + Stempelkarten-Plugin.
+Saison 15:  Open-Source-Strategie-Tag + Plattform-Politur.
+            Final-Entscheidung ESP-Firmware-Release MIT-Lizenz.
+            Live-Grid-Demo-Feature ("Live-Grid oeffnen"
+            Auto-Layout-Grid).
+
+Saison 16:  Stempelkarten-Plugin (Digital Loyalty Card / Time-Clock).
             time_clock_entries-Tabelle, UA-Standard-NFC-Hardware
-            (NFC-Reader an Hub Door). Append-Only mit Hash-Chain
-            vorbereitet. Plugin-Storage-Tabelle plugin_data
-            (Migration 006+).
+            (Reader G2 / Pro / G3, Touch-Pass). Append-Only mit
+            Hash-Chain. Plugin-Storage plugin_data (Migration 006+).
+            Eine NFC-Karte deckt Tuer plus Stempel plus Visitor ab.
 
-Saison 17+: Eigene Intercom-Hardware auf ESP32-Basis,
-            Lizenz-Server-Fleisch, Production-Hardening,
-            erste Pilot-Anlage. Open-Source-Strategie-Review offen.
+Saison 17+: ESP-Hardware-Spur (eigene parallele Linie).
+            ESP32-basiertes Intercom 200-300 EUR, eigene Adapter-
+            Schicht (internal/access/unifix/*). Wird parallel zur
+            Plattform entwickelt. Lizenz-Server-Fleisch,
+            Production-Hardening und erste Pilot-Anlage bleiben
+            zeitlich offen und werden in einem eigenen
+            Saison-Briefing geplant.
 ```
 
 ## 8. Was unifix NICHT ist
@@ -310,13 +349,19 @@ platform_config      Server-weite Key-Value-Settings.
 ### 9.4 Zukuenftige Tabellen-Roadmap
 
 ```
-door_events          Audit-Trail fuer Webhook-Empfang in Saison 15
-                     (verschoben aus dem urspruenglichen S12-07-
-                     Plan). Felder: ts, mock_mac, action
+door_events          Klingel-Audit-Trail.
+                     Wird in Saison 13-01 (Doorbell-History)
+                     angelegt: der doorbellhub schreibt parallel
+                     zur Persistierung, das Mieter-UI rendert die
+                     letzten N Eintraege und einen Ungelesen-
+                     Indikator. Saison 14 dockt zusaetzlich den
+                     UA-Webhook-Endpoint an dieselbe Tabelle an
+                     (Event-Type-Dispatch).
+                     Felder: ts, mock_mac, action
                      ("doorbell", "unlock", "cancel", "reject"),
-                     source ("ua", "tenant", "admin"), request_id,
-                     raw_payload. Hash-Chain optional fuer
-                     Append-Only-Garantie.
+                     source ("ua", "tenant", "admin", "mock"),
+                     request_id, raw_payload. Hash-Chain optional
+                     als Vorbereitung fuer S16+ Stempelkarten.
                      Migration 005.
 
 time_clock_entries   Stempelkarten-Plugin (Saison 16+). Felder:
@@ -362,8 +407,9 @@ separate Prozesse. Beschluss Sascha 12. Mai 2026. Begruendung:
 
 1. **Plattform-First-Architektur:** ein Binary fuer alles. Ein
    einzelner systemd-Service `unifix-server` startet und stoppt die
-   gesamte Anlage. Erleichtert Updates ueber den Lizenz-Server in
-   Saison 14.
+   gesamte Anlage. Erleichtert spaetere Updates ueber den
+   Lizenz-Server, sobald der ausgebaut wird (zeitlich offen,
+   ehemals Saison 14).
 2. **Go-idiomatisch:** Goroutines sind ungefaehr 2 KB schwer. 50+
    Mock-Viewer pro RPi sind trivial; die Stage-Pakete halten
    intern ein paar TLS-Verbindungen und Listener, das ist der

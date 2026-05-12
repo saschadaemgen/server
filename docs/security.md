@@ -47,13 +47,14 @@ Saison 12:     IMPLEMENTIERT. TLS-Layer direkt im unifix-server-
                DevMode-Schalter fuer lokale Entwicklung mit
                Plain-HTTP, niemals in Production.
 
-Saison 13:     TLS mit selbst-signiertem Cert, Fingerprint
-               beim Erstkontakt vom Mieter akzeptiert (Wireguard-Stil)
-               falls Production-Kunden ohne Lizenz-Server starten.
-
-Saison 14+:    TLS mit Kunden-Eigen-CA, vom Lizenz-Server ausgegeben.
-               Browser-Warnungen behebbar, ESP-Klient kann
-               Cert-Pinning machen.
+spaetere      TLS-Reifephasen (Self-Signed mit Fingerprint-Akzept
+Saisons:       beim Erstkontakt, dann Kunden-Eigen-CA via Lizenz-
+               Server) sind in eine spaetere Saison verschoben.
+               Saison 13 ist nach dem S13-DOC-00-Re-Scope mit
+               Doorbell-History, UI-Politur und Stream belegt;
+               Saison 14 ist Webhook. Der TLS-Cert-Ausbau wird
+               zusammen mit dem Lizenz-Server-Fleisch geplant
+               sobald die erste Pilot-Anlage konkret ansteht.
 ```
 
 #### 2.2.4 API-Token-Sicherheit
@@ -176,10 +177,19 @@ TLS ist trivial spoofbar. Konkret:
 - Lizenz-Schluessel sind asymmetrisch signiert, nicht nur
   Bearer-Tokens
 
-## 3. Lizenz- und Hardware-Bindung (Saison 14+)
+## 3. Lizenz- und Hardware-Bindung
 
 Beschluss Saison-10-Abend: jede Lizenz wird an die RPi-Hardware
 gebunden. Mehrere Stufen, von einfach zu hart:
+
+**Saison-Zeitfenster:** die in den Sub-Sektionen 3.1 bis 3.4
+genannten Saison-Nummern (Saison 14 / 15+ / 16+) stammen aus
+dem Roadmap-Stand vor S13-DOC-00. Mit dem Saison-13-Re-Scope
+ist der Lizenz-Server-Ausbau zeitlich offen verschoben (siehe
+CLAUDE.md Sektion 15 und docs/architecture.md Sektion 7); die
+Reifegrad-Reihenfolge der Bindungs-Stufen bleibt erhalten, die
+konkrete Saison-Zuordnung wird zusammen mit dem Lizenz-Server-
+Briefing neu gesetzt sobald die erste Pilot-Anlage ansteht.
 
 ### 3.1 Stufe A: Seriennummer-Binding (Default, Saison 14)
 
@@ -246,7 +256,7 @@ ueberdacht werden.
 - Saison-Protokolle und CLAUDE.md sind interne Dokumente,
   niemals oeffentlich
 
-### 4.3 Optional in Saison 14: garble (Go-Obfuskator)
+### 4.3 Optional in spaeterer Saison: garble (Go-Obfuskator)
 
 Macht Reverse-Engineering deutlich schwerer durch:
 
@@ -293,10 +303,11 @@ File-Mode:      0600 (db.Open via os.MkdirAll setzt Parent-Dir
 Concurrency:    SetMaxOpenConns(1) sichert dass nur eine
                 Connection aktiv ist. WAL-Mode erlaubt
                 trotzdem schnelle parallele Lese-Queries.
-Backup-Strategie: in Saison 14 zu klaeren. Vorlaeufig: simple
-                File-Copy bei Service-Stop, der Lizenz-Server
-                kann spaeter eine differential-Backup-API
-                bereitstellen.
+Backup-Strategie: in einer spaeteren Saison zusammen mit dem
+                Lizenz-Server-Ausbau zu klaeren. Vorlaeufig:
+                simple File-Copy bei Service-Stop, der
+                Lizenz-Server kann spaeter eine differential-
+                Backup-API bereitstellen.
 ```
 
 ### 7.2 Migration-Sicherheit
@@ -375,8 +386,8 @@ API:            secrets.Service.Encrypt(plaintext) []byte
 Storage:        platform_config-Zeile setzt entweder value
                 (Klartext) oder value_encrypted (hex), nie
                 beides. Wer in beide schreibt: ist ein Bug
-                im Caller, kein DB-Constraint (Saison 13
-                koennte das verhaerten falls noetig).
+                im Caller, kein DB-Constraint (eine spaetere
+                Saison koennte das verhaerten falls noetig).
 
 Key-Rotation:   Wechsel des UNIFIX_SECRETS_KEY macht alle
                 bestehenden value_encrypted-Werte ungueltig
@@ -404,16 +415,16 @@ Klartext-Logs:  Master-Key NIEMALS loggen, auch nicht im
 
 ---
 
-## 8. Audit-Trail-Vorbereitung (Saison 15 Webhook-Audit, Ausblick)
+## 8. Audit-Trail-Vorbereitung (Doorbell-History S13-01 + Webhook S14)
 
-Saison 15 wird einen Webhook-Endpoint `POST /webhook/access`
-adden, der die offiziellen UA-Webhook-Events
-(access.doorbell.incoming, access.doorbell.completed,
-access.door.unlock, ...) entgegennimmt und in einer neuen
-door_events-Tabelle (Migration 005) persistiert. Der Einbau
-wurde aus dem urspruenglichen S12-07-Plan in eine eigene Saison
-verschoben weil die Stream-Spike-Erkenntnisse aus Saison 13/14
-das Event-Design beeinflussen koennen.
+Die `door_events`-Tabelle (Migration 005) wird in Saison 13-01
+angelegt. Der `doorbellhub` schreibt eingehende Klingel-Events
+parallel zur SSE-Distribution dorthin, das Mieter-UI rendert die
+letzten N Eintraege plus einen Ungelesen-Indikator. Saison 14
+dockt zusaetzlich den UA-Webhook-Endpoint
+`POST /webhook/access` an dieselbe Tabelle an (Event-Type-
+Dispatch), sodass auch UA-Direktevents (z.B.
+access.door.unlock ohne vorheriges Klingeln) persistiert werden.
 
 Geplante Pflicht-Felder:
 
@@ -442,14 +453,14 @@ kann durch lineares Verfolgen verifizieren ob die Chain intakt
 ist. Aenderungen werden so im Audit sofort sichtbar.
 ```
 
-In Saison 15 zunaechst OHNE Hash-Chain. Eine spaetere Migration
-kann die Chain nachruesten, sobald die Stempelkarten-Anforderung
-fest steht.
+In Saison 13-01 und 14 zunaechst OHNE Hash-Chain. Eine
+spaetere Migration kann die Chain nachruesten, sobald die
+Stempelkarten-Anforderung (Saison 16) fest steht.
 
-### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer Saison 15)
+### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer Saison 14)
 
 UA-Webhooks unterstuetzen Signed-Body via HMAC-SHA256 mit einem
-Shared-Secret. In Saison 15 muss unifix-server:
+Shared-Secret. In Saison 14 muss unifix-server:
 
 ```
 - Pro Webhook-Registration ein eigenes Secret pflegen (gespeichert
@@ -466,4 +477,4 @@ und Admin-Auth: HMAC-Signature im Header statt Session-Cookie,
 weil das UDM-Backend keine Cookies setzt. Mieter- und Admin-Pfade
 bleiben unveraendert.
 
-Konkret-Spezifikation kommt im Saison-15-Briefing.
+Konkret-Spezifikation kommt im Saison-14-Briefing.
