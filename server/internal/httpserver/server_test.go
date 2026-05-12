@@ -539,9 +539,15 @@ func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
 	}
 }
 
-// ---------- Logout ----------
+// ---------- Logout (removed in Saison 13-02) ----------
 
-func TestLogout_HappyPath(t *testing.T) {
+// TestLogout_RouteGone asserts the mieter UI no longer exposes a
+// logout endpoint. The cookie is quasi-permanent and a tenant
+// rotation happens via the admin (remove or replace the mock).
+// Go 1.22 ServeMux returns 405 Method Not Allowed when a path
+// is registered for other methods only; "GET /m/" catches the
+// path so POST yields 405.
+func TestLogout_RouteGone(t *testing.T) {
 	env := newTestServer(t)
 	env.seedMock(t)
 	token, err := env.magic.Create(context.Background(), testMockMAC)
@@ -563,52 +569,19 @@ func TestLogout_HappyPath(t *testing.T) {
 		t.Fatalf("POST /m/logout: %v", err)
 	}
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusSeeOther {
-		t.Errorf("logout status = %d, want 303", resp2.StatusCode)
-	}
-	if loc := resp2.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("Location = %q, want %q", loc, "/m/login")
-	}
-	cookie := findSessionCookie(resp2)
-	if cookie == nil {
-		t.Fatal("clear-cookie header missing on logout response")
-	}
-	if cookie.MaxAge >= 0 {
-		t.Errorf("cleared cookie MaxAge = %d, want negative", cookie.MaxAge)
+	if resp2.StatusCode != http.StatusMethodNotAllowed && resp2.StatusCode != http.StatusNotFound {
+		t.Errorf("POST /m/logout status = %d, want 405 or 404", resp2.StatusCode)
 	}
 
+	// And the tenant must still be logged in afterwards: the
+	// removed logout route is not a sneaky session-killer.
 	resp3, err := env.client.Get(env.ts.URL + "/m/")
 	if err != nil {
-		t.Fatalf("GET /m/ after logout: %v", err)
+		t.Fatalf("GET /m/ after blocked logout: %v", err)
 	}
 	resp3.Body.Close()
-	if resp3.StatusCode != http.StatusSeeOther {
-		t.Errorf("home after logout status = %d, want 303", resp3.StatusCode)
-	}
-	if loc := resp3.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("home redirect = %q, want %q", loc, "/m/login")
-	}
-}
-
-func TestLogout_IdempotentOnNoSession(t *testing.T) {
-	env := newTestServer(t)
-	req, err := http.NewRequest(http.MethodPost, env.ts.URL+"/m/logout", nil)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST /m/logout: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusInternalServerError {
-		t.Errorf("logout without session crashed: %d", resp.StatusCode)
-	}
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Errorf("logout status = %d, want 303", resp.StatusCode)
-	}
-	if loc := resp.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("Location = %q, want %q", loc, "/m/login")
+	if resp3.StatusCode != http.StatusOK {
+		t.Errorf("home after blocked logout = %d, want 200", resp3.StatusCode)
 	}
 }
 
@@ -642,8 +615,8 @@ func TestCookie_Flags(t *testing.T) {
 	if cookie.Path != SessionCookiePath {
 		t.Errorf("Path = %q, want %q", cookie.Path, SessionCookiePath)
 	}
-	if cookie.MaxAge != 30*86400 {
-		t.Errorf("MaxAge = %d, want %d", cookie.MaxAge, 30*86400)
+	if cookie.MaxAge != 365*86400 {
+		t.Errorf("MaxAge = %d, want %d (saison 13-02: cookie quasi-permanent)", cookie.MaxAge, 365*86400)
 	}
 }
 

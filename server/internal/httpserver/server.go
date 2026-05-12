@@ -116,8 +116,10 @@ func (s *Server) SetUAClient(c *uaapi.Client) {
 
 func (s *Server) routes() {
 	// Tenant tree.
+	// Saison 13-02: no /m/logout endpoint. The mieter UI dropped
+	// its logout button and the cookie is quasi-permanent. To
+	// rotate a tenant the admin removes or replaces the mock.
 	s.mux.HandleFunc("GET /m/login", s.handleLogin)
-	s.mux.Handle("POST /m/logout", s.requireSession(http.HandlerFunc(s.handleLogout)))
 	s.mux.Handle("GET /m/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
 	s.mux.Handle("GET /m/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
