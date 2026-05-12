@@ -1,18 +1,36 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"runtime"
-	"time"
+	"log"
+
+	"unifix.local/server/internal/auth/magiclink"
+	"unifix.local/server/internal/auth/session"
+	"unifix.local/server/internal/config"
+	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/httpserver"
 )
 
 func main() {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
+	cfg := config.FromEnv()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("config invalid: %v", err)
 	}
-	fmt.Printf("unifix-server starting host=%s go=%s build_time=%s\n",
-		hostname, runtime.Version(), time.Now().UTC().Format(time.RFC3339))
-	os.Exit(0)
+
+	database, err := db.Open(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("db open failed: %v", err)
+	}
+	defer database.Close()
+
+	magicSvc := magiclink.New(database)
+	sessionSvc := session.New(database)
+
+	srv := httpserver.New(cfg, magicSvc, sessionSvc)
+
+	log.Printf("unifix-server starting on %s (devMode=%v, db=%s)",
+		cfg.ListenAddr, cfg.DevMode, cfg.DBPath)
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("server stopped: %v", err)
+	}
 }
