@@ -115,6 +115,10 @@ func (s *Server) SetUAClient(c *uaapi.Client) {
 }
 
 func (s *Server) routes() {
+	// Static assets (theme.css, future images). Embedded into the
+	// binary via go:embed; served with a long Cache-Control.
+	s.mux.Handle("GET /static/", staticHandler())
+
 	// Tenant tree.
 	// Saison 13-02: no /m/logout endpoint. The mieter UI dropped
 	// its logout button and the cookie is quasi-permanent. To
