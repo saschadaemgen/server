@@ -19,6 +19,7 @@ import (
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
@@ -59,6 +60,7 @@ type testEnv struct {
 	adminSvc    *admin.Service
 	platformCfg *platformconfig.Service
 	mockMgr     *mockmanager.Manager
+	hub         *doorbellhub.Hub
 	d           *db.DB
 	clock       *testClock
 }
@@ -95,6 +97,10 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Factory:      fakeManagerFactory,
 	})
 
+	hub := doorbellhub.New(mockMgr, quietLogger())
+	hubCtx, hubCancel := context.WithCancel(context.Background())
+	go func() { _ = hub.Run(hubCtx) }()
+
 	cfg := config.Config{
 		ListenAddr: ":0",
 		DBPath:     dbPath,
@@ -103,13 +109,15 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		ServerIPv4: "127.0.0.1",
 	}
 	srv, err := New(Deps{
-		Config:         cfg,
-		MagicLink:      magic,
-		Sessions:       sess,
-		MockManager:    mockMgr,
-		Admin:          adminSvc,
-		PlatformConfig: platformCfg,
-		Log:            quietLogger(),
+		Config:          cfg,
+		MagicLink:       magic,
+		Sessions:        sess,
+		MockManager:     mockMgr,
+		Admin:           adminSvc,
+		PlatformConfig:  platformCfg,
+		Hub:             hub,
+		EventsHeartbeat: 50 * time.Millisecond,
+		Log:             quietLogger(),
 	})
 	if err != nil {
 		t.Fatalf("httpserver.New: %v", err)
@@ -127,6 +135,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	t.Cleanup(func() {
 		ts.Close()
+		hubCancel()
 		shutCtx, c := context.WithTimeout(context.Background(), 2*time.Second)
 		defer c()
 		_ = mockMgr.Shutdown(shutCtx)
@@ -136,7 +145,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		srv: srv, ts: ts, client: client,
 		magic: magic, sess: sess, adminSvc: adminSvc,
 		platformCfg: platformCfg, mockMgr: mockMgr,
-		d: d, clock: clock,
+		hub: hub,
+		d:   d, clock: clock,
 	}
 }
 
@@ -236,8 +246,8 @@ func TestLogin_HappyPath(t *testing.T) {
 		t.Errorf("home status = %d, want 200", resp2.StatusCode)
 	}
 	body := readBody(t, resp2)
-	if !strings.Contains(body, "User-ID") {
-		t.Errorf("home body missing %q marker, got: %s", "User-ID", body)
+	if !strings.Contains(body, "Willkommen") {
+		t.Errorf("home body missing %q marker, got: %s", "Willkommen", body)
 	}
 	if !strings.Contains(body, "ua-user-1") {
 		t.Errorf("home body missing ua_user_id %q, got: %s", "ua-user-1", body)
