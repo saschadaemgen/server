@@ -1,8 +1,10 @@
 # unifix Security Plan
 
-**Status:** Saison 10, lebendes Dokument.
-**Stand:** Strategische Eckpunkte gesetzt, technische Umsetzung
-ueberwiegend in spaeteren Saisons.
+**Status:** Saison 12 (Stand 12-03), lebendes Dokument.
+**Stand:** Strategische Eckpunkte gesetzt. Saison 12 hat den
+Auth-Backbone (Magic-Link + Session) und die TLS-Schicht im
+Server-Prozess umgesetzt; Hardware-Bindung und Lizenz-Server-TLS
+bleiben Saison 14+.
 **Geltungsbereich:** intern, Geschaeftsgeheimnis.
 
 ## 1. Sicherheits-Philosophie
@@ -36,8 +38,15 @@ TLS-Setup im Go-Code.
 Saison 10-11:  HTTP plain im LAN, Magic-Link-UUID als Token
                Bewusst Convenience-Niveau, kein Sicherheits-Versprechen.
 
-Saison 12-13:  TLS-Layer mit selbst-signiertem Cert, Fingerprint
+Saison 12:     IMPLEMENTIERT. TLS-Layer direkt im unifix-server-
+               Prozess (Variante 3b). HttpOnly + SameSite=Strict
+               Cookie auf Pfad /m/ (Mieter) und /a/ (Admin, S12-04).
+               DevMode-Schalter fuer lokale Entwicklung mit
+               Plain-HTTP, niemals in Production.
+
+Saison 13:     TLS mit selbst-signiertem Cert, Fingerprint
                beim Erstkontakt vom Mieter akzeptiert (Wireguard-Stil)
+               falls Production-Kunden ohne Lizenz-Server starten.
 
 Saison 14+:    TLS mit Kunden-Eigen-CA, vom Lizenz-Server ausgegeben.
                Browser-Warnungen behebbar, ESP-Klient kann
@@ -64,6 +73,75 @@ Doorbell-Trigger usw. Es muss daher:
 
 Der Browser/Endgeraet-Klient redet ausschliesslich mit dem
 unifix-server (eigener Magic-Link), nicht direkt mit der UDM-API.
+
+#### 2.2.5 Magic-Link und Session Klartext-Storage (Saison 12)
+
+Magic-Link-Tokens und Session-IDs werden in Saison 12 PLAIN in der
+SQLite-DB gespeichert. Beide sind 32 Bytes crypto/rand,
+base64url-encoded (43 Zeichen ASCII).
+
+Bewusster Trade-off, Sascha-Beschluss 12. Mai 2026:
+
+```
+Risiko-Modell:    Single-Tenant pro Anlage. Die SQLite-Datei
+                  liegt im Server-Process unter ./state/unifix.db
+                  mit File-Mode 0600 (Unix) bzw. nur fuer den
+                  Service-User lesbar (Windows). Der einzige
+                  legitime Reader ist der unifix-server-Prozess
+                  selbst. Lokale Angreifer-Annahme: wer
+                  File-Zugriff auf state/ hat, hat auch
+                  Process-Memory und damit ohnehin volle
+                  Kontrolle.
+
+Konsequenz:       Hashing der Tokens wuerde keinen praktischen
+                  Sicherheits-Gewinn bringen. Wir koennen den
+                  Storage-Layer in einer spaeteren Sicherheits-
+                  Review-Saison auf Hash + Verify migrieren
+                  (Migration 003+) falls Multi-Tenant pro Anlage
+                  oder Cloud-Hosting-Modelle relevant werden.
+
+Klartext-Logs:    Tokens und Session-IDs werden NIE im Klartext
+                  geloggt. Falls geloggt, dann maximal die
+                  ersten 8 Zeichen als Praefix (siehe
+                  CLAUDE.md DON'T-Liste).
+```
+
+#### 2.2.6 Cookie-Sicherheit (Saison 12)
+
+Session-Cookies sind defensiv konfiguriert:
+
+```
+Name:       unifix_m_session  (Mieter)
+            unifix_a_session  (Admin, S12-04)
+Pfad:       /m/  bzw.  /a/    (Pfad-Scoping verhindert dass das
+                              Admin-Cookie unter /m/ gesendet wird
+                              und umgekehrt)
+HttpOnly:   true              (immer, kein JavaScript-Zugriff)
+Secure:     true in Production, false in DevMode
+SameSite:   Strict            (immer, kein Cross-Site-Sending)
+MaxAge:     30 Tage           (passend zu Session-Rolling-TTL)
+```
+
+`SameSite=Strict` ist die maximale Stufe. Wir akzeptieren bewusst,
+dass externe Links zu unifix-Seiten den Klienten nicht
+automatisch eingeloggt zeigen (er muss erst ueber /m/login mit
+Magic-Link reinkommen).
+
+#### 2.2.7 DevMode-Schalter
+
+`UNIFIX_DEV_MODE=1` aktiviert lokale Entwicklung:
+
+```
+- ListenAndServe statt ListenAndServeTLS (Plain HTTP)
+- Cookie-Secure=false (sonst koennten Browser den Cookie nie
+  akzeptieren weil das Plain-HTTP-Setup nicht TLS ist)
+- ListenAddr-Default :8080 statt :8443
+- BaseURL-Default http://localhost:8080
+
+Strikt NUR fuer lokale Entwicklung auf Saschas Windows-Rechner.
+Production startet ohne UNIFIX_DEV_MODE und mit CertFile /
+KeyFile, sonst lehnt Config.Validate den Start ab.
+```
 
 ### 2.3 Lizenz-Server-Seite (RPi <-> Cloud)
 
@@ -175,3 +253,120 @@ Produkt produktiv und stabil ist.
 - Boeswilliger Klingel-Knopf-Druecker (per Design ueber UniFi-Reader)
 - Bot-Netze gegen den Lizenz-Server (in Saison 14 ggf. Rate-Limits)
 - Quantum-Crypto-Bedrohungen (out of scope, Klassik-TLS reicht)
+
+---
+
+## 7. Plattform-Daten-Sicherheit (Saison 12)
+
+### 7.1 SQLite-Datei-Schutz
+
+```
+Pfad:           ./state/unifix.db (default, ueberschreibbar
+                via UNIFIX_DB_PATH)
+File-Mode:      0600 (db.Open via os.MkdirAll setzt Parent-Dir
+                auf 0700, SQLite legt die Datei mit 0644 an die
+                wir per umask oder File-Mode-Set nach 0600
+                bringen koennten. Windows ignoriert POSIX-Modes.)
+Concurrency:    SetMaxOpenConns(1) sichert dass nur eine
+                Connection aktiv ist. WAL-Mode erlaubt
+                trotzdem schnelle parallele Lese-Queries.
+Backup-Strategie: in Saison 14 zu klaeren. Vorlaeufig: simple
+                File-Copy bei Service-Stop, der Lizenz-Server
+                kann spaeter eine differential-Backup-API
+                bereitstellen.
+```
+
+### 7.2 Migration-Sicherheit
+
+```
+Atomic:         Jede Migration laeuft in einer eigenen
+                BEGIN/COMMIT-Transaktion. Bei Fehler ROLLBACK,
+                db.Open gibt Fehler zurueck, Server startet
+                NICHT (das ist Absicht: laufende Server-Instanzen
+                mit halb-applizierten Schemas waeren ein
+                Daten-Konsistenz-Risiko).
+Idempotenz:     schema_version-Tabelle verhindert doppelte
+                Anwendung. Reboot eines bereits migrierten
+                Servers tut nichts neu.
+Embed:          Migrations-Files sind in das Binary einkompiliert
+                via go:embed. Es gibt keine externe
+                Migration-Source die manipulierbar waere.
+```
+
+### 7.3 Mock-State-Verzeichnisse
+
+```
+Pfad:           ./state/mocks/<mac>/   pro Mock-Viewer ein
+                eigenes Unterverzeichnis. Default-Parent ist
+                UNIFIX_MOCK_STATE_DIR.
+File-Mode:      0700 fuer Verzeichnisse, 0600 fuer einzelne Files
+                (bundle.json, meta.json, jwt.json, certs/*.crt,
+                certs/*.key, last_doorbell.json,
+                runtime_config.json).
+Atomic-Writes:  state-Paket nutzt temp-file + rename damit
+                ein Crash mid-write keine halben Files
+                hinterlaesst (siehe state.writeFileAtomic).
+Sensitive:      bundle.json und certs/broker.key enthalten
+                mTLS-Material des Mock-Viewers fuer den UDM-
+                MQTT-Broker. Bei Klau aus dem state-Verzeichnis
+                kann ein Angreifer auf den UDM-MQTT-Broker
+                connecten und als der gekuemerte Mock auftreten.
+                Mitigation: Service-User-Isolation auf dem RPi
+                (siehe Saison 15+ Hardening).
+```
+
+---
+
+## 8. Audit-Trail-Vorbereitung (S12-07 Webhook-Audit, Ausblick)
+
+S12-07 wird einen Webhook-Endpoint `POST /webhook/access` adden,
+der die offiziellen UA-Webhook-Events
+(access.doorbell.incoming, access.doorbell.completed,
+access.door.unlock, ...) entgegennimmt und in einer neuen
+door_events-Tabelle (Migration 003) persistiert.
+
+Geplante Pflicht-Felder:
+
+```
+ts            Unix-Millisekunden des Events
+ua_user_id    Wer wurde ausgeloest oder hat geklingelt
+action        "doorbell" / "unlock" / "cancel" / "reject"
+source        "ua" (von UA-Webhook) / "tenant" (Browser) /
+              "admin" (Admin-UI) / "mock" (interner Test)
+request_id    Korrelations-ID, ggf. der MQTT-requestId oder
+              UA-Webhook-request_id
+raw_payload   Original-JSON aus dem Webhook, fuer
+              forensische Analyse
+```
+
+Hash-Chain-Pattern (Saison 15+ Stempelkarten-Plugin):
+
+```
+hash_prev     SHA-256 des vorherigen Eintrags
+hash_self     SHA-256 dieses Eintrags inkl. hash_prev
+
+Append-Only-Garantie: jede nachtraegliche Aenderung an einem
+alten Eintrag bricht die Chain ab dem geaenderten Punkt. Pruefer
+kann durch lineares Verfolgen verifizieren ob die Chain intakt
+ist. Aenderungen werden so im Audit sofort sichtbar.
+```
+
+In Saison 12-07 zunaechst OHNE Hash-Chain. Migration 004+ kann
+die Chain nachruesten, sobald die Stempelkarten-Anforderung
+fest steht.
+
+### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer S12-07)
+
+UA-Webhooks unterstuetzen Signed-Body via HMAC-SHA256 mit einem
+Shared-Secret. In S12-07 muss unifix-server:
+
+```
+- Pro Webhook-Registration ein eigenes Secret pflegen (gespeichert
+  in einer noch anzulegenden webhooks-Tabelle).
+- Eingehende Bodies gegen den HMAC-Header verifizieren BEVOR
+  irgendetwas geparsed wird.
+- Bei Mismatch: 401 Unauthorized, kein Persist, Audit-Log.
+- Replay-Schutz: nonce oder timestamp-Fenster (typisch 5 min).
+```
+
+Konkret-Spezifikation kommt im S12-07-Briefing.
