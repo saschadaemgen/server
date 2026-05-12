@@ -11,6 +11,15 @@ import (
 //go:embed templates/*.html templates/admin/*.html templates/mieter/*.html
 var templatesFS embed.FS
 
+// sharedPartials lists template files that must be available in
+// every template set (admin pages plus mieter pages). theme_head
+// emits the inline detection script, tailwind config, and CSS
+// variables; theme_toggle is the sun/moon button used in headers.
+var sharedPartials = []string{
+	"templates/theme_head.html",
+	"templates/theme_toggle.html",
+}
+
 // adminTemplates bundles the admin-UI templates. Each page
 // template is parsed together with the shared layout.html so
 // {{template "content" .}} resolves to the page body and the
@@ -49,13 +58,14 @@ func newAdminTemplates() (*adminTemplates, error) {
 	pageNames := []string{"login", "dashboard", "settings", "mocks_list", "users_list"}
 	pages := make(map[string]*template.Template, len(pageNames))
 	for _, name := range pageNames {
-		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(
-			templatesFS,
+		files := append([]string{},
 			"templates/layout.html",
 			"templates/admin/"+name+".html",
 			"templates/admin/mocks_row.html",
 			"templates/admin/users_row.html",
 		)
+		files = append(files, sharedPartials...)
+		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(templatesFS, files...)
 		if err != nil {
 			return nil, fmt.Errorf("parse admin page %s: %w", name, err)
 		}
@@ -76,10 +86,9 @@ func newAdminTemplates() (*adminTemplates, error) {
 	mieterNames := []string{"home"}
 	mieter := make(map[string]*template.Template, len(mieterNames))
 	for _, name := range mieterNames {
-		tmpl, err := template.New("mieter_"+name).Funcs(funcMap).ParseFS(
-			templatesFS,
-			"templates/mieter/"+name+".html",
-		)
+		files := append([]string{}, "templates/mieter/"+name+".html")
+		files = append(files, sharedPartials...)
+		tmpl, err := template.New("mieter_"+name).Funcs(funcMap).ParseFS(templatesFS, files...)
 		if err != nil {
 			return nil, fmt.Errorf("parse mieter page %s: %w", name, err)
 		}
