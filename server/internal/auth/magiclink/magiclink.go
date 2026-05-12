@@ -57,8 +57,18 @@ func New(d *db.DB, opts ...Option) *Service {
 // responsible for delivering it to the tenant (typically embedded
 // in an https URL).
 func (s *Service) Create(ctx context.Context, uaUserID string) (string, error) {
+	return s.CreateWithTTL(ctx, uaUserID, DefaultTTL)
+}
+
+// CreateWithTTL is like Create but with a caller-supplied validity
+// window. Used by the admin "Login-Link generieren" flow which
+// hands out 24h links instead of the 7d default.
+func (s *Service) CreateWithTTL(ctx context.Context, uaUserID string, ttl time.Duration) (string, error) {
 	if uaUserID == "" {
 		return "", errors.New("magiclink: uaUserID must not be empty")
+	}
+	if ttl <= 0 {
+		return "", errors.New("magiclink: ttl must be positive")
 	}
 	token, err := newToken()
 	if err != nil {
@@ -68,7 +78,7 @@ func (s *Service) Create(ctx context.Context, uaUserID string) (string, error) {
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO magic_link_tokens (token, ua_user_id, created_at, expires_at)
 		 VALUES (?, ?, ?, ?)`,
-		token, uaUserID, now.UnixMilli(), now.Add(DefaultTTL).UnixMilli())
+		token, uaUserID, now.UnixMilli(), now.Add(ttl).UnixMilli())
 	if err != nil {
 		return "", fmt.Errorf("magiclink: insert: %w", err)
 	}

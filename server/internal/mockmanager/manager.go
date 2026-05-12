@@ -268,6 +268,26 @@ func (m *Manager) UpdateUserBinding(ctx context.Context, mac string, uaUserID st
 	return nil
 }
 
+// GetViewerInfo returns the snapshot for one running viewer by
+// MAC, or ErrViewerNotFound if the MAC is unknown. Equivalent
+// to a filtered ListViewers but cheaper for the admin one-row
+// CRUD endpoints.
+func (m *Manager) GetViewerInfo(_ context.Context, mac string) (*ViewerInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.viewers[mac]
+	if !ok {
+		return nil, ErrViewerNotFound
+	}
+	return &ViewerInfo{
+		MAC:         e.spec.MAC,
+		Name:        e.spec.Name,
+		ServicePort: e.spec.ServicePort,
+		UAUserID:    e.spec.UAUserID,
+		Running:     true,
+	}, nil
+}
+
 // ListViewers returns the snapshot of currently registered viewers.
 func (m *Manager) ListViewers(_ context.Context) ([]ViewerInfo, error) {
 	m.mu.Lock()
