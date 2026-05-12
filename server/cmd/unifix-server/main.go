@@ -15,6 +15,7 @@ import (
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/httpserver"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
@@ -72,6 +73,13 @@ func main() {
 		_ = mockMgr.Shutdown(shutCtx)
 	}()
 
+	hub := doorbellhub.New(mockMgr, log)
+	go func() {
+		if err := hub.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("doorbell hub stopped", "err", err)
+		}
+	}()
+
 	// Build the UA client lazily: only if the operator has already
 	// stored a base URL and token via the admin settings page.
 	var uaClient *uaapi.Client
@@ -92,6 +100,7 @@ func main() {
 		Admin:          adminSvc,
 		PlatformConfig: platformCfg,
 		UA:             uaClient,
+		Hub:            hub,
 		Log:            log,
 	})
 	if err != nil {
