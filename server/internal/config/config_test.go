@@ -9,6 +9,7 @@ func TestFromEnv_DefaultsWhenEmpty(t *testing.T) {
 	for _, k := range []string{
 		envListenAddr, envCertFile, envKeyFile,
 		envDBPath, envDevMode, envBaseURL,
+		envServerIPv4, envMockStateDir,
 	} {
 		t.Setenv(k, "")
 	}
@@ -24,6 +25,12 @@ func TestFromEnv_DefaultsWhenEmpty(t *testing.T) {
 	}
 	if cfg.BaseURL != "" {
 		t.Errorf("BaseURL = %q, want empty in TLS mode", cfg.BaseURL)
+	}
+	if cfg.ServerIPv4 != "" {
+		t.Errorf("ServerIPv4 = %q, want empty", cfg.ServerIPv4)
+	}
+	if cfg.MockStateDir != defaultMockStateDir {
+		t.Errorf("MockStateDir = %q, want %q", cfg.MockStateDir, defaultMockStateDir)
 	}
 }
 
@@ -54,6 +61,8 @@ func TestFromEnv_OverridesApplied(t *testing.T) {
 	t.Setenv(envDBPath, "/var/lib/unifix.db")
 	t.Setenv(envDevMode, "false")
 	t.Setenv(envBaseURL, "https://example.com")
+	t.Setenv(envServerIPv4, "192.168.1.42")
+	t.Setenv(envMockStateDir, "/var/lib/unifix/mocks")
 	cfg := FromEnv()
 	if cfg.ListenAddr != ":9000" {
 		t.Errorf("ListenAddr = %q", cfg.ListenAddr)
@@ -72,6 +81,12 @@ func TestFromEnv_OverridesApplied(t *testing.T) {
 	}
 	if cfg.BaseURL != "https://example.com" {
 		t.Errorf("BaseURL = %q", cfg.BaseURL)
+	}
+	if cfg.ServerIPv4 != "192.168.1.42" {
+		t.Errorf("ServerIPv4 = %q", cfg.ServerIPv4)
+	}
+	if cfg.MockStateDir != "/var/lib/unifix/mocks" {
+		t.Errorf("MockStateDir = %q", cfg.MockStateDir)
 	}
 }
 

@@ -35,31 +35,46 @@ type Config struct {
 	// Default in DevMode: "http://localhost:8080". In TLS mode
 	// the operator must set it explicitly.
 	BaseURL string
+
+	// ServerIPv4 is the IPv4 address the embedded mock viewers
+	// announce in discovery replies (TLV 0x02). Empty disables
+	// mock viewers without preventing the server from starting.
+	ServerIPv4 string
+
+	// MockStateDir is the parent directory under which each
+	// embedded mock viewer keeps its per-mock state and certs.
+	// Default "./state/mocks".
+	MockStateDir string
 }
 
 const (
-	defaultDBPath     = "./state/unifix.db"
-	defaultListenDev  = ":8080"
-	defaultListenTLS  = ":8443"
-	defaultBaseURLDev = "http://localhost:8080"
-	envListenAddr     = "UNIFIX_LISTEN_ADDR"
-	envCertFile       = "UNIFIX_CERT_FILE"
-	envKeyFile        = "UNIFIX_KEY_FILE"
-	envDBPath         = "UNIFIX_DB_PATH"
-	envDevMode        = "UNIFIX_DEV_MODE"
-	envBaseURL        = "UNIFIX_BASE_URL"
+	defaultDBPath       = "./state/unifix.db"
+	defaultListenDev    = ":8080"
+	defaultListenTLS    = ":8443"
+	defaultBaseURLDev   = "http://localhost:8080"
+	defaultMockStateDir = "./state/mocks"
+	envListenAddr       = "UNIFIX_LISTEN_ADDR"
+	envCertFile         = "UNIFIX_CERT_FILE"
+	envKeyFile          = "UNIFIX_KEY_FILE"
+	envDBPath           = "UNIFIX_DB_PATH"
+	envDevMode          = "UNIFIX_DEV_MODE"
+	envBaseURL          = "UNIFIX_BASE_URL"
+	envServerIPv4       = "UNIFIX_SERVER_IPV4"
+	envMockStateDir     = "UNIFIX_MOCK_STATE_DIR"
 )
 
 // FromEnv reads the unifix environment variables and fills in
 // defaults for empty fields.
 func FromEnv() Config {
 	cfg := Config{
-		ListenAddr: os.Getenv(envListenAddr),
-		CertFile:   os.Getenv(envCertFile),
-		KeyFile:    os.Getenv(envKeyFile),
-		DBPath:     os.Getenv(envDBPath),
-		DevMode:    parseBool(os.Getenv(envDevMode)),
-		BaseURL:    os.Getenv(envBaseURL),
+		ListenAddr:   os.Getenv(envListenAddr),
+		CertFile:     os.Getenv(envCertFile),
+		KeyFile:      os.Getenv(envKeyFile),
+		DBPath:       os.Getenv(envDBPath),
+		DevMode:      parseBool(os.Getenv(envDevMode)),
+		BaseURL:      os.Getenv(envBaseURL),
+		ServerIPv4:   os.Getenv(envServerIPv4),
+		MockStateDir: os.Getenv(envMockStateDir),
 	}
 	if cfg.ListenAddr == "" {
 		if cfg.DevMode {
@@ -73,6 +88,9 @@ func FromEnv() Config {
 	}
 	if cfg.BaseURL == "" && cfg.DevMode {
 		cfg.BaseURL = defaultBaseURLDev
+	}
+	if cfg.MockStateDir == "" {
+		cfg.MockStateDir = defaultMockStateDir
 	}
 	return cfg
 }
