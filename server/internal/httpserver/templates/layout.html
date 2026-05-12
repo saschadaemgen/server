@@ -1,0 +1,56 @@
+{{define "layout"}}<!doctype html>
+<html lang="de" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - unifix Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
+    },
+  },
+}
+</script>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-sans antialiased min-h-screen">
+{{if .ShowNav}}
+<nav class="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur">
+  <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-8">
+      <a href="/a/" class="font-semibold tracking-tight text-zinc-100">unifix admin</a>
+      <div class="flex items-center gap-1 text-sm">
+        <a href="/a/" class="px-3 py-1.5 rounded text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 inline-flex items-center gap-2">
+          <span class="w-4 h-4">{{icon "home"}}</span> Dashboard
+        </a>
+        <a href="/a/mocks" class="px-3 py-1.5 rounded text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 inline-flex items-center gap-2">
+          <span class="w-4 h-4">{{icon "server"}}</span> Mock-Viewer
+        </a>
+        <a href="/a/users" class="px-3 py-1.5 rounded text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 inline-flex items-center gap-2">
+          <span class="w-4 h-4">{{icon "users"}}</span> Mieter
+        </a>
+        <a href="/a/settings" class="px-3 py-1.5 rounded text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 inline-flex items-center gap-2">
+          <span class="w-4 h-4">{{icon "settings"}}</span> Settings
+        </a>
+      </div>
+    </div>
+    <form method="POST" action="/a/logout" class="inline">
+      <button class="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 inline-flex items-center gap-2">
+        <span class="w-4 h-4">{{icon "log-out"}}</span> Abmelden
+      </button>
+    </form>
+  </div>
+</nav>
+{{end}}
+<main class="max-w-6xl mx-auto px-6 py-8">
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}

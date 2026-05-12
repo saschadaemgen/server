@@ -1,0 +1,41 @@
+{{define "mock_row"}}<tr id="mock-{{.MAC}}" class="hover:bg-zinc-950/40">
+  <td class="px-4 py-3 font-mono text-xs text-zinc-300">{{.MAC}}</td>
+  <td class="px-4 py-3">{{.Name}}</td>
+  <td class="px-4 py-3 font-mono text-xs text-zinc-400">{{.ServicePort}}</td>
+  <td class="px-4 py-3">
+    {{if .Running}}
+    <span class="inline-flex items-center gap-1.5 text-xs">
+      <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+      <span class="text-zinc-300">laeuft</span>
+    </span>
+    {{else}}
+    <span class="inline-flex items-center gap-1.5 text-xs">
+      <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+      <span class="text-zinc-500">aus</span>
+    </span>
+    {{end}}
+  </td>
+  <td class="px-4 py-3">
+    <form hx-put="/a/mocks/{{.MAC}}/binding" hx-target="#mock-{{.MAC}}" hx-swap="outerHTML"
+          class="flex items-center gap-2">
+      <select name="ua_user_id"
+        class="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/40">
+        <option value="">nicht zugeordnet</option>
+        {{$current := .UAUserID}}
+        {{range .Users}}
+        <option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+        {{end}}
+      </select>
+      <button type="submit" class="text-xs text-zinc-400 hover:text-cyan-400 inline-flex items-center gap-1">
+        <span class="w-3.5 h-3.5">{{icon "link"}}</span>
+      </button>
+    </form>
+  </td>
+  <td class="px-4 py-3 text-right">
+    <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-{{.MAC}}" hx-swap="outerHTML"
+            hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?"
+            class="text-xs text-zinc-400 hover:text-red-400 inline-flex items-center gap-1">
+      <span class="w-3.5 h-3.5">{{icon "trash"}}</span> Loeschen
+    </button>
+  </td>
+</tr>{{end}}

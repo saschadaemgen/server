@@ -1,0 +1,25 @@
+{{define "user_row"}}<tr id="user-{{.ID}}" class="hover:bg-zinc-950/40">
+  <td class="px-4 py-3">{{.FirstName}} {{.LastName}}</td>
+  <td class="px-4 py-3 text-zinc-400 text-xs">{{.Email}}</td>
+  <td class="px-4 py-3 font-mono text-xs text-zinc-500">{{.ID}}</td>
+  <td class="px-4 py-3">
+    {{if eq .Status "ACTIVE"}}
+    <span class="inline-flex items-center gap-1.5 text-xs">
+      <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+      <span class="text-zinc-300">aktiv</span>
+    </span>
+    {{else}}
+    <span class="inline-flex items-center gap-1.5 text-xs">
+      <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+      <span class="text-zinc-500">{{.Status}}</span>
+    </span>
+    {{end}}
+  </td>
+  <td class="px-4 py-3 text-right">
+    <button hx-delete="/a/users/{{.ID}}" hx-target="#user-{{.ID}}" hx-swap="outerHTML"
+            hx-confirm="Mieter {{.FirstName}} {{.LastName}} wirklich loeschen?"
+            class="text-xs text-zinc-400 hover:text-red-400 inline-flex items-center gap-1">
+      <span class="w-3.5 h-3.5">{{icon "trash"}}</span> Loeschen
+    </button>
+  </td>
+</tr>{{end}}

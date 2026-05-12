@@ -1,0 +1,61 @@
+{{define "content"}}
+<div class="mb-8">
+  <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+  <p class="text-sm text-zinc-400 mt-1">Willkommen, {{.AdminName}}.</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <a href="/a/mocks" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors group">
+    <div class="flex items-center justify-between mb-3">
+      <span class="w-5 h-5 text-cyan-400">{{icon "server"}}</span>
+      <span class="text-3xl font-mono tabular-nums">{{.MockCount}}</span>
+    </div>
+    <h2 class="font-medium">Mock-Viewer</h2>
+    <p class="text-sm text-zinc-400 mt-1">virtuelle Geraete im Prozess</p>
+  </a>
+
+  <a href="/a/users" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors">
+    <div class="flex items-center justify-between mb-3">
+      <span class="w-5 h-5 text-cyan-400">{{icon "users"}}</span>
+      <span class="text-3xl font-mono tabular-nums">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</span>
+    </div>
+    <h2 class="font-medium">Mieter (UA-User)</h2>
+    <p class="text-sm text-zinc-400 mt-1">
+      {{if .UserCountReady}}per UA-API verwaltet{{else}}UA-API nicht konfiguriert{{end}}
+    </p>
+  </a>
+
+  <a href="/a/settings" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors">
+    <div class="flex items-center justify-between mb-3">
+      <span class="w-5 h-5 text-cyan-400">{{icon "settings"}}</span>
+      <span class="text-xs uppercase tracking-wider {{if .UserCountReady}}text-green-400{{else}}text-amber-400{{end}}">
+        {{if .UserCountReady}}konfiguriert{{else}}setup noetig{{end}}
+      </span>
+    </div>
+    <h2 class="font-medium">Einstellungen</h2>
+    <p class="text-sm text-zinc-400 mt-1">UA-Developer-API + Plattform</p>
+  </a>
+</div>
+
+<div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+  <h2 class="font-medium mb-3">System</h2>
+  <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Schema-Version</dt>
+      <dd class="font-mono mt-1">{{.SchemaVersion}}</dd>
+    </div>
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Server-IPv4</dt>
+      <dd class="font-mono mt-1">{{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-amber-400">nicht gesetzt</span>{{end}}</dd>
+    </div>
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">DevMode</dt>
+      <dd class="font-mono mt-1">{{if .DevMode}}true{{else}}false{{end}}</dd>
+    </div>
+    <div>
+      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Saison</dt>
+      <dd class="font-mono mt-1">12-04</dd>
+    </div>
+  </dl>
+</div>
+{{end}}
