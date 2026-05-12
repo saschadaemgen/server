@@ -10,6 +10,8 @@ import (
 	"unifix.local/server/internal/db"
 )
 
+const testMockMAC = "0c:ea:14:42:42:42"
+
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -17,7 +19,23 @@ func newTestService(t *testing.T) *Service {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
+	seedMock(t, d, testMockMAC)
 	return New(d)
+}
+
+// seedMock inserts the minimal mock_viewers row needed for the
+// magic_link_tokens.mock_mac FK to validate. Saison-12-06 made
+// the FK hard, so every magic-link test needs a real mock first.
+func seedMock(t *testing.T, d *db.DB, mac string) {
+	t.Helper()
+	now := time.Now().UnixMilli()
+	if _, err := d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		mac, "Test "+mac, 9000, now, now,
+	); err != nil {
+		t.Fatalf("seed mock: %v", err)
+	}
 }
 
 func isBase64URL(r rune) bool {
@@ -29,7 +47,7 @@ func isBase64URL(r rune) bool {
 
 func TestCreate_ReturnsValidToken(t *testing.T) {
 	s := newTestService(t)
-	token, err := s.Create(context.Background(), "ua-user-1")
+	token, err := s.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -46,40 +64,55 @@ func TestCreate_ReturnsValidToken(t *testing.T) {
 
 func TestCreate_PersistsToDB(t *testing.T) {
 	s := newTestService(t)
-	token, err := s.Create(context.Background(), "ua-user-1")
+	token, err := s.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	var (
-		uaUserID  string
+		mockMAC   string
 		createdAt int64
 		expiresAt int64
 	)
 	err = s.db.QueryRow(
-		`SELECT ua_user_id, created_at, expires_at FROM magic_link_tokens WHERE token = ?`,
+		`SELECT mock_mac, created_at, expires_at FROM magic_link_tokens WHERE token = ?`,
 		token,
-	).Scan(&uaUserID, &createdAt, &expiresAt)
+	).Scan(&mockMAC, &createdAt, &expiresAt)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if uaUserID != "ua-user-1" {
-		t.Errorf("ua_user_id = %q, want %q", uaUserID, "ua-user-1")
+	if mockMAC != testMockMAC {
+		t.Errorf("mock_mac = %q, want %q", mockMAC, testMockMAC)
 	}
 	if expiresAt <= createdAt {
 		t.Errorf("expires_at (%d) is not after created_at (%d)", expiresAt, createdAt)
 	}
 }
 
-func TestCreate_EmptyUserRejected(t *testing.T) {
+func TestCreate_EmptyMACRejected(t *testing.T) {
 	s := newTestService(t)
 	if _, err := s.Create(context.Background(), ""); err == nil {
-		t.Fatal("Create with empty uaUserID returned nil error")
+		t.Fatal("Create with empty mockMAC returned nil error")
+	}
+}
+
+func TestCreateWithTTL_ZeroRejected(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.CreateWithTTL(context.Background(), testMockMAC, 0); err == nil {
+		t.Fatal("CreateWithTTL with zero ttl returned nil error")
+	}
+}
+
+func TestCreate_FKEnforcesExistingMock(t *testing.T) {
+	s := newTestService(t)
+	_, err := s.Create(context.Background(), "0c:ea:14:99:99:99")
+	if err == nil {
+		t.Fatal("Create with unknown mock_mac succeeded; FK not enforced")
 	}
 }
 
 func TestConsume_HappyPath(t *testing.T) {
 	s := newTestService(t)
-	token, err := s.Create(context.Background(), "ua-user-1")
+	token, err := s.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -87,8 +120,8 @@ func TestConsume_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Consume: %v", err)
 	}
-	if got != "ua-user-1" {
-		t.Errorf("Consume = %q, want %q", got, "ua-user-1")
+	if got != testMockMAC {
+		t.Errorf("Consume = %q, want %q", got, testMockMAC)
 	}
 	var consumedAt int64
 	if err := s.db.QueryRow(
@@ -121,7 +154,7 @@ func TestConsume_Expired(t *testing.T) {
 	s := newTestService(t)
 	base := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	token, err := s.Create(context.Background(), "ua-user-1")
+	token, err := s.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -134,7 +167,7 @@ func TestConsume_Expired(t *testing.T) {
 
 func TestConsume_AlreadyConsumed(t *testing.T) {
 	s := newTestService(t)
-	token, err := s.Create(context.Background(), "ua-user-1")
+	token, err := s.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

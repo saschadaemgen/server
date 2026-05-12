@@ -1,13 +1,20 @@
-// Package session owns the lifecycle of authenticated tenant
-// sessions. A session is created when a magic-link token is
-// consumed and is validated on every subsequent request. Each
-// validate call performs a rolling renewal: last_seen is bumped
-// and expires_at is pushed out by DefaultIdleTimeout.
+// Package session owns the lifecycle of authenticated mieter
+// (tenant) sessions. A session is created when a magic-link
+// token is consumed and is validated on every subsequent
+// request. Each validate call performs a rolling renewal:
+// last_seen is bumped and expires_at is pushed out by
+// DefaultIdleTimeout.
+//
+// Saison 12-06 refactor: sessions are bound to mock_viewers.mac
+// instead of ua_user_id. The routing model is now mock-centric;
+// admin sessions moved to the separate adminsession package
+// because they have a different subject (admin_username, not a
+// mock).
 //
 // Session ids are 32 random bytes encoded base64url-without-
-// padding (43 characters). They live in the sessions table keyed
-// by ua_user_id; revoking by ua_user_id wipes every active
-// session for that tenant.
+// padding (43 characters). They live in the mieter_sessions
+// table keyed by mock_mac; RevokeAllForMock wipes every active
+// session for that mock.
 package session
 
 import (
@@ -33,7 +40,8 @@ type Meta struct {
 	IP        string
 }
 
-// Service manages session lifecycle against the sessions table.
+// Service manages mieter-session lifecycle against the
+// mieter_sessions table.
 type Service struct {
 	db  *db.DB
 	now func() time.Time
@@ -60,11 +68,11 @@ func New(d *db.DB, opts ...Option) *Service {
 	return s
 }
 
-// Create starts a new session for uaUserID and returns the
+// Create starts a new session for mockMAC and returns the
 // session id. expires_at is set to now + DefaultIdleTimeout.
-func (s *Service) Create(ctx context.Context, uaUserID string, meta Meta) (string, error) {
-	if uaUserID == "" {
-		return "", errors.New("session: uaUserID must not be empty")
+func (s *Service) Create(ctx context.Context, mockMAC string, meta Meta) (string, error) {
+	if mockMAC == "" {
+		return "", errors.New("session: mockMAC must not be empty")
 	}
 	sid, err := newSessionID()
 	if err != nil {
@@ -72,10 +80,10 @@ func (s *Service) Create(ctx context.Context, uaUserID string, meta Meta) (strin
 	}
 	now := s.now()
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO sessions
-		   (session_id, ua_user_id, created_at, last_seen, expires_at, user_agent, ip)
+		`INSERT INTO mieter_sessions
+		   (session_id, mock_mac, created_at, last_seen, expires_at, user_agent, ip)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		sid, uaUserID,
+		sid, mockMAC,
 		now.UnixMilli(), now.UnixMilli(),
 		now.Add(DefaultIdleTimeout).UnixMilli(),
 		meta.UserAgent, meta.IP,
@@ -89,7 +97,7 @@ func (s *Service) Create(ctx context.Context, uaUserID string, meta Meta) (strin
 // Validate checks a session id and renews it on success. On a
 // hit, last_seen and expires_at are updated in the same
 // transaction so concurrent validates cannot race past each
-// other. Returns the ua_user_id the session belongs to.
+// other. Returns the mock-MAC the session belongs to.
 func (s *Service) Validate(ctx context.Context, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", ErrSessionNotFound
@@ -101,13 +109,13 @@ func (s *Service) Validate(ctx context.Context, sessionID string) (string, error
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		uaUserID  string
+		mockMAC   string
 		expiresAt int64
 	)
 	err = tx.QueryRowContext(ctx,
-		`SELECT ua_user_id, expires_at FROM sessions WHERE session_id = ?`,
+		`SELECT mock_mac, expires_at FROM mieter_sessions WHERE session_id = ?`,
 		sessionID,
-	).Scan(&uaUserID, &expiresAt)
+	).Scan(&mockMAC, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrSessionNotFound
 	}
@@ -119,7 +127,7 @@ func (s *Service) Validate(ctx context.Context, sessionID string) (string, error
 		return "", ErrSessionExpired
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET last_seen = ?, expires_at = ? WHERE session_id = ?`,
+		`UPDATE mieter_sessions SET last_seen = ?, expires_at = ? WHERE session_id = ?`,
 		now.UnixMilli(), now.Add(DefaultIdleTimeout).UnixMilli(), sessionID,
 	); err != nil {
 		return "", fmt.Errorf("session: update: %w", err)
@@ -127,28 +135,29 @@ func (s *Service) Validate(ctx context.Context, sessionID string) (string, error
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("session: commit: %w", err)
 	}
-	return uaUserID, nil
+	return mockMAC, nil
 }
 
 // Revoke deletes a single session. Missing sessions are not an
 // error: revoke is idempotent.
 func (s *Service) Revoke(ctx context.Context, sessionID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE session_id = ?`, sessionID)
+		`DELETE FROM mieter_sessions WHERE session_id = ?`, sessionID)
 	if err != nil {
 		return fmt.Errorf("session: delete: %w", err)
 	}
 	return nil
 }
 
-// RevokeAll deletes every session for uaUserID and returns the
-// number of rows removed. Useful when an admin deactivates a
-// tenant.
-func (s *Service) RevokeAll(ctx context.Context, uaUserID string) (int, error) {
+// RevokeAllForMock deletes every session bound to mockMAC and
+// returns the number of rows removed. Useful when an admin
+// removes a mock viewer (FK cascade handles the same outcome,
+// but this gives explicit feedback for the admin UI).
+func (s *Service) RevokeAllForMock(ctx context.Context, mockMAC string) (int, error) {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE ua_user_id = ?`, uaUserID)
+		`DELETE FROM mieter_sessions WHERE mock_mac = ?`, mockMAC)
 	if err != nil {
-		return 0, fmt.Errorf("session: delete by user: %w", err)
+		return 0, fmt.Errorf("session: delete by mock: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -163,7 +172,7 @@ func (s *Service) RevokeAll(ctx context.Context, uaUserID string) (int, error) {
 // not yet wired up.
 func (s *Service) CleanupExpired(ctx context.Context) (int, error) {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE expires_at < ?`, s.now().UnixMilli())
+		`DELETE FROM mieter_sessions WHERE expires_at < ?`, s.now().UnixMilli())
 	if err != nil {
 		return 0, fmt.Errorf("session: cleanup: %w", err)
 	}

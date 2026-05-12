@@ -10,6 +10,8 @@ import (
 	"unifix.local/server/internal/db"
 )
 
+const testMockMAC = "0c:ea:14:42:42:42"
+
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -17,12 +19,27 @@ func newTestService(t *testing.T) *Service {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
+	seedMock(t, d, testMockMAC, 9000)
 	return New(d)
+}
+
+// seedMock inserts the mock_viewers row needed for the
+// mieter_sessions.mock_mac FK to validate.
+func seedMock(t *testing.T, d *db.DB, mac string, port int) {
+	t.Helper()
+	now := time.Now().UnixMilli()
+	if _, err := d.Exec(
+		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		mac, "Test "+mac, port, now, now,
+	); err != nil {
+		t.Fatalf("seed mock: %v", err)
+	}
 }
 
 func TestCreate_ReturnsValidSessionID(t *testing.T) {
 	s := newTestService(t)
-	sid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	sid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -34,23 +51,23 @@ func TestCreate_ReturnsValidSessionID(t *testing.T) {
 func TestCreate_PersistsMetadata(t *testing.T) {
 	s := newTestService(t)
 	meta := Meta{UserAgent: "Test/1.0", IP: "192.168.1.42"}
-	sid, err := s.Create(context.Background(), "ua-user-1", meta)
+	sid, err := s.Create(context.Background(), testMockMAC, meta)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	var (
-		uaUserID  string
+		mockMAC   string
 		userAgent string
 		ip        string
 	)
 	err = s.db.QueryRow(
-		`SELECT ua_user_id, user_agent, ip FROM sessions WHERE session_id = ?`, sid,
-	).Scan(&uaUserID, &userAgent, &ip)
+		`SELECT mock_mac, user_agent, ip FROM mieter_sessions WHERE session_id = ?`, sid,
+	).Scan(&mockMAC, &userAgent, &ip)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if uaUserID != "ua-user-1" {
-		t.Errorf("ua_user_id = %q, want %q", uaUserID, "ua-user-1")
+	if mockMAC != testMockMAC {
+		t.Errorf("mock_mac = %q, want %q", mockMAC, testMockMAC)
 	}
 	if userAgent != meta.UserAgent {
 		t.Errorf("user_agent = %q, want %q", userAgent, meta.UserAgent)
@@ -60,10 +77,18 @@ func TestCreate_PersistsMetadata(t *testing.T) {
 	}
 }
 
-func TestCreate_EmptyUserRejected(t *testing.T) {
+func TestCreate_EmptyMACRejected(t *testing.T) {
 	s := newTestService(t)
 	if _, err := s.Create(context.Background(), "", Meta{}); err == nil {
-		t.Fatal("Create with empty uaUserID returned nil error")
+		t.Fatal("Create with empty mockMAC returned nil error")
+	}
+}
+
+func TestCreate_FKEnforcesExistingMock(t *testing.T) {
+	s := newTestService(t)
+	_, err := s.Create(context.Background(), "0c:ea:14:99:99:99", Meta{})
+	if err == nil {
+		t.Fatal("Create with unknown mock_mac succeeded; FK not enforced")
 	}
 }
 
@@ -71,7 +96,7 @@ func TestValidate_HappyPath_UpdatesLastSeen(t *testing.T) {
 	s := newTestService(t)
 	base := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	sid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	sid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -81,12 +106,12 @@ func TestValidate_HappyPath_UpdatesLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if got != "ua-user-1" {
-		t.Errorf("Validate = %q, want %q", got, "ua-user-1")
+	if got != testMockMAC {
+		t.Errorf("Validate = %q, want %q", got, testMockMAC)
 	}
 	var lastSeen int64
 	if err := s.db.QueryRow(
-		`SELECT last_seen FROM sessions WHERE session_id = ?`, sid,
+		`SELECT last_seen FROM mieter_sessions WHERE session_id = ?`, sid,
 	).Scan(&lastSeen); err != nil {
 		t.Fatalf("query last_seen: %v", err)
 	}
@@ -115,7 +140,7 @@ func TestValidate_Expired(t *testing.T) {
 	s := newTestService(t)
 	base := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	sid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	sid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -130,7 +155,7 @@ func TestValidate_RollingRenewal(t *testing.T) {
 	s := newTestService(t)
 	base := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	sid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	sid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -141,7 +166,7 @@ func TestValidate_RollingRenewal(t *testing.T) {
 	}
 	var expiresAt int64
 	if err := s.db.QueryRow(
-		`SELECT expires_at FROM sessions WHERE session_id = ?`, sid,
+		`SELECT expires_at FROM mieter_sessions WHERE session_id = ?`, sid,
 	).Scan(&expiresAt); err != nil {
 		t.Fatalf("query expires_at: %v", err)
 	}
@@ -153,7 +178,7 @@ func TestValidate_RollingRenewal(t *testing.T) {
 
 func TestRevoke_RemovesSession(t *testing.T) {
 	s := newTestService(t)
-	sid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	sid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -162,7 +187,7 @@ func TestRevoke_RemovesSession(t *testing.T) {
 	}
 	var count int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM sessions WHERE session_id = ?`, sid,
+		`SELECT COUNT(*) FROM mieter_sessions WHERE session_id = ?`, sid,
 	).Scan(&count); err != nil {
 		t.Fatalf("query count: %v", err)
 	}
@@ -181,37 +206,37 @@ func TestRevoke_IdempotentOnMissing(t *testing.T) {
 	}
 }
 
-func TestRevokeAll_ForUser(t *testing.T) {
+func TestRevokeAllForMock(t *testing.T) {
 	s := newTestService(t)
+	// add a second mock so we have data for both buckets
+	seedMock(t, s.db, "0c:ea:14:11:11:11", 9001)
 	for i := 0; i < 3; i++ {
-		if _, err := s.Create(context.Background(), "ua-user-1", Meta{}); err != nil {
+		if _, err := s.Create(context.Background(), testMockMAC, Meta{}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 	}
-	// session for a different user must survive
-	otherSID, err := s.Create(context.Background(), "ua-user-other", Meta{})
+	otherSID, err := s.Create(context.Background(), "0c:ea:14:11:11:11", Meta{})
 	if err != nil {
 		t.Fatalf("Create other: %v", err)
 	}
-	n, err := s.RevokeAll(context.Background(), "ua-user-1")
+	n, err := s.RevokeAllForMock(context.Background(), testMockMAC)
 	if err != nil {
-		t.Fatalf("RevokeAll: %v", err)
+		t.Fatalf("RevokeAllForMock: %v", err)
 	}
 	if n != 3 {
-		t.Errorf("RevokeAll = %d, want 3", n)
+		t.Errorf("RevokeAllForMock = %d, want 3", n)
 	}
 	var remaining int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM sessions WHERE ua_user_id = ?`, "ua-user-1",
+		`SELECT COUNT(*) FROM mieter_sessions WHERE mock_mac = ?`, testMockMAC,
 	).Scan(&remaining); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if remaining != 0 {
-		t.Errorf("ua-user-1 rows after RevokeAll = %d, want 0", remaining)
+		t.Errorf("rows for revoked mock = %d, want 0", remaining)
 	}
-	// untouched user still has session
 	if _, err := s.Validate(context.Background(), otherSID); err != nil {
-		t.Errorf("other-user session lost: %v", err)
+		t.Errorf("other-mock session lost: %v", err)
 	}
 }
 
@@ -219,17 +244,16 @@ func TestCleanupExpired(t *testing.T) {
 	s := newTestService(t)
 	base := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	expired1, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	expired1, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create expired1: %v", err)
 	}
-	expired2, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	expired2, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create expired2: %v", err)
 	}
-	// jump past expiry, then create a session that is still valid
 	s.now = func() time.Time { return base.Add(DefaultIdleTimeout + time.Second) }
-	valid, err := s.Create(context.Background(), "ua-user-1", Meta{})
+	valid, err := s.Create(context.Background(), testMockMAC, Meta{})
 	if err != nil {
 		t.Fatalf("Create valid: %v", err)
 	}
@@ -243,7 +267,7 @@ func TestCleanupExpired(t *testing.T) {
 	for _, sid := range []string{expired1, expired2} {
 		var count int
 		if err := s.db.QueryRow(
-			`SELECT COUNT(*) FROM sessions WHERE session_id = ?`, sid,
+			`SELECT COUNT(*) FROM mieter_sessions WHERE session_id = ?`, sid,
 		).Scan(&count); err != nil {
 			t.Fatalf("query expired: %v", err)
 		}
@@ -253,7 +277,7 @@ func TestCleanupExpired(t *testing.T) {
 	}
 	var count int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM sessions WHERE session_id = ?`, valid,
+		`SELECT COUNT(*) FROM mieter_sessions WHERE session_id = ?`, valid,
 	).Scan(&count); err != nil {
 		t.Fatalf("query valid: %v", err)
 	}

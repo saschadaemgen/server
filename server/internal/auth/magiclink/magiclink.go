@@ -1,13 +1,17 @@
-// Package magiclink issues and consumes one-shot tokens that map
-// to ua_user_id values. The plain token is shown to the admin once
-// and embedded into a URL handed to the tenant. Consuming the
-// token (via the future http login endpoint) trades it for a
-// session.
+// Package magiclink issues and consumes one-shot tokens that
+// map to mock_viewers.mac. The plain token is shown to the
+// admin once and embedded into a URL handed to the tenant of
+// the corresponding mock; consuming the token (via /m/login)
+// trades it for a mieter session bound to the same mock.
+//
+// Saison 12-06 refactor: tokens used to map to ua_user_id, but
+// the routing model is now mock-centric (one mock per browser
+// session, ua_user_id is decoupled).
 //
 // Tokens are 32 random bytes encoded base64url-without-padding,
-// producing 43 ASCII characters. Storage is plain text in saison
-// 12; a hashing pass can be added later when a security review
-// happens.
+// producing 43 ASCII characters. Storage is plain text in
+// saison 12; a hashing pass can be added later when a security
+// review happens.
 package magiclink
 
 import (
@@ -52,20 +56,19 @@ func New(d *db.DB, opts ...Option) *Service {
 	return s
 }
 
-// Create issues a new magic-link token for uaUserID. The token is
-// returned as a 43-character base64url string. Caller is
-// responsible for delivering it to the tenant (typically embedded
-// in an https URL).
-func (s *Service) Create(ctx context.Context, uaUserID string) (string, error) {
-	return s.CreateWithTTL(ctx, uaUserID, DefaultTTL)
+// Create issues a new magic-link token for the given mock-MAC
+// with DefaultTTL. Caller is responsible for delivering the
+// token to the tenant (typically embedded in an https URL).
+func (s *Service) Create(ctx context.Context, mockMAC string) (string, error) {
+	return s.CreateWithTTL(ctx, mockMAC, DefaultTTL)
 }
 
-// CreateWithTTL is like Create but with a caller-supplied validity
-// window. Used by the admin "Login-Link generieren" flow which
-// hands out 24h links instead of the 7d default.
-func (s *Service) CreateWithTTL(ctx context.Context, uaUserID string, ttl time.Duration) (string, error) {
-	if uaUserID == "" {
-		return "", errors.New("magiclink: uaUserID must not be empty")
+// CreateWithTTL is like Create but with a caller-supplied
+// validity window. The admin "Login-Link generieren" flow uses
+// 24h.
+func (s *Service) CreateWithTTL(ctx context.Context, mockMAC string, ttl time.Duration) (string, error) {
+	if mockMAC == "" {
+		return "", errors.New("magiclink: mockMAC must not be empty")
 	}
 	if ttl <= 0 {
 		return "", errors.New("magiclink: ttl must be positive")
@@ -76,9 +79,9 @@ func (s *Service) CreateWithTTL(ctx context.Context, uaUserID string, ttl time.D
 	}
 	now := s.now()
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO magic_link_tokens (token, ua_user_id, created_at, expires_at)
+		`INSERT INTO magic_link_tokens (token, mock_mac, created_at, expires_at)
 		 VALUES (?, ?, ?, ?)`,
-		token, uaUserID, now.UnixMilli(), now.Add(ttl).UnixMilli())
+		token, mockMAC, now.UnixMilli(), now.Add(ttl).UnixMilli())
 	if err != nil {
 		return "", fmt.Errorf("magiclink: insert: %w", err)
 	}
@@ -86,9 +89,8 @@ func (s *Service) CreateWithTTL(ctx context.Context, uaUserID string, ttl time.D
 }
 
 // Consume validates the token and marks it consumed in a single
-// transaction. On success it returns the ua_user_id the token was
-// issued for. The error cases are exposed as sentinel values so
-// callers can map them to http responses.
+// transaction. On success it returns the mock-MAC the token was
+// issued for. Sentinel errors map cleanly to http responses.
 func (s *Service) Consume(ctx context.Context, token string) (string, error) {
 	if token == "" {
 		return "", ErrTokenNotFound
@@ -100,14 +102,14 @@ func (s *Service) Consume(ctx context.Context, token string) (string, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		uaUserID   string
+		mockMAC    string
 		expiresAt  int64
 		consumedAt sql.NullInt64
 	)
 	err = tx.QueryRowContext(ctx,
-		`SELECT ua_user_id, expires_at, consumed_at FROM magic_link_tokens WHERE token = ?`,
+		`SELECT mock_mac, expires_at, consumed_at FROM magic_link_tokens WHERE token = ?`,
 		token,
-	).Scan(&uaUserID, &expiresAt, &consumedAt)
+	).Scan(&mockMAC, &expiresAt, &consumedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrTokenNotFound
 	}
@@ -130,7 +132,7 @@ func (s *Service) Consume(ctx context.Context, token string) (string, error) {
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("magiclink: commit: %w", err)
 	}
-	return uaUserID, nil
+	return mockMAC, nil
 }
 
 // Sentinel errors. Callers should test for these with errors.Is.
