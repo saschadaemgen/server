@@ -1,0 +1,147 @@
+{{define "mieter_home"}}<!doctype html>
+<html lang="de" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>unifix Mieter</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
+      keyframes: {
+        bellPulse: {
+          '0%, 100%': { transform: 'scale(1)' },
+          '50%':      { transform: 'scale(1.08)' },
+        },
+        bellSwing: {
+          '0%, 100%': { transform: 'rotate(-6deg)' },
+          '50%':      { transform: 'rotate(6deg)' },
+        },
+      },
+      animation: {
+        bellPulse: 'bellPulse 1.2s ease-in-out infinite',
+        bellSwing: 'bellSwing 0.6s ease-in-out infinite',
+      },
+    },
+  },
+}
+</script>
+<style>
+/* Inline so the keyframes also apply if Tailwind CDN is slow. */
+@keyframes bellPulseInline { 0%,100%{transform:scale(1);} 50%{transform:scale(1.08);} }
+@keyframes bellSwingInline { 0%,100%{transform:rotate(-6deg);} 50%{transform:rotate(6deg);} }
+.bell-pulse { animation: bellPulseInline 1.2s ease-in-out infinite; }
+.bell-swing { animation: bellSwingInline 0.6s ease-in-out infinite; transform-origin: 50% 10%; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-sans antialiased min-h-screen">
+
+<header class="border-b border-zinc-800 bg-zinc-900/50">
+  <div class="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
+    <span class="font-semibold tracking-tight">unifix</span>
+    <div class="flex items-center gap-4">
+      <span id="status" class="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+        <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span> verbinde...
+      </span>
+      <form method="POST" action="/m/logout" class="inline">
+        <button class="text-xs text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1.5">
+          <span class="w-4 h-4">{{icon "log-out"}}</span> Abmelden
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-3xl mx-auto px-6 py-12">
+  <h1 class="text-3xl font-semibold tracking-tight mb-2">Willkommen</h1>
+  <p class="text-zinc-400">Wenn jemand an der Tuer klingelt, erscheint hier eine Benachrichtigung.</p>
+
+  <div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5 text-sm text-zinc-400">
+    <p>Konto: <span class="font-mono text-zinc-300">{{.UAUserID}}</span></p>
+    <p class="mt-2 text-zinc-500">Diese Seite bleibt offen und verbindet sich automatisch wieder, falls die Verbindung kurz abreisst.</p>
+  </div>
+</main>
+
+<!-- Klingel-Overlay, zeigt sich beim doorbell_start, blendet aus bei doorbell_cancel oder lokaler Schliessen-Klick. -->
+<div id="ring-overlay" class="hidden fixed inset-0 z-50 bg-zinc-950/90 backdrop-blur flex items-center justify-center px-6">
+  <div class="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center shadow-2xl">
+    <div class="mx-auto w-24 h-24 text-cyan-400 mb-6 bell-pulse">
+      <div class="bell-swing">{{icon "bell"}}</div>
+    </div>
+    <h2 class="text-3xl font-semibold tracking-tight mb-2">Es klingelt</h2>
+    <p class="text-zinc-400 mb-8">An der Eingangstuer wird soeben gelaeutet.</p>
+
+    <dl class="text-sm text-left bg-zinc-950 border border-zinc-800 rounded-lg p-4 mb-8 space-y-2">
+      <div class="flex justify-between gap-4">
+        <dt class="text-zinc-500">Zeit</dt>
+        <dd id="ring-time" class="font-mono text-zinc-300">-</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt class="text-zinc-500">Empfaenger</dt>
+        <dd id="ring-mock-mac" class="font-mono text-xs text-zinc-400">-</dd>
+      </div>
+    </dl>
+
+    <button id="ring-close"
+      class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium rounded py-3 transition-colors">
+      Schliessen
+    </button>
+  </div>
+</div>
+
+<script>
+(function() {
+  const evtSource = new EventSource('/m/events');
+  const statusEl  = document.getElementById('status');
+  const overlay   = document.getElementById('ring-overlay');
+  const mockEl    = document.getElementById('ring-mock-mac');
+  const timeEl    = document.getElementById('ring-time');
+  const closeBtn  = document.getElementById('ring-close');
+
+  function setStatus(state) {
+    if (!statusEl) return;
+    if (state === 'live') {
+      statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> live';
+      statusEl.className = 'inline-flex items-center gap-1.5 text-xs text-zinc-300';
+    } else {
+      statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> verbinde wieder...';
+      statusEl.className = 'inline-flex items-center gap-1.5 text-xs text-amber-400';
+    }
+  }
+
+  function showRing(data) {
+    if (!overlay) return;
+    mockEl.textContent = data.mock_mac || '-';
+    if (data.created_at) {
+      const t = new Date(data.created_at);
+      timeEl.textContent = t.toLocaleTimeString('de-DE');
+    } else {
+      timeEl.textContent = new Date().toLocaleTimeString('de-DE');
+    }
+    overlay.classList.remove('hidden');
+  }
+
+  function hideRing() {
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+  }
+
+  evtSource.addEventListener('doorbell_start', (e) => {
+    try { showRing(JSON.parse(e.data)); } catch (_) {}
+  });
+  evtSource.addEventListener('doorbell_cancel', () => hideRing());
+  evtSource.onopen  = () => setStatus('live');
+  evtSource.onerror = () => setStatus('disconnected');
+
+  if (closeBtn) closeBtn.addEventListener('click', hideRing);
+})();
+</script>
+
+</body>
+</html>{{end}}
