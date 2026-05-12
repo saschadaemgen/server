@@ -3,12 +3,12 @@
 // plus a TestConnection probe. Other endpoints (doors, devices,
 // webhooks, ...) will land here in later sub-briefings.
 //
-// The API base URL is typically https://<udm>:12445 and the
-// token is the X-API-KEY header value generated in the UniFi
-// portal. UDM's TLS cert is self-signed without an IP SAN, so
-// the client uses InsecureSkipVerify=true. An optional cert pin
-// could be added later via VerifyPeerCertificate; the operator
-// can wire that through Options.CertSHA256 if they want.
+// The API base URL is typically https://<udm>:12445. The token
+// is generated in the UniFi portal and sent as
+// `Authorization: Bearer <token>` per the official API
+// reference (section 2.7). UDM's TLS cert is self-signed
+// without an IP SAN, so the client uses InsecureSkipVerify=true.
+// An optional cert pin can be supplied via Options.CertSHA256.
 package uaapi
 
 import (
@@ -28,6 +28,26 @@ import (
 var (
 	ErrUnauthorized = errors.New("uaapi: unauthorized (check API token)")
 	ErrNotFound     = errors.New("uaapi: not found")
+)
+
+// Result codes the UA Developer API returns in the `code`
+// envelope field. The full list in section 2.4 of the official
+// reference is much longer; this is the subset we map onto
+// behavior. Anything else lands in a generic error with the
+// code string preserved for diagnosis.
+const (
+	CodeSuccess             = "SUCCESS"
+	CodeUnauthorized        = "CODE_UNAUTHORIZED"
+	CodeAuthFailed          = "CODE_AUTH_FAILED"
+	CodeAccessTokenInvalid  = "CODE_ACCESS_TOKEN_INVALID"
+	CodeNotExists           = "CODE_NOT_EXISTS"
+	CodeResourceNotFound    = "CODE_RESOURCE_NOT_FOUND"
+	CodeUserAccountNotExist = "CODE_USER_ACCOUNT_NOT_EXIST"
+	CodeUserWorkerNotExists = "CODE_USER_WORKER_NOT_EXISTS"
+	CodeParamsInvalid       = "CODE_PARAMS_INVALID"
+	CodeOperationForbidden  = "CODE_OPERATION_FORBIDDEN"
+	CodeUserNameDuplicated  = "CODE_USER_NAME_DUPLICATED"
+	CodeSystemError         = "CODE_SYSTEM_ERROR"
 )
 
 // Options configures a Client. Token and BaseURL are required;
@@ -78,36 +98,69 @@ func New(opts Options) *Client {
 	}
 }
 
-// envelope mirrors the UniFi Access Developer API response shape:
-// {"code":0, "msg":"...", "data": ...}
+// envelope mirrors the UniFi Access Developer API response shape
+// (section 2.8): {"code":"SUCCESS", "msg":"...", "data":...}.
+// Note `code` is a STRING, not an int; an earlier draft of this
+// client had it typed as int which broke every response decode.
 type envelope struct {
-	Code int             `json:"code"`
+	Code string          `json:"code"`
 	Msg  string          `json:"msg"`
 	Data json.RawMessage `json:"data"`
 }
 
 func (c *Client) do(req *http.Request) (*envelope, error) {
-	req.Header.Set("X-API-KEY", c.token)
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+	if req.Body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("uaapi: do: %w", err)
 	}
 	defer resp.Body.Close()
+	// Some failure modes never reach the envelope: a reverse
+	// proxy can swallow the body and respond with a bare 401 or
+	// 404. Map those before we try to decode JSON.
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, ErrUnauthorized
 	case http.StatusNotFound:
-		return nil, ErrNotFound
+		// Only short-circuit on 404 if we cannot decode an
+		// envelope; the API itself sometimes returns 200 with
+		// CODE_NOT_EXISTS. Fall through to the normal decode
+		// path below.
 	}
 	var env envelope
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return nil, fmt.Errorf("uaapi: decode: %w", err)
 	}
-	if resp.StatusCode >= 400 || env.Code != 0 {
-		return nil, fmt.Errorf("uaapi: api error: status=%d code=%d msg=%q",
-			resp.StatusCode, env.Code, env.Msg)
+	if err := mapCodeToError(env.Code, env.Msg); err != nil {
+		return nil, err
 	}
 	return &env, nil
+}
+
+// mapCodeToError converts an API envelope code into a Go error.
+// Returns nil only for CodeSuccess. Known auth and missing-
+// resource codes get mapped to the sentinel errors so callers
+// can switch on them with errors.Is.
+func mapCodeToError(code, msg string) error {
+	switch code {
+	case CodeSuccess:
+		return nil
+	case CodeUnauthorized, CodeAuthFailed, CodeAccessTokenInvalid:
+		return ErrUnauthorized
+	case CodeNotExists, CodeResourceNotFound,
+		CodeUserAccountNotExist, CodeUserWorkerNotExists:
+		return ErrNotFound
+	case CodeParamsInvalid:
+		return fmt.Errorf("uaapi: invalid params: %s", msg)
+	case CodeUserNameDuplicated:
+		return fmt.Errorf("uaapi: user name duplicated: %s", msg)
+	case CodeOperationForbidden:
+		return fmt.Errorf("uaapi: operation forbidden: %s", msg)
+	default:
+		return fmt.Errorf("uaapi: api error code=%s msg=%s", code, msg)
+	}
 }
