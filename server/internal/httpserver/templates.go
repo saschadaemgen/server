@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"strings"
 )
 
 //go:embed templates/*.html templates/admin/*.html templates/mieter/*.html
@@ -28,9 +29,21 @@ type adminTemplates struct {
 	mieter   map[string]*template.Template
 }
 
+// macIDFromMAC turns a colon-separated MAC into a CSS-safe
+// suffix for HTML id attributes. Doppelpunkte sind technisch
+// valide in HTML-IDs, kollidieren aber mit dem CSS-Selector-
+// Pseudo-Klassen-Praefix, deshalb stolpert htmx beim
+// querySelectorAll. Wir strippen die Doppelpunkte und nutzen
+// einen klaren Praefix wie "mock-row-" um Kollisionen mit
+// echten CSS-Klassen zu vermeiden.
+func macIDFromMAC(mac string) string {
+	return strings.ToLower(strings.ReplaceAll(mac, ":", ""))
+}
+
 func newAdminTemplates() (*adminTemplates, error) {
 	funcMap := template.FuncMap{
-		"icon": renderIcon,
+		"icon":  renderIcon,
+		"macID": macIDFromMAC,
 	}
 
 	pageNames := []string{"login", "dashboard", "settings", "mocks_list", "users_list"}

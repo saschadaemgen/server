@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -256,6 +257,49 @@ func TestAdminMocks_ListEmpty(t *testing.T) {
 	}
 	if !strings.Contains(body, "Neuen Mock-Viewer anlegen") {
 		t.Errorf("missing create form")
+	}
+}
+
+// htmlIDWithColonRE matches any HTML id="..." attribute whose
+// value contains a colon. Colons in IDs are legal HTML but
+// blow up querySelectorAll because ":" starts a CSS pseudo
+// class. htmx hits that path on every hx-target, so the
+// admin mocks UI needs colon-free row IDs.
+var htmlIDWithColonRE = regexp.MustCompile(`(?i)\bid\s*=\s*"[^"]*:[^"]*"`)
+
+// htmxSelectorWithColonRE catches the same hazard in hx-target
+// (or any other htmx attribute that takes a CSS selector).
+var htmxSelectorWithColonRE = regexp.MustCompile(`(?i)\bhx-(target|swap-oob|trigger|select)\s*=\s*"[^"]*#[^"]*:[^"]*"`)
+
+func TestMocksRow_RenderedIDsHaveNoColons(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
+
+	form := url.Values{}
+	form.Set("name", "Colon Probe")
+	form.Set("mac", "0c:ea:14:0a:78:06")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/mocks", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /a/mocks: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status = %d, want 200", resp.StatusCode)
+	}
+	body := readBody(t, resp)
+
+	if m := htmlIDWithColonRE.FindString(body); m != "" {
+		t.Errorf("rendered row has HTML id with colon (breaks CSS selectors): %s", m)
+	}
+	if m := htmxSelectorWithColonRE.FindString(body); m != "" {
+		t.Errorf("rendered row has htmx selector with colon (breaks querySelectorAll): %s", m)
+	}
+	// The expected colon-free pattern must be present.
+	if !strings.Contains(body, `id="mock-row-0cea140a7806"`) {
+		t.Errorf("expected colon-free id mock-row-0cea140a7806 in body; got: %s", body)
 	}
 }
 
