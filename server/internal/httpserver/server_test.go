@@ -2,6 +2,8 @@ package httpserver
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -11,10 +13,15 @@ import (
 	"testing"
 	"time"
 
+	"unifix.local/mock"
+	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/mockmanager"
+	"unifix.local/server/internal/platformconfig"
+	"unifix.local/server/internal/secrets"
 )
 
 // testClock is a shared time source whose value can be moved
@@ -42,16 +49,18 @@ func (c *testClock) Add(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// testEnv carries everything a test needs in one place. Briefing
-// asks for a four-tuple helper; bundling extras (db, clock) on a
-// struct is the same idea without long return lists.
+// testEnv carries everything a test needs in one place.
 type testEnv struct {
-	ts     *httptest.Server
-	client *http.Client
-	magic  *magiclink.Service
-	sess   *session.Service
-	d      *db.DB
-	clock  *testClock
+	srv         *Server
+	ts          *httptest.Server
+	client      *http.Client
+	magic       *magiclink.Service
+	sess        *session.Service
+	adminSvc    *admin.Service
+	platformCfg *platformconfig.Service
+	mockMgr     *mockmanager.Manager
+	d           *db.DB
+	clock       *testClock
 }
 
 func newTestServer(t *testing.T) *testEnv {
@@ -68,13 +77,43 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	magic := magiclink.New(d, magiclink.WithClock(clock.Now))
 	sess := session.New(d, session.WithClock(clock.Now))
+	adminSvc := admin.New(d, admin.WithClock(clock.Now))
+
+	secKey := make([]byte, 32)
+	for i := range secKey {
+		secKey[i] = byte(i)
+	}
+	secSvc, err := secrets.NewWithKey(secKey)
+	if err != nil {
+		t.Fatalf("secrets.NewWithKey: %v", err)
+	}
+	platformCfg := platformconfig.New(d, secSvc, platformconfig.WithClock(clock.Now))
+
+	mockMgr := mockmanager.New(d, quietLogger(), mockmanager.Options{
+		StateDirBase: filepath.Join(t.TempDir(), "mocks"),
+		ServerIPv4:   "127.0.0.1",
+		Factory:      fakeManagerFactory,
+	})
+
 	cfg := config.Config{
 		ListenAddr: ":0",
 		DBPath:     dbPath,
 		DevMode:    true,
 		BaseURL:    "http://127.0.0.1",
+		ServerIPv4: "127.0.0.1",
 	}
-	srv := New(cfg, magic, sess)
+	srv, err := New(Deps{
+		Config:         cfg,
+		MagicLink:      magic,
+		Sessions:       sess,
+		MockManager:    mockMgr,
+		Admin:          adminSvc,
+		PlatformConfig: platformCfg,
+		Log:            quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("httpserver.New: %v", err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -88,10 +127,52 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	t.Cleanup(func() {
 		ts.Close()
+		shutCtx, c := context.WithTimeout(context.Background(), 2*time.Second)
+		defer c()
+		_ = mockMgr.Shutdown(shutCtx)
 		_ = d.Close()
 	})
-	return &testEnv{ts: ts, client: client, magic: magic, sess: sess, d: d, clock: clock}
+	return &testEnv{
+		srv: srv, ts: ts, client: client,
+		magic: magic, sess: sess, adminSvc: adminSvc,
+		platformCfg: platformCfg, mockMgr: mockMgr,
+		d: d, clock: clock,
+	}
 }
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// fakeManagerFactory builds a do-nothing Viewer that satisfies
+// the mockmanager.Viewer interface without binding any sockets.
+// Used by every admin httpserver test so the manager can run
+// add/remove/list/binding flows headlessly.
+func fakeManagerFactory(cfg mock.Config, _ *slog.Logger) (mockmanager.Viewer, error) {
+	return &noopViewer{
+		mac:     cfg.MAC,
+		events:  make(chan mock.DoorbellEvent, 1),
+		cancels: make(chan mock.DoorbellCancelEvent, 1),
+		done:    make(chan struct{}),
+	}, nil
+}
+
+type noopViewer struct {
+	mac     string
+	events  chan mock.DoorbellEvent
+	cancels chan mock.DoorbellCancelEvent
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (v *noopViewer) Run(ctx context.Context) error {
+	<-ctx.Done()
+	v.once.Do(func() { close(v.done) })
+	return ctx.Err()
+}
+func (v *noopViewer) Events() <-chan mock.DoorbellEvent        { return v.events }
+func (v *noopViewer) Cancels() <-chan mock.DoorbellCancelEvent { return v.cancels }
+func (v *noopViewer) MAC() string                              { return v.mac }
 
 func readBody(t *testing.T, resp *http.Response) string {
 	t.Helper()

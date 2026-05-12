@@ -10,12 +10,16 @@ import (
 	"syscall"
 	"time"
 
+	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
 	"unifix.local/server/internal/httpserver"
 	"unifix.local/server/internal/mockmanager"
+	"unifix.local/server/internal/platformconfig"
+	"unifix.local/server/internal/secrets"
+	"unifix.local/server/internal/uaapi"
 )
 
 func main() {
@@ -30,6 +34,13 @@ func main() {
 		log.Warn("UNIFIX_SERVER_IPV4 not set; mock viewers will not be reachable by UDM")
 	}
 
+	secretsSvc, err := secrets.New()
+	if err != nil {
+		log.Error("secrets init failed (set UNIFIX_SECRETS_KEY; use cmd/genkey to generate one)",
+			"err", err)
+		os.Exit(1)
+	}
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Error("db open failed", "err", err)
@@ -39,6 +50,8 @@ func main() {
 
 	magicSvc := magiclink.New(database)
 	sessionSvc := session.New(database)
+	adminSvc := admin.New(database)
+	platformCfg := platformconfig.New(database, secretsSvc)
 
 	mockMgr := mockmanager.New(database, log, mockmanager.Options{
 		StateDirBase: cfg.MockStateDir,
@@ -54,12 +67,37 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() {
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
 		_ = mockMgr.Shutdown(shutCtx)
 	}()
 
-	srv := httpserver.New(cfg, magicSvc, sessionSvc)
+	// Build the UA client lazily: only if the operator has already
+	// stored a base URL and token via the admin settings page.
+	var uaClient *uaapi.Client
+	baseURL, _ := platformCfg.Get(ctx, platformconfig.KeyUAAPIBaseURL)
+	token, _ := platformCfg.GetSecret(ctx, platformconfig.KeyUAAPIToken)
+	if baseURL != "" && token != "" {
+		uaClient = uaapi.New(uaapi.Options{BaseURL: baseURL, Token: token})
+		log.Info("ua api client configured", "base_url", baseURL)
+	} else {
+		log.Info("ua api not yet configured; admin must set base URL + token under /a/settings")
+	}
+
+	srv, err := httpserver.New(httpserver.Deps{
+		Config:         cfg,
+		MagicLink:      magicSvc,
+		Sessions:       sessionSvc,
+		MockManager:    mockMgr,
+		Admin:          adminSvc,
+		PlatformConfig: platformCfg,
+		UA:             uaClient,
+		Log:            log,
+	})
+	if err != nil {
+		log.Error("httpserver init failed", "err", err)
+		os.Exit(1)
+	}
 
 	log.Info("unifix-server starting",
 		"addr", cfg.ListenAddr,
