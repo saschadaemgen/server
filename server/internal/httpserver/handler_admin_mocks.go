@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/uaapi"
@@ -139,6 +140,55 @@ func (s *Server) handleAdminMocksDelete(w http.ResponseWriter, r *http.Request) 
 	}
 	// htmx swaps outerHTML with an empty body, dropping the row.
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleAdminMocksMagicLink generates a 24h magic-link for the
+// tenant bound to this mock and returns a clipboard-ready modal
+// HTML fragment. htmx swaps it into #modal-slot.
+func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Request) {
+	mac := strings.ToLower(r.PathValue("mac"))
+	if !macFormat.MatchString(mac) {
+		s.respondHTMXError(w, http.StatusBadRequest, "Ungueltige MAC-Adresse.")
+		return
+	}
+	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	if err != nil {
+		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+			s.respondHTMXError(w, http.StatusNotFound, "Mock-Viewer nicht gefunden.")
+			return
+		}
+		s.log.Error("get viewer info", "err", err, "mac_prefix", mac[:8])
+		s.respondHTMXError(w, http.StatusInternalServerError, "Mock-Lookup fehlgeschlagen.")
+		return
+	}
+	if info.UAUserID == "" {
+		s.respondHTMXError(w, http.StatusBadRequest,
+			"Mock ist keinem Mieter zugeordnet. Bitte zuerst eine Verknuepfung anlegen.")
+		return
+	}
+
+	token, err := s.magic.CreateWithTTL(r.Context(), info.UAUserID, 24*time.Hour)
+	if err != nil {
+		s.log.Error("magic-link generate failed", "err", err, "mac_prefix", mac[:8])
+		s.respondHTMXError(w, http.StatusInternalServerError, "Token-Erzeugung fehlgeschlagen.")
+		return
+	}
+
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	loginURL := fmt.Sprintf("%s://%s/m/login?t=%s", scheme, r.Host, token)
+
+	s.renderAdminPartial(w, "magic_link_modal", struct {
+		URL      string
+		UAUserID string
+		MockName string
+	}{
+		URL:      loginURL,
+		UAUserID: info.UAUserID,
+		MockName: info.Name,
+	})
 }
 
 func (s *Server) handleAdminMocksBinding(w http.ResponseWriter, r *http.Request) {

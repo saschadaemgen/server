@@ -32,10 +32,17 @@
     </form>
   </td>
   <td class="px-4 py-3 text-right">
-    <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-{{.MAC}}" hx-swap="outerHTML"
-            hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?"
-            class="text-xs text-zinc-400 hover:text-red-400 inline-flex items-center gap-1">
-      <span class="w-3.5 h-3.5">{{icon "trash"}}</span> Loeschen
-    </button>
+    <div class="flex items-center justify-end gap-3">
+      <button hx-post="/a/mocks/{{.MAC}}/magic-link" hx-target="#modal-slot" hx-swap="innerHTML"
+        {{if not .UAUserID}}disabled title="Mock muss zuerst einem Mieter zugeordnet werden"{{end}}
+        class="text-xs text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 disabled:text-zinc-600 disabled:cursor-not-allowed">
+        <span class="w-3.5 h-3.5">{{icon "link"}}</span> Login-Link
+      </button>
+      <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-{{.MAC}}" hx-swap="outerHTML"
+              hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?"
+              class="text-xs text-zinc-400 hover:text-red-400 inline-flex items-center gap-1">
+        <span class="w-3.5 h-3.5">{{icon "trash"}}</span> Loeschen
+      </button>
+    </div>
   </td>
 </tr>{{end}}

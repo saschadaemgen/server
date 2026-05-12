@@ -54,6 +54,7 @@ func newAdminTemplates() (*adminTemplates, error) {
 		"templates/admin/mocks_row.html",
 		"templates/admin/users_row.html",
 		"templates/admin/_error.html",
+		"templates/admin/magic_link_modal.html",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("parse admin partials: %w", err)

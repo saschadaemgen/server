@@ -118,6 +118,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/mocks", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksCreate)))
 	s.mux.Handle("DELETE /a/mocks/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksDelete)))
 	s.mux.Handle("PUT /a/mocks/{mac}/binding", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksBinding)))
+	s.mux.Handle("POST /a/mocks/{mac}/magic-link", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksMagicLink)))
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
 	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
 	s.mux.Handle("DELETE /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
