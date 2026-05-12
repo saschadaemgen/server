@@ -1,8 +1,9 @@
 // Package db opens the unifix-server sqlite database and applies
 // pending schema migrations. The database stores platform data:
-// magic-link tokens, sessions, and (in later seasons) door events
-// and plugin tables. Tenant identity lives in the unifi access
-// developer api and is referenced here via ua_user_id columns.
+// admin users, mock viewers, magic-link tokens, and the two session
+// tables (mieter_sessions, admin_sessions). Since Saison 12-06 the
+// tenant routing key is the mock viewer's MAC; tenant identity in
+// the UniFi Access Developer API is administered separately.
 package db
 
 import (
