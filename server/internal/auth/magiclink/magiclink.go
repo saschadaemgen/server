@@ -31,11 +31,25 @@ type Service struct {
 	now func() time.Time
 }
 
-// New constructs a Service backed by the given database. The
-// returned Service uses time.Now; tests may override the now
-// field directly.
-func New(d *db.DB) *Service {
-	return &Service{db: d, now: time.Now}
+// Option mutates a Service during construction. Used for
+// dependency injection in tests; production code passes no
+// options.
+type Option func(*Service)
+
+// WithClock replaces the default time.Now source. Tests inject
+// a closure they can advance to exercise expiry paths.
+func WithClock(now func() time.Time) Option {
+	return func(s *Service) { s.now = now }
+}
+
+// New constructs a Service backed by the given database. With
+// no options the Service uses time.Now.
+func New(d *db.DB, opts ...Option) *Service {
+	s := &Service{db: d, now: time.Now}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // Create issues a new magic-link token for uaUserID. The token is

@@ -39,10 +39,25 @@ type Service struct {
 	now func() time.Time
 }
 
-// New constructs a Service. now defaults to time.Now; tests may
-// override the field directly.
-func New(d *db.DB) *Service {
-	return &Service{db: d, now: time.Now}
+// Option mutates a Service during construction. Used for
+// dependency injection in tests; production code passes no
+// options.
+type Option func(*Service)
+
+// WithClock replaces the default time.Now source. Tests inject
+// a closure they can advance to exercise expiry and rolling
+// renewal paths.
+func WithClock(now func() time.Time) Option {
+	return func(s *Service) { s.now = now }
+}
+
+// New constructs a Service. With no options it uses time.Now.
+func New(d *db.DB, opts ...Option) *Service {
+	s := &Service{db: d, now: time.Now}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // Create starts a new session for uaUserID and returns the
