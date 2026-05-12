@@ -41,7 +41,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uaUserID, err := s.magic.Consume(r.Context(), token)
+	mockMAC, err := s.magic.Consume(r.Context(), token)
 	switch {
 	case errors.Is(err, magiclink.ErrTokenNotFound):
 		s.renderLoginError(w, http.StatusBadRequest,
@@ -63,7 +63,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sid, err := s.sessions.Create(r.Context(), uaUserID, session.Meta{
+	sid, err := s.sessions.Create(r.Context(), mockMAC, session.Meta{
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 	})

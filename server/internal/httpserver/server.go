@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"unifix.local/server/internal/auth/admin"
+	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
@@ -29,17 +30,21 @@ import (
 // same struct to New regardless of which sub-set of features
 // the caller wants enabled; nullable fields like UA degrade
 // gracefully.
+//
+// Saison 12-06 refactor: Sessions now means MIETER sessions
+// (bound to mock_mac). Admin sessions live in their own service.
 type Deps struct {
 	Config         config.Config
 	MagicLink      *magiclink.Service
 	Sessions       *session.Service
+	AdminSessions  *adminsession.Service
 	MockManager    *mockmanager.Manager
 	Admin          *admin.Service
 	PlatformConfig *platformconfig.Service
 	// UA is built lazily by main once the operator has saved a
 	// base URL and token. Nil means "not configured yet".
 	UA *uaapi.Client
-	// Hub fans doorbell events from mockmanager out to per-user
+	// Hub fans doorbell events from mockmanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
 	// EventsHeartbeat overrides the SSE keepalive interval.
@@ -54,6 +59,7 @@ type Server struct {
 	cfg             config.Config
 	magic           *magiclink.Service
 	sessions        *session.Service
+	adminSessions   *adminsession.Service
 	mockMgr         *mockmanager.Manager
 	admin           *admin.Service
 	platformCfg     *platformconfig.Service
@@ -79,6 +85,7 @@ func New(deps Deps) (*Server, error) {
 		cfg:             deps.Config,
 		magic:           deps.MagicLink,
 		sessions:        deps.Sessions,
+		adminSessions:   deps.AdminSessions,
 		mockMgr:         deps.MockManager,
 		admin:           deps.Admin,
 		platformCfg:     deps.PlatformConfig,
@@ -117,7 +124,6 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/mocks", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksList)))
 	s.mux.Handle("POST /a/mocks", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksCreate)))
 	s.mux.Handle("DELETE /a/mocks/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksDelete)))
-	s.mux.Handle("PUT /a/mocks/{mac}/binding", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksBinding)))
 	s.mux.Handle("POST /a/mocks/{mac}/magic-link", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksMagicLink)))
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
 	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))

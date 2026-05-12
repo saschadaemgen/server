@@ -15,27 +15,10 @@
     </span>
     {{end}}
   </td>
-  <td class="px-4 py-3">
-    <form hx-put="/a/mocks/{{.MAC}}/binding" hx-target="#mock-row-{{macID .MAC}}" hx-swap="outerHTML"
-          class="flex items-center gap-2">
-      <select name="ua_user_id"
-        class="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/40">
-        <option value="">nicht zugeordnet</option>
-        {{$current := .UAUserID}}
-        {{range .Users}}
-        <option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
-        {{end}}
-      </select>
-      <button type="submit" class="text-xs text-zinc-400 hover:text-cyan-400 inline-flex items-center gap-1">
-        <span class="w-3.5 h-3.5">{{icon "link"}}</span>
-      </button>
-    </form>
-  </td>
   <td class="px-4 py-3 text-right">
     <div class="flex items-center justify-end gap-3">
       <button hx-post="/a/mocks/{{.MAC}}/magic-link" hx-target="#modal-slot" hx-swap="innerHTML"
-        {{if not .UAUserID}}disabled title="Mock muss zuerst einem Mieter zugeordnet werden"{{end}}
-        class="text-xs text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 disabled:text-zinc-600 disabled:cursor-not-allowed">
+        class="text-xs text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1">
         <span class="w-3.5 h-3.5">{{icon "link"}}</span> Login-Link
       </button>
       <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-row-{{macID .MAC}}" hx-swap="outerHTML"

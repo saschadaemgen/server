@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"unifix.local/server/internal/auth/admin"
-	"unifix.local/server/internal/auth/session"
+	"unifix.local/server/internal/auth/adminsession"
 )
 
 type adminLoginPageData struct {
@@ -23,7 +23,7 @@ type adminLoginPageData struct {
 func (s *Server) handleAdminLoginGet(w http.ResponseWriter, r *http.Request) {
 	// already logged in? skip to dashboard.
 	if sid := readAdminSessionCookie(r); sid != "" {
-		if _, err := s.sessions.Validate(r.Context(), sid); err == nil {
+		if _, err := s.adminSessions.Validate(r.Context(), sid); err == nil {
 			http.Redirect(w, r, "/a/", http.StatusSeeOther)
 			return
 		}
@@ -87,8 +87,6 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	// Login-Pfad (auch direkt nach Setup).
 	if err := s.admin.Login(r.Context(), username, password); err != nil {
-		// Niemals zwischen "Username unbekannt" und "falsches Passwort"
-		// unterscheiden in der HTTP-Antwort.
 		if errors.Is(err, admin.ErrNotFound) || errors.Is(err, admin.ErrInvalidPassword) {
 			s.renderAdminPage(w, "login", adminLoginPageData{
 				Title: "Login", Username: username,
@@ -101,8 +99,7 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Session anlegen mit Admin-Praefix.
-	sid, err := s.sessions.Create(r.Context(), adminUserPrefix+username, session.Meta{
+	sid, err := s.adminSessions.Create(r.Context(), username, adminsession.Meta{
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 	})
@@ -117,7 +114,6 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 
 func friendlyAdminError(err error) string {
 	msg := err.Error()
-	// kappe Praefixe wie "admin: ..."
 	if i := strings.Index(msg, ": "); i >= 0 && i < len(msg)-2 {
 		msg = msg[i+2:]
 	}

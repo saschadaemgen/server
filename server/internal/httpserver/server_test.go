@@ -15,6 +15,7 @@ import (
 
 	"unifix.local/mock"
 	"unifix.local/server/internal/auth/admin"
+	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
@@ -23,6 +24,19 @@ import (
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
+)
+
+// Test fixtures for the Saison 12-06 mock-centric routing model.
+// The test mock is registered via mockmanager and reused by every
+// magic-link / session test so the FK chain
+//
+//	magic_link_tokens.mock_mac -> mock_viewers.mac
+//	mieter_sessions.mock_mac   -> mock_viewers.mac
+//
+// stays satisfied.
+const (
+	testMockMAC  = "0c:ea:14:42:42:42"
+	testMockName = "Familie Mueller 2OG"
 )
 
 // testClock is a shared time source whose value can be moved
@@ -57,6 +71,7 @@ type testEnv struct {
 	client      *http.Client
 	magic       *magiclink.Service
 	sess        *session.Service
+	adminSess   *adminsession.Service
 	adminSvc    *admin.Service
 	platformCfg *platformconfig.Service
 	mockMgr     *mockmanager.Manager
@@ -79,6 +94,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	magic := magiclink.New(d, magiclink.WithClock(clock.Now))
 	sess := session.New(d, session.WithClock(clock.Now))
+	adminSess := adminsession.New(d, adminsession.WithClock(clock.Now))
 	adminSvc := admin.New(d, admin.WithClock(clock.Now))
 
 	secKey := make([]byte, 32)
@@ -112,6 +128,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Config:          cfg,
 		MagicLink:       magic,
 		Sessions:        sess,
+		AdminSessions:   adminSess,
 		MockManager:     mockMgr,
 		Admin:           adminSvc,
 		PlatformConfig:  platformCfg,
@@ -143,10 +160,35 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	})
 	return &testEnv{
 		srv: srv, ts: ts, client: client,
-		magic: magic, sess: sess, adminSvc: adminSvc,
+		magic: magic, sess: sess, adminSess: adminSess, adminSvc: adminSvc,
 		platformCfg: platformCfg, mockMgr: mockMgr,
 		hub: hub,
 		d:   d, clock: clock,
+	}
+}
+
+// seedMock registers the canonical test mock via mockmanager. Used
+// before every test that creates a magic-link token or a session,
+// because both tables FK on mock_viewers.mac. Each call hands out
+// a fresh service port so tests can seed multiple mocks back-to-back.
+func (e *testEnv) seedMock(t *testing.T) {
+	t.Helper()
+	e.seedMockAs(t, testMockMAC, testMockName)
+}
+
+func (e *testEnv) seedMockAs(t *testing.T, mac, name string) {
+	t.Helper()
+	infos, err := e.mockMgr.ListViewers(context.Background())
+	if err != nil {
+		t.Fatalf("seedMock: ListViewers: %v", err)
+	}
+	port := uint16(8100 + len(infos))
+	if err := e.mockMgr.AddViewer(context.Background(), mockmanager.ViewerSpec{
+		MAC:         mac,
+		Name:        name,
+		ServicePort: port,
+	}); err != nil {
+		t.Fatalf("seedMock: AddViewer: %v", err)
 	}
 }
 
@@ -157,7 +199,7 @@ func quietLogger() *slog.Logger {
 // fakeManagerFactory builds a do-nothing Viewer that satisfies
 // the mockmanager.Viewer interface without binding any sockets.
 // Used by every admin httpserver test so the manager can run
-// add/remove/list/binding flows headlessly.
+// add/remove/list flows headlessly.
 func fakeManagerFactory(cfg mock.Config, _ *slog.Logger) (mockmanager.Viewer, error) {
 	return &noopViewer{
 		mac:     cfg.MAC,
@@ -214,7 +256,8 @@ func findSessionCookie(resp *http.Response) *http.Cookie {
 
 func TestLogin_HappyPath(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -249,8 +292,8 @@ func TestLogin_HappyPath(t *testing.T) {
 	if !strings.Contains(body, "Willkommen") {
 		t.Errorf("home body missing %q marker, got: %s", "Willkommen", body)
 	}
-	if !strings.Contains(body, "ua-user-1") {
-		t.Errorf("home body missing ua_user_id %q, got: %s", "ua-user-1", body)
+	if !strings.Contains(body, testMockName) {
+		t.Errorf("home body missing mock name %q, got: %s", testMockName, body)
 	}
 }
 
@@ -288,7 +331,8 @@ func TestLogin_TokenInvalid(t *testing.T) {
 
 func TestLogin_TokenExpired(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -309,7 +353,8 @@ func TestLogin_TokenExpired(t *testing.T) {
 
 func TestLogin_TokenAlreadyConsumed(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -347,7 +392,10 @@ func TestLogin_TokenAlreadyConsumed(t *testing.T) {
 
 func TestLogin_AlreadyLoggedIn_RedirectsHome(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	const macB = "0c:ea:14:42:42:43"
+	env.seedMockAs(t, macB, "Wohnung 2")
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -357,8 +405,8 @@ func TestLogin_AlreadyLoggedIn_RedirectsHome(t *testing.T) {
 	}
 	resp1.Body.Close()
 
-	// Create a second token but do not consume it.
-	token2, err := env.magic.Create(context.Background(), "ua-user-2")
+	// Create a second token (for the other mock) but do not consume it.
+	token2, err := env.magic.Create(context.Background(), macB)
 	if err != nil {
 		t.Fatalf("second magic.Create: %v", err)
 	}
@@ -411,7 +459,8 @@ func TestHome_RequiresSession(t *testing.T) {
 
 func TestHome_SessionExpired(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -441,7 +490,8 @@ func TestHome_SessionExpired(t *testing.T) {
 
 func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -453,7 +503,7 @@ func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
 
 	var lastSeenBefore int64
 	if err := env.d.QueryRow(
-		`SELECT last_seen FROM sessions WHERE ua_user_id = ?`, "ua-user-1",
+		`SELECT last_seen FROM mieter_sessions WHERE mock_mac = ?`, testMockMAC,
 	).Scan(&lastSeenBefore); err != nil {
 		t.Fatalf("query last_seen before: %v", err)
 	}
@@ -469,13 +519,13 @@ func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp2.StatusCode)
 	}
 	body := readBody(t, resp2)
-	if !strings.Contains(body, "ua-user-1") {
-		t.Errorf("body missing ua_user_id, got: %s", body)
+	if !strings.Contains(body, testMockName) {
+		t.Errorf("body missing mock name, got: %s", body)
 	}
 
 	var lastSeenAfter int64
 	if err := env.d.QueryRow(
-		`SELECT last_seen FROM sessions WHERE ua_user_id = ?`, "ua-user-1",
+		`SELECT last_seen FROM mieter_sessions WHERE mock_mac = ?`, testMockMAC,
 	).Scan(&lastSeenAfter); err != nil {
 		t.Fatalf("query last_seen after: %v", err)
 	}
@@ -488,7 +538,8 @@ func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
 
 func TestLogout_HappyPath(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}
@@ -560,7 +611,8 @@ func TestLogout_IdempotentOnNoSession(t *testing.T) {
 
 func TestCookie_Flags(t *testing.T) {
 	env := newTestServer(t)
-	token, err := env.magic.Create(context.Background(), "ua-user-1")
+	env.seedMock(t)
+	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
 	}

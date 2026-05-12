@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"unifix.local/server/internal/auth/admin"
+	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
@@ -51,6 +52,7 @@ func main() {
 
 	magicSvc := magiclink.New(database)
 	sessionSvc := session.New(database)
+	adminSessionSvc := adminsession.New(database)
 	adminSvc := admin.New(database)
 	platformCfg := platformconfig.New(database, secretsSvc)
 
@@ -96,6 +98,7 @@ func main() {
 		Config:         cfg,
 		MagicLink:      magicSvc,
 		Sessions:       sessionSvc,
+		AdminSessions:  adminSessionSvc,
 		MockManager:    mockMgr,
 		Admin:          adminSvc,
 		PlatformConfig: platformCfg,

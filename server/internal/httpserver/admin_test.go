@@ -404,6 +404,11 @@ func TestAdminMocks_Delete(t *testing.T) {
 }
 
 // ---------- Magic-Link generator ----------
+//
+// Saison 12-06: magic-link generation no longer needs a tenant
+// binding. Any existing mock can issue a link; the token is bound
+// only to the mock's MAC. The "RequiresUserBinding" test from
+// Saison 12-05 has been retired.
 
 func TestAdminMocksMagicLink_RequiresAdminSession(t *testing.T) {
 	env := newTestServer(t)
@@ -434,36 +439,6 @@ func TestAdminMocksMagicLink_NotFound(t *testing.T) {
 	}
 }
 
-func TestAdminMocksMagicLink_RequiresUserBinding(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
-
-	createForm := url.Values{}
-	createForm.Set("name", "No Binding")
-	createForm.Set("mac", "0c:ea:14:55:55:55")
-	createReq, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/a/mocks", strings.NewReader(createForm.Encode()))
-	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if _, err := env.client.Do(createReq); err != nil {
-		t.Fatalf("create mock: %v", err)
-	}
-
-	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/a/mocks/0c:ea:14:55:55:55/magic-link", nil)
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST magic-link: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
-	body := readBody(t, resp)
-	if !strings.Contains(body, "keinem Mieter") {
-		t.Errorf("body missing tenant-binding hint, got: %s", body)
-	}
-}
-
 func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
@@ -476,16 +451,6 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if _, err := env.client.Do(createReq); err != nil {
 		t.Fatalf("create mock: %v", err)
-	}
-
-	bindForm := url.Values{}
-	bindForm.Set("ua_user_id", "ua-user-mueller")
-	bindReq, _ := http.NewRequest(http.MethodPut,
-		env.ts.URL+"/a/mocks/0c:ea:14:77:77:77/binding",
-		strings.NewReader(bindForm.Encode()))
-	bindReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if _, err := env.client.Do(bindReq); err != nil {
-		t.Fatalf("bind user: %v", err)
 	}
 
 	req, _ := http.NewRequest(http.MethodPost,
@@ -507,7 +472,7 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 	}
 
 	// Pluck the token out of the rendered HTML and verify it
-	// actually consumes through to the bound ua_user_id.
+	// actually consumes through to the mock's MAC.
 	const marker = "/m/login?t="
 	idx := strings.Index(body, marker)
 	if idx < 0 {
@@ -519,12 +484,12 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 		t.Fatal("token end marker missing")
 	}
 	token := rest[:end]
-	ua, err := env.magic.Consume(context.Background(), token)
+	mac, err := env.magic.Consume(context.Background(), token)
 	if err != nil {
 		t.Fatalf("consume token: %v", err)
 	}
-	if ua != "ua-user-mueller" {
-		t.Errorf("consume returned ua=%q, want ua-user-mueller", ua)
+	if mac != "0c:ea:14:77:77:77" {
+		t.Errorf("consume returned mac=%q, want 0c:ea:14:77:77:77", mac)
 	}
 }
 
@@ -540,43 +505,6 @@ func TestAdminMocksMagicLink_RejectsBadMAC(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestAdminMocks_BindingUpdate(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
-
-	form := url.Values{}
-	form.Set("name", "Binding Test")
-	form.Set("mac", "0c:ea:14:22:22:22")
-	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/mocks", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if _, err := env.client.Do(req); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	bindForm := url.Values{}
-	bindForm.Set("ua_user_id", "ua-user-xyz")
-	bindReq, _ := http.NewRequest(http.MethodPut,
-		env.ts.URL+"/a/mocks/0c:ea:14:22:22:22/binding",
-		strings.NewReader(bindForm.Encode()))
-	bindReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := env.client.Do(bindReq)
-	if err != nil {
-		t.Fatalf("PUT binding: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
-	}
-
-	got, err := env.mockMgr.LookupUserByMAC(context.Background(), "0c:ea:14:22:22:22")
-	if err != nil {
-		t.Fatalf("LookupUserByMAC: %v", err)
-	}
-	if got != "ua-user-xyz" {
-		t.Errorf("LookupUserByMAC = %q, want ua-user-xyz", got)
 	}
 }
 

@@ -17,15 +17,18 @@ const defaultEventsHeartbeat = 30 * time.Second
 
 // handleMieterEvents holds a long-lived SSE connection for one
 // tenant browser. It registers a doorbellhub subscriber for the
-// session's ua_user_id and streams events as they arrive.
+// session's mock_mac and streams events as they arrive.
 //
 // The handler returns on client disconnect (r.Context().Done)
 // or server shutdown. The defer cleanup() releases the hub
 // subscription and closes the events channel so no goroutine
 // leaks behind the listener.
+//
+// Saison 12-06: subscriptions are keyed by mock_mac, matching
+// the new mock-centric routing model.
 func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
-	uaUserID := UAUserIDFromContext(r.Context())
-	if uaUserID == "" {
+	mockMAC := MockMACFromContext(r.Context())
+	if mockMAC == "" {
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
@@ -47,7 +50,7 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	sub, cleanup := s.hub.Subscribe(uaUserID)
+	sub, cleanup := s.hub.Subscribe(mockMAC)
 	defer cleanup()
 
 	// Initial comment so the browser onopen fires immediately.
