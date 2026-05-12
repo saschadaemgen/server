@@ -45,6 +45,12 @@ type Config struct {
 	// embedded mock viewer keeps its per-mock state and certs.
 	// Default "./state/mocks".
 	MockStateDir string
+
+	// SecretsKeySet mirrors whether UNIFIX_SECRETS_KEY is set in
+	// the environment. The actual key bytes are read by the
+	// secrets package; Config only carries the boolean so
+	// Validate can warn (not fail) when the operator forgot it.
+	SecretsKeySet bool
 }
 
 const (
@@ -61,20 +67,22 @@ const (
 	envBaseURL          = "UNIFIX_BASE_URL"
 	envServerIPv4       = "UNIFIX_SERVER_IPV4"
 	envMockStateDir     = "UNIFIX_MOCK_STATE_DIR"
+	envSecretsKey       = "UNIFIX_SECRETS_KEY"
 )
 
 // FromEnv reads the unifix environment variables and fills in
 // defaults for empty fields.
 func FromEnv() Config {
 	cfg := Config{
-		ListenAddr:   os.Getenv(envListenAddr),
-		CertFile:     os.Getenv(envCertFile),
-		KeyFile:      os.Getenv(envKeyFile),
-		DBPath:       os.Getenv(envDBPath),
-		DevMode:      parseBool(os.Getenv(envDevMode)),
-		BaseURL:      os.Getenv(envBaseURL),
-		ServerIPv4:   os.Getenv(envServerIPv4),
-		MockStateDir: os.Getenv(envMockStateDir),
+		ListenAddr:    os.Getenv(envListenAddr),
+		CertFile:      os.Getenv(envCertFile),
+		KeyFile:       os.Getenv(envKeyFile),
+		DBPath:        os.Getenv(envDBPath),
+		DevMode:       parseBool(os.Getenv(envDevMode)),
+		BaseURL:       os.Getenv(envBaseURL),
+		ServerIPv4:    os.Getenv(envServerIPv4),
+		MockStateDir:  os.Getenv(envMockStateDir),
+		SecretsKeySet: os.Getenv(envSecretsKey) != "",
 	}
 	if cfg.ListenAddr == "" {
 		if cfg.DevMode {
