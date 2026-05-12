@@ -13,11 +13,13 @@ package httpserver
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/magiclink"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
+	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/uaapi"
@@ -36,23 +38,32 @@ type Deps struct {
 	PlatformConfig *platformconfig.Service
 	// UA is built lazily by main once the operator has saved a
 	// base URL and token. Nil means "not configured yet".
-	UA  *uaapi.Client
-	Log *slog.Logger
+	UA *uaapi.Client
+	// Hub fans doorbell events from mockmanager out to per-user
+	// SSE subscribers. Nil disables /m/events with 503.
+	Hub *doorbellhub.Hub
+	// EventsHeartbeat overrides the SSE keepalive interval.
+	// Zero falls back to defaultEventsHeartbeat (30s); tests
+	// inject something shorter.
+	EventsHeartbeat time.Duration
+	Log             *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
 type Server struct {
-	cfg         config.Config
-	magic       *magiclink.Service
-	sessions    *session.Service
-	mockMgr     *mockmanager.Manager
-	admin       *admin.Service
-	platformCfg *platformconfig.Service
-	ua          *uaapi.Client
-	log         *slog.Logger
-	mux         *http.ServeMux
-	tpl         *adminTemplates
-	uaFactory   func() *uaapi.Client // for late-binding after settings save
+	cfg             config.Config
+	magic           *magiclink.Service
+	sessions        *session.Service
+	mockMgr         *mockmanager.Manager
+	admin           *admin.Service
+	platformCfg     *platformconfig.Service
+	ua              *uaapi.Client
+	hub             *doorbellhub.Hub
+	eventsHeartbeat time.Duration
+	log             *slog.Logger
+	mux             *http.ServeMux
+	tpl             *adminTemplates
+	uaFactory       func() *uaapi.Client // for late-binding after settings save
 }
 
 // New constructs the Server with all routes registered.
@@ -65,16 +76,18 @@ func New(deps Deps) (*Server, error) {
 		deps.Log = slog.Default()
 	}
 	srv := &Server{
-		cfg:         deps.Config,
-		magic:       deps.MagicLink,
-		sessions:    deps.Sessions,
-		mockMgr:     deps.MockManager,
-		admin:       deps.Admin,
-		platformCfg: deps.PlatformConfig,
-		ua:          deps.UA,
-		log:         deps.Log.With("component", "httpserver"),
-		mux:         http.NewServeMux(),
-		tpl:         tpl,
+		cfg:             deps.Config,
+		magic:           deps.MagicLink,
+		sessions:        deps.Sessions,
+		mockMgr:         deps.MockManager,
+		admin:           deps.Admin,
+		platformCfg:     deps.PlatformConfig,
+		ua:              deps.UA,
+		hub:             deps.Hub,
+		eventsHeartbeat: deps.EventsHeartbeat,
+		log:             deps.Log.With("component", "httpserver"),
+		mux:             http.NewServeMux(),
+		tpl:             tpl,
 	}
 	srv.routes()
 	return srv, nil
@@ -91,6 +104,7 @@ func (s *Server) routes() {
 	// Tenant tree.
 	s.mux.HandleFunc("GET /m/login", s.handleLogin)
 	s.mux.Handle("POST /m/logout", s.requireSession(http.HandlerFunc(s.handleLogout)))
+	s.mux.Handle("GET /m/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
 	s.mux.Handle("GET /m/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
 	// Admin tree.
