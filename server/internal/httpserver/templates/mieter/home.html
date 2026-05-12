@@ -1,111 +1,81 @@
 {{define "mieter_home"}}<!doctype html>
-<html lang="de" class="dark">
+<html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>unifix Mieter</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  darkMode: 'class',
-  theme: {
-    extend: {
-      fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
-      },
-      keyframes: {
-        bellPulse: {
-          '0%, 100%': { transform: 'scale(1)' },
-          '50%':      { transform: 'scale(1.08)' },
-        },
-        bellSwing: {
-          '0%, 100%': { transform: 'rotate(-6deg)' },
-          '50%':      { transform: 'rotate(6deg)' },
-        },
-      },
-      animation: {
-        bellPulse: 'bellPulse 1.2s ease-in-out infinite',
-        bellSwing: 'bellSwing 0.6s ease-in-out infinite',
-      },
-    },
-  },
-}
-</script>
-<style>
-/* Inline so the keyframes also apply if Tailwind CDN is slow. */
-@keyframes bellPulseInline { 0%,100%{transform:scale(1);} 50%{transform:scale(1.08);} }
-@keyframes bellSwingInline { 0%,100%{transform:rotate(-6deg);} 50%{transform:rotate(6deg);} }
-.bell-pulse { animation: bellPulseInline 1.2s ease-in-out infinite; }
-.bell-swing { animation: bellSwingInline 0.6s ease-in-out infinite; transform-origin: 50% 10%; }
-</style>
+<title>unifix</title>
+{{template "theme_head" .}}
 </head>
-<body class="bg-zinc-950 text-zinc-100 font-sans antialiased min-h-screen">
+<body class="bg-app-bg text-app-text antialiased min-h-screen">
 
-<header class="border-b border-zinc-800 bg-zinc-900/50">
+<header class="border-b border-app-border bg-app-glass backdrop-blur sticky top-0 z-30">
   <div class="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
-    <span class="font-semibold tracking-tight">unifix</span>
-    <div class="flex items-center gap-4">
-      <span class="relative inline-flex items-center text-zinc-400" title="Ungelesene Klingeln">
+    <span class="font-semibold tracking-tight text-app-text">unifix</span>
+    <div class="flex items-center gap-3">
+      <span class="relative inline-flex items-center text-app-text-2" title="Ungelesene Klingeln">
         <span class="w-5 h-5">{{icon "bell"}}</span>
-        <span id="unread-badge"
-              class="absolute -top-1.5 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-cyan-500 text-zinc-950 text-[10px] font-semibold flex items-center justify-center {{if eq .UnreadCount 0}}hidden{{end}}">
+        <span id="unread-badge" class="unread-badge {{if eq .UnreadCount 0}}hidden{{end}}">
           {{.UnreadCount}}
         </span>
       </span>
-      <span id="status" class="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-        <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span> verbinde...
+      <span id="status" class="inline-flex items-center text-xs text-app-text-2">
+        <span class="status-dot offline"></span><span id="status-label">verbinde...</span>
       </span>
-      <form method="POST" action="/m/logout" class="inline">
-        <button class="text-xs text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1.5">
-          <span class="w-4 h-4">{{icon "log-out"}}</span> Abmelden
-        </button>
-      </form>
+      {{template "theme_toggle" .}}
     </div>
   </div>
 </header>
 
 <main class="max-w-3xl mx-auto px-6 py-12">
-  <h1 class="text-3xl font-semibold tracking-tight mb-2">Willkommen</h1>
-  <p class="text-zinc-400">Wenn jemand an der Tuer klingelt, erscheint hier eine Benachrichtigung.</p>
+  <h1 class="headline-xl mb-2">Willkommen</h1>
+  <p class="body-text text-app-text-2">
+    Wenn jemand an der Tuer klingelt, erscheint hier eine Benachrichtigung.
+  </p>
 
-  <div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5 text-sm text-zinc-400">
-    <p>Geraet: <span class="text-zinc-100">{{.MockName}}</span></p>
-    <p class="mt-2 text-zinc-500">Diese Seite bleibt offen und verbindet sich automatisch wieder, falls die Verbindung kurz abreisst.</p>
-  </div>
+  <section class="solid-card mt-10 p-5">
+    <div class="flex items-center gap-4">
+      <span class="w-6 h-6 text-app-blue">{{icon "home"}}</span>
+      <div class="flex-1">
+        <div class="headline-m">{{.MockName}}</div>
+        <div class="small-text text-app-text-2 mt-0.5">
+          <span class="status-dot live"></span>aktiv
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <section class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-    <header class="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
-      <h2 class="font-medium">Letzte Klingeln</h2>
-      <span class="text-xs text-zinc-500">letzte {{len .History}} Eintraege</span>
+  <section class="solid-card mt-6 overflow-hidden">
+    <header class="px-5 py-4 border-b border-app-border-2 flex items-center justify-between">
+      <h2 class="headline-m">Letzte Klingeln</h2>
+      <span class="small-text text-app-text-3">letzte {{len .History}} Eintraege</span>
     </header>
-    <ul id="history-list" class="divide-y divide-zinc-800">
+    <ul id="history-list" class="divide-y divide-app-border-2">
       {{if not .History}}
-      <li class="px-5 py-6 text-sm text-zinc-500 text-center">
+      <li class="px-5 py-8 small-text text-app-text-3 text-center">
         Noch keine Klingeln aufgezeichnet.
       </li>
       {{end}}
       {{range .History}}
-      <li id="history-row-{{.ID}}" class="px-5 py-3 flex items-center justify-between text-sm">
+      <li id="history-row-{{.ID}}" class="px-5 py-3 flex items-center justify-between">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="w-4 h-4 text-zinc-500">{{icon "bell"}}</span>
+          <span class="w-4 h-4 text-app-text-3">{{icon "bell"}}</span>
           <div class="min-w-0">
-            <div class="text-zinc-200 truncate">{{.OccurredAt}}</div>
-            <div class="text-xs text-zinc-500 truncate">
+            <div class="body-text text-app-text truncate">{{.OccurredAt}}</div>
+            <div class="small-text text-app-text-3 truncate">
               {{if .IntercomMAC}}Klingelschild <span class="font-mono">{{.IntercomMAC}}</span>{{else}}Klingelschild unbekannt{{end}}
             </div>
           </div>
         </div>
         <div class="flex items-center gap-3 flex-shrink-0">
-          <span class="text-xs
-            {{if eq .Status "abgebrochen"}}text-zinc-400
-            {{else if eq .Status "beantwortet"}}text-emerald-300
-            {{else if eq .Status "beendet"}}text-zinc-300
-            {{else}}text-amber-300{{end}}">
+          <span class="small-text
+            {{if eq .Status "abgebrochen"}}text-app-text-3
+            {{else if eq .Status "beantwortet"}}text-app-green
+            {{else if eq .Status "beendet"}}text-app-text-2
+            {{else}}text-app-amber{{end}}">
             {{.Status}}
           </span>
           {{if .Unread}}
-          <span class="text-[10px] uppercase tracking-wider bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded">neu</span>
+          <span class="pill-badge">neu</span>
           {{end}}
         </div>
       </li>
@@ -114,59 +84,72 @@ tailwind.config = {
   </section>
 </main>
 
-<!-- Klingel-Overlay, zeigt sich beim doorbell_start, blendet aus bei doorbell_cancel oder lokaler Schliessen-Klick. -->
-<div id="ring-overlay" class="hidden fixed inset-0 z-50 bg-zinc-950/90 backdrop-blur flex items-center justify-center px-6">
-  <div class="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center shadow-2xl">
-    <div class="mx-auto w-24 h-24 text-cyan-400 mb-6 bell-pulse">
-      <div class="bell-swing">{{icon "bell"}}</div>
+<!-- Saison 13-02: full-screen bell overlay with blur backdrop,
+     glowing icon, spring-bounce entry, wobble loop, pulse-rings,
+     and Apple-style pill buttons. The "Annehmen" button is
+     visible but disabled; Saison 13-03 will wire the lifecycle. -->
+<div id="ring-overlay" class="bell-backdrop hidden">
+  <div class="w-full max-w-md text-center">
+    <div class="bell-stage">
+      <span class="pulse-ring"></span>
+      <span class="pulse-ring delay-2"></span>
+      <span class="bell-icon-wrap">{{icon "bell-ring"}}</span>
     </div>
-    <h2 class="text-3xl font-semibold tracking-tight mb-2">Es klingelt</h2>
-    <p class="text-zinc-400 mb-8">An der Eingangstuer wird soeben gelaeutet.</p>
 
-    <dl class="text-sm text-left bg-zinc-950 border border-zinc-800 rounded-lg p-4 mb-8 space-y-2">
-      <div class="flex justify-between gap-4">
-        <dt class="text-zinc-500">Zeit</dt>
-        <dd id="ring-time" class="font-mono text-zinc-300">-</dd>
+    <h2 class="headline-xl mb-2">Es klingelt</h2>
+    <p id="ring-subtitle" class="body-text text-app-text-2 mb-8">An der Eingangstuer wird gelaeutet.</p>
+
+    <dl class="text-left glass-card p-4 mb-8 space-y-2">
+      <div class="flex justify-between gap-4 small-text">
+        <dt class="text-app-text-3">Zeit</dt>
+        <dd id="ring-time" class="font-mono text-app-text">-</dd>
       </div>
-      <div class="flex justify-between gap-4">
-        <dt class="text-zinc-500">Empfaenger</dt>
-        <dd id="ring-mock-mac" class="font-mono text-xs text-zinc-400">-</dd>
+      <div class="flex justify-between gap-4 small-text">
+        <dt class="text-app-text-3">Empfaenger</dt>
+        <dd id="ring-mock-name" class="text-app-text truncate max-w-[60%]">{{.MockName}}</dd>
       </div>
     </dl>
 
-    <button id="ring-close"
-      class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium rounded py-3 transition-colors">
-      Schliessen
-    </button>
+    <div class="flex flex-col sm:flex-row gap-3 sm:justify-center">
+      <button id="ring-accept" type="button"
+              class="btn-pill btn-primary w-full sm:w-auto"
+              disabled title="Wird in Saison 13-03 funktional">
+        <span class="w-4 h-4">{{icon "phone"}}</span> Annehmen
+      </button>
+      <button id="ring-reject" type="button"
+              class="btn-pill btn-secondary w-full sm:w-auto">
+        <span class="w-4 h-4">{{icon "phone-off"}}</span> Ignorieren
+      </button>
+    </div>
   </div>
 </div>
 
 <script>
 (function() {
-  const evtSource    = new EventSource('/m/events');
-  const statusEl     = document.getElementById('status');
-  const overlay      = document.getElementById('ring-overlay');
-  const mockEl       = document.getElementById('ring-mock-mac');
-  const timeEl       = document.getElementById('ring-time');
-  const closeBtn     = document.getElementById('ring-close');
-  const unreadBadge  = document.getElementById('unread-badge');
-  const historyList  = document.getElementById('history-list');
+  var evtSource    = new EventSource('/m/events');
+  var statusLabel  = document.getElementById('status-label');
+  var statusDot    = document.querySelector('#status .status-dot');
+  var overlay      = document.getElementById('ring-overlay');
+  var timeEl       = document.getElementById('ring-time');
+  var rejectBtn    = document.getElementById('ring-reject');
+  var unreadBadge  = document.getElementById('unread-badge');
+  var historyList  = document.getElementById('history-list');
 
   function setStatus(state) {
-    if (!statusEl) return;
+    if (!statusLabel || !statusDot) return;
     if (state === 'live') {
-      statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> live';
-      statusEl.className = 'inline-flex items-center gap-1.5 text-xs text-zinc-300';
+      statusLabel.textContent = 'live';
+      statusDot.className = 'status-dot live';
     } else {
-      statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> verbinde wieder...';
-      statusEl.className = 'inline-flex items-center gap-1.5 text-xs text-amber-400';
+      statusLabel.textContent = 'verbinde wieder...';
+      statusDot.className = 'status-dot warning';
     }
   }
 
   function bumpUnread(delta) {
     if (!unreadBadge) return;
-    const current = parseInt(unreadBadge.textContent || '0', 10) || 0;
-    const next = Math.max(0, current + delta);
+    var current = parseInt(unreadBadge.textContent || '0', 10) || 0;
+    var next = Math.max(0, current + delta);
     unreadBadge.textContent = next.toString();
     if (next > 0) {
       unreadBadge.classList.remove('hidden');
@@ -176,69 +159,71 @@ tailwind.config = {
   }
 
   function formatLocal(unixMillis) {
-    const d = new Date(unixMillis);
-    const pad = (n) => n.toString().padStart(2, '0');
+    var d = new Date(unixMillis);
+    var pad = function(n) { return n.toString().padStart(2, '0'); };
     return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
       ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
   function prependHistory(data) {
-    if (!historyList) return;
-    if (!data.event_id) return;
-    const empty = historyList.querySelector('li.text-zinc-500.text-center');
+    if (!historyList || !data.event_id) return;
+    var empty = historyList.querySelector('li.text-center');
     if (empty) empty.remove();
-    const li = document.createElement('li');
+    var li = document.createElement('li');
     li.id = 'history-row-' + data.event_id;
-    li.className = 'px-5 py-3 flex items-center justify-between text-sm';
-    const occurred = data.created_at ? formatLocal(data.created_at) : '-';
-    const intercom = data.device_id
+    li.className = 'px-5 py-3 flex items-center justify-between';
+    var occurred = data.created_at ? formatLocal(data.created_at) : '-';
+    var intercom = data.device_id
       ? 'Klingelschild <span class="font-mono">' + data.device_id + '</span>'
       : 'Klingelschild unbekannt';
     li.innerHTML =
       '<div class="flex items-center gap-3 min-w-0">' +
-        '<span class="w-4 h-4 text-zinc-500"></span>' +
+        '<span class="w-4 h-4 text-app-text-3"></span>' +
         '<div class="min-w-0">' +
-          '<div class="text-zinc-200 truncate">' + occurred + '</div>' +
-          '<div class="text-xs text-zinc-500 truncate">' + intercom + '</div>' +
+          '<div class="body-text text-app-text truncate">' + occurred + '</div>' +
+          '<div class="small-text text-app-text-3 truncate">' + intercom + '</div>' +
         '</div>' +
       '</div>' +
       '<div class="flex items-center gap-3 flex-shrink-0">' +
-        '<span class="text-xs text-amber-300">laeuft</span>' +
-        '<span class="text-[10px] uppercase tracking-wider bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded">neu</span>' +
+        '<span class="small-text text-app-amber">laeuft</span>' +
+        '<span class="pill-badge">neu</span>' +
       '</div>';
     historyList.insertBefore(li, historyList.firstChild);
   }
 
   function showRing(data) {
     if (!overlay) return;
-    mockEl.textContent = data.mock_mac || '-';
     if (data.created_at) {
-      const t = new Date(data.created_at);
+      var t = new Date(data.created_at);
       timeEl.textContent = t.toLocaleTimeString('de-DE');
     } else {
       timeEl.textContent = new Date().toLocaleTimeString('de-DE');
     }
-    overlay.classList.remove('hidden');
+    overlay.classList.remove('hidden', 'is-leaving');
   }
 
   function hideRing() {
-    if (!overlay) return;
-    overlay.classList.add('hidden');
+    if (!overlay || overlay.classList.contains('hidden')) return;
+    overlay.classList.add('is-leaving');
+    setTimeout(function() {
+      overlay.classList.add('hidden');
+      overlay.classList.remove('is-leaving');
+    }, 200);
   }
 
-  evtSource.addEventListener('doorbell_start', (e) => {
+  evtSource.addEventListener('doorbell_start', function(e) {
     try {
-      const data = JSON.parse(e.data);
+      var data = JSON.parse(e.data);
       showRing(data);
       prependHistory(data);
       bumpUnread(1);
     } catch (_) {}
   });
-  evtSource.addEventListener('doorbell_cancel', () => hideRing());
-  evtSource.onopen  = () => setStatus('live');
-  evtSource.onerror = () => setStatus('disconnected');
+  evtSource.addEventListener('doorbell_cancel', function() { hideRing(); });
+  evtSource.onopen  = function() { setStatus('live'); };
+  evtSource.onerror = function() { setStatus('disconnected'); };
 
-  if (closeBtn) closeBtn.addEventListener('click', hideRing);
+  if (rejectBtn) rejectBtn.addEventListener('click', hideRing);
 })();
 </script>
 
