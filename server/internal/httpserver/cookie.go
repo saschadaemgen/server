@@ -32,12 +32,16 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	})
 }
 
-// Saison 13-02 removed clearSessionCookie: the mieter UI no
-// longer has a logout button, the cookie is quasi-permanent, and
-// no other code path needs to actively clear the cookie. If a
-// future feature has to drop the session client-side again,
-// reintroduce a helper symmetric to setSessionCookie with
-// MaxAge=-1.
+// Saison 13-02-FIX note: the cookie-swap bug reported by Sascha
+// turned out to be the optimistic short-circuit in handler_login,
+// not multi-path cookie pollution. The handler now consumes the
+// token whenever the URL carries one, and the regression is
+// covered by TestMagicLinkSessionSwap_SameBrowser. If a future
+// build ever needs to wipe a legacy cookie scope (e.g. an older
+// version that scoped to "/"), reintroduce a helper here and
+// call it BEFORE setSessionCookie, but mind that any tests that
+// pick the first matching cookie via response order will then
+// have to filter out the wipe entry.
 
 // readSessionCookie returns the cookie value or "" if absent.
 func readSessionCookie(r *http.Request) string {

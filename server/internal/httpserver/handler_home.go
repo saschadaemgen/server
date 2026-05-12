@@ -44,6 +44,15 @@ type mieterHistoryRow struct {
 // the user can see "neu" appear when they leave the page open.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	mac := MockMACFromContext(r.Context())
+	// Defensive: refuse to fall back to "any mock" when the
+	// session somehow landed here without a MAC on the context.
+	// requireSession should never let that happen, but if it
+	// ever does we redirect to /m/login rather than show the
+	// first mock-by-row-order (Saison 13-02-FIX guardrail).
+	if mac == "" {
+		http.Redirect(w, r, "/m/login", http.StatusSeeOther)
+		return
+	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {

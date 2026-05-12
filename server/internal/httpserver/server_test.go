@@ -395,11 +395,18 @@ func TestLogin_TokenAlreadyConsumed(t *testing.T) {
 	}
 }
 
-func TestLogin_AlreadyLoggedIn_RedirectsHome(t *testing.T) {
+// TestLogin_AlreadyLoggedIn_NoToken covers the legitimate
+// "browser back to /m/login" case: an already-signed-in tenant
+// hits /m/login without a token in the URL. We redirect to /m/
+// without burning anything.
+//
+// The opposite case (logged in PLUS a fresh token in the URL)
+// must NOT short-circuit; it must consume the token and swap the
+// session. That branch is covered by
+// TestMagicLinkSessionSwap_SameBrowser further down.
+func TestLogin_AlreadyLoggedIn_NoToken(t *testing.T) {
 	env := newTestServer(t)
 	env.seedMock(t)
-	const macB = "0c:ea:14:42:42:43"
-	env.seedMockAs(t, macB, "Wohnung 2")
 	token, err := env.magic.Create(context.Background(), testMockMAC)
 	if err != nil {
 		t.Fatalf("magic.Create: %v", err)
@@ -410,14 +417,9 @@ func TestLogin_AlreadyLoggedIn_RedirectsHome(t *testing.T) {
 	}
 	resp1.Body.Close()
 
-	// Create a second token (for the other mock) but do not consume it.
-	token2, err := env.magic.Create(context.Background(), macB)
+	resp2, err := env.client.Get(env.ts.URL + "/m/login")
 	if err != nil {
-		t.Fatalf("second magic.Create: %v", err)
-	}
-	resp2, err := env.client.Get(env.ts.URL + "/m/login?t=" + token2)
-	if err != nil {
-		t.Fatalf("second GET /m/login: %v", err)
+		t.Fatalf("token-less /m/login: %v", err)
 	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusSeeOther {
@@ -426,22 +428,89 @@ func TestLogin_AlreadyLoggedIn_RedirectsHome(t *testing.T) {
 	if loc := resp2.Header.Get("Location"); loc != "/m/" {
 		t.Errorf("Location = %q, want %q", loc, "/m/")
 	}
+}
 
-	// token2 must still be consumable from a fresh client.
-	jar3, _ := cookiejar.New(nil)
+// TestMagicLinkSessionSwap_SameBrowser is the regression test for
+// the Saison 13-02-FIX cookie bug. Same cookie jar, two magic
+// links, two mocks: after the second click the home page MUST
+// render the second mock, not the first.
+func TestMagicLinkSessionSwap_SameBrowser(t *testing.T) {
+	env := newTestServer(t)
+	const (
+		macA   = "0c:ea:14:42:42:42"
+		nameA  = "Mock A leerstand"
+		macB   = "0c:ea:14:42:42:43"
+		nameB  = "Mock B Daemgen"
+	)
+	env.seedMockAs(t, macA, nameA)
+	env.seedMockAs(t, macB, nameB)
+
+	tokenA, err := env.magic.Create(context.Background(), macA)
+	if err != nil {
+		t.Fatalf("magic.Create A: %v", err)
+	}
+	tokenB, err := env.magic.Create(context.Background(), macB)
+	if err != nil {
+		t.Fatalf("magic.Create B: %v", err)
+	}
+
+	// Click 1: login as mock A.
+	respA, err := env.client.Get(env.ts.URL + "/m/login?t=" + tokenA)
+	if err != nil {
+		t.Fatalf("GET /m/login A: %v", err)
+	}
+	respA.Body.Close()
+	if respA.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login A status = %d, want 303", respA.StatusCode)
+	}
+	homeA, err := env.client.Get(env.ts.URL + "/m/")
+	if err != nil {
+		t.Fatalf("GET /m/ after A: %v", err)
+	}
+	bodyA := readBody(t, homeA)
+	if !strings.Contains(bodyA, nameA) {
+		t.Fatalf("home after A missing %q in body", nameA)
+	}
+
+	// Click 2: SAME cookie jar, login as mock B.
+	respB, err := env.client.Get(env.ts.URL + "/m/login?t=" + tokenB)
+	if err != nil {
+		t.Fatalf("GET /m/login B: %v", err)
+	}
+	respB.Body.Close()
+	if respB.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login B status = %d, want 303 (token must be consumed, not short-circuited)", respB.StatusCode)
+	}
+
+	// /m/ must now render mock B, NOT mock A.
+	homeB, err := env.client.Get(env.ts.URL + "/m/")
+	if err != nil {
+		t.Fatalf("GET /m/ after B: %v", err)
+	}
+	bodyB := readBody(t, homeB)
+	if !strings.Contains(bodyB, nameB) {
+		t.Errorf("home after B missing %q in body (cookie swap broken)", nameB)
+	}
+	if strings.Contains(bodyB, nameA) {
+		t.Errorf("home after B still contains %q (stale session leaked)", nameA)
+	}
+
+	// And the second token must be marked consumed in the DB now;
+	// re-using it from a fresh jar must fail.
+	jar2, _ := cookiejar.New(nil)
 	fresh := &http.Client{
-		Jar: jar3,
+		Jar: jar2,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp3, err := fresh.Get(env.ts.URL + "/m/login?t=" + token2)
+	respReuse, err := fresh.Get(env.ts.URL + "/m/login?t=" + tokenB)
 	if err != nil {
-		t.Fatalf("third GET /m/login: %v", err)
+		t.Fatalf("reuse token B: %v", err)
 	}
-	resp3.Body.Close()
-	if resp3.StatusCode != http.StatusSeeOther {
-		t.Errorf("token2 should still be valid, status = %d", resp3.StatusCode)
+	respReuse.Body.Close()
+	if respReuse.StatusCode != http.StatusBadRequest {
+		t.Errorf("token B reuse status = %d, want 400 (token must be consumed)", respReuse.StatusCode)
 	}
 }
 
