@@ -2,51 +2,51 @@
 <div class="min-h-[70vh] flex items-center justify-center">
   <div class="w-full max-w-sm">
     <div class="mb-8 text-center">
-      <h1 class="text-2xl font-semibold tracking-tight">unifix admin</h1>
-      <p class="text-sm text-zinc-400 mt-1">
+      <h1 class="headline-l">unifix admin</h1>
+      <p class="small-text text-app-text-2 mt-1">
         {{if .Setup}}Erstmaliger Setup: lege den Admin-Account an.{{else}}Anmeldung erforderlich.{{end}}
       </p>
     </div>
 
-    <form method="POST" action="/a/login" class="bg-zinc-900 border border-zinc-800 rounded-lg p-6 space-y-4">
+    <form method="POST" action="/a/login" class="solid-card p-6 space-y-4">
       {{if .Setup}}
       <input type="hidden" name="setup" value="1">
       {{end}}
 
       {{if .Error}}
-      <div class="bg-red-950/50 border border-red-900 text-red-200 text-sm rounded px-3 py-2">
+      <div class="text-app-red small-text rounded-button border border-app-red/40 px-3 py-2"
+           style="background: color-mix(in srgb, var(--accent-red) 12%, transparent);">
         {{.Error}}
       </div>
       {{end}}
 
       <div>
-        <label class="block text-xs uppercase tracking-wider text-zinc-400 mb-1.5">Benutzername</label>
+        <label class="block caption mb-1.5">Benutzername</label>
         <input type="text" name="username" autocomplete="username" required autofocus
           value="{{.Username}}"
-          class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50">
+          class="w-full">
       </div>
 
       <div>
-        <label class="block text-xs uppercase tracking-wider text-zinc-400 mb-1.5">Passwort</label>
+        <label class="block caption mb-1.5">Passwort</label>
         <input type="password" name="password" autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}" required
-          class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50">
+          class="w-full">
       </div>
 
       {{if .Setup}}
       <div>
-        <label class="block text-xs uppercase tracking-wider text-zinc-400 mb-1.5">Passwort wiederholen</label>
+        <label class="block caption mb-1.5">Passwort wiederholen</label>
         <input type="password" name="password_confirm" autocomplete="new-password" required
-          class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50">
+          class="w-full">
       </div>
       {{end}}
 
-      <button type="submit"
-        class="w-full bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-medium rounded py-2 transition-colors">
+      <button type="submit" class="btn-pill btn-primary w-full">
         {{if .Setup}}Admin anlegen{{else}}Anmelden{{end}}
       </button>
     </form>
 
-    <p class="text-xs text-zinc-500 text-center mt-4">unifix Plattform - Saison 12</p>
+    <p class="caption text-center mt-4">unifix Plattform - Saison 13</p>
   </div>
 </div>
 {{end}}

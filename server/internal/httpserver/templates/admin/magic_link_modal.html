@@ -1,34 +1,36 @@
 {{define "magic_link_modal"}}<div id="modal-backdrop"
-     class="fixed inset-0 bg-zinc-950/80 backdrop-blur z-50 flex items-center justify-center px-4"
+     class="bell-backdrop"
+     style="z-index: 60;"
      onclick="this.remove()">
-  <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6 max-w-2xl w-full shadow-2xl"
+  <div class="glass-card p-6 max-w-2xl w-full"
+       style="box-shadow: var(--shadow-overlay);"
        onclick="event.stopPropagation()">
     <div class="flex items-start justify-between mb-5">
       <div>
-        <h3 class="text-lg font-semibold tracking-tight">Login-Link fuer {{.MockName}}</h3>
-        <p class="text-sm text-zinc-400 mt-1">Gueltig 24 Stunden, einmalig verwendbar.</p>
+        <h3 class="headline-m">Login-Link fuer {{.MockName}}</h3>
+        <p class="small-text text-app-text-2 mt-1">Gueltig 24 Stunden, einmalig verwendbar.</p>
       </div>
       <button type="button" onclick="document.getElementById('modal-backdrop').remove()"
-              class="text-zinc-500 hover:text-zinc-300">
+              class="text-app-text-3 hover:text-app-text">
         <span class="w-5 h-5 inline-block">{{icon "x"}}</span>
       </button>
     </div>
 
     <input id="magic-link-url" type="text" readonly value="{{.URL}}"
            onclick="this.select()"
-           class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50">
+           class="w-full font-mono">
 
-    <p class="text-xs text-zinc-500 mt-2">
+    <p class="small-text text-app-text-3 mt-2">
       Mock-MAC: <span class="font-mono">{{.MockMAC}}</span>
     </p>
 
     <div class="flex gap-2 justify-end mt-5">
       <button type="button" onclick="document.getElementById('modal-backdrop').remove()"
-              class="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded px-4 py-2 text-sm transition-colors">
+              class="btn-pill btn-secondary">
         Schliessen
       </button>
       <button type="button" id="copy-btn" onclick="copyMagicLink()"
-              class="bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-medium rounded px-4 py-2 text-sm inline-flex items-center gap-2 transition-colors">
+              class="btn-pill btn-primary">
         <span class="w-4 h-4">{{icon "copy"}}</span>
         <span id="copy-label">In Zwischenablage kopieren</span>
       </button>

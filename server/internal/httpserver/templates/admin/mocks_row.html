@@ -1,30 +1,28 @@
-{{define "mock_row"}}<tr id="mock-row-{{macID .MAC}}" class="hover:bg-zinc-950/40">
-  <td class="px-4 py-3 font-mono text-xs text-zinc-300">{{.MAC}}</td>
-  <td class="px-4 py-3">{{.Name}}</td>
-  <td class="px-4 py-3 font-mono text-xs text-zinc-400">{{.ServicePort}}</td>
-  <td class="px-4 py-3">
+{{define "mock_row"}}<tr id="mock-row-{{macID .MAC}}">
+  <td class="font-mono text-app-text-2" style="font-size: 12px;">{{.MAC}}</td>
+  <td class="text-app-text">{{.Name}}</td>
+  <td class="font-mono text-app-text-3" style="font-size: 12px;">{{.ServicePort}}</td>
+  <td>
     {{if .Running}}
-    <span class="inline-flex items-center gap-1.5 text-xs">
-      <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
-      <span class="text-zinc-300">laeuft</span>
+    <span class="inline-flex items-center small-text text-app-text">
+      <span class="status-dot live"></span>laeuft
     </span>
     {{else}}
-    <span class="inline-flex items-center gap-1.5 text-xs">
-      <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
-      <span class="text-zinc-500">aus</span>
+    <span class="inline-flex items-center small-text text-app-text-3">
+      <span class="status-dot offline"></span>aus
     </span>
     {{end}}
   </td>
-  <td class="px-4 py-3 text-right">
+  <td class="text-right">
     <div class="flex items-center justify-end gap-3">
       <button hx-post="/a/mocks/{{.MAC}}/magic-link" hx-target="#modal-slot" hx-swap="innerHTML"
-        class="text-xs text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1">
-        <span class="w-3.5 h-3.5">{{icon "link"}}</span> Login-Link
+        class="small-text text-app-blue hover:text-app-blue-hover inline-flex items-center gap-1">
+        <span class="w-4 h-4">{{icon "link"}}</span> Login-Link
       </button>
       <button hx-delete="/a/mocks/{{.MAC}}" hx-target="#mock-row-{{macID .MAC}}" hx-swap="outerHTML"
               hx-confirm="Mock-Viewer {{.MAC}} wirklich loeschen?"
-              class="text-xs text-zinc-400 hover:text-red-400 inline-flex items-center gap-1">
-        <span class="w-3.5 h-3.5">{{icon "trash"}}</span> Loeschen
+              class="small-text text-app-text-3 hover:text-app-red inline-flex items-center gap-1">
+        <span class="w-4 h-4">{{icon "trash"}}</span> Loeschen
       </button>
     </div>
   </td>

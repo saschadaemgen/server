@@ -1,99 +1,99 @@
 {{define "content"}}
 <div class="mb-8">
-  <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
-  <p class="text-sm text-zinc-400 mt-1">Willkommen, {{.AdminName}}.</p>
+  <h1 class="headline-xl">Dashboard</h1>
+  <p class="small-text text-app-text-2 mt-1">Willkommen, {{.AdminName}}.</p>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-  <a href="/a/mocks" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors group">
+  <a href="/a/mocks" class="solid-card p-4 hover:bg-app-card transition-colors block">
     <div class="flex items-center justify-between mb-3">
-      <span class="w-5 h-5 text-cyan-400">{{icon "server"}}</span>
-      <span class="text-3xl font-mono tabular-nums">{{.MockCount}}</span>
+      <span class="w-6 h-6 text-app-blue">{{icon "server"}}</span>
+      <span class="headline-xl font-mono tabular-nums">{{.MockCount}}</span>
     </div>
-    <h2 class="font-medium">Mock-Viewer</h2>
-    <p class="text-sm text-zinc-400 mt-1">virtuelle Geraete im Prozess</p>
+    <h2 class="headline-m">Mock-Viewer</h2>
+    <p class="small-text text-app-text-2 mt-1">virtuelle Geraete im Prozess</p>
   </a>
 
-  <a href="/a/users" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors">
+  <a href="/a/users" class="solid-card p-4 hover:bg-app-card transition-colors block">
     <div class="flex items-center justify-between mb-3">
-      <span class="w-5 h-5 text-cyan-400">{{icon "users"}}</span>
-      <span class="text-3xl font-mono tabular-nums">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</span>
+      <span class="w-6 h-6 text-app-blue">{{icon "users"}}</span>
+      <span class="headline-xl font-mono tabular-nums">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</span>
     </div>
-    <h2 class="font-medium">Mieter (UA-User)</h2>
-    <p class="text-sm text-zinc-400 mt-1">
+    <h2 class="headline-m">Mieter (UA-User)</h2>
+    <p class="small-text text-app-text-2 mt-1">
       {{if .UserCountReady}}per UA-API verwaltet{{else}}UA-API nicht konfiguriert{{end}}
     </p>
   </a>
 
-  <a href="/a/settings" class="bg-zinc-900 border border-zinc-800 rounded-lg p-5 hover:border-zinc-700 transition-colors">
+  <a href="/a/settings" class="solid-card p-4 hover:bg-app-card transition-colors block">
     <div class="flex items-center justify-between mb-3">
-      <span class="w-5 h-5 text-cyan-400">{{icon "settings"}}</span>
-      <span class="text-xs uppercase tracking-wider {{if .UserCountReady}}text-green-400{{else}}text-amber-400{{end}}">
+      <span class="w-6 h-6 text-app-blue">{{icon "settings"}}</span>
+      <span class="caption {{if .UserCountReady}}text-app-green{{else}}text-app-amber{{end}}">
         {{if .UserCountReady}}konfiguriert{{else}}setup noetig{{end}}
       </span>
     </div>
-    <h2 class="font-medium">Einstellungen</h2>
-    <p class="text-sm text-zinc-400 mt-1">UA-Developer-API + Plattform</p>
+    <h2 class="headline-m">Einstellungen</h2>
+    <p class="small-text text-app-text-2 mt-1">UA-Developer-API + Plattform</p>
   </a>
 </div>
 
-<div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5">
-  <h2 class="font-medium mb-4 flex items-center gap-2">
-    <span class="w-5 h-5 text-cyan-400">{{icon "bell"}}</span>
+<div class="mt-10 solid-card p-5">
+  <h2 class="headline-m mb-4 flex items-center gap-2">
+    <span class="w-6 h-6 text-app-blue">{{icon "bell"}}</span>
     Klingel-Statistik
   </h2>
-  <dl class="grid grid-cols-3 gap-4 text-sm mb-4">
+  <dl class="grid grid-cols-3 gap-4 mb-4">
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 24h</dt>
-      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total24h}}</dd>
+      <dt class="caption">Letzte 24h</dt>
+      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total24h}}</dd>
     </div>
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 7 Tage</dt>
-      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total7d}}</dd>
+      <dt class="caption">Letzte 7 Tage</dt>
+      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total7d}}</dd>
     </div>
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Letzte 30 Tage</dt>
-      <dd class="font-mono text-2xl mt-1">{{.Doorbell.Total30d}}</dd>
+      <dt class="caption">Letzte 30 Tage</dt>
+      <dd class="headline-l font-mono mt-1">{{.Doorbell.Total30d}}</dd>
     </div>
   </dl>
   {{if .Doorbell.TopMocks}}
-  <div class="border-t border-zinc-800 pt-4">
-    <h3 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">Top-Mocks der letzten 24h</h3>
-    <ul class="divide-y divide-zinc-800/60">
+  <div class="border-t border-app-border-2 pt-4">
+    <h3 class="caption mb-3">Top-Mocks der letzten 24h</h3>
+    <ul class="divide-y divide-app-border-2">
       {{range .Doorbell.TopMocks}}
-      <li class="flex items-center justify-between py-2 text-sm">
+      <li class="flex items-center justify-between py-2">
         <div class="min-w-0">
-          <div class="text-zinc-200 truncate">{{.Name}}</div>
-          <div class="text-xs text-zinc-500 font-mono truncate">{{.MAC}}</div>
+          <div class="body-text text-app-text truncate">{{.Name}}</div>
+          <div class="small-text text-app-text-3 font-mono truncate">{{.MAC}}</div>
         </div>
-        <span class="font-mono tabular-nums text-zinc-300">{{.Count}}</span>
+        <span class="font-mono tabular-nums text-app-text">{{.Count}}</span>
       </li>
       {{end}}
     </ul>
   </div>
   {{else if .Doorbell.Ready}}
-  <p class="text-xs text-zinc-500">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
+  <p class="small-text text-app-text-3">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
   {{end}}
 </div>
 
-<div class="mt-10 bg-zinc-900 border border-zinc-800 rounded-lg p-5">
-  <h2 class="font-medium mb-3">System</h2>
-  <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+<div class="mt-10 solid-card p-5">
+  <h2 class="headline-m mb-3">System</h2>
+  <dl class="grid grid-cols-2 md:grid-cols-4 gap-4">
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Schema-Version</dt>
-      <dd class="font-mono mt-1">{{.SchemaVersion}}</dd>
+      <dt class="caption">Schema-Version</dt>
+      <dd class="font-mono mt-1 text-app-text">{{.SchemaVersion}}</dd>
     </div>
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Server-IPv4</dt>
-      <dd class="font-mono mt-1">{{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-amber-400">nicht gesetzt</span>{{end}}</dd>
+      <dt class="caption">Server-IPv4</dt>
+      <dd class="font-mono mt-1 text-app-text">{{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-app-amber">nicht gesetzt</span>{{end}}</dd>
     </div>
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">DevMode</dt>
-      <dd class="font-mono mt-1">{{if .DevMode}}true{{else}}false{{end}}</dd>
+      <dt class="caption">DevMode</dt>
+      <dd class="font-mono mt-1 text-app-text">{{if .DevMode}}true{{else}}false{{end}}</dd>
     </div>
     <div>
-      <dt class="text-zinc-500 text-xs uppercase tracking-wider">Saison</dt>
-      <dd class="font-mono mt-1">12-04</dd>
+      <dt class="caption">Saison</dt>
+      <dd class="font-mono mt-1 text-app-text">13-02</dd>
     </div>
   </dl>
 </div>

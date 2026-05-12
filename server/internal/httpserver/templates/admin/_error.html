@@ -1,3 +1,5 @@
-{{define "error"}}<div class="bg-red-950/40 border border-red-900 text-red-200 text-sm rounded px-3 py-2">
+{{define "error"}}<div class="solid-card small-text text-app-red px-3 py-2"
+     style="background: color-mix(in srgb, var(--accent-red) 12%, var(--bg-elevated));
+            border-color: color-mix(in srgb, var(--accent-red) 35%, transparent);">
   {{.Message}}
 </div>{{end}}
