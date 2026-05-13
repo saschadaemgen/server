@@ -525,6 +525,30 @@
       closeOpen();
     });
 
+    // Saison 13-02-FIX4-a-HOTFIX6: Scroll und Resize wuerden die
+    // Panel-Position einfrieren (top/left aus getBoundingClientRect
+    // wandern nicht mit). Wir schliessen daher lieber. capture:true
+    // beim scroll damit auch Scrolls in beliebigen Containern
+    // greifen, nicht nur window.
+    function closeOnScrollOrResize() {
+      if (openInstance) closeOpen();
+    }
+    window.addEventListener('scroll', closeOnScrollOrResize, true);
+    window.addEventListener('resize', closeOnScrollOrResize);
+
+    // Esc schliesst auch dann zuverlaessig wenn der Fokus
+    // ausserhalb des Panels gelandet ist (z.B. nach Maus-Klick
+    // ohne Auswahl).
+    document.addEventListener('keydown', function (e) {
+      if (!openInstance) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        var trigger = openInstance.trigger;
+        closeOpen();
+        if (trigger) trigger.focus();
+      }
+    });
+
     function initAll(root) {
       var nodes = (root || document).querySelectorAll('[data-dropdown]');
       for (var i = 0; i < nodes.length; i++) {
