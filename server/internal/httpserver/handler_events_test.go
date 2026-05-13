@@ -177,15 +177,30 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	if name != doorbellhub.TypeDoorbellStart {
 		t.Errorf("event name = %q, want %q", name, doorbellhub.TypeDoorbellStart)
 	}
-	var got doorbellhub.Event
-	if err := json.Unmarshal([]byte(data), &got); err != nil {
+	// Saison 13-02-FIX3 wire format:
+	//   { "door": "...", "ts": "RFC3339", "raw": { full hub.Event } }
+	// "raw" still carries the legacy MockMAC + RequestID fields so
+	// tests like this one can still poke at them without parsing
+	// the new shape.
+	var payload struct {
+		Door string            `json:"door"`
+		TS   string            `json:"ts"`
+		Raw  doorbellhub.Event `json:"raw"`
+	}
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		t.Fatalf("decode data: %v (raw: %s)", err, data)
 	}
-	if got.MockMAC != testMockMAC {
-		t.Errorf("MockMAC = %q", got.MockMAC)
+	if payload.Door == "" {
+		t.Errorf("door = empty in SSE payload")
 	}
-	if got.RequestID != "req-1" {
-		t.Errorf("RequestID = %q", got.RequestID)
+	if payload.TS == "" {
+		t.Errorf("ts = empty in SSE payload")
+	}
+	if payload.Raw.MockMAC != testMockMAC {
+		t.Errorf("raw.MockMAC = %q", payload.Raw.MockMAC)
+	}
+	if payload.Raw.RequestID != "req-1" {
+		t.Errorf("raw.RequestID = %q", payload.Raw.RequestID)
 	}
 }
 

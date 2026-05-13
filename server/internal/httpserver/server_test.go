@@ -294,11 +294,13 @@ func TestLogin_HappyPath(t *testing.T) {
 		t.Errorf("home status = %d, want 200", resp2.StatusCode)
 	}
 	body := readBody(t, resp2)
-	if !strings.Contains(body, "Willkommen") {
-		t.Errorf("home body missing %q marker, got: %s", "Willkommen", body)
-	}
 	if !strings.Contains(body, testMockName) {
 		t.Errorf("home body missing mock name %q, got: %s", testMockName, body)
+	}
+	// Claude-Design library expects this hint inside the always-dark
+	// stream slot when no live video is wired yet.
+	if !strings.Contains(body, "Bereit") {
+		t.Errorf("home body missing intercom-idle stream hint, got: %s", body)
 	}
 }
 
