@@ -199,6 +199,28 @@ func (s *Service) ActiveCount(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// RecentlyActiveCount returns the number of viewer_sessions whose
+// last_seen is within the given window (e.g. last 30 minutes).
+// Saison 13-02-FIX4-a-HOTFIX3: dashboard surfaces this as
+// "aktive Sessions" - genauer als ActiveCount, das eine Sessions
+// zaehlt die naechste Woche noch gueltig WAEREN aber niemand
+// benutzt.
+func (s *Service) RecentlyActiveCount(ctx context.Context, window time.Duration) (int, error) {
+	if window <= 0 {
+		window = 30 * time.Minute
+	}
+	cutoff := s.now().Add(-window).UnixMilli()
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM viewer_sessions WHERE last_seen >= ?`,
+		cutoff,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("session: recently active count: %w", err)
+	}
+	return n, nil
+}
+
 // Sentinel errors. Callers should test for these with errors.Is.
 var (
 	ErrSessionNotFound = errors.New("session: not found")

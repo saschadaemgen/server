@@ -17,27 +17,27 @@
         <h1 class="page-title">Dashboard</h1>
         <p class="page-subtitle">Live-Stand der Plattform.</p>
       </div>
+      <div class="page-actions">
+        <button class="btn btn-secondary" type="button" onclick="location.reload()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 10a8 8 0 0 1 13.7-5.7L20 6"/>
+            <path d="M20 4v4h-4"/>
+            <path d="M20 14a8 8 0 0 1-13.7 5.7L4 18"/>
+            <path d="M4 20v-4h4"/>
+          </svg>
+          Aktualisieren
+        </button>
+      </div>
     </header>
 
     <div class="stat-grid">
       <div class="stat-card is-accent">
         <div class="stat-card-head">
-          <span class="stat-card-label">Web-Viewer</span>
+          <span class="stat-card-label">Web-Viewer gesamt</span>
         </div>
-        <div class="stat-card-value">{{.Page.WebViewers}}</div>
+        <div class="stat-card-value">{{.Page.WebViewersTotal}}</div>
         <div class="stat-card-foot">
-          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.WebViewersOn}} online</span>
-        </div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-head">
-          <span class="stat-card-label">Klingel-Events 24h</span>
-        </div>
-        <div class="stat-card-value">{{.Page.EventsToday}}</div>
-        <div class="stat-card-foot">
-          <span style="color: var(--color-text-secondary); font-weight: var(--fw-medium);">{{.Page.EventsTrend}}</span>
-          <span>vs. 7d-Schnitt</span>
+          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.WebViewersRunning}} online</span>
         </div>
       </div>
 
@@ -47,7 +47,27 @@
         </div>
         <div class="stat-card-value">{{.Page.ActiveSessions}}</div>
         <div class="stat-card-foot">
-          <span>angemeldete Browser</span>
+          <span>Aktivitaet in 30 Min</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Klingel-Events heute</span>
+        </div>
+        <div class="stat-card-value">{{.Page.EventsToday}}</div>
+        <div class="stat-card-foot">
+          <span>seit 00:00 Uhr</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Klingel-Events 7 Tage</span>
+        </div>
+        <div class="stat-card-value">{{.Page.Events7d}}</div>
+        <div class="stat-card-foot">
+          <span>rollendes Fenster</span>
         </div>
       </div>
     </div>
@@ -55,44 +75,57 @@
     <section class="app-card" style="margin-top: var(--space-6);">
       <div class="app-card-head">
         <h2 class="app-card-title">Letzte Klingel-Ereignisse</h2>
+        <span class="badge">letzte 20</span>
       </div>
-      <table class="app-table">
-        <thead><tr><th>Zeit</th><th>Wohnung</th><th>Tuer</th><th>Status</th></tr></thead>
-        <tbody>
-          {{range .Page.RecentEvents}}
-            <tr>
-              <td>{{.When}}</td>
-              <td>{{.UnitName}}</td>
-              <td>{{.DoorName}}</td>
-              <td>{{.Status}}</td>
-            </tr>
-          {{else}}
-            <tr><td colspan="4" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Ereignisse.</td></tr>
-          {{end}}
-        </tbody>
-      </table>
+      {{if .Page.RecentEventsEmpty}}
+        <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>Noch keine Klingel-Events. Sobald jemand an einem Intercom klingelt, taucht der Eintrag hier auf.</p>
+        </div>
+      {{else}}
+        <table class="app-table">
+          <thead><tr><th>Zeit</th><th>Wohnung</th><th>Tuer</th><th>Status</th></tr></thead>
+          <tbody>
+            {{range .Page.RecentEvents}}
+              <tr>
+                <td>{{.When}}</td>
+                <td>
+                  <span class="app-table-mark">{{.UnitMark}}</span>
+                  {{.UnitName}}
+                </td>
+                <td>{{.DoorName}}</td>
+                <td>{{.Status}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
     </section>
 
     <section class="app-card" style="margin-top: var(--space-6);">
       <div class="app-card-head">
         <h2 class="app-card-title">Letzte Anmeldungen</h2>
+        <span class="badge">letzte 10</span>
       </div>
-      <table class="app-table">
-        <thead><tr><th>Zeit</th><th>Bereich</th><th>User</th><th>IP</th><th>Resultat</th></tr></thead>
-        <tbody>
-          {{range .Page.RecentAudit}}
-            <tr>
-              <td>{{.When}}</td>
-              <td>{{.Realm}}</td>
-              <td>{{.User}}</td>
-              <td>{{.IP}}</td>
-              <td>{{.Outcome}}</td>
-            </tr>
-          {{else}}
-            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Anmeldungen.</td></tr>
-          {{end}}
-        </tbody>
-      </table>
+      {{if .Page.RecentAuditEmpty}}
+        <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>Noch keine Anmeldungen.</p>
+        </div>
+      {{else}}
+        <table class="app-table">
+          <thead><tr><th>Zeit</th><th>Bereich</th><th>User</th><th>IP</th><th>Resultat</th></tr></thead>
+          <tbody>
+            {{range .Page.RecentAudit}}
+              <tr>
+                <td>{{.When}}</td>
+                <td>{{.Realm}}</td>
+                <td>{{.User}}</td>
+                <td>{{.IP}}</td>
+                <td>{{.Outcome}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
     </section>
   </main>
 

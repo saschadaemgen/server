@@ -15,35 +15,44 @@ type adminUser struct {
 	Initials string
 }
 
-// adminDashboardData traegt die echten Werte fuer das Dashboard:
-// Web-Viewer-Anzahl, Klingel-Events, aktive Sessions, Audit-Liste.
+// adminDashboardData traegt die vier KPI-Karten plus zwei Listen
+// (Klingel-Events + Login-Audit). Saison 13-02-FIX4-a-HOTFIX3:
+// alle Zahlen kommen aus der DB, keine Fake-Werte mehr.
 type adminDashboardData struct {
-	User           adminUser
-	WebViewers     int
-	WebViewersOn   int
-	EventsToday    int
-	EventsTrend    string
-	ActiveSessions int
-	RecentEvents   []dashRecentEvent
-	RecentAudit    []dashAuditRow
+	User                adminUser
+	WebViewersTotal     int
+	WebViewersRunning   int
+	ActiveSessions      int
+	EventsToday         int
+	Events7d            int
+	RecentEvents        []dashRecentEvent
+	RecentEventsEmpty   bool
+	RecentAudit         []dashAuditRow
+	RecentAuditEmpty    bool
 }
 
 type dashRecentEvent struct {
 	When      string
+	ViewerMAC string
 	UnitName  string
 	UnitMark  string
 	DoorName  string
-	Action    string
 	Status    string
 }
 
 type dashAuditRow struct {
-	When     string
-	User     string
-	IP       string
-	Outcome  string
-	Realm    string
+	When    string
+	User    string
+	IP      string
+	Outcome string
+	Realm   string
 }
+
+const (
+	recentEventsLimit = 20
+	recentAuditLimit  = 10
+	activeWindow      = 30 * time.Minute
+)
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
@@ -52,78 +61,90 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
 
-	infos, err := s.mockMgr.ListViewers(r.Context())
-	if err == nil {
-		for _, info := range infos {
-			if info.Type != mockmanager.TypeWeb {
-				continue
-			}
-			data.WebViewers++
-			if info.Running {
-				data.WebViewersOn++
-			}
+	now := time.Now()
+	infos, _ := s.mockMgr.ListViewers(r.Context())
+	infoByMAC := map[string]mockmanager.ViewerInfo{}
+	for _, info := range infos {
+		infoByMAC[info.MAC] = info
+		if info.Type != mockmanager.TypeWeb {
+			continue
 		}
-	}
-
-	if s.history != nil {
-		if agg, err := s.history.AggregateAdmin(r.Context(), time.Now()); err == nil {
-			data.EventsToday = agg.Total24h
-			data.EventsTrend = trendArrow(agg.Total24h, agg.Total7d/7)
-		}
-		// Recent events: pull from the most-active mocks. Until a
-		// global feed exists, take the first viewer's history.
-		if len(infos) > 0 {
-			recent, _ := s.history.ListForMock(r.Context(), infos[0].MAC, 10)
-			for _, ev := range recent {
-				data.RecentEvents = append(data.RecentEvents, dashRecentEvent{
-					When:     ev.OccurredAt.Format("15:04"),
-					UnitName: infos[0].Name,
-					UnitMark: initialsOf(infos[0].Name),
-					DoorName: doorNameFromIntercom(ev.IntercomMAC),
-					Action:   "Klingel",
-					Status:   eventStatusFor(ev),
-				})
-			}
+		data.WebViewersTotal++
+		if info.Running {
+			data.WebViewersRunning++
 		}
 	}
 
 	if s.sessions != nil {
-		if n, err := s.sessions.ActiveCount(r.Context()); err == nil {
+		if n, err := s.sessions.RecentlyActiveCount(r.Context(), activeWindow); err == nil {
 			data.ActiveSessions = n
 		}
 	}
 
-	if s.audit != nil {
-		entries, err := s.audit.Recent(r.Context(), "", 20)
-		if err == nil {
-			for _, e := range entries {
-				data.RecentAudit = append(data.RecentAudit, dashAuditRow{
-					When:    e.Timestamp.Local().Format("15:04:05"),
-					User:    e.Username,
-					IP:      e.IP,
-					Outcome: string(e.Outcome),
-					Realm:   string(e.Realm),
-				})
+	if s.history != nil {
+		startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		if n, err := s.history.CountSince(r.Context(), startOfToday); err == nil {
+			data.EventsToday = n
+		}
+		if n, err := s.history.CountSince(r.Context(), now.Add(-7*24*time.Hour)); err == nil {
+			data.Events7d = n
+		}
+		recent, _ := s.history.ListRecent(r.Context(), recentEventsLimit)
+		for _, ev := range recent {
+			row := dashRecentEvent{
+				When:      formatRelativeGerman(ev.OccurredAt, now),
+				ViewerMAC: ev.MockMAC,
+				UnitName:  ev.MockMAC,
+				DoorName:  doorNameFromIntercom(ev.IntercomMAC),
+				Status:    eventStatusFor(ev),
 			}
+			if info, ok := infoByMAC[ev.MockMAC]; ok && info.Name != "" {
+				row.UnitName = info.Name
+				row.UnitMark = initialsOf(info.Name)
+			} else {
+				row.UnitMark = "?"
+			}
+			data.RecentEvents = append(data.RecentEvents, row)
+		}
+		data.RecentEventsEmpty = len(data.RecentEvents) == 0
+	} else {
+		data.RecentEventsEmpty = true
+	}
+
+	if s.audit != nil {
+		entries, _ := s.audit.Recent(r.Context(), "", recentAuditLimit)
+		for _, e := range entries {
+			data.RecentAudit = append(data.RecentAudit, dashAuditRow{
+				When:    e.Timestamp.Local().Format("02.01. 15:04:05"),
+				User:    e.Username,
+				IP:      e.IP,
+				Outcome: string(e.Outcome),
+				Realm:   string(e.Realm),
+			})
 		}
 	}
+	data.RecentAuditEmpty = len(data.RecentAudit) == 0
 
 	s.renderAdminPage(w, "dashboard", data)
 }
 
-// trendArrow renders a tiny percent-trend string like "+12%" or "-8%".
-func trendArrow(today int, baseline int) string {
-	if baseline == 0 {
-		if today == 0 {
-			return "+0%"
-		}
-		return "+100%"
+// formatRelativeGerman rendert eine relative Zeit-Angabe fuer
+// Dashboard-Listen: "vor 12 Sek", "vor 3 Min", "vor 2 h", "vor 4 d".
+// Aelteres ($ge 7 Tage) wird absolut formatiert.
+func formatRelativeGerman(t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "vor " + itoa(int(d.Seconds())) + " Sek"
+	case d < time.Hour:
+		return "vor " + itoa(int(d.Minutes())) + " Min"
+	case d < 24*time.Hour:
+		return "vor " + itoa(int(d.Hours())) + " h"
+	case d < 7*24*time.Hour:
+		return "vor " + itoa(int(d.Hours()/24)) + " d"
+	default:
+		return t.Local().Format("02.01.06 15:04")
 	}
-	delta := (today - baseline) * 100 / baseline
-	if delta >= 0 {
-		return "+" + itoa(delta) + "%"
-	}
-	return itoa(delta) + "%"
 }
 
 func itoa(n int) string {
@@ -151,13 +172,13 @@ func itoa(n int) string {
 func eventStatusFor(ev doorhistory.Event) string {
 	switch {
 	case ev.AnsweredAt != nil:
-		return "answered"
+		return "beantwortet"
 	case ev.EndedAt != nil:
-		return "answered"
+		return "beantwortet"
 	case ev.CancelledAt != nil:
-		return "ignored"
+		return "abgebrochen"
 	default:
-		return "missed"
+		return "verpasst"
 	}
 }
 

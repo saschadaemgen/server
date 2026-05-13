@@ -377,6 +377,10 @@ func (f *fakeHistory) ListForMock(context.Context, string, int) ([]doorhistory.E
 	return nil, nil
 }
 func (f *fakeHistory) UnreadCount(context.Context, string) (int, error) { return 0, nil }
+func (f *fakeHistory) ListRecent(context.Context, int) ([]doorhistory.Event, error) {
+	return nil, nil
+}
+func (f *fakeHistory) CountSince(context.Context, time.Time) (int, error) { return 0, nil }
 func (f *fakeHistory) AggregateAdmin(context.Context, time.Time) (doorhistory.AdminStats, error) {
 	return doorhistory.AdminStats{}, nil
 }

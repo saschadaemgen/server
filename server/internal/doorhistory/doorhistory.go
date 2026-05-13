@@ -72,7 +72,9 @@ type Store interface {
 	MarkRead(ctx context.Context, mockMAC string, eventIDs []int64) error
 	MarkAllRead(ctx context.Context, mockMAC string, readAt time.Time) error
 	ListForMock(ctx context.Context, mockMAC string, limit int) ([]Event, error)
+	ListRecent(ctx context.Context, limit int) ([]Event, error)
 	UnreadCount(ctx context.Context, mockMAC string) (int, error)
+	CountSince(ctx context.Context, since time.Time) (int, error)
 	AggregateAdmin(ctx context.Context, now time.Time) (AdminStats, error)
 }
 
@@ -262,6 +264,58 @@ func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("doorhistory: unread count: %w", err)
+	}
+	return n, nil
+}
+
+// ListRecent returns up to limit most-recent doorbell_start
+// events across ALL viewers, newest first. Used by the admin
+// dashboard's global activity list (Saison 13-02-FIX4-a-HOTFIX3).
+func (s *SQLStore) ListRecent(ctx context.Context, limit int) ([]Event, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, viewer_mac, event_type, intercom_mac, occurred_at,
+		        cancelled_at, answered_at, ended_at,
+		        cancel_token, room_id, read_at,
+		        prev_hash, entry_hash
+		   FROM door_events
+		  WHERE event_type = ?
+		  ORDER BY occurred_at DESC, id DESC
+		  LIMIT ?`,
+		TypeDoorbellStart, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("doorhistory: query recent: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Event, 0, limit)
+	for rows.Next() {
+		ev, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("doorhistory: rows: %w", err)
+	}
+	return out, nil
+}
+
+// CountSince zaehlt doorbell_start-Eintraege mit occurred_at >=
+// since. Wird vom Dashboard fuer "Klingel-Events heute" und
+// "Klingel-Events 7 Tage" benutzt.
+func (s *SQLStore) CountSince(ctx context.Context, since time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM door_events
+		  WHERE event_type = ? AND occurred_at >= ?`,
+		TypeDoorbellStart, since.Unix(),
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("doorhistory: count since: %w", err)
 	}
 	return n, nil
 }

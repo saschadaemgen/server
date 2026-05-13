@@ -7,6 +7,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"unifix.local/server/internal/doorhistory"
 )
 
 const adminTestUser = "saschsa"
@@ -288,6 +291,129 @@ func TestAdminWebViewers_ResetPassword(t *testing.T) {
 	if resp2.StatusCode == http.StatusSeeOther {
 		t.Errorf("old password still works after reset")
 	}
+}
+
+// TestPasswordReset_InvalidatesSessions ist der HOTFIX3-Acceptance-
+// Test fuer Auto-Logout: nach Reset-PW darf KEIN viewer_session-
+// Eintrag des Viewers in der DB stehenbleiben. Login-Cookie des
+// vorher angemeldeten Mieters muss also wirkungslos sein.
+func TestPasswordReset_InvalidatesSessions(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	// Mieter loggt sich ein, hat damit einen viewer_sessions-Eintrag.
+	respLogin := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	respLogin.Body.Close()
+	if respLogin.StatusCode != http.StatusSeeOther {
+		t.Fatalf("seed login failed status=%d", respLogin.StatusCode)
+	}
+	var before int
+	if err := env.d.QueryRow(
+		`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC,
+	).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+	if before == 0 {
+		t.Fatalf("seed login did not create a viewer_sessions row")
+	}
+
+	// Admin macht Reset-PW.
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/reset-pw", nil)
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("reset-pw: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset-pw status = %d, want 200", resp.StatusCode)
+	}
+
+	// Sessions des Viewers sollten weg sein.
+	var after int
+	if err := env.d.QueryRow(
+		`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC,
+	).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Errorf("viewer_sessions after reset = %d, want 0 (auto-logout missing)", after)
+	}
+}
+
+// TestDashboard_RealNumbers seedet Viewer + Sessions + door_events
+// und prueft dass die vier KPI-Karten echte Zahlen aus der DB
+// rendern (HOTFIX3 macht Schluss mit Fake-Werten).
+func TestDashboard_RealNumbers(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewerAs(t, "0c:ea:14:33:33:01", "Viewer A", "viewer-a", "TestPw-1234567X")
+	env.seedViewerAs(t, "0c:ea:14:33:33:02", "Viewer B", "viewer-b", "TestPw-1234567X")
+
+	// Ein Login -> eine aktive Session
+	respLogin := env.loginViewer(t, "viewer-a", "TestPw-1234567X")
+	respLogin.Body.Close()
+
+	// door_events seeden (Mitte des Tages + alt)
+	now := time.Now()
+	if _, err := env.history.Insert(context.Background(),
+		doorhistory.Event{
+			MockMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
+			OccurredAt: now.Add(-2 * time.Hour),
+		}, nil); err != nil {
+		t.Fatalf("insert event today: %v", err)
+	}
+	if _, err := env.history.Insert(context.Background(),
+		doorhistory.Event{
+			MockMAC: "0c:ea:14:33:33:02", EventType: doorhistory.TypeDoorbellStart,
+			OccurredAt: now.Add(-3 * 24 * time.Hour),
+		}, nil); err != nil {
+		t.Fatalf("insert event 3d: %v", err)
+	}
+	if _, err := env.history.Insert(context.Background(),
+		doorhistory.Event{
+			MockMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
+			OccurredAt: now.Add(-10 * 24 * time.Hour),
+		}, nil); err != nil {
+		t.Fatalf("insert event 10d: %v", err)
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/a/")
+	if err != nil {
+		t.Fatalf("GET /a/: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, "Web-Viewer gesamt") {
+		t.Errorf("dashboard missing 'Web-Viewer gesamt' label")
+	}
+	if !strings.Contains(body, "Klingel-Events heute") {
+		t.Errorf("dashboard missing 'Klingel-Events heute' label")
+	}
+	if !strings.Contains(body, "Klingel-Events 7 Tage") {
+		t.Errorf("dashboard missing 'Klingel-Events 7 Tage' label")
+	}
+	if !strings.Contains(body, "Aktive Sessions") {
+		t.Errorf("dashboard missing 'Aktive Sessions' label")
+	}
+	// Web-Viewer-Anzahl 2
+	if !strings.Contains(body, `<div class="stat-card-value">2</div>`) {
+		t.Errorf("dashboard does not render WebViewersTotal=2; body sample:\n%s", body[:min(2000, len(body))])
+	}
+	// Recent-Events-Liste hat Viewer-A-Eintrag
+	if !strings.Contains(body, "Viewer A") {
+		t.Errorf("recent events list missing 'Viewer A'")
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func TestAdminWebViewers_Delete(t *testing.T) {
