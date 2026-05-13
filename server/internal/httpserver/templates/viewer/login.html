@@ -6,6 +6,17 @@
   <title>unifix - Anmeldung</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
+  <style>
+    /* Banner-Variante orange fuer Lockout-Hinweis (Library hat
+       nur red und green; orange = Warnung statt Fehler). */
+    .banner-orange {
+      background: rgba(249, 115, 22, 0.15);
+      color: rgb(249, 115, 22);
+      border: 1px solid rgba(249, 115, 22, 0.45);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+    }
+  </style>
 </head>
 <body class="login-stage">
   <main class="login-card" role="main">
@@ -16,11 +27,15 @@
     <h1 class="login-title">Anmeldung</h1>
     <p class="login-subtitle">Bitte gib die Zugangsdaten ein, die der Hausverwalter dir gegeben hat.</p>
 
-    {{if .Error}}
-      <div class="banner banner-red" role="status" style="margin-bottom: var(--space-3);">{{.Error}}</div>
-    {{end}}
-    {{if .BlockedMsg}}
-      <div class="banner banner-amber" role="status" style="margin-bottom: var(--space-3);">{{.BlockedMsg}}</div>
+    {{if .Locked}}
+      <div class="banner banner-orange" role="status" style="margin-bottom: var(--space-3);">
+        Konto vorruebergehend gesperrt durch zu viele Fehlversuche.
+        Bitte spaeter erneut versuchen oder die Hausverwaltung kontaktieren.
+      </div>
+    {{else if .ErrorMessage}}
+      <div class="banner banner-red" role="status" style="margin-bottom: var(--space-3);">
+        {{.ErrorMessage}}
+      </div>
     {{end}}
 
     <form method="post" action="/m" autocomplete="on">
@@ -30,7 +45,7 @@
       </div>
       <div class="field" style="margin-top:var(--space-3);">
         <label class="field-label" for="password">Passwort</label>
-        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required value="{{.PrefillPw}}"/>
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required/>
       </div>
       <button class="btn btn-primary btn-lg" type="submit" style="width:100%; margin-top:var(--space-4);">Anmelden</button>
     </form>
