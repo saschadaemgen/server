@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"unifix.local/mock"
+	"unifix.local/server/internal/auth/esptoken"
 	"unifix.local/server/internal/db"
 )
 
@@ -637,6 +638,44 @@ func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
 		return ErrViewerNotFound
 	}
 	return nil
+}
+
+// LookupESPMACByToken vergleicht einen vom ESP praesentierten
+// Klartext-Bearer-Token gegen alle adoptierten ESP-Viewer und
+// liefert die MAC des passenden Geraets. Verify nutzt
+// crypto/subtle.ConstantTimeCompare. Bei <100 ESP-Viewern pro
+// Server (realistisch fuer eine Wohnanlage) ist die linear-
+// scan-Strategie billig genug; in einer spaeteren Saison kann
+// das auf indizierten Hash-Lookup umgestellt werden, sobald
+// Multi-Tenant-Server gewachsen sind.
+func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (string, error) {
+	if presented == "" {
+		return "", ErrViewerNotFound
+	}
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac, esp_token_hash FROM viewers
+		  WHERE type = 'esp' AND esp_token_hash IS NOT NULL`)
+	if err != nil {
+		return "", fmt.Errorf("mockmanager: lookup esp by token: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var mac string
+		var hash sql.NullString
+		if err := rows.Scan(&mac, &hash); err != nil {
+			return "", fmt.Errorf("mockmanager: scan esp token: %w", err)
+		}
+		if !hash.Valid || hash.String == "" {
+			continue
+		}
+		if esptoken.Verify(presented, hash.String) {
+			return mac, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("mockmanager: rows: %w", err)
+	}
+	return "", ErrViewerNotFound
 }
 
 // LookupESPTokenHash gibt den Token-Hash fuer einen adoptierten
