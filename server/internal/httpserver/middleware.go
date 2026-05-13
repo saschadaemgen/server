@@ -40,12 +40,12 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sid := s.readSessionCookie(r)
 		if sid == "" {
-			http.Redirect(w, r, "/m", http.StatusSeeOther)
+			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 			return
 		}
 		viewerMAC, err := s.sessions.Validate(r.Context(), sid)
 		if err != nil {
-			http.Redirect(w, r, "/m", http.StatusSeeOther)
+			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxKeyViewerMAC, viewerMAC)

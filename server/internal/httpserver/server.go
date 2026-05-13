@@ -17,6 +17,7 @@ package httpserver
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"unifix.local/server/internal/auth/admin"
@@ -132,12 +133,20 @@ func (s *Server) routes() {
 	// via go:embed; served with a long Cache-Control.
 	s.mux.Handle("GET /static/", staticHandler())
 
-	// Tenant tree (/m).
-	s.mux.HandleFunc("GET /m", s.handleViewerRoot)
-	s.mux.HandleFunc("POST /m", s.handleViewerLoginPost)
-	s.mux.HandleFunc("POST /m/logout", s.handleViewerLogout)
-	s.mux.Handle("GET /m/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
-	s.mux.Handle("GET /m/", s.requireSession(http.HandlerFunc(s.handleHome)))
+	// Tenant tree (/einloggen). Saison 13-02-FIX4-a-HOTFIX2:
+	// die alte /m-Familie wird mieterfreundlich umbenannt. Der
+	// alte Pfad antwortet mit 301 (siehe /m-Handler unten).
+	s.mux.HandleFunc("GET /einloggen", s.handleViewerRoot)
+	s.mux.HandleFunc("POST /einloggen", s.handleViewerLoginPost)
+	s.mux.HandleFunc("POST /einloggen/logout", s.handleViewerLogout)
+	s.mux.Handle("GET /einloggen/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
+	s.mux.Handle("GET /einloggen/", s.requireSession(http.HandlerFunc(s.handleHome)))
+
+	// Old /m-Routen liefern 301 nach /einloggen. Bookmark-/QR-
+	// Bestand bleibt damit funktionsfaehig. Path-Suffix wird
+	// mitgereicht (z.B. /m/events -> /einloggen/events).
+	s.mux.HandleFunc("/m", s.redirectLegacyM)
+	s.mux.HandleFunc("/m/", s.redirectLegacyM)
 
 	// Admin tree (/a).
 	s.mux.HandleFunc("GET /a/login", s.handleAdminLoginGet)
@@ -180,4 +189,17 @@ func (s *Server) ListenAndServe() error {
 		return http.ListenAndServe(s.cfg.ListenAddr, s.mux)
 	}
 	return http.ListenAndServeTLS(s.cfg.ListenAddr, s.cfg.CertFile, s.cfg.KeyFile, s.mux)
+}
+
+// redirectLegacyM leitet alle Anfragen unter dem alten /m-Pfad
+// (vor S13-02-FIX4-a-HOTFIX2) mit 301 nach /einloggen weiter,
+// inklusive Path-Suffix. /m -> /einloggen, /m/events ->
+// /einloggen/events, /m/logout -> /einloggen/logout.
+func (s *Server) redirectLegacyM(w http.ResponseWriter, r *http.Request) {
+	tail := strings.TrimPrefix(r.URL.Path, "/m")
+	target := "/einloggen" + tail
+	if raw := r.URL.RawQuery; raw != "" {
+		target += "?" + raw
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }

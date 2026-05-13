@@ -335,12 +335,15 @@ func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, userna
 // in Server-Logs, Browser-History und Referer-Headern). Mieter
 // scannt den QR, kommt zur Login-Seite und tippt Username plus
 // Passwort vom Zettel ab.
+//
+// Saison 13-02-FIX4-a-HOTFIX2: URL haengt jetzt auf /einloggen
+// (mieterfreundlich, kein /m-Tech-Kuerzel mehr).
 func (s *Server) buildLoginURL(r *http.Request, _ string, _ string) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/m", scheme, r.Host)
+	return fmt.Sprintf("%s://%s/einloggen", scheme, r.Host)
 }
 
 func (s *Server) respondCredentials(w http.ResponseWriter, r *http.Request, c credentialsResponse) {

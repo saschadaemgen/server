@@ -45,14 +45,14 @@ type viewerHistoryRow struct {
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
-		http.Redirect(w, r, "/m", http.StatusSeeOther)
+		http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 		return
 	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
 			s.clearSessionCookie(w)
-			http.Redirect(w, r, "/m", http.StatusSeeOther)
+			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 			return
 		}
 		s.log.Error("get viewer info", "err", err, "mac_prefix", safePrefix(mac))

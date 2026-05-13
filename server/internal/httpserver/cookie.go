@@ -21,8 +21,12 @@ import "net/http"
 const (
 	viewerCookieNameSecure = "__Host-unifix_viewer"
 	viewerCookieNameDev    = "unifix_viewer"
+	// Saison 13-02-FIX4-a-HOTFIX2: Cookie laeuft jetzt unter / ,
+	// damit sowohl /einloggen als auch zukuenftige Pfade (z.B.
+	// /api/...) das Cookie sehen ohne Path-Mismatch. Production
+	// braucht Path=/ ohnehin fuer den __Host-Prefix.
 	viewerCookiePathSecure = "/"
-	viewerCookiePathDev    = "/m/"
+	viewerCookiePathDev    = "/"
 	sessionCookieMaxAge    = 365 * 24 * 3600
 )
 

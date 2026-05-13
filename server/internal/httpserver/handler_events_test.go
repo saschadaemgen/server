@@ -38,7 +38,7 @@ func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Re
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.ts.URL+"/m/events", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.ts.URL+"/einloggen/events", nil)
 	if err != nil {
 		cancel()
 		t.Fatalf("new req: %v", err)
@@ -119,7 +119,7 @@ func nextSSEEvent(t *testing.T, br *bufio.Reader, timeout time.Duration) (string
 
 func TestEvents_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m/events")
+	resp, err := env.client.Get(env.ts.URL + "/einloggen/events")
 	if err != nil {
 		t.Fatalf("GET /m/events: %v", err)
 	}
@@ -127,8 +127,8 @@ func TestEvents_RequiresSession(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303 (redirect to login)", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m" {
-		t.Errorf("Location = %q, want /m", loc)
+	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
+		t.Errorf("Location = %q, want /einloggen", loc)
 	}
 }
 

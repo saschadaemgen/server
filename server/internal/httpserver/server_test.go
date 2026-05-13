@@ -214,7 +214,7 @@ func (e *testEnv) loginViewer(t *testing.T, username, password string) *http.Res
 	form := url.Values{}
 	form.Set("username", username)
 	form.Set("password", password)
-	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/m", strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -290,8 +290,8 @@ func TestLogin_HappyPath(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m" {
-		t.Errorf("Location = %q, want /m", loc)
+	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
+		t.Errorf("Location = %q, want /einloggen", loc)
 	}
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -302,7 +302,7 @@ func TestLogin_HappyPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	resp2, err := env.client.Get(env.ts.URL + "/m/")
+	resp2, err := env.client.Get(env.ts.URL + "/einloggen/")
 	if err != nil {
 		t.Fatalf("GET /m/: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestLogin_HappyPath(t *testing.T) {
 
 func TestLogin_NoSession_RendersForm(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m")
+	resp, err := env.client.Get(env.ts.URL + "/einloggen")
 	if err != nil {
 		t.Fatalf("GET /m: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestLogin_NoSession_RendersForm(t *testing.T) {
 // haben in URLs nichts zu suchen).
 func TestLogin_IgnoresQueryPrefill(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m?u=alice&p=hunter2")
+	resp, err := env.client.Get(env.ts.URL + "/einloggen?u=alice&p=hunter2")
 	if err != nil {
 		t.Fatalf("GET /m: %v", err)
 	}
@@ -420,8 +420,8 @@ func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303 (See Other)", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m" {
-		t.Errorf("Location = %q, want /m", loc)
+	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
+		t.Errorf("Location = %q, want /einloggen", loc)
 	}
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -482,7 +482,7 @@ func TestLogin_CaseInsensitiveUsername(t *testing.T) {
 
 func TestHome_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m/")
+	resp, err := env.client.Get(env.ts.URL + "/einloggen/")
 	if err != nil {
 		t.Fatalf("GET /m/: %v", err)
 	}
@@ -490,8 +490,8 @@ func TestHome_RequiresSession(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m" {
-		t.Errorf("Location = %q, want /m", loc)
+	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
+		t.Errorf("Location = %q, want /einloggen", loc)
 	}
 }
 
@@ -503,7 +503,7 @@ func TestHome_SessionExpired(t *testing.T) {
 
 	env.clock.Add(2 * session.DefaultIdleTimeout)
 
-	resp2, err := env.client.Get(env.ts.URL + "/m/")
+	resp2, err := env.client.Get(env.ts.URL + "/einloggen/")
 	if err != nil {
 		t.Fatalf("GET /m/: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
 	resp.Body.Close()
 
-	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/m/logout", nil)
+	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/einloggen/logout", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 		t.Errorf("status = %d, want 303", resp2.StatusCode)
 	}
 
-	resp3, err := env.client.Get(env.ts.URL + "/m/")
+	resp3, err := env.client.Get(env.ts.URL + "/einloggen/")
 	if err != nil {
 		t.Fatalf("GET /m/ after logout: %v", err)
 	}
@@ -566,6 +566,73 @@ func TestCookie_Flags(t *testing.T) {
 	}
 	if cookie.MaxAge != 365*86400 {
 		t.Errorf("MaxAge = %d, want %d", cookie.MaxAge, 365*86400)
+	}
+}
+
+// ---------- S13-02-FIX4-a-HOTFIX2: Legacy /m -> /einloggen ----------
+
+// TestOldMRouteRedirects sichert dass alle alten /m-Pfade
+// (Bookmarks, alte QR-Codes, externe Links) mit 301 nach
+// /einloggen umgeleitet werden.
+func TestOldMRouteRedirects(t *testing.T) {
+	env := newTestServer(t)
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/m", "/einloggen"},
+		{"/m/", "/einloggen/"},
+		{"/m/events", "/einloggen/events"},
+		{"/m/logout", "/einloggen/logout"},
+		{"/m?u=alice", "/einloggen?u=alice"},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			resp, err := env.client.Get(env.ts.URL + c.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", c.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusMovedPermanently {
+				t.Errorf("status = %d, want 301 for %s", resp.StatusCode, c.path)
+			}
+			if loc := resp.Header.Get("Location"); loc != c.want {
+				t.Errorf("Location = %q, want %q for %s", loc, c.want, c.path)
+			}
+		})
+	}
+}
+
+// ---------- Modals haben modal-glass (S13-02-FIX4-a-HOTFIX2) ----------
+
+// TestAllModalsHaveGlassClass rendert die Admin-Web-Viewers-Seite
+// inklusive Anlegen-Modal und prueft im HTML auf das
+// modal-glass-Element. Ohne diese Klasse schliesst das
+// library-interactions.js das Modal bei jedem Inner-Klick (s.
+// HOTFIX1- und HOTFIX2-Notes).
+func TestAllModalsHaveGlassClass(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/web-viewers")
+	if err != nil {
+		t.Fatalf("GET /a/web-viewers: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	// Server-seitiges Anlegen-Modal
+	if !strings.Contains(body, `class="modal-glass"`) {
+		t.Errorf("create-viewer modal-glass missing in web-viewers HTML")
+	}
+	// JS-injected Credentials-Modal: das Markup ist im Inline-
+	// Skript als String; wir greppen einfach nach dem Bauplan.
+	if !strings.Contains(body, `<div class="modal-glass">`) {
+		t.Errorf("renderCredentials JS template missing modal-glass")
+	}
+	if !strings.Contains(body, "modal-header") {
+		t.Errorf("modal-header (Library-Konvention) missing")
+	}
+	if !strings.Contains(body, "modal-footer") {
+		t.Errorf("modal-footer (Library-Konvention) missing")
 	}
 }
 

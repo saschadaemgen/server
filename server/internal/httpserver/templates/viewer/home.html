@@ -41,7 +41,7 @@
 
   <script src="/static/interactions.js"></script>
   <script>
-    unifix.connectSSE("/m/events", {
+    unifix.connectSSE("/einloggen/events", {
       onDoorbellStart:  function () { unifix.openOverlay("ringing"); },
       onDoorbellCancel: function () { unifix.closeOverlay("ringing"); },
       onHistoryUpdate:  function () { location.reload(); }
