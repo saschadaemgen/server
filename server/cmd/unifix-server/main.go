@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/httpserver"
+	"unifix.local/server/internal/mdns"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
@@ -143,12 +146,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// mDNS-Advertisement (Saison 13-02-FIX4-d). Adoptierte
+	// ESP-Viewer finden den Server via _unifix._tcp.local statt
+	// einer haendischen IP-Konfiguration. Skip wenn keine IP
+	// gesetzt ist; dann waere die Antwort sowieso nutzlos.
+	mdnsSvc, err := startMDNSIfPossible(cfg.ServerIPv4, cfg.ListenAddr, log)
+	if err != nil {
+		log.Warn("mdns advertisement skipped", "err", err)
+	}
+	defer func() {
+		if mdnsSvc != nil {
+			_ = mdnsSvc.Close()
+		}
+	}()
+
 	log.Info("unifix-server starting",
 		"addr", cfg.ListenAddr,
 		"dev_mode", cfg.DevMode,
 		"db", cfg.DBPath,
 		"mock_state_dir", cfg.MockStateDir,
 		"server_ipv4", cfg.ServerIPv4,
+		"mdns_active", mdnsSvc != nil,
 	)
 
 	errCh := make(chan error, 1)
@@ -197,6 +215,30 @@ func ensurePepper(ctx context.Context, cfg *platformconfig.Service, log *slog.Lo
 	}
 	log.Info("viewer password pepper generated and stored")
 	return nil
+}
+
+// startMDNSIfPossible parses listenAddr (":8080" or "0.0.0.0:8080")
+// for the port and starts an mDNS advertisement. If serverIPv4 is
+// empty (no UNIFIX_SERVER_IPV4 set), returns (nil, nil) - the
+// caller logs a warning and continues without mDNS.
+func startMDNSIfPossible(serverIPv4, listenAddr string, log *slog.Logger) (*mdns.Service, error) {
+	if serverIPv4 == "" {
+		return nil, errors.New("UNIFIX_SERVER_IPV4 not set")
+	}
+	_, portStr, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port == 0 {
+		return nil, errors.New("listen addr port unparseable")
+	}
+	svc, err := mdns.Start(serverIPv4, port)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("mdns advertising", "service", mdns.ServiceName, "instance", mdns.InstanceName, "ip", serverIPv4, "port", port)
+	return svc, nil
 }
 
 // runAuditCleanup laeuft alle 6h und loescht login_audit-Zeilen
