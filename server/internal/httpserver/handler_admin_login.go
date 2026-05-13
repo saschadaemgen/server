@@ -9,41 +9,35 @@ import (
 	"unifix.local/server/internal/auth/adminsession"
 )
 
+// adminLoginPageData matches the Claude-Design admin-login.html
+// snippet contract. It carries an optional Error string and a
+// CSRFToken slot we keep present even though our auth pipeline
+// has no CSRF middleware yet (S13-03+ work).
 type adminLoginPageData struct {
-	Title    string
-	ShowNav  bool
-	Setup    bool
-	Username string
-	Error    string
+	Error     string
+	CSRFToken string
 }
 
-// handleAdminLoginGet renders the login form. If no admin user
-// exists yet (first-run), the form switches into setup mode
-// (asks for password confirm).
+// handleAdminLoginGet renders the library login form.
+//
+// Saison 13-02-FIX3: the previous separate "first-run setup"
+// page is gone (the library template has no setup form). When
+// no admin exists yet, the very first successful POST creates
+// the admin with the typed password. UX is simpler and matches
+// the library design; the operator should pick a strong password
+// at first launch.
 func (s *Server) handleAdminLoginGet(w http.ResponseWriter, r *http.Request) {
-	// already logged in? skip to dashboard.
 	if sid := readAdminSessionCookie(r); sid != "" {
 		if _, err := s.adminSessions.Validate(r.Context(), sid); err == nil {
 			http.Redirect(w, r, "/a/", http.StatusSeeOther)
 			return
 		}
 	}
-	exists, err := s.admin.Exists(r.Context())
-	if err != nil {
-		s.log.Error("admin exists check failed", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	data := adminLoginPageData{
-		Title:   "Login",
-		ShowNav: false,
-		Setup:   !exists,
-	}
-	s.renderAdminPage(w, "login", data)
+	s.renderAdminPage(w, "login", adminLoginPageData{})
 }
 
-// handleAdminLoginPost handles either setup or login depending
-// on form contents.
+// handleAdminLoginPost handles login (and first-run setup as a
+// silent side-effect when no admin exists yet).
 func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -51,7 +45,12 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(r.PostForm.Get("username"))
 	password := r.PostForm.Get("password")
-	isSetup := r.PostForm.Get("setup") == "1"
+	if username == "" || password == "" {
+		s.renderAdminPage(w, "login", adminLoginPageData{
+			Error: "Benutzername und Passwort sind Pflicht.",
+		})
+		return
+	}
 
 	exists, err := s.admin.Exists(r.Context())
 	if err != nil {
@@ -60,24 +59,11 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Setup-Pfad: trat ein wenn noch kein Admin existiert.
+	// First-run: create the admin from this first valid POST.
 	if !exists {
-		if !isSetup {
-			http.Redirect(w, r, "/a/login", http.StatusSeeOther)
-			return
-		}
-		confirm := r.PostForm.Get("password_confirm")
-		if password == "" || password != confirm {
-			s.renderAdminPage(w, "login", adminLoginPageData{
-				Title: "Setup", Setup: true, Username: username,
-				Error: "Passwoerter stimmen nicht ueberein oder sind leer.",
-			})
-			return
-		}
 		if err := s.admin.SetPassword(r.Context(), username, password); err != nil {
 			s.log.Warn("admin setup rejected", "err", err)
 			s.renderAdminPage(w, "login", adminLoginPageData{
-				Title: "Setup", Setup: true, Username: username,
 				Error: friendlyAdminError(err),
 			})
 			return
@@ -85,11 +71,9 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("admin setup complete", "username", username)
 	}
 
-	// Login-Pfad (auch direkt nach Setup).
 	if err := s.admin.Login(r.Context(), username, password); err != nil {
 		if errors.Is(err, admin.ErrNotFound) || errors.Is(err, admin.ErrInvalidPassword) {
 			s.renderAdminPage(w, "login", adminLoginPageData{
-				Title: "Login", Username: username,
 				Error: "Anmeldedaten ungueltig.",
 			})
 			return

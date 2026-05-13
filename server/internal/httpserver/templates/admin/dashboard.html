@@ -1,121 +1,23 @@
-{{define "content"}}
-<div class="page-header">
-  <h1 class="text-display">Dashboard</h1>
-  <p class="text-body text-secondary">Willkommen zurueck, {{.AdminName}}.</p>
-</div>
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unifix · Dashboard</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
 
-<div class="grid-3">
-  <a href="/a/mocks" class="app-card">
-    <div class="app-card-header">
-      <div class="app-card-icon-wrap">{{icon "server"}}</div>
-      <div class="app-card-titles">
-        <p class="text-caption text-tertiary">Mock-Viewer</p>
-        <p class="app-card-stat">{{.MockCount}}</p>
-      </div>
-      <div class="text-tertiary">{{icon "chevron-right"}}</div>
-    </div>
-    <p class="text-callout text-secondary mt-2">virtuelle Geraete im Prozess</p>
-  </a>
+  {{template "admin-dashboard.html" .}}
+  {{template "modal-magic-link.html" .}}
 
-  <a href="/a/users" class="app-card">
-    <div class="app-card-header">
-      <div class="app-card-icon-wrap green">{{icon "users"}}</div>
-      <div class="app-card-titles">
-        <p class="text-caption text-tertiary">Mieter (UA-User)</p>
-        <p class="app-card-stat">{{if .UserCountReady}}{{.UserCount}}{{else}}-{{end}}</p>
-      </div>
-      <div class="text-tertiary">{{icon "chevron-right"}}</div>
-    </div>
-    <p class="text-callout text-secondary mt-2">
-      {{if .UserCountReady}}via UA-Developer-API verwaltet{{else}}UA-API noch nicht konfiguriert{{end}}
-    </p>
-  </a>
-
-  <a href="/a/settings" class="app-card">
-    <div class="app-card-header">
-      <div class="app-card-icon-wrap {{if .UserCountReady}}{{else}}amber{{end}}">{{icon "settings"}}</div>
-      <div class="app-card-titles">
-        <p class="text-caption text-tertiary">Einstellungen</p>
-        <p class="text-title-1 {{if .UserCountReady}}text-green{{else}}text-amber{{end}}">
-          {{if .UserCountReady}}konfiguriert{{else}}setup noetig{{end}}
-        </p>
-      </div>
-      <div class="text-tertiary">{{icon "chevron-right"}}</div>
-    </div>
-    <p class="text-callout text-secondary mt-2">UA-Developer-API + Plattform</p>
-  </a>
-</div>
-
-<div class="app-card">
-  <div class="app-card-header no-trailing">
-    <div class="app-card-icon-wrap">{{icon "bell"}}</div>
-    <div class="app-card-titles">
-      <h2 class="text-title-1">Klingel-Statistik</h2>
-      <p class="text-callout text-secondary">Aktivitaet ueber rollierende Zeitfenster.</p>
-    </div>
-  </div>
-  <div class="grid-3 mt-6">
-    <div>
-      <p class="text-caption text-tertiary">Letzte 24 Stunden</p>
-      <p class="app-card-stat mt-2">{{.Doorbell.Total24h}}</p>
-    </div>
-    <div>
-      <p class="text-caption text-tertiary">Letzte 7 Tage</p>
-      <p class="app-card-stat mt-2">{{.Doorbell.Total7d}}</p>
-    </div>
-    <div>
-      <p class="text-caption text-tertiary">Letzte 30 Tage</p>
-      <p class="app-card-stat mt-2">{{.Doorbell.Total30d}}</p>
-    </div>
-  </div>
-  {{if .Doorbell.TopMocks}}
-  <div class="mt-6" style="border-top: 1px solid var(--border-card); padding-top: 16px;">
-    <p class="text-caption text-tertiary mb-6">Top-Mocks der letzten 24h</p>
-    <ul class="history-list">
-      {{range .Doorbell.TopMocks}}
-      <li class="history-item">
-        <div class="history-item-icon">{{icon "bell"}}</div>
-        <div>
-          <div class="history-item-title">{{.Name}}</div>
-          <div class="history-item-meta text-mono">{{.MAC}}</div>
-        </div>
-        <div class="text-mono text-primary tabular-nums" style="font-weight:600;">{{.Count}}</div>
-      </li>
-      {{end}}
-    </ul>
-  </div>
-  {{else if .Doorbell.Ready}}
-  <p class="text-callout text-tertiary mt-6">Noch keine Klingel-Events in den letzten 24 Stunden.</p>
-  {{end}}
-</div>
-
-<div class="app-card">
-  <div class="app-card-header no-trailing">
-    <div class="app-card-icon-wrap">{{icon "settings"}}</div>
-    <div class="app-card-titles">
-      <h2 class="text-title-1">System</h2>
-      <p class="text-callout text-secondary">Aktueller Server-Stand.</p>
-    </div>
-  </div>
-  <div class="grid-4 mt-6">
-    <div>
-      <p class="text-caption text-tertiary">Schema-Version</p>
-      <p class="text-headline text-mono mt-2">{{.SchemaVersion}}</p>
-    </div>
-    <div>
-      <p class="text-caption text-tertiary">Server-IPv4</p>
-      <p class="text-headline text-mono mt-2">
-        {{if .ServerIPv4}}{{.ServerIPv4}}{{else}}<span class="text-amber">nicht gesetzt</span>{{end}}
-      </p>
-    </div>
-    <div>
-      <p class="text-caption text-tertiary">DevMode</p>
-      <p class="text-headline text-mono mt-2">{{if .DevMode}}true{{else}}false{{end}}</p>
-    </div>
-    <div>
-      <p class="text-caption text-tertiary">Saison</p>
-      <p class="text-headline text-mono mt-2">13-02</p>
-    </div>
-  </div>
-</div>
-{{end}}
+  <script>
+    (function () {
+      var nodes = document.querySelectorAll('[data-modal], [data-sheet], [data-overlay], [data-sheet-scrim]');
+      for (var i = 0; i < nodes.length; i++) nodes[i].classList.remove('is-open');
+    })();
+  </script>
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

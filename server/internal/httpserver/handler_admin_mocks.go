@@ -17,24 +17,37 @@ import (
 var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 
 // servicePortStart is the first port the auto-allocator hands out.
-// Saison 12 default: 8100. Far enough from 8080 (UA-standard) and
-// 8443 (server TLS) to avoid surprises.
 const servicePortStart = 8100
 
+// adminMocksData carries the data the Claude-Design admin-mocks
+// snippet expects: User, Units (mock viewers), Doors and the
+// RecentMocks event log.
 type adminMocksData struct {
-	Title     string
-	ShowNav   bool
-	ActiveNav string
-	Mocks     []mockRowData
+	User        adminUser
+	Units       []adminUnit
+	Doors       []adminDoor
+	RecentMocks []adminMockEvent
+	CSRFToken   string
 }
 
-// mockRowData is the per-row payload for templates/admin/mocks_row.html.
-// Saison 12-06: ua_user_id is gone; routing is mock-MAC only.
-type mockRowData struct {
-	MAC         string
-	Name        string
-	ServicePort uint16
-	Running     bool
+type adminUnit struct {
+	ID         string
+	Name       string
+	TenantName string
+	OnlineNow  bool
+}
+
+type adminDoor struct {
+	ID   string
+	Name string
+}
+
+type adminMockEvent struct {
+	When     string
+	UnitName string
+	DoorName string
+	Trigger  string
+	Result   string // "delivered" | "offline" | "ignored" | other
 }
 
 func (s *Server) handleAdminMocksList(w http.ResponseWriter, r *http.Request) {
@@ -45,33 +58,66 @@ func (s *Server) handleAdminMocksList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username := AdminUserFromContext(r.Context())
 	data := adminMocksData{
-		Title:     "Mock-Viewer",
-		ShowNav:   true,
-		ActiveNav: "mocks",
-		Mocks:     make([]mockRowData, 0, len(infos)),
+		User: adminUser{Name: username, Initials: initialsOf(username)},
+		Doors: []adminDoor{
+			{ID: "hauseingang", Name: "Hauseingang"},
+		},
 	}
 	for _, info := range infos {
-		data.Mocks = append(data.Mocks, mockRowData{
-			MAC:         info.MAC,
-			Name:        info.Name,
-			ServicePort: info.ServicePort,
-			Running:     info.Running,
+		data.Units = append(data.Units, adminUnit{
+			ID:         info.MAC,
+			Name:       info.Name,
+			TenantName: info.Name,
+			OnlineNow:  info.Running,
 		})
 	}
-	s.renderAdminPage(w, "mocks_list", data)
+
+	// Recent mock-events: drain the most recent doorbell entries
+	// across all mocks (best-effort: take the first mock's history
+	// for now; a true union-query is a S13-03 follow-up).
+	if s.history != nil && len(infos) > 0 {
+		events, _ := s.history.ListForMock(r.Context(), infos[0].MAC, 10)
+		for _, ev := range events {
+			data.RecentMocks = append(data.RecentMocks, adminMockEvent{
+				When:     ev.OccurredAt.Format("15:04"),
+				UnitName: infos[0].Name,
+				DoorName: doorNameFromIntercom(ev.IntercomMAC),
+				Trigger:  "manuell",
+				Result:   mockResultFor(ev.CancelledAt != nil, ev.ReadAt != nil),
+			})
+		}
+	}
+
+	s.renderAdminPage(w, "mocks", data)
 }
 
+func mockResultFor(cancelled, read bool) string {
+	switch {
+	case cancelled:
+		return "ignored"
+	case read:
+		return "delivered"
+	default:
+		return "delivered"
+	}
+}
+
+// handleAdminMocksCreate is unchanged from S13-01: form-POST a
+// new mock viewer. The library admin-mocks page no longer ships
+// a CRUD form, but the handler stays in place so future flows
+// (e.g. an /a/units/create page) can re-use it.
 func (s *Server) handleAdminMocksCreate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.respondHTMXError(w, http.StatusBadRequest, "Ungueltige Formular-Daten.")
+		http.Error(w, "Ungueltige Formular-Daten.", http.StatusBadRequest)
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	mac := strings.ToLower(strings.TrimSpace(r.PostForm.Get("mac")))
 
 	if name == "" || len(name) > 64 {
-		s.respondHTMXError(w, http.StatusBadRequest, "Name fehlt oder zu lang (max 64 Zeichen).")
+		http.Error(w, "Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
 		return
 	}
 	if mac == "" {
@@ -79,20 +125,21 @@ func (s *Server) handleAdminMocksCreate(w http.ResponseWriter, r *http.Request) 
 		mac, err = generateUbiquitiMAC()
 		if err != nil {
 			s.log.Error("generate mac", "err", err)
-			s.respondHTMXError(w, http.StatusInternalServerError, "MAC-Generierung fehlgeschlagen.")
+			http.Error(w, "MAC-Generierung fehlgeschlagen.", http.StatusInternalServerError)
 			return
 		}
 	}
 	if !macFormat.MatchString(mac) {
-		s.respondHTMXError(w, http.StatusBadRequest,
-			"MAC muss im Format xx:xx:xx:xx:xx:xx (lowercase hex) sein.")
+		http.Error(w,
+			"MAC muss im Format xx:xx:xx:xx:xx:xx (lowercase hex) sein.",
+			http.StatusBadRequest)
 		return
 	}
 
 	port, err := s.nextFreeServicePort(r.Context())
 	if err != nil {
 		s.log.Error("next free port", "err", err)
-		s.respondHTMXError(w, http.StatusInternalServerError, "Port-Allokation fehlgeschlagen.")
+		http.Error(w, "Port-Allokation fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 
@@ -100,23 +147,17 @@ func (s *Server) handleAdminMocksCreate(w http.ResponseWriter, r *http.Request) 
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
 		case errors.Is(err, mockmanager.ErrMACInUse):
-			s.respondHTMXError(w, http.StatusConflict, "MAC bereits vergeben.")
+			http.Error(w, "MAC bereits vergeben.", http.StatusConflict)
 		case errors.Is(err, mockmanager.ErrPortInUse):
-			s.respondHTMXError(w, http.StatusConflict, "Service-Port bereits vergeben.")
+			http.Error(w, "Service-Port bereits vergeben.", http.StatusConflict)
 		default:
 			s.log.Error("add viewer", "err", err, "mac_prefix", mac[:8])
-			s.respondHTMXError(w, http.StatusInternalServerError, "Anlegen fehlgeschlagen.")
+			http.Error(w, "Anlegen fehlgeschlagen.", http.StatusInternalServerError)
 		}
 		return
 	}
 
-	row := mockRowData{
-		MAC:         mac,
-		Name:        name,
-		ServicePort: port,
-		Running:     true,
-	}
-	s.renderAdminPartial(w, "mock_row", row)
+	http.Redirect(w, r, "/a/mocks", http.StatusSeeOther)
 }
 
 func (s *Server) handleAdminMocksDelete(w http.ResponseWriter, r *http.Request) {
@@ -137,31 +178,49 @@ func (s *Server) handleAdminMocksDelete(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleAdminMocksMagicLink generates a 24h magic-link bound to
-// this mock and returns a clipboard-ready modal HTML fragment.
-// Saison 12-06: no longer requires a tenant binding; any
-// existing mock can issue a link.
+// magicLinkModalData is the payload for the Claude-Design
+// modal-magic-link.html snippet. Library shape uses nested
+// .Modal.{Unit, MagicLinkURL, ExpiresIn, QRSVG}.
+type magicLinkModalData struct {
+	Modal magicLinkModal
+}
+
+type magicLinkModal struct {
+	Unit          magicLinkUnit
+	MagicLinkURL  string
+	ExpiresIn     string
+	QRSVG         string
+}
+
+type magicLinkUnit struct {
+	Name       string
+	TenantName string
+	Email      string
+}
+
+// handleAdminMocksMagicLink generates a 24h magic-link and
+// returns the modal partial pre-populated with the URL.
 func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
-		s.respondHTMXError(w, http.StatusBadRequest, "Ungueltige MAC-Adresse.")
+		http.Error(w, "Ungueltige MAC-Adresse.", http.StatusBadRequest)
 		return
 	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
-			s.respondHTMXError(w, http.StatusNotFound, "Mock-Viewer nicht gefunden.")
+			http.Error(w, "Mock-Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
 		s.log.Error("get viewer info", "err", err, "mac_prefix", mac[:8])
-		s.respondHTMXError(w, http.StatusInternalServerError, "Mock-Lookup fehlgeschlagen.")
+		http.Error(w, "Mock-Lookup fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 
 	token, err := s.magic.CreateWithTTL(r.Context(), info.MAC, 24*time.Hour)
 	if err != nil {
 		s.log.Error("magic-link generate failed", "err", err, "mac_prefix", mac[:8])
-		s.respondHTMXError(w, http.StatusInternalServerError, "Token-Erzeugung fehlgeschlagen.")
+		http.Error(w, "Token-Erzeugung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 
@@ -171,26 +230,20 @@ func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Reques
 	}
 	loginURL := fmt.Sprintf("%s://%s/m/login?t=%s", scheme, r.Host, token)
 
-	s.renderAdminPartial(w, "magic_link_modal", struct {
-		URL      string
-		MockMAC  string
-		MockName string
-	}{
-		URL:      loginURL,
-		MockMAC:  info.MAC,
-		MockName: info.Name,
-	})
+	data := magicLinkModalData{Modal: magicLinkModal{
+		Unit:         magicLinkUnit{Name: info.Name, TenantName: info.Name, Email: ""},
+		MagicLinkURL: loginURL,
+		ExpiresIn:    "in 24 Stunden",
+	}}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tpl.renderPartial(w, "modal-magic-link.html", data); err != nil {
+		s.log.Error("render magic-link modal", "err", err)
+		http.Error(w, "Modal-Render fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
 }
 
-func (s *Server) respondHTMXError(w http.ResponseWriter, status int, msg string) {
-	w.WriteHeader(status)
-	_ = s.tpl.renderPartial(w, "error", map[string]string{"Message": msg})
-}
-
-// generateUbiquitiMAC produces 0c:ea:14:XX:XX:XX with the
-// trailing three bytes drawn from crypto/rand. The Ubiquiti OUI
-// keeps the mock indistinguishable from real UA hardware in
-// quick visual inspections.
+// generateUbiquitiMAC produces 0c:ea:14:XX:XX:XX.
 func generateUbiquitiMAC() (string, error) {
 	b := make([]byte, 3)
 	if _, err := rand.Read(b); err != nil {

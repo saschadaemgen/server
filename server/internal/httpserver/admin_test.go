@@ -4,21 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 )
 
-// loginAdmin runs the setup-then-login flow against the test
-// server and returns the post-login session cookie value.
+// loginAdmin posts a single (username, password) form to /a/login.
+// Saison 13-02-FIX3: the previous "first-run setup" flow is gone;
+// the very first valid POST creates the admin row and logs in.
 func loginAdmin(t *testing.T, env *testEnv, username, password string) {
 	t.Helper()
-	// Setup-Form.
 	form := url.Values{}
-	form.Set("setup", "1")
 	form.Set("username", username)
 	form.Set("password", password)
-	form.Set("password_confirm", password)
 	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := env.client.Do(req)
@@ -31,9 +28,9 @@ func loginAdmin(t *testing.T, env *testEnv, username, password string) {
 	}
 }
 
-// ---------- Login + setup ----------
+// ---------- Login + first-run setup ----------
 
-func TestAdminLogin_GetShowsSetupWhenNoAdmin(t *testing.T) {
+func TestAdminLogin_GetRendersLibraryForm(t *testing.T) {
 	env := newTestServer(t)
 	resp, err := env.client.Get(env.ts.URL + "/a/login")
 	if err != nil {
@@ -41,21 +38,22 @@ func TestAdminLogin_GetShowsSetupWhenNoAdmin(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Erstmaliger Setup") {
-		t.Errorf("body missing setup marker, got: %s", body[:min(200, len(body))])
+	if !strings.Contains(body, `name="username"`) {
+		t.Errorf("login form missing username input")
 	}
-	if !strings.Contains(body, "Admin anlegen") {
-		t.Errorf("body missing setup button")
+	if !strings.Contains(body, `name="password"`) {
+		t.Errorf("login form missing password input")
+	}
+	if !strings.Contains(body, "Anmelden") {
+		t.Errorf("login form missing submit label")
 	}
 }
 
-func TestAdminLogin_SetupCreatesAdminAndLogsIn(t *testing.T) {
+func TestAdminLogin_FirstPostSetsUpAdminAndLogsIn(t *testing.T) {
 	env := newTestServer(t)
 	form := url.Values{}
-	form.Set("setup", "1")
 	form.Set("username", "saschsa")
 	form.Set("password", "lange-langes-passwort")
-	form.Set("password_confirm", "lange-langes-passwort")
 	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := env.client.Do(req)
@@ -69,12 +67,10 @@ func TestAdminLogin_SetupCreatesAdminAndLogsIn(t *testing.T) {
 	if loc := resp.Header.Get("Location"); loc != "/a/" {
 		t.Errorf("Location = %q, want /a/", loc)
 	}
-	// admin user now exists in DB
 	ok, err := env.adminSvc.Exists(context.Background())
 	if err != nil || !ok {
-		t.Errorf("Exists after setup = %v err=%v, want true nil", ok, err)
+		t.Errorf("Exists after first-post = %v err=%v, want true nil", ok, err)
 	}
-	// cookie present
 	var found bool
 	for _, c := range resp.Cookies() {
 		if c.Name == AdminSessionCookieName && c.Value != "" {
@@ -84,44 +80,6 @@ func TestAdminLogin_SetupCreatesAdminAndLogsIn(t *testing.T) {
 	}
 	if !found {
 		t.Error("admin session cookie missing after setup")
-	}
-}
-
-func TestAdminLogin_SetupRejectsMismatch(t *testing.T) {
-	env := newTestServer(t)
-	form := url.Values{}
-	form.Set("setup", "1")
-	form.Set("username", "saschsa")
-	form.Set("password", "abcdefgh")
-	form.Set("password_confirm", "different")
-	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST /a/login: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if !strings.Contains(body, "stimmen nicht ueberein") {
-		t.Errorf("missing mismatch error in body")
-	}
-}
-
-func TestAdminLogin_AfterSetupGetShowsLoginNotSetup(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
-	// fresh client (no cookie) to avoid auto-redirect.
-	resp, err := http.Get(env.ts.URL + "/a/login")
-	if err != nil {
-		t.Fatalf("GET /a/login: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if strings.Contains(body, "Erstmaliger Setup") {
-		t.Error("login page still shows setup mode after admin exists")
-	}
-	if !strings.Contains(body, "Anmeldung erforderlich") {
-		t.Errorf("missing login marker")
 	}
 }
 
@@ -178,7 +136,7 @@ func TestAdminDashboard_HappyPath(t *testing.T) {
 		t.Errorf("missing Dashboard heading")
 	}
 	if !strings.Contains(body, "saschsa") {
-		t.Errorf("missing personalized greeting (admin username)")
+		t.Errorf("missing admin name in nav (got no occurrence of \"saschsa\")")
 	}
 }
 
@@ -193,8 +151,11 @@ func TestAdminSettings_Get(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	if !strings.Contains(body, "API Token") {
-		t.Errorf("missing API Token field")
+	if !strings.Contains(body, "Controller-URL") {
+		t.Errorf("missing UA controller url field")
+	}
+	if !strings.Contains(body, "Einstellungen") {
+		t.Errorf("missing settings heading")
 	}
 }
 
@@ -202,8 +163,7 @@ func TestAdminSettings_PostStoresEncrypted(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
 	form := url.Values{}
-	form.Set("action", "save")
-	form.Set("base_url", "https://example.com:12445")
+	form.Set("ua_controller_url", "https://example.com:12445")
 	form.Set("token", "secret-token-abcdef")
 	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/settings", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -213,7 +173,6 @@ func TestAdminSettings_PostStoresEncrypted(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// plaintext base url stored
 	gotURL, err := env.platformCfg.Get(context.Background(), "ua_api_base_url")
 	if err != nil {
 		t.Fatalf("Get base_url: %v", err)
@@ -221,7 +180,6 @@ func TestAdminSettings_PostStoresEncrypted(t *testing.T) {
 	if gotURL != "https://example.com:12445" {
 		t.Errorf("base_url = %q", gotURL)
 	}
-	// token stored encrypted; decrypt yields plaintext
 	gotToken, err := env.platformCfg.GetSecret(context.Background(), "ua_api_token")
 	if err != nil {
 		t.Fatalf("GetSecret token: %v", err)
@@ -229,7 +187,6 @@ func TestAdminSettings_PostStoresEncrypted(t *testing.T) {
 	if gotToken != "secret-token-abcdef" {
 		t.Errorf("token = %q", gotToken)
 	}
-	// raw DB row must not contain the plaintext token
 	var enc string
 	if err := env.d.QueryRow(
 		`SELECT value_encrypted FROM platform_config WHERE key = ?`, "ua_api_token",
@@ -241,9 +198,9 @@ func TestAdminSettings_PostStoresEncrypted(t *testing.T) {
 	}
 }
 
-// ---------- Mocks CRUD ----------
+// ---------- Mocks ----------
 
-func TestAdminMocks_ListEmpty(t *testing.T) {
+func TestAdminMocks_ListRendersDeviceTable(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
 	resp, err := env.client.Get(env.ts.URL + "/a/mocks")
@@ -251,55 +208,12 @@ func TestAdminMocks_ListEmpty(t *testing.T) {
 		t.Fatalf("GET /a/mocks: %v", err)
 	}
 	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if !strings.Contains(body, "Noch keine Mock-Viewer") {
-		t.Errorf("missing empty-state marker")
-	}
-	if !strings.Contains(body, "Neuen Mock-Viewer anlegen") {
-		t.Errorf("missing create form")
-	}
-}
-
-// htmlIDWithColonRE matches any HTML id="..." attribute whose
-// value contains a colon. Colons in IDs are legal HTML but
-// blow up querySelectorAll because ":" starts a CSS pseudo
-// class. htmx hits that path on every hx-target, so the
-// admin mocks UI needs colon-free row IDs.
-var htmlIDWithColonRE = regexp.MustCompile(`(?i)\bid\s*=\s*"[^"]*:[^"]*"`)
-
-// htmxSelectorWithColonRE catches the same hazard in hx-target
-// (or any other htmx attribute that takes a CSS selector).
-var htmxSelectorWithColonRE = regexp.MustCompile(`(?i)\bhx-(target|swap-oob|trigger|select)\s*=\s*"[^"]*#[^"]*:[^"]*"`)
-
-func TestMocksRow_RenderedIDsHaveNoColons(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
-
-	form := url.Values{}
-	form.Set("name", "Colon Probe")
-	form.Set("mac", "0c:ea:14:0a:78:06")
-	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/a/mocks", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST /a/mocks: %v", err)
-	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("create status = %d, want 200", resp.StatusCode)
+		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 	body := readBody(t, resp)
-
-	if m := htmlIDWithColonRE.FindString(body); m != "" {
-		t.Errorf("rendered row has HTML id with colon (breaks CSS selectors): %s", m)
-	}
-	if m := htmxSelectorWithColonRE.FindString(body); m != "" {
-		t.Errorf("rendered row has htmx selector with colon (breaks querySelectorAll): %s", m)
-	}
-	// The expected colon-free pattern must be present.
-	if !strings.Contains(body, `id="mock-row-0cea140a7806"`) {
-		t.Errorf("expected colon-free id mock-row-0cea140a7806 in body; got: %s", body)
+	if !strings.Contains(body, "Mock-Tools") {
+		t.Errorf("missing Mock-Tools heading")
 	}
 }
 
@@ -316,18 +230,10 @@ func TestAdminMocks_CreateHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /a/mocks: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303 (redirect after create)", resp.StatusCode)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(body, "0c:ea:14:de:ad:be") {
-		t.Errorf("partial response missing MAC")
-	}
-	if !strings.Contains(body, "Smoke Test Mock") {
-		t.Errorf("partial response missing name")
-	}
-
 	infos, _ := env.mockMgr.ListViewers(context.Background())
 	if len(infos) != 1 {
 		t.Errorf("ListViewers len = %d, want 1", len(infos))
@@ -340,20 +246,22 @@ func TestAdminMocks_CreateGeneratesMACWhenEmpty(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("name", "Auto MAC")
-	// mac empty -> auto generate
 	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/mocks", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST /a/mocks: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303", resp.StatusCode)
 	}
-	body := readBody(t, resp)
-	if !strings.Contains(body, "0c:ea:14:") {
-		t.Errorf("auto-generated MAC missing Ubiquiti OUI prefix")
+	infos, _ := env.mockMgr.ListViewers(context.Background())
+	if len(infos) != 1 {
+		t.Fatalf("ListViewers len = %d, want 1", len(infos))
+	}
+	if !strings.HasPrefix(infos[0].MAC, "0c:ea:14:") {
+		t.Errorf("auto-generated MAC missing Ubiquiti OUI prefix: %s", infos[0].MAC)
 	}
 }
 
@@ -404,11 +312,6 @@ func TestAdminMocks_Delete(t *testing.T) {
 }
 
 // ---------- Magic-Link generator ----------
-//
-// Saison 12-06: magic-link generation no longer needs a tenant
-// binding. Any existing mock can issue a link; the token is bound
-// only to the mock's MAC. The "RequiresUserBinding" test from
-// Saison 12-05 has been retired.
 
 func TestAdminMocksMagicLink_RequiresAdminSession(t *testing.T) {
 	env := newTestServer(t)
@@ -461,7 +364,7 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp.StatusCode)
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	body := readBody(t, resp)
 	if !strings.Contains(body, "Familie Mueller") {
@@ -471,8 +374,6 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 		t.Errorf("body missing /m/login?t= URL, got: %s", body)
 	}
 
-	// Pluck the token out of the rendered HTML and verify it
-	// actually consumes through to the mock's MAC.
 	const marker = "/m/login?t="
 	idx := strings.Index(body, marker)
 	if idx < 0 {
@@ -508,9 +409,13 @@ func TestAdminMocksMagicLink_RejectsBadMAC(t *testing.T) {
 	}
 }
 
-// ---------- Users (no UA configured) ----------
+// ---------- Users page ----------
+//
+// Saison 13-02-FIX3: /a/users renders regardless of whether the
+// UA-API is configured. It now surfaces our mock_viewers as
+// tenant rows; UA-Developer-API data is joined where available.
 
-func TestAdminUsers_RequiresUAConfig(t *testing.T) {
+func TestAdminUsers_RendersTenantTable(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
 	resp, err := env.client.Get(env.ts.URL + "/a/users")
@@ -518,9 +423,12 @@ func TestAdminUsers_RequiresUAConfig(t *testing.T) {
 		t.Fatalf("GET /a/users: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
 	body := readBody(t, resp)
-	if !strings.Contains(body, "UA-API nicht konfiguriert") {
-		t.Errorf("missing UA-not-configured marker")
+	if !strings.Contains(body, "Mieter") {
+		t.Errorf("missing Mieter heading")
 	}
 }
 
@@ -543,7 +451,6 @@ func TestAdminLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 		t.Errorf("Location = %q, want /a/login", loc)
 	}
 
-	// follow-up request must be unauthenticated again
 	resp2, err := env.client.Get(env.ts.URL + "/a/")
 	if err != nil {
 		t.Fatalf("GET /a/ after logout: %v", err)
@@ -552,11 +459,4 @@ func TestAdminLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 	if resp2.StatusCode != http.StatusSeeOther {
 		t.Errorf("dashboard after logout = %d, want 303", resp2.StatusCode)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

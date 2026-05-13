@@ -8,69 +8,124 @@ import (
 	"unifix.local/server/internal/uaapi"
 )
 
+// adminUsersData is the payload for admin-users.html (Claude-
+// Design library). Tenants are surfaced from our mock_viewers
+// table plus the UA-Developer-API where available; the library
+// expects a flat shape with magic-link state per row.
 type adminUsersData struct {
-	Title         string
-	ShowNav       bool
-	ActiveNav     string
-	NotConfigured bool
-	Users         []uaapi.User
+	User       adminUser
+	Tenants    []adminTenantRow
+	Pagination adminPagination
 }
 
+type adminTenantRow struct {
+	ID              string
+	UnitName        string
+	UnitMark        string
+	TenantName      string
+	Email           string
+	MagicLinkStatus string // "active" | "expired" | "not-sent"
+	MagicLinkExpiry string
+	LastSeen        string
+}
+
+type adminPagination struct {
+	Page    int
+	Total   int
+	PerPage int
+}
+
+// handleAdminUsersList renders the Mieter-Tabelle. We use the
+// mock_viewers list as the row source since one mock-viewer is
+// effectively one tenant device; UA-User data joins in where the
+// developer API is reachable.
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
-	data := adminUsersData{Title: "Mieter", ShowNav: true, ActiveNav: "users"}
-	if s.ua == nil {
-		data.NotConfigured = true
-		s.renderAdminPage(w, "users_list", data)
-		return
+	username := AdminUserFromContext(r.Context())
+	data := adminUsersData{
+		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
-	users, err := s.ua.ListUsers(r.Context())
+
+	mocks, err := s.mockMgr.ListViewers(r.Context())
 	if err != nil {
-		if errors.Is(err, uaapi.ErrUnauthorized) {
-			data.NotConfigured = true
-			s.renderAdminPage(w, "users_list", data)
-			return
-		}
-		s.log.Error("list ua users", "err", err)
-		http.Error(w, "ua api: "+err.Error(), http.StatusBadGateway)
+		s.log.Error("list viewers", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	data.Users = users
-	s.renderAdminPage(w, "users_list", data)
+
+	// Pull UA users so we can join an email per row when possible.
+	uaByName := map[string]uaapi.User{}
+	if s.ua != nil {
+		if users, err := s.ua.ListUsers(r.Context()); err == nil {
+			for _, u := range users {
+				uaByName[strings.ToLower(u.FirstName+" "+u.LastName)] = u
+			}
+		}
+	}
+
+	for _, m := range mocks {
+		row := adminTenantRow{
+			ID:              m.MAC,
+			UnitName:        m.Name,
+			UnitMark:        initialsOf(m.Name),
+			TenantName:      m.Name,
+			MagicLinkStatus: "not-sent",
+		}
+		if u, ok := uaByName[strings.ToLower(m.Name)]; ok {
+			row.Email = u.UserEmail
+			row.TenantName = u.FirstName + " " + u.LastName
+		}
+		if m.Running {
+			row.LastSeen = "online"
+		} else {
+			row.LastSeen = "offline"
+		}
+		data.Tenants = append(data.Tenants, row)
+	}
+
+	data.Pagination = adminPagination{
+		Page:    1,
+		Total:   len(data.Tenants),
+		PerPage: len(data.Tenants),
+	}
+
+	s.renderAdminPage(w, "users", data)
 }
 
+// handleAdminUsersCreate creates a UA-Developer-API user. The
+// library form posts first_name + last_name + email; we keep
+// the existing behaviour.
 func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) {
 	if s.ua == nil {
-		s.respondHTMXError(w, http.StatusServiceUnavailable, "UA-API nicht konfiguriert.")
+		http.Error(w, "UA-API nicht konfiguriert", http.StatusServiceUnavailable)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.respondHTMXError(w, http.StatusBadRequest, "Ungueltige Formular-Daten.")
+		http.Error(w, "Ungueltige Formular-Daten.", http.StatusBadRequest)
 		return
 	}
 	first := strings.TrimSpace(r.PostForm.Get("first_name"))
 	last := strings.TrimSpace(r.PostForm.Get("last_name"))
 	email := strings.TrimSpace(r.PostForm.Get("email"))
 	if first == "" || last == "" {
-		s.respondHTMXError(w, http.StatusBadRequest, "Vor- und Nachname sind Pflicht.")
+		http.Error(w, "Vor- und Nachname sind Pflicht.", http.StatusBadRequest)
 		return
 	}
-
-	created, err := s.ua.CreateUser(r.Context(), uaapi.User{
+	_, err := s.ua.CreateUser(r.Context(), uaapi.User{
 		FirstName: first, LastName: last, UserEmail: email,
 	})
 	if err != nil {
 		if errors.Is(err, uaapi.ErrUnauthorized) {
-			s.respondHTMXError(w, http.StatusUnauthorized,
-				"UA-API Token ungueltig. Bitte unter Einstellungen pruefen.")
+			http.Error(w, "UA-API Token ungueltig.", http.StatusUnauthorized)
 			return
 		}
 		s.log.Error("create ua user", "err", err)
-		s.respondHTMXError(w, http.StatusBadGateway, "Anlegen fehlgeschlagen: "+err.Error())
+		http.Error(w, "Anlegen fehlgeschlagen.", http.StatusBadGateway)
 		return
 	}
-	s.renderAdminPartial(w, "user_row", *created)
+	http.Redirect(w, r, "/a/users", http.StatusSeeOther)
 }
 
+// handleAdminUsersDelete deletes a UA-Developer-API user.
 func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) {
 	if s.ua == nil {
 		http.Error(w, "UA-API nicht konfiguriert", http.StatusServiceUnavailable)
@@ -94,6 +149,5 @@ func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "delete failed", http.StatusBadGateway)
 		return
 	}
-	// htmx outerHTML swap with empty body drops the row.
 	w.WriteHeader(http.StatusOK)
 }

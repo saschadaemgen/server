@@ -1,54 +1,14 @@
-{{define "content"}}
-<div style="min-height: 70vh; display: grid; place-items: center;">
-  <div style="width: 100%; max-width: 380px;">
-    <div style="text-align: center; margin-bottom: 32px;">
-      <div style="display: inline-grid; place-items: center; width: 56px; height: 56px; border-radius: 16px;
-                  background: var(--accent-blue); color: #fff; box-shadow: 0 12px 32px rgba(10,132,255,0.35);
-                  margin-bottom: 16px;">
-        <span style="width: 28px; height: 28px; display: grid; place-items: center;">{{icon "sparkle"}}</span>
-      </div>
-      <h1 class="text-display">unifix admin</h1>
-      <p class="text-callout text-secondary mt-2">
-        {{if .Setup}}Erstmaliger Setup. Leg den Admin-Account an.{{else}}Anmeldung erforderlich.{{end}}
-      </p>
-    </div>
-
-    <form method="POST" action="/a/login" class="app-card">
-      {{if .Setup}}<input type="hidden" name="setup" value="1">{{end}}
-
-      <div class="form-stack">
-        {{if .Error}}
-        <div class="form-error">{{.Error}}</div>
-        {{end}}
-
-        <div>
-          <label class="input-label">Benutzername</label>
-          <input type="text" name="username" autocomplete="username" required autofocus
-            value="{{.Username}}" class="input">
-        </div>
-
-        <div>
-          <label class="input-label">Passwort</label>
-          <input type="password" name="password" required class="input"
-            autocomplete="{{if .Setup}}new-password{{else}}current-password{{end}}">
-        </div>
-
-        {{if .Setup}}
-        <div>
-          <label class="input-label">Passwort wiederholen</label>
-          <input type="password" name="password_confirm" autocomplete="new-password" required class="input">
-        </div>
-        {{end}}
-
-        <button type="submit" class="btn btn-primary" style="width: 100%;">
-          {{if .Setup}}Admin anlegen{{else}}Anmelden{{end}}
-        </button>
-      </div>
-    </form>
-
-    <p class="text-caption text-tertiary" style="text-align: center; margin-top: 24px;">
-      unifix Plattform - Saison 13
-    </p>
-  </div>
-</div>
-{{end}}
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unifix · Anmeldung</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="login-stage">
+  {{template "admin-login.html" .}}
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

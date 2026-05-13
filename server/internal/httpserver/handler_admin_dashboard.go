@@ -3,149 +3,185 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
+	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/platformconfig"
 )
 
+// adminUser is the {Name, Initials} bag the Claude-Design admin
+// snippets expect in `.User`. We derive Initials from Name.
+type adminUser struct {
+	Name     string
+	Initials string
+}
+
+// adminDashboardData carries the {{.User}}, {{.Stats}} and
+// {{.RecentEvents}} fields the library admin-dashboard.html
+// snippet renders.
 type adminDashboardData struct {
-	Title          string
-	ShowNav        bool
-	ActiveNav      string
-	AdminName      string
-	MockCount      int
-	UserCount      int
-	UserCountReady bool
-	SchemaVersion  int
-	ServerIPv4     string
-	DevMode        bool
-	Doorbell       adminDoorbellStats
+	User         adminUser
+	Stats        adminStats
+	RecentEvents []adminRecentEvent
 }
 
-// adminDoorbellStats is the dashboard slice of doorhistory data.
-// Saison 13-01 puts the three rolling-window totals plus a
-// per-mock 24h ranking on the dashboard card.
-type adminDoorbellStats struct {
-	Ready    bool
-	Total24h int
-	Total7d  int
-	Total30d int
-	TopMocks []adminDoorbellMockRow
+type adminStats struct {
+	ActiveDevices int
+	EventsToday   int
+	EventsTrend   string // pre-formatted e.g. "+12%"
+	CamerasOnline int
+	CamerasTotal  int
+	ActiveTenants int
 }
 
-type adminDoorbellMockRow struct {
-	MAC   string
-	Name  string
-	Count int
+type adminRecentEvent struct {
+	When       string
+	UnitName   string
+	UnitMark   string
+	TenantName string
+	DoorName   string
+	Action     string
+	Status     string // "answered" | "ignored" | "missed" | "opened" | ...
 }
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 
 	data := adminDashboardData{
-		Title:      "Dashboard",
-		ShowNav:    true,
-		ActiveNav:  "dashboard",
-		AdminName:  username,
-		ServerIPv4: s.cfg.ServerIPv4,
-		DevMode:    s.cfg.DevMode,
+		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
 
-	if infos, err := s.mockMgr.ListViewers(r.Context()); err == nil {
-		data.MockCount = len(infos)
+	mocks, err := s.mockMgr.ListViewers(r.Context())
+	if err == nil {
+		data.Stats.ActiveDevices = len(mocks)
+		data.Stats.CamerasTotal = len(mocks)
+		for _, m := range mocks {
+			if m.Running {
+				data.Stats.CamerasOnline++
+			}
+		}
 	}
-	if v, err := s.currentSchemaVersion(r.Context()); err == nil {
-		data.SchemaVersion = v
-	}
+
+	// UA-User count - fall back to ActiveDevices when UA-API is not configured.
 	if s.ua != nil {
 		if users, err := s.ua.ListUsers(r.Context()); err == nil {
-			data.UserCount = len(users)
-			data.UserCountReady = true
+			data.Stats.ActiveTenants = len(users)
 		}
 	} else {
-		// also count as ready if base URL + token are configured
-		// but the lazy build did not happen yet.
 		base, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyUAAPIBaseURL)
 		if base != "" {
-			data.UserCountReady = true
+			data.Stats.ActiveTenants = data.Stats.ActiveDevices
 		}
 	}
 
-	data.Doorbell = s.loadDoorbellStats(r.Context())
+	// Door-event counters from doorhistory.
+	if s.history != nil {
+		if agg, err := s.history.AggregateAdmin(r.Context(), time.Now()); err == nil {
+			data.Stats.EventsToday = agg.Total24h
+			data.Stats.EventsTrend = trendArrow(agg.Total24h, agg.Total7d/7)
+		}
+		// Recent events: pull the most-recent N for whichever mock fired.
+		// We pick the first mock's history as a proxy until a global feed exists.
+		if len(mocks) > 0 {
+			recent, _ := s.history.ListForMock(r.Context(), mocks[0].MAC, 10)
+			for _, ev := range recent {
+				data.RecentEvents = append(data.RecentEvents, adminRecentEvent{
+					When:     ev.OccurredAt.Format("15:04"),
+					UnitName: mocks[0].Name,
+					UnitMark: initialsOf(mocks[0].Name),
+					DoorName: doorNameFromIntercom(ev.IntercomMAC),
+					Action:   "Klingel",
+					Status:   eventStatusFor(ev),
+				})
+			}
+		}
+	}
 
 	s.renderAdminPage(w, "dashboard", data)
 }
 
-// loadDoorbellStats produces the dashboard card payload. Falls
-// back to an empty (but Ready) struct on a store error so the
-// card still renders; the operator sees zero counters rather
-// than an admin 500.
-func (s *Server) loadDoorbellStats(ctx context.Context) adminDoorbellStats {
-	if s.history == nil {
-		return adminDoorbellStats{Ready: false}
-	}
-	agg, err := s.history.AggregateAdmin(ctx, time.Now())
-	if err != nil {
-		s.log.Warn("doorhistory aggregate failed", "err", err)
-		return adminDoorbellStats{Ready: false}
-	}
-	stats := adminDoorbellStats{
-		Ready:    true,
-		Total24h: agg.Total24h,
-		Total7d:  agg.Total7d,
-		Total30d: agg.Total30d,
-	}
-	if len(agg.PerMock24h) > 0 {
-		stats.TopMocks = s.topMocks24h(ctx, agg.PerMock24h, 5)
-	}
-	return stats
-}
-
-// topMocks24h joins the per-mock counters against mock_viewers
-// for display names, sorts by descending count and truncates to
-// limit. Missing mocks (FK CASCADE just removed them mid-render)
-// fall back to "(geloescht)".
-func (s *Server) topMocks24h(ctx context.Context, counts map[string]int, limit int) []adminDoorbellMockRow {
-	rows := make([]adminDoorbellMockRow, 0, len(counts))
-	for mac, n := range counts {
-		name := "(geloescht)"
-		if info, err := s.mockMgr.GetViewerInfo(ctx, mac); err == nil {
-			name = info.Name
+// trendArrow renders a tiny percent-trend string like "+12%" or
+// "-8%". Without baseline the string is a neutral "+0%".
+func trendArrow(today int, baseline int) string {
+	if baseline == 0 {
+		if today == 0 {
+			return "+0%"
 		}
-		rows = append(rows, adminDoorbellMockRow{MAC: mac, Name: name, Count: n})
+		return "+100%"
 	}
-	// stable sort: descending by count, ties broken by mac for
-	// deterministic dashboard output across reloads.
-	sortDoorbellRows(rows)
-	if len(rows) > limit {
-		rows = rows[:limit]
+	delta := (today - baseline) * 100 / baseline
+	if delta >= 0 {
+		return "+" + itoa(delta) + "%"
 	}
-	return rows
+	return itoa(delta) + "%"
 }
 
-func sortDoorbellRows(rows []adminDoorbellMockRow) {
-	for i := 1; i < len(rows); i++ {
-		for j := i; j > 0; j-- {
-			if rows[j].Count > rows[j-1].Count ||
-				(rows[j].Count == rows[j-1].Count && rows[j].MAC < rows[j-1].MAC) {
-				rows[j-1], rows[j] = rows[j], rows[j-1]
-			} else {
-				break
-			}
-		}
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [12]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+func eventStatusFor(ev doorhistory.Event) string {
+	switch {
+	case ev.AnsweredAt != nil:
+		return "answered"
+	case ev.EndedAt != nil:
+		return "answered"
+	case ev.CancelledAt != nil:
+		return "ignored"
+	default:
+		return "missed"
 	}
 }
 
-// currentSchemaVersion is a thin DB helper kept on Server so we
-// do not need to expose it on the db package.
+func doorNameFromIntercom(mac string) string {
+	if mac == "" {
+		return "Hauseingang"
+	}
+	return mac
+}
+
+// initialsOf takes "Sascha Daemgen" -> "SD", "saschsa" -> "S",
+// "" -> "?". Used for the avatar bubble in the admin nav and
+// the per-row identity column.
+func initialsOf(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "?"
+	}
+	parts := strings.Fields(name)
+	if len(parts) == 1 {
+		return strings.ToUpper(parts[0][:1])
+	}
+	first := strings.ToUpper(parts[0][:1])
+	last := strings.ToUpper(parts[len(parts)-1][:1])
+	return first + last
+}
+
+// currentSchemaVersion is kept for diagnostic uses; the Claude-
+// Design dashboard does not surface it directly anymore.
 func (s *Server) currentSchemaVersion(ctx context.Context) (int, error) {
 	if s.platformCfg == nil {
 		return 0, nil
 	}
-	// any service with a *db.DB works; reuse platformconfig's.
-	// But we need the raw DB; ask via mockMgr is also fine.
-	// Cleanest: just SELECT directly via the sessions service which
-	// also has the DB. Saison 12-04 keeps this small.
 	row := s.sessionsDB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_version`)
 	var v int
 	if err := row.Scan(&v); err != nil {
