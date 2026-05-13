@@ -621,6 +621,25 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	return nil
 }
 
+// TouchESPSeen aktualisiert nur updated_at fuer einen ESP-Viewer.
+// Wird vom /esp/heartbeat-Fallback und vom /esp/state-Endpoint
+// genutzt, damit das Admin-Dashboard ein "zuletzt gesehen"
+// rendern kann ohne dass jeder Poll andere Spalten anfasst.
+func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET updated_at = ? WHERE mac = ? AND type = 'esp'`,
+		now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: touch esp: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
 // SetESPTokenHash speichert einen frisch generierten Token-Hash
 // fuer einen adoptierten ESP-Viewer. Die alte token-hash-Zeile
 // wird einfach ueberschrieben (Token-Rotation).

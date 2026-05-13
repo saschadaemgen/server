@@ -191,3 +191,24 @@ func (s *Server) publishToESP(mac string, ev eventbus.Event) int {
 	}
 	return s.eventBus.Publish(mac, ev)
 }
+
+// handleESPHeartbeat is the polling fallback for environments
+// where SSE is blocked. ESPs that fail to keep /esp/events open
+// hit this endpoint on a slower interval. The response is
+// intentionally tiny so a battery-friendly firmware can poll
+// often without burning bytes.
+func (s *Server) handleESPHeartbeat(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	if err := s.mockMgr.TouchESPSeen(r.Context(), mac); err != nil {
+		s.log.Warn("esp heartbeat touch", "err", err, "mac_prefix", mac[:8])
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":          true,
+		"server_time": time.Now().Unix(),
+	})
+}
