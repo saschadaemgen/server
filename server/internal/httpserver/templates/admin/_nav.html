@@ -97,58 +97,74 @@
        Defaults hier sind nur fuer den geschlossenen Zustand
        relevant. Z-Index liegt UEBER dem Modal (--z-modal=300).
        Die overflow:hidden des Modal-Glass kann das Panel nicht
-       mehr clippen, weil es im Body liegt. */
+       mehr clippen, weil es im Body liegt.
+
+       Saison 13-02-FIX4-a-HOTFIX7: konkrete Farben statt
+       var(--color-surface-1), weil das eine 4%-Alpha-translucente
+       Weiss-Fuellung ist. Inside .modal-glass (bg rgba(22,22,26,
+       0.94)) sah das dunkel aus; portaliert auf body schimmert
+       der ganze Hintergrund durch. Daher fest #0e1014 (das ist
+       --color-bg-elev aus tokens.css) plus !important, damit
+       spaetere Library-Updates nicht zurueckholen. */
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
     right: 0;
     max-height: 280px;
     overflow: hidden;
-    background-color: var(--color-surface-1);
-    border: 1px solid var(--color-hairline-strong);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    background-color: #0e1014 !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.80) !important;
     z-index: 9999;
     display: none;
     flex-direction: column;
+    opacity: 1 !important;
   }
   .dropdown-panel.is-open { display: flex; }
-  .dropdown-search {
+  .dropdown-panel .dropdown-search {
     margin: 8px;
-    padding: 6px 8px;
-    background-color: var(--color-surface-2);
-    color: var(--color-text);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    background-color: #14161c !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    border-radius: 6px !important;
+    font-size: 14px;
+    outline: none;
   }
-  .dropdown-search:focus-visible {
-    outline: 2px solid var(--color-accent);
+  .dropdown-panel .dropdown-search:focus-visible {
+    outline: 2px solid #3d7bff;
   }
-  .dropdown-list {
+  .dropdown-panel .dropdown-list {
     list-style: none;
     margin: 0;
     padding: 0;
     overflow-y: auto;
     flex: 1;
+    background-color: #0e1014 !important;
   }
-  .dropdown-option {
-    padding: 8px var(--space-3);
+  .dropdown-panel .dropdown-option {
+    padding: 10px 12px;
     cursor: pointer;
-    color: var(--color-text);
+    color: #ffffff !important;
+    background-color: transparent !important;
     border-top: 1px solid transparent;
     border-bottom: 1px solid transparent;
+    font-size: 14px;
   }
-  .dropdown-option:hover,
-  .dropdown-option.is-active {
-    background-color: var(--color-surface-2);
+  .dropdown-panel .dropdown-option:hover,
+  .dropdown-panel .dropdown-option.is-active {
+    background-color: #14161c !important;
   }
-  .dropdown-option[aria-selected="true"] {
-    background-color: var(--color-accent);
-    color: white;
+  .dropdown-panel .dropdown-option[aria-selected="true"] {
+    background-color: #3d7bff !important;
+    color: #ffffff !important;
   }
-  .dropdown-empty, .dropdown-loading {
+  .dropdown-panel .dropdown-empty,
+  .dropdown-panel .dropdown-loading {
     padding: 12px;
-    color: var(--color-text-tertiary);
+    color: rgba(255, 255, 255, 0.62) !important;
     text-align: center;
     font-style: italic;
   }
