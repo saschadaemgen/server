@@ -32,14 +32,14 @@ import (
 	"unifix.local/server/internal/secrets"
 )
 
-// Saison 13-02-FIX4-a: Magic-Link ist tot. Alle Login-Tests laufen
-// jetzt ueber Username + Passwort POST /m. Der Test-Viewer wird
-// vor jedem Login mit seedViewer() angelegt; das setzt sowohl die
-// viewers-Zeile als auch das Argon2id-Passwort.
+// Saison 13-02-FIX4-a-HOTFIX4: Login via Wohnungs-Name (case +
+// umlaut-tolerant). testViewerLogin ist der Name, den der
+// Mieter im Login-Form eintippt; muss ohne Normalisierung
+// mit dem DB-name matchen.
 const (
 	testViewerMAC      = "0c:ea:14:42:42:42"
 	testViewerName     = "Familie Mueller 2OG"
-	testViewerUsername = "familie-mueller-2og"
+	testViewerLogin    = "Familie Mueller 2OG"
 	testViewerPassword = "Kp3-mQ7r9-zX2nWv"
 )
 
@@ -298,10 +298,12 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 // seedViewer registriert den Standard-Test-Viewer mit Passwort.
 func (e *testEnv) seedViewer(t *testing.T) {
 	t.Helper()
-	e.seedViewerAs(t, testViewerMAC, testViewerName, testViewerUsername, testViewerPassword)
+	e.seedViewerAs(t, testViewerMAC, testViewerName, testViewerPassword)
 }
 
-func (e *testEnv) seedViewerAs(t *testing.T, mac, name, username, plainPW string) {
+// seedViewerAs ist die HOTFIX4-Signatur: kein separater Username
+// mehr, der Name IST der Login.
+func (e *testEnv) seedViewerAs(t *testing.T, mac, name, plainPW string) {
 	t.Helper()
 	infos, err := e.mockMgr.ListViewers(context.Background())
 	if err != nil {
@@ -313,7 +315,6 @@ func (e *testEnv) seedViewerAs(t *testing.T, mac, name, username, plainPW string
 		Name:        name,
 		ServicePort: port,
 		Type:        mockmanager.TypeWeb,
-		Username:    username,
 	}); err != nil {
 		t.Fatalf("seedViewer: AddViewer: %v", err)
 	}
@@ -405,7 +406,7 @@ func findSessionCookie(resp *http.Response) *http.Cookie {
 func TestLogin_HappyPath(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
 	}
@@ -480,7 +481,7 @@ func TestLogin_IgnoresQueryPrefill(t *testing.T) {
 func TestLogin_WrongPassword(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, "wrong-password-1234")
+	resp := env.loginViewer(t, testViewerLogin, "wrong-password-1234")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 (form re-render)", resp.StatusCode)
@@ -508,10 +509,10 @@ func TestLogin_LockedAccountShowsBanner(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
 	for i := 0; i < ratelimit.IPMaxAttempts; i++ {
-		resp := env.loginViewer(t, testViewerUsername, "bad")
+		resp := env.loginViewer(t, testViewerLogin, "bad")
 		resp.Body.Close()
 	}
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	defer resp.Body.Close()
 	body := readBody(t, resp)
 	if !strings.Contains(body, "vorruebergehend gesperrt") {
@@ -533,7 +534,7 @@ func TestLogin_LockedAccountShowsBanner(t *testing.T) {
 func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusSeeOther {
@@ -562,38 +563,53 @@ func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	}
 	var sawSuccess bool
 	for _, row := range rows {
-		if string(row.Outcome) == "success" && row.Username == testViewerUsername {
+		if string(row.Outcome) == "success" && row.Username == testViewerLogin {
 			sawSuccess = true
 			break
 		}
 	}
 	if !sawSuccess {
-		t.Errorf("audit log missing success row for %q", testViewerUsername)
+		t.Errorf("audit log missing success row for %q", testViewerLogin)
 	}
 }
 
-// TestLogin_CaseInsensitiveUsername ist der S13-02-FIX4-a-HOTFIX1
-// Hauptfix: SQL-Lookup ist jetzt case-insensitive, plus Umlaute
-// werden zu ae/oe/ue/ss aufgeloest. Wir seeden den Viewer mit
-// lowercase-Username und probieren mehrere Schreibweisen durch.
-func TestLogin_CaseInsensitiveUsername(t *testing.T) {
+// TestLogin_AllUmlautVariants (S13-02-FIX4-a-HOTFIX4): Login geht
+// via Wohnungs-Name mit normalisierter Vergleichs-Form (case +
+// Umlaute + Whitespace). Wir seeden EIN Viewer und probieren
+// alle Schreibweisen durch.
+func TestLogin_AllUmlautVariants(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewerAs(t,
 		"0c:ea:14:dd:dd:dd",
 		"Daemgen",
-		"daemgen",
 		"TestPw-1234567X",
 	)
 
-	for _, typed := range []string{"daemgen", "Daemgen", "DAEMGEN", "Dämgen"} {
+	for _, typed := range []string{"Daemgen", "daemgen", "DAEMGEN", "Dämgen", "  Daemgen  "} {
 		t.Run(typed, func(t *testing.T) {
-			env.srv.viewerLimiter.ClearUser("daemgen")
+			env.srv.viewerLimiter.ClearUser(mockmanager.NormalizeName(typed))
 			resp := env.loginViewer(t, typed, "TestPw-1234567X")
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusSeeOther {
 				t.Errorf("status = %d for typed %q, want 303", resp.StatusCode, typed)
 			}
 		})
+	}
+}
+
+// TestLogin_WhitespaceTolerant prueft dass Mehrfach-Spaces im
+// Login matchen mit Single-Space im DB-Name.
+func TestLogin_WhitespaceTolerant(t *testing.T) {
+	env := newTestServer(t)
+	env.seedViewerAs(t,
+		"0c:ea:14:ww:ww:ww",
+		"Familie Mueller 2OG",
+		"TestPw-1234567X",
+	)
+	resp := env.loginViewer(t, "Familie  Mueller   2OG", "TestPw-1234567X")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303 (multi-WS should match single-WS)", resp.StatusCode)
 	}
 }
 
@@ -617,7 +633,7 @@ func TestHome_RequiresSession(t *testing.T) {
 func TestHome_SessionExpired(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	resp.Body.Close()
 
 	env.clock.Add(2 * session.DefaultIdleTimeout)
@@ -637,7 +653,7 @@ func TestHome_SessionExpired(t *testing.T) {
 func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	resp.Body.Close()
 
 	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/einloggen/logout", nil)
@@ -668,7 +684,7 @@ func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 func TestCookie_Flags(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
-	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	defer resp.Body.Close()
 	cookie := findSessionCookie(resp)
 	if cookie == nil {

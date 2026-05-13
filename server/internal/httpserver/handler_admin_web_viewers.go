@@ -23,34 +23,27 @@ import (
 // macFormat matches the lowercase colon form, e.g. 0c:ea:14:42:42:42.
 var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 
-// usernameFormat passt auf die Form, die sanitizeUsername liefert:
-// 3-32 Zeichen aus lowercase a-z, 0-9, _ . und -. Wird als
-// Sanity-Check nach dem Sanitize-Pass eingesetzt, nicht als
-// Ersatz fuer den Sanitizer.
-var usernameFormat = regexp.MustCompile(`^[a-z0-9._-]{3,32}$`)
-
 // servicePortStart is the first port the auto-allocator hands out.
 const servicePortStart = 8100
 
 // adminWebViewersData ist die Payload fuer das templates/admin/web-viewers.html
 // Template (eigene Implementierung, kein Library-Snippet).
 type adminWebViewersData struct {
-	User    adminUser
-	Viewers []webViewerRow
-	Flash   string
+	User      adminUser
+	Viewers   []webViewerRow
+	Flash     string
 	FlashType string
 }
 
 type webViewerRow struct {
-	MAC             string
-	Name            string
-	Username        string
-	HasPassword     bool
-	PasswordSetAt   string
-	LockedNow       bool
-	OnlineNow       bool
-	LinkedUserID    string
-	LinkedUserName  string
+	MAC            string
+	Name           string
+	HasPassword    bool
+	PasswordSetAt  string
+	LockedNow      bool
+	OnlineNow      bool
+	LinkedUserID   string
+	LinkedUserName string
 }
 
 func (s *Server) handleAdminWebViewersList(w http.ResponseWriter, r *http.Request) {
@@ -74,9 +67,9 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 			locked[l.Value] = true
 		}
 	}
-	username := AdminUserFromContext(r.Context())
+	adminUserName := AdminUserFromContext(r.Context())
 	data := adminWebViewersData{
-		User: adminUser{Name: username, Initials: initialsOf(username)},
+		User: adminUser{Name: adminUserName, Initials: initialsOf(adminUserName)},
 	}
 	// User-IDs sammeln und in einem Call beim UserStore aufloesen,
 	// damit die Liste die Verknuepfungs-Spalte ohne N+1-Requests
@@ -104,20 +97,20 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 		if info.Type != mockmanager.TypeWeb {
 			continue
 		}
+		nameKey := mockmanager.NormalizeName(info.Name)
 		row := webViewerRow{
 			MAC:          info.MAC,
 			Name:         info.Name,
-			Username:     info.Username,
 			HasPassword:  info.HasPassword,
 			OnlineNow:    info.Running,
-			LockedNow:    locked[info.Username],
+			LockedNow:    locked[nameKey],
 			LinkedUserID: info.LinkedUAUserID,
 		}
 		if info.PasswordSetAt != nil {
 			row.PasswordSetAt = info.PasswordSetAt.Format("02.01.2006 15:04")
 		}
-		if name, ok := userNames[info.LinkedUAUserID]; ok {
-			row.LinkedUserName = name
+		if linkedName, ok := userNames[info.LinkedUAUserID]; ok {
+			row.LinkedUserName = linkedName
 		}
 		data.Viewers = append(data.Viewers, row)
 	}
@@ -126,59 +119,37 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 
 // credentialsResponse ist die JSON-Antwort nach Anlegen / Reset.
 type credentialsResponse struct {
-	MAC       string `json:"mac"`
-	Name      string `json:"name"`
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	LoginURL  string `json:"login_url"`
-	QRSVG     string `json:"qr_svg"`
+	MAC      string `json:"mac"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	LoginURL string `json:"login_url"`
+	QRSVG    string `json:"qr_svg"`
 }
 
-// handleAdminWebViewersCreate legt einen neuen Web-Viewer an,
-// generiert ein Passwort, persistiert Argon2id-Hash und gibt
-// (URL+Username+Passwort+QR-SVG) als JSON oder HTML-Fragment
-// zurueck (Accept-driven).
+// handleAdminWebViewersCreate legt einen neuen Web-Viewer an.
+//
+// Saison 13-02-FIX4-a-HOTFIX4: radikal vereinfachte Maske. Der
+// Wohnungs-Name ist der einzige Pflicht-Input, plus optional
+// das Passwort (leer = Server generiert) und optional
+// linked_ua_user_id. MAC wird intern erzeugt.
 func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	mac := strings.ToLower(strings.TrimSpace(r.PostForm.Get("mac")))
-	suggestedUsername := strings.TrimSpace(r.PostForm.Get("username"))
+	manualPW := r.PostForm.Get("password")
+	linkedUser := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
 
 	if name == "" || len(name) > 64 {
-		http.Error(w, "Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
+		http.Error(w, "Wohnungs-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
 		return
 	}
-	if mac == "" {
-		var err error
-		mac, err = generateUbiquitiMAC()
-		if err != nil {
-			s.log.Error("generate mac", "err", err)
-			http.Error(w, "MAC-Generierung fehlgeschlagen.", http.StatusInternalServerError)
-			return
-		}
-	}
-	if !macFormat.MatchString(mac) {
-		http.Error(w,
-			"MAC muss im Format xx:xx:xx:xx:xx:xx (lowercase hex) sein.",
-			http.StatusBadRequest)
-		return
-	}
-	// Saison 13-02-FIX4-a-HOTFIX3: Username wird IMMER durch
-	// sanitizeUsername gefiltert (Anlegen-Pfad spiegelt damit den
-	// Login-Pfad). Wenn der Admin schon einen sauberen Username
-	// eingegeben hat, ist die Operation idempotent.
-	if suggestedUsername == "" {
-		suggestedUsername = sanitizeUsername(name)
-	} else {
-		suggestedUsername = sanitizeUsername(suggestedUsername)
-	}
-	if !usernameFormat.MatchString(suggestedUsername) {
-		http.Error(w,
-			"Benutzername muss nach Normalisierung 3-32 Zeichen aus a-z, 0-9, _ und . haben.",
-			http.StatusBadRequest)
+
+	mac, err := generateUbiquitiMAC()
+	if err != nil {
+		s.log.Error("generate mac", "err", err)
+		http.Error(w, "MAC-Generierung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 
@@ -189,23 +160,23 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	linkedUser := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
 	spec := mockmanager.ViewerSpec{
 		MAC:            mac,
 		Name:           name,
 		ServicePort:    port,
 		Type:           mockmanager.TypeWeb,
-		Username:       suggestedUsername,
 		LinkedUAUserID: linkedUser,
 	}
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
 		case errors.Is(err, mockmanager.ErrMACInUse):
-			http.Error(w, "MAC bereits vergeben.", http.StatusConflict)
+			http.Error(w, "MAC bereits vergeben (RNG-Kollision; bitte erneut anlegen).", http.StatusConflict)
 		case errors.Is(err, mockmanager.ErrPortInUse):
 			http.Error(w, "Service-Port bereits vergeben.", http.StatusConflict)
-		case errors.Is(err, mockmanager.ErrUsernameInUse):
-			http.Error(w, "Benutzername bereits vergeben.", http.StatusConflict)
+		case errors.Is(err, mockmanager.ErrNameInUse):
+			http.Error(w,
+				"Wohnungs-Name ist bereits vergeben (case-insensitive). Bitte einen anderen Namen waehlen.",
+				http.StatusConflict)
 		default:
 			s.log.Error("add viewer", "err", err, "mac_prefix", mac[:8])
 			http.Error(w, "Anlegen fehlgeschlagen.", http.StatusInternalServerError)
@@ -213,18 +184,58 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp, err := s.generateAndStorePassword(r.Context(), spec.MAC, spec.Name, suggestedUsername, r)
+	resp, err := s.storePasswordForViewer(r.Context(), spec.MAC, spec.Name, manualPW, r)
 	if err != nil {
 		s.log.Error("set initial password", "err", err)
-		http.Error(w, "Passwort-Generierung fehlgeschlagen.", http.StatusInternalServerError)
+		http.Error(w, "Passwort-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 	s.respondCredentials(w, r, resp)
 }
 
-// handleAdminWebViewersResetPW erzeugt ein neues Passwort und
-// invalidiert alle alten Sessions des Viewers.
+// handleAdminWebViewersResetPW erzeugt ein neues Zufalls-Passwort
+// und invalidiert alle alten Sessions des Viewers. Fuer den
+// "Passwort vergessen"-Pfad.
 func (s *Server) handleAdminWebViewersResetPW(w http.ResponseWriter, r *http.Request) {
+	s.changePassword(w, r, "")
+}
+
+// handleAdminWebViewersSetPassword setzt ein vom Admin manuell
+// vorgegebenes Passwort. Body: { password: "..." }. Wirkung wie
+// Reset-PW (Hash speichern, Sessions invalidieren), aber das
+// Passwort ist vorgegeben.
+//
+// Saison 13-02-FIX4-a-HOTFIX4: keine Mindest-Anforderungen an
+// das Passwort - das hier ist eine Klingel-Anlage, kein Online-
+// Banking. Admin darf "1234" eingeben wenn er will.
+func (s *Server) handleAdminWebViewersSetPassword(w http.ResponseWriter, r *http.Request) {
+	pw := ""
+	if r.Header.Get("Content-Type") == "application/json" {
+		var body struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
+			return
+		}
+		pw = body.Password
+	} else {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
+			return
+		}
+		pw = r.PostForm.Get("password")
+	}
+	if pw == "" {
+		http.Error(w, "Passwort darf nicht leer sein.", http.StatusBadRequest)
+		return
+	}
+	s.changePassword(w, r, pw)
+}
+
+// changePassword ist der gemeinsame Code-Pfad fuer Reset-PW
+// (manualPW="") und Set-Password (manualPW vorgegeben).
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, manualPW string) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
@@ -240,20 +251,20 @@ func (s *Server) handleAdminWebViewersResetPW(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Lookup fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	resp, err := s.generateAndStorePassword(r.Context(), info.MAC, info.Name, info.Username, r)
+	resp, err := s.storePasswordForViewer(r.Context(), info.MAC, info.Name, manualPW, r)
 	if err != nil {
-		s.log.Error("reset password", "err", err)
-		http.Error(w, "Reset fehlgeschlagen.", http.StatusInternalServerError)
+		s.log.Error("change password", "err", err)
+		http.Error(w, "Passwort-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 	if _, err := s.sessions.RevokeAllForViewer(r.Context(), info.MAC); err != nil {
-		s.log.Warn("revoke sessions after pw reset", "err", err)
+		s.log.Warn("revoke sessions after pw change", "err", err)
 	}
 	s.respondCredentials(w, r, resp)
 }
 
 // handleAdminWebViewersUnlock hebt die Rate-Limit-Sperre fuer den
-// Viewer-Username auf.
+// Viewer-Login auf.
 func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -265,12 +276,13 @@ func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 		return
 	}
-	if s.viewerLimiter != nil && info.Username != "" {
-		s.viewerLimiter.ClearUser(info.Username)
+	nameKey := mockmanager.NormalizeName(info.Name)
+	if s.viewerLimiter != nil && nameKey != "" {
+		s.viewerLimiter.ClearUser(nameKey)
 	}
 	s.recordAudit(r, loginaudit.Entry{
 		Realm:     loginaudit.RealmViewer,
-		Username:  info.Username,
+		Username:  info.Name,
 		ViewerMAC: info.MAC,
 		IP:        clientIP(r),
 		UserAgent: r.UserAgent(),
@@ -361,13 +373,23 @@ func (s *Server) handleAdminWebViewersDelete(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// generateAndStorePassword erzeugt ein neues 16-Zeichen-Passwort,
-// hasht es mit Argon2id+Pepper, schreibt den Hash und gibt
-// Klartext-Passwort + QR-Code zurueck.
-func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, username string, r *http.Request) (credentialsResponse, error) {
-	pw, err := password.Generate()
-	if err != nil {
-		return credentialsResponse{}, fmt.Errorf("password generate: %w", err)
+// storePasswordForViewer hasht das Passwort mit Argon2id+Pepper,
+// schreibt den Hash, und gibt das Klartext-Passwort plus QR-Code
+// zurueck. Wenn manualPW leer ist, wird intern eines via
+// password.Generate erzeugt; sonst nimmt der Caller-vorgegebene
+// Wert direkt.
+//
+// Saison 13-02-FIX4-a-HOTFIX4: KEINE Mindest-Anforderungen an
+// das vom Admin getippte Passwort. Klingel-Anlage, kein Online-
+// Banking. Admin darf "1234" eingeben wenn er will.
+func (s *Server) storePasswordForViewer(ctx context.Context, mac, name, manualPW string, r *http.Request) (credentialsResponse, error) {
+	pw := manualPW
+	if pw == "" {
+		generated, err := password.Generate()
+		if err != nil {
+			return credentialsResponse{}, fmt.Errorf("password generate: %w", err)
+		}
+		pw = generated
 	}
 	pepper, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyViewerPwPepper)
 	hash, err := argon2id.HashWithPepper(pw, pepper)
@@ -377,7 +399,7 @@ func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, userna
 	if err := s.mockMgr.SetPasswordHash(ctx, mac, hash); err != nil {
 		return credentialsResponse{}, fmt.Errorf("store hash: %w", err)
 	}
-	loginURL := s.buildLoginURL(r, username, pw)
+	loginURL := s.buildLoginURL(r)
 	qrSVG, err := renderQRSVG(loginURL, 240)
 	if err != nil {
 		s.log.Warn("qr render failed", "err", err)
@@ -386,7 +408,6 @@ func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, userna
 	return credentialsResponse{
 		MAC:      mac,
 		Name:     name,
-		Username: username,
 		Password: pw,
 		LoginURL: loginURL,
 		QRSVG:    qrSVG,
@@ -394,16 +415,9 @@ func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, userna
 }
 
 // buildLoginURL liefert nur die nackte Login-URL fuer den QR-Code.
-//
-// Saison 13-02-FIX4-a-HOTFIX1: Pre-Fill via ?u= und ?p= ist raus
-// (Sicherheits-Anti-Pattern; Passwoerter im Query-String landen
-// in Server-Logs, Browser-History und Referer-Headern). Mieter
-// scannt den QR, kommt zur Login-Seite und tippt Username plus
-// Passwort vom Zettel ab.
-//
-// Saison 13-02-FIX4-a-HOTFIX2: URL haengt jetzt auf /einloggen
-// (mieterfreundlich, kein /m-Tech-Kuerzel mehr).
-func (s *Server) buildLoginURL(r *http.Request, _ string, _ string) string {
+// Pre-Fill ist raus (Anti-Pattern, HOTFIX1); URL liegt seit
+// HOTFIX2 auf /einloggen.
+func (s *Server) buildLoginURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"

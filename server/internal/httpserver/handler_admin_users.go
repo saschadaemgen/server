@@ -57,10 +57,9 @@ type adminUserDetailData struct {
 }
 
 type linkedViewerRow struct {
-	MAC      string
-	Name     string
-	Online   bool
-	Username string
+	MAC    string
+	Name   string
+	Online bool
 }
 
 // handleAdminUsersList rendert /a/users mit Pagination + Suche +
@@ -386,10 +385,9 @@ func (s *Server) collectLinkedViewers(r *http.Request, userID string) []linkedVi
 	for _, v := range all {
 		if v.LinkedUAUserID == userID {
 			out = append(out, linkedViewerRow{
-				MAC:      v.MAC,
-				Name:     v.Name,
-				Online:   v.Running,
-				Username: v.Username,
+				MAC:    v.MAC,
+				Name:   v.Name,
+				Online: v.Running,
 			})
 		}
 	}

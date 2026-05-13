@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
@@ -239,8 +240,11 @@ func TestAdminWebViewers_CreateReturnsCredentials(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if c.Username == "" || c.Password == "" {
-		t.Errorf("response missing credentials: %+v", c)
+	if c.Password == "" {
+		t.Errorf("response missing password: %+v", c)
+	}
+	if c.Name == "" {
+		t.Errorf("response missing name: %+v", c)
 	}
 	// S13-02-FIX4-a-HOTFIX1: Login-URL ist jetzt nackt (kein
 	// ?u= / ?p= mehr); das war ein Sicherheits-Anti-Pattern.
@@ -287,7 +291,7 @@ func TestAdminWebViewers_ResetPassword(t *testing.T) {
 		t.Error("reset returned same password (RNG broken?)")
 	}
 	// Old password muss jetzt nicht mehr funktionieren.
-	resp2 := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp2 := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	defer resp2.Body.Close()
 	if resp2.StatusCode == http.StatusSeeOther {
 		t.Errorf("old password still works after reset")
@@ -304,7 +308,7 @@ func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 	env.seedViewer(t)
 
 	// Mieter loggt sich ein, hat damit einen viewer_sessions-Eintrag.
-	respLogin := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	respLogin := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	respLogin.Body.Close()
 	if respLogin.StatusCode != http.StatusSeeOther {
 		t.Fatalf("seed login failed status=%d", respLogin.StatusCode)
@@ -350,8 +354,8 @@ func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 func TestDashboard_RealNumbers(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	env.seedViewerAs(t, "0c:ea:14:33:33:01", "Viewer A", "viewer-a", "TestPw-1234567X")
-	env.seedViewerAs(t, "0c:ea:14:33:33:02", "Viewer B", "viewer-b", "TestPw-1234567X")
+	env.seedViewerAs(t, "0c:ea:14:33:33:01", "Viewer A", "TestPw-1234567X")
+	env.seedViewerAs(t, "0c:ea:14:33:33:02", "Viewer B", "TestPw-1234567X")
 
 	// Ein Login -> eine aktive Session
 	respLogin := env.loginViewer(t, "viewer-a", "TestPw-1234567X")
@@ -663,7 +667,7 @@ func TestUsersDetail_RendersLinkedViewers(t *testing.T) {
 		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
 	)
 	// Viewer mit linked_ua_user_id = "u1" seeden
-	env.seedViewerAs(t, "0c:ea:14:dd:ee:01", "Wohnung A", "wohnung-a", "TestPw-1234567X")
+	env.seedViewerAs(t, "0c:ea:14:dd:ee:01", "Wohnung A", "TestPw-1234567X")
 	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:dd:ee:01", "u1"); err != nil {
 		t.Fatalf("SetLinkedUAUserID: %v", err)
 	}
@@ -685,8 +689,7 @@ func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
 		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
 	)
 	form := url.Values{}
-	form.Set("name", "Familie Mueller")
-	form.Set("mac", "0c:ea:14:de:ad:c0")
+	form.Set("name", "Familie Mueller-Link-Test")
 	form.Set("linked_ua_user_id", "u1")
 	req, _ := http.NewRequest(http.MethodPost,
 		env.ts.URL+"/a/web-viewers", strings.NewReader(form.Encode()))
@@ -700,12 +703,108 @@ func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	info, err := env.mockMgr.GetViewerInfo(context.Background(), "0c:ea:14:de:ad:c0")
+	// MAC kommt jetzt vom Server (HOTFIX4: kein MAC-Input mehr).
+	// Wir suchen den Viewer per Name.
+	info, _, err := env.mockMgr.LookupByName(context.Background(), "Familie Mueller-Link-Test")
 	if err != nil {
-		t.Fatalf("get viewer: %v", err)
+		t.Fatalf("lookup: %v", err)
 	}
 	if info.LinkedUAUserID != "u1" {
 		t.Errorf("LinkedUAUserID = %q, want u1", info.LinkedUAUserID)
+	}
+}
+
+// TestCreateViewer_RejectsDuplicateName (HOTFIX4): doppelter
+// normalisierter Name -> 409 Conflict.
+func TestCreateViewer_RejectsDuplicateName(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	form := url.Values{}
+	form.Set("name", "Familie Mueller 2OG")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, _ := env.client.Do(req)
+	resp.Body.Close()
+
+	dupForm := url.Values{}
+	dupForm.Set("name", "FAMILIE MUELLER 2OG")
+	req2, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers", strings.NewReader(dupForm.Encode()))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp2, err := env.client.Do(req2)
+	if err != nil {
+		t.Fatalf("dup POST: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusConflict {
+		t.Errorf("dup status = %d, want 409", resp2.StatusCode)
+	}
+}
+
+// TestSetPassword_UpdatesAndInvalidatesSessions (HOTFIX4): POST
+// /a/web-viewers/{mac}/set-password setzt das Passwort und
+// loggt offene Sessions aus.
+func TestSetPassword_UpdatesAndInvalidatesSessions(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	// Mieter loggt sich ein.
+	loginResp := env.loginViewer(t, testViewerLogin, testViewerPassword)
+	loginResp.Body.Close()
+
+	var sessionsBefore int
+	env.d.QueryRow(`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC).Scan(&sessionsBefore)
+	if sessionsBefore == 0 {
+		t.Fatal("seed login did not create a session")
+	}
+
+	// Admin setzt neues Passwort "1234" (Klingel-Anlage, keine
+	// Mindest-Laenge).
+	body := strings.NewReader(`{"password":"1234"}`)
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/set-password", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("set-password: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Session-Tabelle ist leer
+	var sessionsAfter int
+	env.d.QueryRow(`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC).Scan(&sessionsAfter)
+	if sessionsAfter != 0 {
+		t.Errorf("sessions after set-password = %d, want 0", sessionsAfter)
+	}
+
+	// Login mit neuem (kurzem) Passwort funktioniert
+	jar2, _ := cookiejar.New(nil)
+	fresh := &http.Client{
+		Jar: jar2,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	form := url.Values{}
+	form.Set("username", testViewerLogin)
+	form.Set("password", "1234")
+	loginReq, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginResp2, err := fresh.Do(loginReq)
+	if err != nil {
+		t.Fatalf("login with new pw: %v", err)
+	}
+	loginResp2.Body.Close()
+	if loginResp2.StatusCode != http.StatusSeeOther {
+		t.Errorf("login with new pw status = %d, want 303", loginResp2.StatusCode)
 	}
 }
 
