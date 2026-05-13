@@ -1,4 +1,33 @@
 {{define "admin-nav"}}
+<style>
+  /* Saison 13-02-FIX4-a-HOTFIX4: dunkles Theme fuer Select-
+     Dropdowns. Browser-default ist meist weiss, das bricht die
+     Library-Aesthetik. Hier global (in jeder Admin-Seite via
+     admin-nav-Partial eingebunden) ohne die Library-Files
+     anzufassen. */
+  select.input,
+  select.field-select,
+  .admin-shell select {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-hairline-strong);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%;
+    background-size: 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 32px;
+  }
+  select.input option,
+  select.field-select option,
+  .admin-shell select option {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+  }
+</style>
 <nav class="admin-nav" aria-label="Hauptnavigation">
   <a class="admin-nav-brand" href="/a/">
     <span class="admin-nav-brand-mark" aria-hidden="true">u</span>

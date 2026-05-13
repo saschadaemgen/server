@@ -33,8 +33,7 @@
       <table class="app-table">
         <thead>
           <tr>
-            <th>Wohnung</th>
-            <th>Benutzername</th>
+            <th>Wohnungs-Name</th>
             <th>Verknuepft mit</th>
             <th>Status</th>
             <th>Passwort gesetzt</th>
@@ -48,7 +47,6 @@
                 <strong>{{.Name}}</strong>
                 <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
               </td>
-              <td><code>{{.Username}}</code></td>
               <td>
                 {{if .LinkedUserName}}
                   <a href="/a/users/{{.LinkedUserID}}">{{.LinkedUserName}}</a>
@@ -72,7 +70,7 @@
               </td>
               <td style="text-align:right; white-space:nowrap;">
                 <form method="post" action="/a/web-viewers/{{.MAC}}/reset-pw" style="display:inline; margin:0;" data-credentials-form>
-                  <button class="btn btn-secondary btn-sm" type="submit">Passwort zuruecksetzen</button>
+                  <button class="btn btn-secondary btn-sm" type="submit">Neues Passwort</button>
                 </form>
                 {{if .LockedNow}}
                   <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
@@ -85,23 +83,22 @@
               </td>
             </tr>
           {{else}}
-            <tr><td colspan="6" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
+            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
           {{end}}
         </tbody>
       </table>
     </div>
 
-    <!-- Anlegen-Modal. Struktur strikt nach Library-Konvention:
-         modal-scrim > modal-glass > modal-header / modal-body /
-         modal-footer. Das library-interactions.js erkennt das
-         Inner-Container-Element nur ueber die modal-glass-Klasse. -->
+    <!-- Anlegen-Modal. Saison 13-02-FIX4-a-HOTFIX4 hat die Maske
+         radikal vereinfacht: Wohnungs-Name + optional Passwort +
+         optional Verknuepfung. MAC wird intern erzeugt. -->
     <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true" aria-labelledby="create-viewer-title">
       <div class="modal-glass">
         <form method="post" action="/a/web-viewers" data-credentials-form>
           <header class="modal-header">
             <div>
               <h2 id="create-viewer-title" class="modal-title">Web-Viewer anlegen</h2>
-              <p class="modal-sub">Neue Wohnung mit Username + generiertem Passwort.</p>
+              <p class="modal-sub">Wohnungs-Name + optional Passwort. Der Mieter loggt sich mit dem Wohnungs-Namen ein.</p>
             </div>
             <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
@@ -110,23 +107,14 @@
           <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
             <div class="field">
               <label class="field-label" for="new-name">Wohnungs-Name</label>
-              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG" data-username-source/>
-              <span class="field-hint">Mieter sehen diesen Namen als Anzeige; Umlaute und Leerzeichen sind erlaubt.</span>
+              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG" autofocus/>
             </div>
             <div class="field">
-              <label class="field-label" for="new-username">Benutzername (optional)</label>
-              <input class="input" id="new-username" name="username" type="text" placeholder="leer = aus Name ableiten" data-username-input/>
-              <span class="field-hint">Beim Speichern wird der finale Username aus a-z, 0-9, _, . und - normalisiert.</span>
-            </div>
-            <div class="field">
-              <label class="field-label">Anmelde-Username (Vorschau)</label>
-              <div class="input" data-username-preview style="color: var(--color-text-secondary); font-family: var(--font-mono);">-</div>
-              <span class="field-hint">So gibt der Mieter den Namen ein. Aktualisiert sich live beim Tippen.</span>
-            </div>
-            <div class="field">
-              <label class="field-label" for="new-mac">MAC-Adresse (optional)</label>
-              <input class="input" id="new-mac" name="mac" type="text" pattern="^([0-9a-f]{2}:){5}[0-9a-f]{2}$" placeholder="leer = automatisch generieren"/>
-              <span class="field-hint">Lowercase hex mit Doppelpunkten, z.B. 0c:ea:14:42:42:42.</span>
+              <label class="field-label" for="new-pw">Passwort (optional)</label>
+              <div class="field-with-toggle">
+                <input class="input" id="new-pw" name="password" type="password" autocomplete="new-password" placeholder="leer = wird automatisch generiert"/>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="toggle-pw" data-target="#new-pw">Zeigen</button>
+              </div>
             </div>
             <div class="field">
               <label class="field-label" for="new-link">Verknuepfen mit Benutzer (optional)</label>
@@ -157,15 +145,16 @@
       font-weight: var(--fw-medium);
     }
     /* Copy-Button-Layout: Feld + Button nebeneinander. */
-    .field-with-copy {
+    .field-with-copy, .field-with-toggle {
       display: flex;
       gap: var(--space-2);
       align-items: stretch;
     }
-    .field-with-copy .input {
+    .field-with-copy .input, .field-with-toggle .input {
       flex: 1;
     }
-    .field-with-copy .copy-btn {
+    .field-with-copy .copy-btn,
+    .field-with-toggle button {
       flex: none;
       padding: 0 var(--space-3);
       min-width: 96px;
@@ -179,48 +168,7 @@
   <script src="/static/interactions.js"></script>
   <script>
     (function () {
-      // ---- sanitizeUsername (JS-Spiegel der Go-Funktion) ----
-      // Server-Seite ist die Autoritaet; dieser Spiegel ist nur
-      // fuer das Live-Preview-Field im Anlegen-Modal.
-      var UMLAUTS = {
-        'ä':'ae','ö':'oe','ü':'ue','ß':'ss',
-        'Ä':'ae','Ö':'oe','Ü':'ue'
-      };
-      function sanitizeUsername(input) {
-        var s = (input || '').trim();
-        // Umlaute aufloesen
-        s = s.replace(/[äöüÄÖÜß]/g, function (c) { return UMLAUTS[c] || c; });
-        s = s.toLowerCase();
-        var out = '';
-        var prevDash = false;
-        for (var i = 0; i < s.length; i++) {
-          var c = s[i];
-          if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '.' || c === '_') {
-            out += c;
-            prevDash = false;
-          } else if (c === ' ' || c === '-' || c === '\t') {
-            if (!prevDash) { out += '-'; prevDash = true; }
-          }
-        }
-        out = out.replace(/^-+|-+$/g, '');
-        if (out.length < 3) out = out + '-viewer';
-        if (out.length > 32) out = out.slice(0, 32);
-        return out;
-      }
-
-      function updateUsernamePreview() {
-        var modal = document.querySelector('[data-modal="create-viewer"]');
-        if (!modal) return;
-        var nameEl = modal.querySelector('[data-username-source]');
-        var userEl = modal.querySelector('[data-username-input]');
-        var prevEl = modal.querySelector('[data-username-preview]');
-        if (!prevEl) return;
-        var raw = (userEl && userEl.value.trim()) || (nameEl && nameEl.value) || '';
-        if (!raw) { prevEl.textContent = '-'; return; }
-        prevEl.textContent = sanitizeUsername(raw);
-      }
-
-      // ---- Anlegen-Modal Open / Live-Preview ----
+      // ---- Anlegen-Modal Open + Dropdown-Lazy-Load ----
       var userDropdownLoaded = false;
       function loadUserDropdown() {
         if (userDropdownLoaded) return;
@@ -234,7 +182,7 @@
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (j) {
             if (!j || !j.configured) {
-              userDropdownLoaded = false; // beim naechsten Versuch erneut probieren
+              userDropdownLoaded = false;
               var opt = document.createElement('option');
               opt.value = '';
               opt.textContent = '-- UA-API noch nicht konfiguriert --';
@@ -259,12 +207,23 @@
         e.preventDefault();
         var modal = document.querySelector('[data-modal="create-viewer"]');
         if (modal) modal.classList.add('is-open');
-        updateUsernamePreview();
         loadUserDropdown();
       });
-      document.addEventListener('input', function (e) {
-        if (e.target.matches('[data-username-source], [data-username-input]')) {
-          updateUsernamePreview();
+
+      // ---- Show/Hide Passwort-Feld im Anlegen-Modal ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="toggle-pw"]');
+        if (!btn) return;
+        e.preventDefault();
+        var sel = btn.getAttribute('data-target');
+        var input = document.querySelector(sel);
+        if (!input) return;
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.textContent = 'Verbergen';
+        } else {
+          input.type = 'password';
+          btn.textContent = 'Zeigen';
         }
       });
 
@@ -340,23 +299,101 @@
           });
       });
 
+      // ---- Passwort Bearbeiten-Flow im Credentials-Modal ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="edit-password"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = btn.closest('[data-modal="credentials"]');
+        if (!modal) return;
+        var pwField = modal.querySelector('[data-pw-field]');
+        var current = pwField ? pwField.textContent : '';
+        var html = ''
+          + '<input class="input" data-pw-input type="text" value="' + escape(current) + '"'
+          +   ' style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);"/>'
+          + '<button class="btn btn-primary btn-sm" type="button" data-action="save-password">Speichern</button>'
+          + '<button class="btn btn-secondary btn-sm" type="button" data-action="cancel-password-edit">Abbrechen</button>';
+        var wrap = btn.closest('.field-with-copy');
+        if (!wrap) return;
+        wrap.dataset.previousHtml = wrap.innerHTML;
+        wrap.innerHTML = html;
+        var input = wrap.querySelector('[data-pw-input]');
+        if (input) { input.focus(); input.select(); }
+      });
+
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="cancel-password-edit"]');
+        if (!btn) return;
+        e.preventDefault();
+        var wrap = btn.closest('.field-with-copy');
+        if (!wrap || !wrap.dataset.previousHtml) return;
+        wrap.innerHTML = wrap.dataset.previousHtml;
+        delete wrap.dataset.previousHtml;
+      });
+
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="save-password"]');
+        if (!btn) return;
+        e.preventDefault();
+        var wrap = btn.closest('.field-with-copy');
+        var modal = btn.closest('[data-modal="credentials"]');
+        if (!wrap || !modal) return;
+        var input = wrap.querySelector('[data-pw-input]');
+        if (!input || !input.value) {
+          alert('Passwort darf nicht leer sein.');
+          return;
+        }
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Modal hat keine MAC.');
+          return;
+        }
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/set-password', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: input.value }),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            wrap.innerHTML = ''
+              + '<div class="input" data-pw-field id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div>'
+              + '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-password"><span data-copy-label>Kopieren</span></button>'
+              + '<button class="btn btn-secondary btn-sm" type="button" data-action="edit-password">Bearbeiten</button>';
+            delete wrap.dataset.previousHtml;
+            btn.classList.add('is-copied');
+            setTimeout(function () { btn.classList.remove('is-copied'); }, 1500);
+          })
+          .catch(function (err) {
+            alert('Speichern fehlgeschlagen: ' + err.message);
+          });
+      });
+
       function renderCredentials(j) {
         // Struktur strikt nach Library-Konvention:
         //   modal-scrim > modal-glass > modal-header / modal-body / modal-footer
         // Die library-interactions.js prueft modal-glass als Inner-
         // Container, sonst schliesst sie bei JEDEM Klick im Modal.
+        //
+        // Saison 13-02-FIX4-a-HOTFIX4: Username-Spalte fliegt raus
+        // (Name ist der Login). Passwort hat einen "Bearbeiten"-
+        // Knopf, MAC steht auf dem Wrapper damit der Save-Pfad sie
+        // findet.
+        var mac = escape(j.mac || '');
         var name = escape(j.name);
-        var username = escape(j.username);
         var password = escape(j.password);
         var loginURL = escape(j.login_url);
         var qrSVG = j.qr_svg || '';
         return ''
-          + '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
+          + '<div class="modal-scrim is-open" data-modal="credentials" data-mac="' + mac + '" role="dialog" aria-modal="true">'
           +   '<div class="modal-glass">'
           +     '<header class="modal-header">'
           +       '<div>'
           +         '<h2 class="modal-title">Zugangsdaten fuer ' + name + '</h2>'
-          +         '<p class="modal-sub">Anmelde-Username: <code>' + username + '</code></p>'
+          +         '<p class="modal-sub">Anmelde-Name: <code>' + name + '</code></p>'
           +       '</div>'
           +       '<button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">'
           +         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
@@ -368,10 +405,10 @@
           +       '</div>'
 
           +       '<div class="field">'
-          +         '<label class="field-label">Benutzername</label>'
+          +         '<label class="field-label">Anmelde-Name</label>'
           +         '<div class="field-with-copy">'
-          +           '<div class="input" id="cred-username" style="user-select:all;">' + username + '</div>'
-          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-username">'
+          +           '<div class="input" id="cred-name" style="user-select:all;">' + name + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-name">'
           +             '<span data-copy-label>Kopieren</span>'
           +           '</button>'
           +         '</div>'
@@ -380,10 +417,11 @@
           +       '<div class="field">'
           +         '<label class="field-label">Passwort</label>'
           +         '<div class="field-with-copy">'
-          +           '<div class="input" id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + password + '</div>'
+          +           '<div class="input" data-pw-field id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + password + '</div>'
           +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-password">'
           +             '<span data-copy-label>Kopieren</span>'
           +           '</button>'
+          +           '<button class="btn btn-secondary btn-sm" type="button" data-action="edit-password">Bearbeiten</button>'
           +         '</div>'
           +       '</div>'
 
@@ -398,7 +436,7 @@
           +       '</div>'
 
           +       '<div class="qr-box" style="display:flex; justify-content:center;">' + qrSVG + '</div>'
-          +       '<p class="field-hint" style="text-align:center;">Mieter kann den QR-Code mit dem Handy scannen und sich dann mit Username und Passwort vom Zettel anmelden.</p>'
+          +       '<p class="field-hint" style="text-align:center;">Mieter scannt den QR-Code und gibt dann Wohnungs-Namen und Passwort vom Zettel ein.</p>'
           +     '</div>'
           +     '<footer class="modal-footer">'
           +       '<button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button>'
