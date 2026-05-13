@@ -18,8 +18,9 @@ import (
 
 // Well-known keys. Add new constants here as the platform grows.
 const (
-	KeyUAAPIBaseURL = "ua_api_base_url"
-	KeyUAAPIToken   = "ua_api_token"
+	KeyUAAPIBaseURL    = "ua_api_base_url"
+	KeyUAAPIToken      = "ua_api_token"
+	KeyViewerPwPepper  = "viewer_pw_pepper"
 )
 
 // Service combines the DB and the secrets service.
