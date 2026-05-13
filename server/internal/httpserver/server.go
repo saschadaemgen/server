@@ -186,8 +186,23 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 
 	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
-	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspViewers)))
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
+
+	// ESP-Discovery (Saison 13-02-FIX4-c). Oeffentliche Endpoints
+	// ohne Auth-Header - der Token kommt erst nach erfolgreicher
+	// Adoption durch den Admin.
+	s.mux.HandleFunc("POST /esp/discover", s.handleESPDiscover)
+	s.mux.HandleFunc("GET /esp/discover/status", s.handleESPStatus)
+
+	// ESP-Viewer-Admin-Tab.
+	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
+	s.mux.Handle("GET /a/esp-viewers.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersListJSON)))
+	s.mux.Handle("POST /a/esp-viewers/adopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersAdopt)))
+	s.mux.Handle("POST /a/esp-viewers/{mac}/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersReject)))
+	s.mux.Handle("POST /a/esp-viewers/{mac}/rename", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersRename)))
+	s.mux.Handle("POST /a/esp-viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersRegenerateToken)))
+	s.mux.Handle("POST /a/esp-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
+	s.mux.Handle("DELETE /a/esp-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
 
 	// Benutzer-CRUD (Saison 13-02-FIX4-b). UA-Access-Developer-API
 	// ist die Source-of-Truth; alle Zugriffe gehen ueber das

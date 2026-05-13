@@ -202,6 +202,8 @@ func extractUser(data any) adminUser {
 		return v.User
 	case adminUserDetailData:
 		return v.User
+	case adminESPViewersData:
+		return v.User
 	case placeholderData:
 		return v.User
 	case adminLoginPageData:

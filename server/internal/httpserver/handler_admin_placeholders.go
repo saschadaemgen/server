@@ -21,16 +21,6 @@ func (s *Server) renderPlaceholder(w http.ResponseWriter, r *http.Request, name 
 	s.renderAdminPage(w, name, data)
 }
 
-func (s *Server) handleAdminEspViewers(w http.ResponseWriter, r *http.Request) {
-	s.renderPlaceholder(w, r, "esp-viewers", placeholderData{
-		Title:    "ESP-Viewer",
-		Lead:     "Adoptierte ESP32-Hardware-Viewer als Klingel-Empfaenger.",
-		CardHead: "Geplant fuer FIX4-c",
-		CardBody: "Anlegen, Token-Pairing und Status-Monitor fuer ESP32-Viewer-Geraete. Hardware-Stack laeuft als kompatible Alternative zum Web-Viewer im Browser.",
-		NextBrief: "S13-02-FIX4-c",
-	})
-}
-
 func (s *Server) handleAdminEspPager(w http.ResponseWriter, r *http.Request) {
 	s.renderPlaceholder(w, r, "esp-pager", placeholderData{
 		Title:    "ESP-Pager",
