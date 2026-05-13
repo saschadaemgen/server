@@ -12,12 +12,68 @@
   {{template "admin-users.html" .}}
   {{template "modal-magic-link.html" .}}
 
+  <script src="/static/interactions.js"></script>
   <script>
+    // Magic-link glue (Saison 13-02-FIX3b).
+    //
+    // The library exposes a per-row button with
+    //   data-action="open-magic-link" data-tenant="<mac>"
+    // but leaves the actual server roundtrip to the host app.
+    // We POST to /a/users/{mac}/magic-link, expect a JSON
+    // payload {url, tenant_name, expires_in_hours, qr_svg}, hydrate
+    // the modal DOM nodes the library already shipped, then call
+    // unifix.openModal('magic-link') to reveal it.
     (function () {
-      var nodes = document.querySelectorAll('[data-modal], [data-sheet], [data-overlay], [data-sheet-scrim]');
-      for (var i = 0; i < nodes.length; i++) nodes[i].classList.remove('is-open');
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-magic-link"]');
+        if (!btn) return;
+        e.preventDefault();
+
+        var mac = btn.getAttribute('data-tenant') || btn.getAttribute('data-mac');
+        if (!mac) return;
+
+        fetch('/a/users/' + encodeURIComponent(mac) + '/magic-link', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            var modal = document.querySelector('[data-modal="magic-link"]');
+            if (!modal) return;
+
+            // Library hooks: .modal-title for headline,
+            // [data-magic-url] for the URL text, .qr-box for the QR.
+            var titleEl = modal.querySelector('.modal-title');
+            var urlEl   = modal.querySelector('[data-magic-url]');
+            var qrEl    = modal.querySelector('.qr-box');
+            var subEl   = modal.querySelector('.modal-sub');
+            var hintEl  = modal.querySelector('.field-hint');
+
+            if (titleEl) titleEl.textContent = 'Magic Link fuer ' + (data.tenant_name || 'Mieter');
+            if (urlEl) urlEl.textContent = data.url || '';
+            if (qrEl && data.qr_svg) qrEl.innerHTML = data.qr_svg;
+            if (subEl) subEl.textContent = data.tenant_name || '';
+            if (hintEl && data.expires_in_hours) {
+              hintEl.textContent = 'Wird automatisch ungueltig in ' +
+                data.expires_in_hours + ' Stunden.';
+            }
+
+            if (window.unifix && window.unifix.openModal) {
+              window.unifix.openModal('magic-link');
+            } else {
+              modal.classList.add('is-open');
+            }
+          })
+          .catch(function (err) {
+            console.error('Magic-Link-Erzeugung fehlgeschlagen:', err);
+            alert('Magic-Link konnte nicht erzeugt werden: ' + err.message);
+          });
+      });
     })();
   </script>
-  <script src="/static/interactions.js"></script>
 </body>
 </html>

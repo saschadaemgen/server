@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -391,6 +392,66 @@ func TestAdminMocksMagicLink_HappyPath(t *testing.T) {
 	}
 	if mac != "0c:ea:14:77:77:77" {
 		t.Errorf("consume returned mac=%q, want 0c:ea:14:77:77:77", mac)
+	}
+}
+
+// TestAdminMocksMagicLink_JSON covers the Saison 13-02-FIX3b
+// glue path: with Accept: application/json the magic-link
+// handler returns {url, tenant_name, expires_in_hours, qr_svg}
+// instead of the full modal HTML fragment, and the alias
+// route /a/users/{mac}/magic-link reaches the same handler.
+func TestAdminMocksMagicLink_JSON(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, "saschsa", "lange-langes-passwort")
+
+	createForm := url.Values{}
+	createForm.Set("name", "Familie Mueller")
+	createForm.Set("mac", "0c:ea:14:33:33:33")
+	createReq, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/mocks", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := env.client.Do(createReq); err != nil {
+		t.Fatalf("create mock: %v", err)
+	}
+
+	for _, path := range []string{
+		"/a/mocks/0c:ea:14:33:33:33/magic-link",
+		"/a/users/0c:ea:14:33:33:33/magic-link",
+	} {
+		req, _ := http.NewRequest(http.MethodPost, env.ts.URL+path, nil)
+		req.Header.Set("Accept", "application/json")
+		resp, err := env.client.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		body := readBody(t, resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d, body=%s", path, resp.StatusCode, body)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("%s content-type = %q, want application/json", path, ct)
+		}
+		var payload struct {
+			URL            string `json:"url"`
+			TenantName     string `json:"tenant_name"`
+			ExpiresInHours int    `json:"expires_in_hours"`
+			QRSVG          string `json:"qr_svg"`
+		}
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("%s: decode json: %v (body=%s)", path, err, body)
+		}
+		if payload.TenantName != "Familie Mueller" {
+			t.Errorf("%s: tenant_name = %q", path, payload.TenantName)
+		}
+		if !strings.Contains(payload.URL, "/m/login?t=") {
+			t.Errorf("%s: url missing magic-link prefix: %q", path, payload.URL)
+		}
+		if payload.ExpiresInHours != 24 {
+			t.Errorf("%s: expires_in_hours = %d, want 24", path, payload.ExpiresInHours)
+		}
+		if !strings.HasPrefix(payload.QRSVG, "<svg") {
+			t.Errorf("%s: qr_svg missing svg root: %q", path, payload.QRSVG)
+		}
 	}
 }
 

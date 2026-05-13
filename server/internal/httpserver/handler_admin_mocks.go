@@ -3,12 +3,15 @@ package httpserver
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/skip2/go-qrcode"
 
 	"unifix.local/server/internal/mockmanager"
 )
@@ -198,8 +201,25 @@ type magicLinkUnit struct {
 	Email      string
 }
 
-// handleAdminMocksMagicLink generates a 24h magic-link and
-// returns the modal partial pre-populated with the URL.
+// magicLinkResponse is the JSON shape the admin-users glue
+// script consumes after POST /a/users/{mac}/magic-link (and the
+// legacy POST /a/mocks/{mac}/magic-link route). The qr_svg is
+// an inline SVG ready to drop into the modal's .qr-box element.
+type magicLinkResponse struct {
+	URL            string `json:"url"`
+	TenantName     string `json:"tenant_name"`
+	ExpiresInHours int    `json:"expires_in_hours"`
+	QRSVG          string `json:"qr_svg"`
+}
+
+// handleAdminMocksMagicLink generates a 24h magic-link bound to
+// this mock and returns either the pre-rendered modal HTML
+// fragment (Accept: text/html) or a JSON payload that the
+// admin-users glue script can drop into the existing modal
+// (Accept: application/json). The JSON path is the live-test-
+// approved flow from S13-02-FIX3b; the HTML path stays for
+// backwards compatibility with any test that still expects the
+// modal markup directly.
 func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -230,6 +250,22 @@ func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Reques
 	}
 	loginURL := fmt.Sprintf("%s://%s/m/login?t=%s", scheme, r.Host, token)
 
+	if wantsJSON(r) {
+		qrSVG, err := renderQRSVG(loginURL, 240)
+		if err != nil {
+			s.log.Warn("qr render failed", "err", err)
+			qrSVG = ""
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(magicLinkResponse{
+			URL:            loginURL,
+			TenantName:     info.Name,
+			ExpiresInHours: 24,
+			QRSVG:          qrSVG,
+		})
+		return
+	}
+
 	data := magicLinkModalData{Modal: magicLinkModal{
 		Unit:         magicLinkUnit{Name: info.Name, TenantName: info.Name, Email: ""},
 		MagicLinkURL: loginURL,
@@ -241,6 +277,47 @@ func (s *Server) handleAdminMocksMagicLink(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Modal-Render fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
+}
+
+// wantsJSON peeks at the Accept header to decide whether to
+// answer with JSON (admin-users glue script) or HTML (legacy
+// magic-link-modal-as-fragment path). We deliberately do NOT
+// rely on the request method - both flavours come in as POST.
+func wantsJSON(r *http.Request) bool {
+	a := r.Header.Get("Accept")
+	return strings.Contains(a, "application/json")
+}
+
+// renderQRSVG builds an inline SVG QR-Code for the given content.
+// The bitmap is rendered as a single dark <path> for compactness;
+// a 1-module quiet zone is added to keep scanners happy. Dimension
+// "size" is the target pixel-width on screen.
+func renderQRSVG(content string, size int) (string, error) {
+	q, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		return "", err
+	}
+	bits := q.Bitmap()
+	n := len(bits) // total modules incl. 4-module quiet zone the lib already adds
+	if n == 0 {
+		return "", errors.New("qr: empty bitmap")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b,
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" shape-rendering="crispEdges" role="img" aria-label="Magic-Link QR-Code">`,
+		n, n, size, size)
+	b.WriteString(`<rect width="100%" height="100%" fill="#ffffff"/>`)
+	b.WriteString(`<path fill="#000000" d="`)
+	for y, row := range bits {
+		for x, on := range row {
+			if !on {
+				continue
+			}
+			fmt.Fprintf(&b, "M%d %dh1v1h-1z", x, y)
+		}
+	}
+	b.WriteString(`"/></svg>`)
+	return b.String(), nil
 }
 
 // generateUbiquitiMAC produces 0c:ea:14:XX:XX:XX.

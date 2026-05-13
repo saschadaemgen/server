@@ -23,6 +23,16 @@ The library is treated as approved spec; integration code may
 adapt it (form action paths, field names) but must not change
 CSS class names, token values, or the inline SVG icon paths.
 
+## go-qrcode
+
+Server-side QR-code generation for the admin Magic-Link modal
+(Saison 13-02-FIX3b). The library's PNG path is unused; we read
+the QR Bitmap and assemble a compact inline SVG per render.
+
+- Project: https://github.com/skip2/go-qrcode
+- License: MIT
+- Copyright: (c) 2014 Tom Harwood and contributors
+
 ## Tailwind CSS
 
 Tailwind CSS is no longer linked in any served page after

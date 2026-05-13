@@ -141,6 +141,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
 	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
 	s.mux.Handle("DELETE /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
+	// Saison 13-02-FIX3b: the admin-users table renders one
+	// row per mock-viewer and wires its Magic-Link button to
+	// /a/users/{mac}/magic-link. Same handler as the older
+	// /a/mocks/.../magic-link route - the path is just the
+	// library's natural slot for the action.
+	s.mux.Handle("POST /a/users/{mac}/magic-link", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksMagicLink)))
 }
 
 // Handler returns the underlying mux so callers (tests) can wrap

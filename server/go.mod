@@ -7,6 +7,7 @@ replace unifix.local/shared => ../shared
 replace unifix.local/mock => ../mock
 
 require (
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.51.0
 	modernc.org/sqlite v1.50.1
 	unifix.local/mock v0.0.0-00010101000000-000000000000
