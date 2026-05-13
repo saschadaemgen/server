@@ -686,6 +686,13 @@
   // window.unifix-Overwrite). Globale Event-Delegation auf
   // document mit closest() ist robust gegen DOM-Reihenfolge
   // und Modal-Reopen.
+  //
+  // Saison 13-02-FIX4-a-HOTFIX7: drei Target-Strategien plus
+  // stopPropagation, damit das Toggle auch dann findet wenn
+  // data-target nicht aufloest (z.B. weil Modal-Inject noch
+  // im Gange ist) und nicht durch andere Handler kaputtgemacht
+  // wird. data-pw="1"-Marker hilft Strategie 3 das Input wieder
+  // zu finden wenn type schon auf "text" steht.
   (function () {
     if (window.__unifixPwToggleBound) return;
     window.__unifixPwToggleBound = true;
@@ -693,14 +700,45 @@
       var btn = e.target.closest('[data-action="toggle-pw"]');
       if (!btn) return;
       e.preventDefault();
+      e.stopPropagation();
+
+      var input = null;
+
+      // Strategie 1: data-target Selector.
       var sel = btn.getAttribute('data-target');
-      var input = sel ? document.querySelector(sel) : null;
-      if (!input) return;
+      if (sel) {
+        try { input = document.querySelector(sel); } catch (_) {}
+      }
+
+      // Strategie 2: vorheriger Input-Sibling.
+      if (!input) {
+        var el = btn.previousElementSibling;
+        while (el && el.tagName !== 'INPUT') {
+          el = el.previousElementSibling;
+        }
+        input = el;
+      }
+
+      // Strategie 3: erstes Passwort-/markiertes-Text-Input im
+      // selben Parent-Container.
+      if (!input && btn.parentElement) {
+        input = btn.parentElement.querySelector(
+          'input[type="password"], input[type="text"][data-pw="1"]'
+        );
+      }
+
+      if (!input) {
+        if (window.console) console.warn('toggle-pw: no input resolved for', btn);
+        return;
+      }
+
       if (input.type === 'password') {
         input.type = 'text';
+        input.dataset.pw = '1';
         btn.textContent = 'Verbergen';
       } else {
         input.type = 'password';
+        delete input.dataset.pw;
         btn.textContent = 'Zeigen';
       }
     });
