@@ -187,6 +187,35 @@
     text-align: center;
     font-style: italic;
   }
+
+  /* Saison 13-02-FIX4-a-HOTFIX8: kleiner Icon-Knopf fuer
+     Tabellen-Spalten ("Link kopieren" etc.). Bewusst neutral
+     gehalten damit er nicht mit den primary/secondary Buttons
+     der Library konkurriert. */
+  .icon-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+    padding: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .icon-btn:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+  .icon-btn:focus-visible {
+    outline: 2px solid #3d7bff;
+    outline-offset: 2px;
+  }
+  .icon-btn.is-success {
+    background-color: #10b981;
+    border-color: #10b981;
+    color: #ffffff;
+  }
 </style>
 <nav class="admin-nav" aria-label="Hauptnavigation">
   <a class="admin-nav-brand" href="/a/">
@@ -769,6 +798,73 @@
         delete input.dataset.pw;
         btn.textContent = 'Zeigen';
       }
+    });
+  })();
+
+  // Saison 13-02-FIX4-a-HOTFIX8: globaler Copy-Link-Handler.
+  // Bedient sowohl die Tabellen-Icon-Knoepfe (data-url) als auch
+  // den "Kopieren"-Knopf im Edit-Modal (data-target auf das
+  // URL-Input-Feld). Zwei-Sekunden-Erfolgs-Feedback via
+  // is-success-Klasse.
+  (function () {
+    if (window.__unifixCopyLinkBound) return;
+    window.__unifixCopyLinkBound = true;
+
+    function copyText(t) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(t);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          document.body.removeChild(ta);
+        }
+      });
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="copy-link"]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var text = btn.getAttribute('data-url') || '';
+      if (!text) {
+        var sel = btn.getAttribute('data-target');
+        if (sel) {
+          var el = document.querySelector(sel);
+          if (el) text = el.value || el.textContent || '';
+        }
+      }
+      if (!text) return;
+
+      copyText(text).then(function () {
+        var origTitle = btn.title;
+        var origText = btn.textContent;
+        btn.classList.add('is-success');
+        if (btn.matches('.btn, .btn-primary, .btn-secondary')) {
+          btn.textContent = 'Kopiert!';
+        } else {
+          btn.title = 'Kopiert!';
+        }
+        setTimeout(function () {
+          btn.classList.remove('is-success');
+          btn.title = origTitle;
+          if (btn.textContent !== origText) btn.textContent = origText;
+        }, 2000);
+      }).catch(function () {
+        if (window.console) console.warn('copy-link: clipboard write failed');
+      });
     });
   })();
 </script>

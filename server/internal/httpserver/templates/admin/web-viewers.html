@@ -37,6 +37,7 @@
             <th>Verknuepft mit</th>
             <th>Status</th>
             <th>Passwort gesetzt</th>
+            <th style="text-align:center;">Link</th>
             <th style="text-align:right;">Aktionen</th>
           </tr>
         </thead>
@@ -68,6 +69,18 @@
               <td>
                 {{if .HasPassword}}{{.PasswordSetAt}}{{else}}<em>noch nicht gesetzt</em>{{end}}
               </td>
+              <td style="text-align:center;">
+                <button class="icon-btn" type="button"
+                        data-action="copy-link"
+                        data-url="{{.LoginURL}}"
+                        title="Login-Link kopieren"
+                        aria-label="Login-Link kopieren">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                  </svg>
+                </button>
+              </td>
               <td style="text-align:right; white-space:nowrap;">
                 <button class="btn btn-secondary btn-sm" type="button"
                         data-action="open-edit"
@@ -85,7 +98,7 @@
               </td>
             </tr>
           {{else}}
-            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
+            <tr><td colspan="6" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
           {{end}}
         </tbody>
       </table>

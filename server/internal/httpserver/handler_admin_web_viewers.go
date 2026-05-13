@@ -44,6 +44,7 @@ type webViewerRow struct {
 	OnlineNow      bool
 	LinkedUserID   string
 	LinkedUserName string
+	LoginURL       string
 }
 
 func (s *Server) handleAdminWebViewersList(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,7 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 			}
 		}
 	}
+	loginURL := s.buildLoginURL(r)
 	for _, info := range infos {
 		if info.Type != mockmanager.TypeWeb {
 			continue
@@ -105,6 +107,7 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 			OnlineNow:    info.Running,
 			LockedNow:    locked[nameKey],
 			LinkedUserID: info.LinkedUAUserID,
+			LoginURL:     loginURL,
 		}
 		if info.PasswordSetAt != nil {
 			row.PasswordSetAt = info.PasswordSetAt.Format("02.01.2006 15:04")
