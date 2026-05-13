@@ -3,10 +3,16 @@
 // is supported in saison 12; a multi-admin migration is a later
 // season problem.
 //
-// Passwords are stored as bcrypt hashes (cost 12). Login does
-// not leak the difference between "user not found" and "wrong
-// password" through its error type; callers should always
-// surface "invalid credentials" to the browser regardless.
+// Saison 13-02-FIX4-a: Argon2id (m=64MB, t=3, p=4) ersetzt bcrypt
+// fuer NEU gesetzte Passwoerter. Beim Login werden Bcrypt-Hashes
+// transparent ueber Rehash-on-Login zu Argon2id migriert (der
+// erste Login nach dem Update macht den Wechsel). Pepper wird vom
+// platformconfig-Service geliefert (PepperSource interface), damit
+// das admin-Paket nicht direkt von platformconfig abhaengt.
+//
+// Login leakt nicht den Unterschied zwischen "user not found" und
+// "wrong password" durch sein Error-Type; Caller muessen beides
+// als "invalid credentials" surfen.
 package admin
 
 import (
@@ -18,13 +24,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"unifix.local/server/internal/auth/argon2id"
 	"unifix.local/server/internal/db"
 )
-
-// bcryptCost is the work factor for password hashing. 12 is the
-// 2024-era recommendation: balances brute-force resistance
-// against login latency on the RPi (about 200 ms at cost 12).
-const bcryptCost = 12
 
 // Sentinel errors. Login uses these to distinguish between
 // "credentials don't match anything" and "DB is broken"; HTTP
@@ -33,13 +35,23 @@ const bcryptCost = 12
 var (
 	ErrNotFound        = errors.New("admin: user not found")
 	ErrInvalidPassword = errors.New("admin: invalid password")
+	ErrPasswordTooShort = errors.New("admin: password must be at least 12 characters")
 )
 
-// Service mediates between the admin_users table and the HTTP
-// layer.
+// PepperSource liefert den Argon2id-Pepper zur Laufzeit. Das
+// platformconfig-Paket implementiert das via GetSecret/SetSecret;
+// in Tests reicht ein schlanker Stub. Empty-string return bedeutet
+// "kein Pepper" und ist ein gueltiger Zustand.
+type PepperSource interface {
+	GetPepper(ctx context.Context) (string, error)
+}
+
+// Service mediiert zwischen der admin_users-Tabelle und der HTTP-
+// Schicht.
 type Service struct {
-	db  *db.DB
-	now func() time.Time
+	db     *db.DB
+	pepper PepperSource
+	now    func() time.Time
 }
 
 // Option mutates a Service during construction.
@@ -48,6 +60,13 @@ type Option func(*Service)
 // WithClock injects a test clock.
 func WithClock(now func() time.Time) Option {
 	return func(s *Service) { s.now = now }
+}
+
+// WithPepper injects the pepper source. Without it Argon2id-Hashes
+// werden ohne Pepper-Konkatenation gerechnet (akzeptiert in
+// Test-Setups die ohne platformconfig auskommen).
+func WithPepper(p PepperSource) Option {
+	return func(s *Service) { s.pepper = p }
 }
 
 // New constructs a Service. now defaults to time.Now.
@@ -59,29 +78,53 @@ func New(d *db.DB, opts ...Option) *Service {
 	return s
 }
 
-// Login verifies username + password and bumps last_login_at on
-// success. Returns ErrNotFound or ErrInvalidPassword on failure;
-// the caller must not leak the distinction.
+// Login verifies username + password. On success bumps
+// last_login_at. Wenn der gespeicherte Hash bcrypt-format ist,
+// wird er nach erfolgreicher Verifikation transparent zu Argon2id
+// rehashed (Migrations-Pfad fuer Bestand-Admins).
 func (s *Service) Login(ctx context.Context, username, password string) error {
 	var hash string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT password_hash FROM admin_users WHERE username = ?`, username,
 	).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Run a dummy bcrypt compare to keep timing roughly
-		// constant against username-enumeration probes.
-		_ = bcrypt.CompareHashAndPassword(
-			[]byte("$2a$12$0000000000000000000000.0000000000000000000000000000"),
-			[]byte(password),
-		)
+		// Dummy-Argon2id-Compare gegen einen festen Hash, um die
+		// Verify-Latenz der "user found"-Pfade zu spiegeln und
+		// User-Enumeration-Probes zu erschweren.
+		_, _ = argon2id.VerifyWithPepper(password, "", dummyArgon2idHash)
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("admin: select: %w", err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return ErrInvalidPassword
+
+	pepper, _ := s.fetchPepper(ctx)
+
+	switch {
+	case argon2id.LooksLikeArgon2id(hash):
+		ok, err := argon2id.VerifyWithPepper(password, pepper, hash)
+		if err != nil {
+			return fmt.Errorf("admin: verify argon2id: %w", err)
+		}
+		if !ok {
+			return ErrInvalidPassword
+		}
+	default:
+		// bcrypt-Pfad: rehash-on-login bei Erfolg.
+		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+			return ErrInvalidPassword
+		}
+		newHash, err := argon2id.HashWithPepper(password, pepper)
+		if err == nil {
+			if _, err := s.db.ExecContext(ctx,
+				`UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?`,
+				newHash, s.now().UnixMilli(), username,
+			); err != nil {
+				// Rehash-Fehler ist nicht-fatal fuer den Login.
+			}
+		}
 	}
+
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE admin_users SET last_login_at = ? WHERE username = ?`,
 		s.now().UnixMilli(), username,
@@ -91,18 +134,18 @@ func (s *Service) Login(ctx context.Context, username, password string) error {
 	return nil
 }
 
-// SetPassword creates or updates an admin user. Uses bcrypt at
-// the package-level cost.
+// SetPassword creates or updates an admin user. Argon2id mit Pepper.
 func (s *Service) SetPassword(ctx context.Context, username, password string) error {
 	if username == "" {
 		return errors.New("admin: username must not be empty")
 	}
-	if len(password) < 8 {
-		return errors.New("admin: password must be at least 8 characters")
+	if len(password) < 12 {
+		return ErrPasswordTooShort
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	pepper, _ := s.fetchPepper(ctx)
+	hash, err := argon2id.HashWithPepper(password, pepper)
 	if err != nil {
-		return fmt.Errorf("admin: bcrypt: %w", err)
+		return fmt.Errorf("admin: hash: %w", err)
 	}
 	now := s.now().UnixMilli()
 	_, err = s.db.ExecContext(ctx,
@@ -111,7 +154,7 @@ func (s *Service) SetPassword(ctx context.Context, username, password string) er
 		 ON CONFLICT(username) DO UPDATE SET
 		   password_hash = excluded.password_hash,
 		   updated_at = excluded.updated_at`,
-		username, string(hash), now, now,
+		username, hash, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("admin: upsert: %w", err)
@@ -131,3 +174,16 @@ func (s *Service) Exists(ctx context.Context) (bool, error) {
 	}
 	return n > 0, nil
 }
+
+func (s *Service) fetchPepper(ctx context.Context) (string, error) {
+	if s.pepper == nil {
+		return "", nil
+	}
+	return s.pepper.GetPepper(ctx)
+}
+
+// dummyArgon2idHash ist ein fester PHC-String der die normale
+// Login-Latenz spiegelt um User-Enumeration zu erschweren. Die
+// genaue Pepper / Salt / Hash-Bytes sind irrelevant - der Verify
+// schlaegt immer fehl, aber er braucht ~250ms wie ein echter Verify.
+const dummyArgon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$00000000000000000000000000000000$00000000000000000000000000000000000000000000"
