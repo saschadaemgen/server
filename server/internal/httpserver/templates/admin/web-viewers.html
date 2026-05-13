@@ -242,22 +242,8 @@
         if (modal) modal.classList.add('is-open');
       });
 
-      // ---- Show/Hide Passwort-Feld ----
-      document.addEventListener('click', function (e) {
-        var btn = e.target.closest('[data-action="toggle-pw"]');
-        if (!btn) return;
-        e.preventDefault();
-        var sel = btn.getAttribute('data-target');
-        var input = document.querySelector(sel);
-        if (!input) return;
-        if (input.type === 'password') {
-          input.type = 'text';
-          btn.textContent = 'Verbergen';
-        } else {
-          input.type = 'password';
-          btn.textContent = 'Zeigen';
-        }
-      });
+      // ---- Show/Hide Passwort-Feld lebt global in _nav.html
+      //      (HOTFIX6); hier kein page-local Handler mehr. ----
 
       // ---- Bearbeiten-Modal Open ----
       document.addEventListener('click', function (e) {

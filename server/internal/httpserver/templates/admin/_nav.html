@@ -583,5 +583,32 @@
     });
     mo.observe(document.body, { childList: true, subtree: true });
   })();
+
+  // Saison 13-02-FIX4-a-HOTFIX6: globaler Passwort-Show-Toggle.
+  // Vorher hingen die toggle-pw-Handler in der page-local IIFE
+  // von web-viewers.html. Im Live-Test feuerten sie nicht
+  // zuverlaessig (vermutlich Race mit interactions.js
+  // window.unifix-Overwrite). Globale Event-Delegation auf
+  // document mit closest() ist robust gegen DOM-Reihenfolge
+  // und Modal-Reopen.
+  (function () {
+    if (window.__unifixPwToggleBound) return;
+    window.__unifixPwToggleBound = true;
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="toggle-pw"]');
+      if (!btn) return;
+      e.preventDefault();
+      var sel = btn.getAttribute('data-target');
+      var input = sel ? document.querySelector(sel) : null;
+      if (!input) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Verbergen';
+      } else {
+        input.type = 'password';
+        btn.textContent = 'Zeigen';
+      }
+    });
+  })();
 </script>
 {{end}}
