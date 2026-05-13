@@ -181,6 +181,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/set-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetPassword)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/edit", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersEdit)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/generate-pw", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersGeneratePW)))
+	s.mux.Handle("GET /a/web-viewers/{mac}/login-info", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersLoginInfo)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersUnlock)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/rename", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersRename)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))

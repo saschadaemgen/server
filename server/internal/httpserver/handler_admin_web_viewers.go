@@ -457,6 +457,39 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
+// handleAdminWebViewersLoginInfo liefert den fertigen Mieter-
+// Login-Link plus einen QR-Code-SVG fuer einen einzelnen
+// Web-Viewer. Wird vom Edit-Modal-JS lazy beim Oeffnen abgerufen.
+// Beide Felder kommen aus existierender Bauchemie:
+// buildLoginURL() und renderQRSVG() (Saison 13-02-FIX4-a).
+func (s *Server) handleAdminWebViewersLoginInfo(w http.ResponseWriter, r *http.Request) {
+	mac := strings.ToLower(r.PathValue("mac"))
+	if !macFormat.MatchString(mac) {
+		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.mockMgr.GetViewerInfo(r.Context(), mac); err != nil {
+		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("login info get viewer", "err", err, "mac_prefix", mac[:8])
+		http.Error(w, "Lookup fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	url := s.buildLoginURL(r)
+	qrSVG, err := renderQRSVG(url, 240)
+	if err != nil {
+		s.log.Warn("qr render failed", "err", err)
+		qrSVG = ""
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"login_url": url,
+		"qr_svg":    qrSVG,
+	})
+}
+
 // handleAdminWebViewersGeneratePW liefert ein frisches Zufalls-
 // Passwort OHNE es zu speichern. Das UI uebernimmt es ins
 // Passwort-Feld; gespeichert wird erst beim "Speichern"-Klick

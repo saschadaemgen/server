@@ -1001,6 +1001,69 @@ func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
 	}
 }
 
+// ---------- Login-Info Endpoint (Saison 13-02-FIX4-a-HOTFIX8) ----------
+
+func TestLoginInfoEndpoint_ReturnsURLAndQR(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/web-viewers/" + testViewerMAC + "/login-info")
+	if err != nil {
+		t.Fatalf("GET login-info: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["login_url"] == "" {
+		t.Error("login_url empty")
+	}
+	if !strings.Contains(got["login_url"], "/einloggen") {
+		t.Errorf("login_url = %q, want suffix /einloggen", got["login_url"])
+	}
+	if !strings.Contains(got["qr_svg"], "<svg") {
+		t.Errorf("qr_svg missing <svg> markup: %q", got["qr_svg"])
+	}
+}
+
+func TestLoginInfoEndpoint_404OnUnknownMAC(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/web-viewers/0c:ea:14:99:99:99/login-info")
+	if err != nil {
+		t.Fatalf("GET login-info: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestWebViewersList_IncludesLoginURLPerRow(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/web-viewers")
+	if err != nil {
+		t.Fatalf("GET list: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, `data-action="copy-link"`) {
+		t.Error("list missing copy-link icon button")
+	}
+	if !strings.Contains(body, `/einloggen`) {
+		t.Error("list missing login URL in data-url")
+	}
+}
+
 // ---------- Magic-Link routes are gone ----------
 
 func TestMagicLinkRoutes_AreGone(t *testing.T) {
