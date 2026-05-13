@@ -39,8 +39,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 7 {
-		t.Errorf("schema_version = %d, want 7", version)
+	if version != 8 {
+		t.Errorf("schema_version = %d, want 8", version)
 	}
 	for _, table := range []string{
 		"viewers", "viewer_sessions", "admin_sessions",
@@ -81,7 +81,7 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer d.Close()
-	for _, v := range []int{1, 2, 3, 4, 5, 6, 7} {
+	for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
 		var count int
 		if err := d.QueryRow(
 			`SELECT COUNT(*) FROM schema_version WHERE version = ?`, v,
@@ -216,7 +216,6 @@ func TestViewers_TableExists(t *testing.T) {
 	}
 	for _, idx := range []string{
 		"idx_viewers_service_port",
-		"idx_viewers_username",
 		"idx_viewers_type",
 	} {
 		var n string
@@ -254,58 +253,40 @@ func TestViewers_UniquePort(t *testing.T) {
 	defer d.Close()
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:42:42:42", "v1", 8080, "user-a", now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?)`,
+		"0c:ea:14:42:42:42", "v1", 8080, now, now,
 	); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 	_, err = d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:42:42:43", "v2", 8080, "user-b", now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?)`,
+		"0c:ea:14:42:42:43", "v2", 8080, now, now,
 	)
 	if err == nil {
 		t.Fatal("duplicate port insert succeeded, unique index missing")
 	}
 }
 
-func TestViewers_UniqueUsername(t *testing.T) {
+// HOTFIX4: viewers.username-Spalte ist abgeschafft. Test fuer
+// Uniqueness laeuft jetzt ueber den Anwendungs-Layer
+// (mockmanager-Tests pruefen ErrNameInUse).
+func TestViewers_UsernameColumnGone(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
-	now := int64(1747000000000)
-	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:42:42:42", "v1", 8080, "alice", now, now,
-	); err != nil {
-		t.Fatalf("first insert: %v", err)
+	if _, err := d.Exec(`SELECT username FROM viewers LIMIT 1`); err == nil {
+		t.Error("viewers.username column still exists after migration 008")
 	}
-	_, err = d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:42:42:43", "v2", 8081, "alice", now, now,
-	)
-	if err == nil {
-		t.Fatal("duplicate username insert succeeded, unique index missing")
-	}
-	// NULL-Usernames sind erlaubt fuer ESP-Viewer ohne Username.
 	if _, err := d.Exec(
 		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
 		 VALUES (?, ?, ?, 'esp', ?, ?)`,
-		"0c:ea:14:99:99:99", "esp1", 8082, now, now,
+		"0c:ea:14:99:99:99", "esp1", 8082, 1, 1,
 	); err != nil {
 		t.Errorf("esp insert without username failed: %v", err)
-	}
-	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
-		 VALUES (?, ?, ?, 'esp', ?, ?)`,
-		"0c:ea:14:99:99:9a", "esp2", 8083, now, now,
-	); err != nil {
-		t.Errorf("second esp insert without username failed: %v", err)
 	}
 }
 
@@ -317,9 +298,9 @@ func TestViewerSessions_CascadeOnViewerDelete(t *testing.T) {
 	defer d.Close()
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:cc:cc:cc", "x", 9100, "x", now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?)`,
+		"0c:ea:14:cc:cc:cc", "x", 9100, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer: %v", err)
 	}
@@ -358,9 +339,9 @@ func TestDoorEvents_FKAndCascade(t *testing.T) {
 		t.Fatal("insert without viewer succeeded, FK not enforced")
 	}
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		"0c:ea:14:11:22:33", "y", 9200, "y", now*1000, now*1000,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?)`,
+		"0c:ea:14:11:22:33", "y", 9200, now*1000, now*1000,
 	); err != nil {
 		t.Fatalf("seed viewer: %v", err)
 	}
