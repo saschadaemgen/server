@@ -22,8 +22,11 @@ import (
 // macFormat matches the lowercase colon form, e.g. 0c:ea:14:42:42:42.
 var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 
-// usernameFormat erlaubt 3-32 Zeichen aus [a-zA-Z0-9_.-].
-var usernameFormat = regexp.MustCompile(`^[A-Za-z0-9._-]{3,32}$`)
+// usernameFormat passt auf die Form, die sanitizeUsername liefert:
+// 3-32 Zeichen aus lowercase a-z, 0-9, _ . und -. Wird als
+// Sanity-Check nach dem Sanitize-Pass eingesetzt, nicht als
+// Ersatz fuer den Sanitizer.
+var usernameFormat = regexp.MustCompile(`^[a-z0-9._-]{3,32}$`)
 
 // servicePortStart is the first port the auto-allocator hands out.
 const servicePortStart = 8100
@@ -134,12 +137,18 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 			http.StatusBadRequest)
 		return
 	}
+	// Saison 13-02-FIX4-a-HOTFIX3: Username wird IMMER durch
+	// sanitizeUsername gefiltert (Anlegen-Pfad spiegelt damit den
+	// Login-Pfad). Wenn der Admin schon einen sauberen Username
+	// eingegeben hat, ist die Operation idempotent.
 	if suggestedUsername == "" {
 		suggestedUsername = sanitizeUsername(name)
+	} else {
+		suggestedUsername = sanitizeUsername(suggestedUsername)
 	}
 	if !usernameFormat.MatchString(suggestedUsername) {
 		http.Error(w,
-			"Benutzername darf nur a-z, 0-9, _ und . enthalten (3-32 Zeichen).",
+			"Benutzername muss nach Normalisierung 3-32 Zeichen aus a-z, 0-9, _ und . haben.",
 			http.StatusBadRequest)
 		return
 	}
@@ -437,37 +446,5 @@ func generateUbiquitiMAC() (string, error) {
 	return fmt.Sprintf("0c:ea:14:%02x:%02x:%02x", b[0], b[1], b[2]), nil
 }
 
-// sanitizeUsername macht einen Default-Username aus einem
-// Anzeigenamen, damit der Admin nicht zweimal tippen muss.
-//
-//	"Familie Mueller 2OG"  -> "familie-mueller-2og"
-//	"Familie Müller"       -> "familie-mueller"
-//	"Daemgen"              -> "daemgen"
-//	"Dämgen"               -> "daemgen"
-//
-// Saison 13-02-FIX4-a-HOTFIX1: Umlaute werden zu ae/oe/ue/ss
-// aufgeloest BEVOR der Sanitize-Filter greift, damit der Username
-// stabil bleibt egal ob der Admin "Mueller" oder "Müller" tippt.
-func sanitizeUsername(name string) string {
-	expanded := expandGermanUmlauts(name)
-	var b strings.Builder
-	for _, c := range strings.ToLower(expanded) {
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-			b.WriteRune(c)
-		case c == ' ', c == '_', c == '.':
-			b.WriteRune('-')
-		}
-	}
-	out := b.String()
-	out = strings.Trim(out, "-")
-	if len(out) < 3 {
-		out = out + "-viewer"
-	}
-	if len(out) > 32 {
-		out = out[:32]
-	}
-	return out
-}
 
 

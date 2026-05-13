@@ -54,7 +54,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	usernameRaw := strings.TrimSpace(r.PostForm.Get("username"))
-	username := normalizeUsername(usernameRaw)
+	username := sanitizeUsername(usernameRaw)
 	password := r.PostForm.Get("password")
 	ip := clientIP(r)
 	ua := r.UserAgent()
@@ -210,25 +210,6 @@ func (s *Server) recordAudit(r *http.Request, e loginaudit.Entry) {
 	if err := s.audit.Insert(r.Context(), e); err != nil {
 		s.log.Warn("login_audit insert failed", "err", err)
 	}
-}
-
-// normalizeUsername bringt den Benutzernamen auf die Form, in der
-// er in der DB liegt: lowercase, Umlaute zu ae/oe/ue/ss aufgeloest,
-// Whitespace getrimmt. Mieter sollen "Daemgen", "daemgen" oder
-// "Dämgen" eingeben koennen und jedes Mal denselben DB-Eintrag
-// finden.
-func normalizeUsername(s string) string {
-	s = strings.TrimSpace(s)
-	s = expandGermanUmlauts(s)
-	return strings.ToLower(s)
-}
-
-func expandGermanUmlauts(s string) string {
-	r := strings.NewReplacer(
-		"ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss",
-		"Ä", "ae", "Ö", "oe", "Ü", "ue",
-	)
-	return r.Replace(s)
 }
 
 // sidPrefix gibt die ersten 8 Zeichen einer Session-ID zurueck;

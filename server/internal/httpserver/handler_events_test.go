@@ -20,14 +20,20 @@ import (
 // cleanly.
 func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Reader, *http.Response, context.CancelFunc) {
 	t.Helper()
+	// Saison 13-02-FIX4-a-HOTFIX3: Usernames sind exact-match;
+	// die Test-Helper muss daher den sanitized-Wert wirklich in
+	// die DB schieben. Wir leiten den Username aus dem letzten
+	// MAC-Oktett ab und schmeissen Doppelpunkte raus.
+	tail := strings.ReplaceAll(viewerMAC[len(viewerMAC)-5:], ":", "")
+	username := "test-" + tail
 	if _, err := env.mockMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
-			env.seedViewerAs(t, viewerMAC, "Test Viewer", "test-"+viewerMAC[len(viewerMAC)-5:], "TestPw-1234567X")
+			env.seedViewerAs(t, viewerMAC, "Test Viewer", username, "TestPw-1234567X")
 		} else {
 			t.Fatalf("GetViewerInfo: %v", err)
 		}
 	}
-	info, _, err := env.mockMgr.LookupByUsername(context.Background(), "test-"+viewerMAC[len(viewerMAC)-5:])
+	info, _, err := env.mockMgr.LookupByUsername(context.Background(), username)
 	if err != nil {
 		t.Fatalf("LookupByUsername: %v", err)
 	}
