@@ -180,7 +180,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		"cookie_path", s.viewerCookiePath(),
 		"cookie_secure", !s.cfg.DevMode,
 	)
-	http.Redirect(w, r, "/m", http.StatusSeeOther)
+	http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 }
 
 // handleViewerLogout revokiert die Viewer-Session und loescht das
@@ -190,7 +190,7 @@ func (s *Server) handleViewerLogout(w http.ResponseWriter, r *http.Request) {
 		_ = s.sessions.Revoke(r.Context(), sid)
 	}
 	s.clearSessionCookie(w)
-	http.Redirect(w, r, "/m", http.StatusSeeOther)
+	http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
 }
 
 func (s *Server) renderViewerLogin(w http.ResponseWriter, data viewerLoginPageData) {
