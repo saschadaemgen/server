@@ -334,6 +334,74 @@ func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
+// espStateRequest is the JSON body of POST /esp/state.
+type espStateRequest struct {
+	Screen      string `json:"screen"`        // idle|incoming|active|settings
+	LastInputTS int64  `json:"last_input_ts"` // unix seconds
+	UptimeSec   int64  `json:"uptime_sec"`
+}
+
+// handleESPState ingests an ESP-side status report. Saison
+// 13-02-FIX4-d keeps state in memory only (per-MAC map under
+// Server) - the admin dashboard tile that surfaces it lands in
+// a later season and can promote the storage to a real table
+// if persistence turns out to matter across server restarts.
+func (s *Server) handleESPState(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	var body espStateRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if err := s.mockMgr.TouchESPSeen(r.Context(), mac); err != nil {
+		s.log.Warn("esp state touch", "err", err, "mac_prefix", mac[:8])
+	}
+	s.recordESPState(mac, body)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// recordESPState stores the latest snapshot under the Server's
+// per-MAC map. The map is created lazily on first call; the
+// callers are an HTTP handler and the dashboard reader, both
+// already serialized by the http.Server's request goroutines
+// for the same MAC, but multiple MACs can race so we lock.
+func (s *Server) recordESPState(mac string, body espStateRequest) {
+	s.espStateMu.Lock()
+	defer s.espStateMu.Unlock()
+	if s.espState == nil {
+		s.espState = make(map[string]ESPState)
+	}
+	s.espState[mac] = ESPState{
+		Screen:      body.Screen,
+		LastInputTS: body.LastInputTS,
+		UptimeSec:   body.UptimeSec,
+		ReceivedAt:  time.Now(),
+	}
+}
+
+// ESPState is the latest report received from one ESP-Viewer.
+// Exported so dashboard handlers can read snapshots.
+type ESPState struct {
+	Screen      string
+	LastInputTS int64
+	UptimeSec   int64
+	ReceivedAt  time.Time
+}
+
+// ESPState returns the most recent state report for the given
+// MAC, or false if no /esp/state call has landed yet.
+func (s *Server) ESPState(mac string) (ESPState, bool) {
+	s.espStateMu.RLock()
+	defer s.espStateMu.RUnlock()
+	st, ok := s.espState[mac]
+	return st, ok
+}
+
 // handleESPHeartbeat is the polling fallback for environments
 // where SSE is blocked. ESPs that fail to keep /esp/events open
 // hit this endpoint on a slower interval. The response is

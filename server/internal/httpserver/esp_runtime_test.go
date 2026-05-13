@@ -445,6 +445,36 @@ func TestESPUnlock_CallsUAAPIUnlock(t *testing.T) {
 	}
 }
 
+func TestESPState_StoresLatestReport(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	body, _ := json.Marshal(map[string]any{
+		"screen":         "idle",
+		"last_input_ts":  1778684500,
+		"uptime_sec":     3600,
+	})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/state", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, ok := env.srv.ESPState(espTestMAC)
+	if !ok {
+		t.Fatal("no state recorded")
+	}
+	if got.Screen != "idle" || got.UptimeSec != 3600 || got.LastInputTS != 1778684500 {
+		t.Errorf("state = %+v", got)
+	}
+}
+
 // readBodyBytes is a small reader helper that does not consume
 // the body via the existing readBody util (which returns string
 // and closes already).

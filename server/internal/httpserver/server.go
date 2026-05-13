@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"unifix.local/server/internal/access"
@@ -103,6 +104,9 @@ type Server struct {
 	log             *slog.Logger
 	mux             *http.ServeMux
 	tpl             *adminTemplates
+
+	espStateMu sync.RWMutex
+	espState   map[string]ESPState
 }
 
 // EventBus exposes the in-process event bus so callers (main,
@@ -220,6 +224,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /esp/heartbeat", s.requireESPBearer(http.HandlerFunc(s.handleESPHeartbeat)))
 	s.mux.Handle("POST /esp/answer", s.requireESPBearer(http.HandlerFunc(s.handleESPAnswer)))
 	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
+	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
