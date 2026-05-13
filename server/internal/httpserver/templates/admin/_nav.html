@@ -37,10 +37,26 @@
 
   .dropdown { position: relative; width: 100%; }
   .dropdown > select[data-dropdown-target] {
-    /* visually hidden, aber form-relevant */
-    position: absolute;
-    width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
-    margin: -1px; padding: 0; border: 0; pointer-events: none;
+    /* Saison 13-02-FIX4-a-HOTFIX6: strikte visually-hidden-
+       Konvention. Vorher: nur clip + 1x1px, das hat in Modals
+       trotzdem als heller Balken durchgeschimmert (Chromium auf
+       Windows). Jetzt: clip + clip-path + Margin-Negativ +
+       overflow:hidden + white-space:nowrap. Plus pointer-events:
+       none damit keine versehentlichen Klicks ankommen. Der
+       Select bleibt Form-relevant fuer Submission. */
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+    pointer-events: none !important;
+    appearance: none !important;
+    opacity: 0 !important;
   }
   .dropdown-trigger {
     width: 100%;
