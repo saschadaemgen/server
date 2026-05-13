@@ -41,11 +41,98 @@
 
   <script src="/static/interactions.js"></script>
   <script>
-    unifix.connectSSE("/einloggen/events", {
-      onDoorbellStart:  function () { unifix.openOverlay("ringing"); },
-      onDoorbellCancel: function () { unifix.closeOverlay("ringing"); },
-      onHistoryUpdate:  function () { location.reload(); }
-    });
+    // Saison 13-03: Klingel-Lifecycle-Wire-Up.
+    // intercom-ringing.html aus dem design-library liefert drei
+    // Buttons (ignore-call, unlock-door, accept-call) mit
+    // is-disabled-Klasse und disabled-Attribut. Beim doorbell_start
+    // schalten wir Tuer-Auf und Annehmen frei, schreiben device_id
+    // und event_id auf die Buttons; beim doorbell_cancel sperren
+    // wir sie wieder. Die Library bleibt unveraendert.
+    (function () {
+      var currentEventID = null;
+      var currentDeviceID = "";
+
+      function setButtonsActive(active, ev) {
+        var unlock = document.querySelector('[data-action="unlock-door"]');
+        var accept = document.querySelector('[data-action="accept-call"]');
+        [unlock, accept].forEach(function (btn) {
+          if (!btn) return;
+          if (active) {
+            btn.classList.remove('is-disabled');
+            btn.removeAttribute('disabled');
+          } else {
+            btn.classList.add('is-disabled');
+            btn.setAttribute('disabled', 'disabled');
+          }
+        });
+        if (unlock) unlock.dataset.intercomMac = ev ? (ev.device_id || "") : "";
+      }
+
+      unifix.connectSSE("/einloggen/events", {
+        onDoorbellStart: function (ev) {
+          ev = ev || {};
+          currentEventID = ev.cancel_token || ev.request_id || "";
+          currentDeviceID = ev.device_id || "";
+          setButtonsActive(true, ev);
+          unifix.openOverlay("ringing");
+        },
+        onDoorbellCancel: function () {
+          currentEventID = null;
+          currentDeviceID = "";
+          setButtonsActive(false, null);
+          unifix.closeOverlay("ringing");
+        },
+        onHistoryUpdate: function () { location.reload(); }
+      });
+
+      function jsonPost(url, body) {
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          credentials: 'same-origin',
+          body: body ? JSON.stringify(body) : null
+        });
+      }
+
+      // Tuer auf - vor interactions.js' is-disabled-Check fangen.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="unlock-door"]');
+        if (!btn || btn.disabled) return;
+        e.preventDefault();
+        var intercomMAC = btn.dataset.intercomMac || currentDeviceID;
+        if (!intercomMAC) return;
+        jsonPost('/einloggen/doors/' + encodeURIComponent(intercomMAC) + '/unlock', null)
+          .catch(function () { /* still close overlay, audit row records the attempt */ });
+      });
+
+      // Annehmen.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="accept-call"]');
+        if (!btn || btn.disabled) return;
+        e.preventDefault();
+        if (!currentEventID) return;
+        jsonPost('/einloggen/answer', { event_id: currentEventID })
+          .then(function (r) {
+            if (r.ok) {
+              // Overlay schliesst sich erst wenn der cancel-Push
+              // (answered_elsewhere) auf dem SSE-Kanal eintrifft.
+              // Live-Call-Stream kommt in S13-04; fuer jetzt:
+              // Knoepfe sperren, Mieter weiss "es laeuft".
+              setButtonsActive(false, null);
+            }
+          })
+          .catch(function () {});
+      });
+
+      // Ablehnen - interactions.js schliesst das Overlay,
+      // wir feuern parallel den Server-Call.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="ignore-call"]');
+        if (!btn || !currentEventID) return;
+        jsonPost('/einloggen/reject', { event_id: currentEventID })
+          .catch(function () {});
+      });
+    })();
   </script>
 
 </body>
