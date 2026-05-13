@@ -81,36 +81,42 @@
       </table>
     </div>
 
-    <!-- Anlegen-Modal -->
-    <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true">
-      <div class="modal modal-glass modal-md">
+    <!-- Anlegen-Modal. Struktur strikt nach Library-Konvention:
+         modal-scrim > modal-glass > modal-header / modal-body /
+         modal-footer. Das library-interactions.js erkennt das
+         Inner-Container-Element nur ueber die modal-glass-Klasse. -->
+    <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true" aria-labelledby="create-viewer-title">
+      <div class="modal-glass">
         <form method="post" action="/a/web-viewers" data-credentials-form>
-          <div class="modal-head">
-            <h2 class="modal-title">Web-Viewer anlegen</h2>
-            <button class="btn-icon btn-ghost" type="button" data-action="close-modal" aria-label="Schliessen">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          <header class="modal-header">
+            <div>
+              <h2 id="create-viewer-title" class="modal-title">Web-Viewer anlegen</h2>
+              <p class="modal-sub">Neue Wohnung mit Username + generiertem Passwort.</p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
-          </div>
-          <div class="modal-body">
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
             <div class="field">
               <label class="field-label" for="new-name">Wohnungs-Name</label>
               <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG"/>
             </div>
-            <div class="field" style="margin-top:var(--space-3);">
+            <div class="field">
               <label class="field-label" for="new-username">Benutzername (optional)</label>
               <input class="input" id="new-username" name="username" type="text" pattern="[A-Za-z0-9._\-]{3,32}" placeholder="leer = aus Name ableiten"/>
-              <span class="field-hint">3-32 Zeichen aus a-z, 0-9, _ und . erlaubt.</span>
+              <span class="field-hint">3-32 Zeichen aus a-z, 0-9, _ und . erlaubt. Umlaute werden zu ae/oe/ue aufgeloest.</span>
             </div>
-            <div class="field" style="margin-top:var(--space-3);">
+            <div class="field">
               <label class="field-label" for="new-mac">MAC-Adresse (optional)</label>
               <input class="input" id="new-mac" name="mac" type="text" pattern="^([0-9a-f]{2}:){5}[0-9a-f]{2}$" placeholder="leer = automatisch generieren"/>
               <span class="field-hint">Lowercase hex mit Doppelpunkten, z.B. 0c:ea:14:42:42:42.</span>
             </div>
           </div>
-          <div class="modal-foot">
+          <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
             <button class="btn btn-primary" type="submit">Anlegen</button>
-          </div>
+          </footer>
         </form>
       </div>
     </div>
@@ -171,24 +177,35 @@
       });
 
       function renderCredentials(j) {
-        // modal-glass-Klasse ist Pflicht: das library-interactions.js
-        // schliesst das Modal nur wenn der Klick AUSSERHALB einer
-        // .modal-glass-Box landet (closest('.modal-glass') !== null
-        // -> Klick ist innerhalb -> bleibt offen).
-        return '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
-          + '<div class="modal modal-glass modal-md">'
-          + '<div class="modal-head"><h2 class="modal-title">Zugangsdaten fuer ' + escape(j.name) + '</h2>'
-          + '<button class="btn-icon btn-ghost" type="button" data-action="close-modal" aria-label="Schliessen">x</button></div>'
-          + '<div class="modal-body">'
-          + '<p class="modal-sub">Passwort wird nur EIN MAL angezeigt. Bitte sofort an den Mieter weitergeben.</p>'
-          + '<div class="field"><label class="field-label">Benutzername</label><div class="input" style="user-select:all;">' + escape(j.username) + '</div></div>'
-          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Passwort</label><div class="input" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
-          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Login-Link</label><div class="input" style="user-select:all; word-break:break-all;">' + escape(j.login_url) + '</div></div>'
-          + '<div class="qr-box" style="margin-top:var(--space-4); display:flex; justify-content:center;">' + (j.qr_svg || '') + '</div>'
-          + '<p class="field-hint" style="text-align:center;">QR scannen oeffnet die Login-Seite. Username und Passwort vom Zettel uebertragen (Pre-Fill ist absichtlich aus Sicherheitsgruenden weg).</p>'
-          + '</div>'
-          + '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button></div>'
-          + '</div></div>';
+        // Struktur strikt nach Library-Konvention:
+        //   modal-scrim > modal-glass > modal-header / modal-body / modal-footer
+        // Die library-interactions.js prueft modal-glass als
+        // Inner-Container, sonst schliesst sie bei JEDEM Klick im
+        // Modal-Bereich.
+        return ''
+          + '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
+          +   '<div class="modal-glass">'
+          +     '<header class="modal-header">'
+          +       '<div>'
+          +         '<h2 class="modal-title">Zugangsdaten fuer ' + escape(j.name) + '</h2>'
+          +         '<p class="modal-sub">Passwort wird nur EIN MAL angezeigt. Bitte sofort an den Mieter weitergeben.</p>'
+          +       '</div>'
+          +       '<button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">'
+          +         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+          +       '</button>'
+          +     '</header>'
+          +     '<div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">'
+          +       '<div class="field"><label class="field-label">Benutzername</label><div class="input" style="user-select:all;">' + escape(j.username) + '</div></div>'
+          +       '<div class="field"><label class="field-label">Passwort</label><div class="input" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
+          +       '<div class="field"><label class="field-label">Login-Link</label><div class="input" style="user-select:all; word-break:break-all;">' + escape(j.login_url) + '</div></div>'
+          +       '<div class="qr-box" style="display:flex; justify-content:center;">' + (j.qr_svg || '') + '</div>'
+          +       '<p class="field-hint" style="text-align:center;">QR scannen oeffnet die Login-Seite. Username und Passwort vom Zettel uebertragen.</p>'
+          +     '</div>'
+          +     '<footer class="modal-footer">'
+          +       '<button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button>'
+          +     '</footer>'
+          +   '</div>'
+          + '</div>';
       }
       function escape(s) {
         return String(s || '').replace(/[&<>\"']/g, function (c) {
