@@ -22,8 +22,10 @@ import (
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/httpserver"
 	"unifix.local/server/internal/mdns"
 	"unifix.local/server/internal/mockmanager"
@@ -97,7 +99,17 @@ func main() {
 		_ = mockMgr.Shutdown(shutCtx)
 	}()
 
-	hub := doorbellhub.New(mockMgr, historyStore, log)
+	// Saison 13-03: zentrale Push-Quelle plus Anruf-Lifecycle.
+	// EventBus wird vom HTTPServer und vom doorbellhub geteilt,
+	// damit ESP-SSE und Web-SSE aus derselben Quelle gefuettert
+	// werden. doorbellcalls speichert pro Anruf den CAS-Stand
+	// fuer Multi-Viewer-Annehmen.
+	eventBus := eventbus.New()
+	callsSvc := doorbellcalls.New(database.DB)
+	hub := doorbellhub.NewWithOptions(mockMgr, historyStore, log, doorbellhub.Options{
+		Bus:   eventBus,
+		Calls: callsSvc,
+	})
 	go func() {
 		if err := hub.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("doorbell hub stopped", "err", err)
@@ -139,6 +151,8 @@ func main() {
 		UserStore:      userStore,
 		Hub:            hub,
 		History:        historyStore,
+		EventBus:       eventBus,
+		DoorbellCalls:  callsSvc,
 		Log:            log,
 	})
 	if err != nil {
