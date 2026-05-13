@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"unifix.local/server/internal/doorbellcalls"
@@ -29,14 +30,24 @@ import (
 // handleMieterUnlock relays a door unlock to the UA-API.
 // {door_id} comes from the URL path; the actor in the audit
 // row is the viewer's MAC from the session context.
+//
+// Saison 13-03-HOTFIX1: the path parameter the bell-overlay JS
+// sends is the INTERCOM MAC (from doorbell_start.device_id),
+// not the UA-Access door UUID. We sniff the format: if the
+// param matches the MAC regex, look it up via
+// platformconfig.LookupDoorForIntercom and use the resolved
+// UUID; otherwise treat the param as a real door UUID
+// (preserves the test path that calls /einloggen/doors/door-x/unlock
+// with a synthetic id and the future admin path that may use
+// the UUID directly).
 func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	viewerMAC := ViewerMACFromContext(r.Context())
 	if viewerMAC == "" {
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
-	doorID := r.PathValue("door_id")
-	if doorID == "" {
+	pathDoorID := r.PathValue("door_id")
+	if pathDoorID == "" {
 		http.Error(w, "door_id required", http.StatusBadRequest)
 		return
 	}
@@ -44,6 +55,28 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ua-api not configured", http.StatusServiceUnavailable)
 		return
 	}
+
+	doorID := pathDoorID
+	if macFormat.MatchString(strings.ToLower(pathDoorID)) {
+		resolved, err := s.platformCfg.LookupDoorForIntercom(r.Context(), pathDoorID)
+		if err != nil {
+			s.log.Error("intercom_to_door lookup", "err", err, "intercom", pathDoorID)
+			http.Error(w, "intercom-to-door mapping read failed", http.StatusInternalServerError)
+			return
+		}
+		if resolved == "" {
+			s.log.Warn("intercom not in intercom_to_door mapping", "intercom", pathDoorID)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":    false,
+				"error": "intercom MAC not mapped to a door; admin must set platform_config.intercom_to_door",
+			})
+			return
+		}
+		doorID = resolved
+	}
+
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), viewerMAC)
 	if err != nil {
 		s.log.Error("mieter unlock viewer info", "err", err, "mac_prefix", viewerMAC[:8])

@@ -65,6 +65,61 @@ func TestMieterUnlock_CallsUAAPIAndAudits(t *testing.T) {
 	}
 }
 
+func TestMieterUnlock_ResolvesIntercomMACToDoorUUID(t *testing.T) {
+	var gotDoorID string
+	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotDoorID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
+	}))
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
+
+	// Mapping setzen: Intercom-MAC -> Door-UUID.
+	if err := env.platformCfg.Set(context.Background(),
+		platformconfig.KeyIntercomToDoor,
+		`{"28:70:4e:31:e2:9c": "door-uuid-real-1"}`,
+	); err != nil {
+		t.Fatalf("Set intercom_to_door: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if gotDoorID != "door-uuid-real-1" {
+		t.Errorf("UA-API saw door = %q, want door-uuid-real-1", gotDoorID)
+	}
+}
+
+func TestMieterUnlock_UnmappedIntercomReturns404(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: "http://invalid", Token: "t"}))
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (unmapped intercom)", resp.StatusCode)
+	}
+}
+
 func TestMieterAnswer_FirstWinsPushesCancelToOthers(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
