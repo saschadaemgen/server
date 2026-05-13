@@ -319,6 +319,13 @@ func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
 
 // LookupByUsername returns the viewer record for the given
 // username (web-type only). Used by the viewer-login handler.
+//
+// Saison 13-02-FIX4-a-HOTFIX1: case-insensitive lookup. Mieter
+// soll "Daemgen", "daemgen" oder "DAEMGEN" tippen koennen und
+// denselben Eintrag finden. Der Caller normalisiert den Input
+// vorher schon (lowercase + Umlaute aufgeloest), aber doppelt
+// haelt besser, falls jemand spaeter direkt gegen den Manager
+// queried.
 func (m *Manager) LookupByUsername(ctx context.Context, username string) (*ViewerInfo, string, error) {
 	var (
 		info       ViewerInfo
@@ -330,7 +337,7 @@ func (m *Manager) LookupByUsername(ctx context.Context, username string) (*Viewe
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
 		   FROM viewers
-		  WHERE username = ? AND type = 'web'`, username).
+		  WHERE LOWER(username) = LOWER(?) AND type = 'web'`, username).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", ErrViewerNotFound

@@ -338,7 +338,11 @@ func TestLogin_NoSession_RendersForm(t *testing.T) {
 	}
 }
 
-func TestLogin_PrefillsFromQueryParams(t *testing.T) {
+// TestLogin_IgnoresQueryPrefill prueft den S13-02-FIX4-a-HOTFIX1-
+// Sicherheits-Fix: ?u= und ?p= werden vom Server-Handler NICHT
+// mehr auf das Form gemappt (Pre-Fill ist Anti-Pattern; Passwoerter
+// haben in URLs nichts zu suchen).
+func TestLogin_IgnoresQueryPrefill(t *testing.T) {
 	env := newTestServer(t)
 	resp, err := env.client.Get(env.ts.URL + "/m?u=alice&p=hunter2")
 	if err != nil {
@@ -346,11 +350,11 @@ func TestLogin_PrefillsFromQueryParams(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	if !strings.Contains(body, `value="alice"`) {
-		t.Errorf("prefill u missing in body")
+	if strings.Contains(body, `value="alice"`) {
+		t.Errorf("username pre-fill leaked into form (should be empty)")
 	}
-	if !strings.Contains(body, `value="hunter2"`) {
-		t.Errorf("prefill p missing in body")
+	if strings.Contains(body, `value="hunter2"`) {
+		t.Errorf("password pre-fill leaked into form (should be empty)")
 	}
 }
 
@@ -378,7 +382,10 @@ func TestLogin_UnknownUser(t *testing.T) {
 	}
 }
 
-func TestLogin_RateLimitsAfterRepeatedFailures(t *testing.T) {
+// TestLogin_LockedAccountShowsBanner ist der S13-02-FIX4-a-HOTFIX1
+// Acceptance-Test: nach Lockout sieht der Mieter einen orangen
+// Banner mit Hinweis auf die Hausverwaltung.
+func TestLogin_LockedAccountShowsBanner(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
 	for i := 0; i < ratelimit.IPMaxAttempts; i++ {
@@ -388,8 +395,86 @@ func TestLogin_RateLimitsAfterRepeatedFailures(t *testing.T) {
 	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Zu viele Versuche") {
-		t.Errorf("body missing rate-limit hint, got: %s", body)
+	if !strings.Contains(body, "vorruebergehend gesperrt") {
+		t.Errorf("locked banner text missing, got: %s", body)
+	}
+	if !strings.Contains(body, "Hausverwaltung") {
+		t.Errorf("locked banner contact hint missing")
+	}
+	if !strings.Contains(body, "banner-orange") {
+		t.Errorf("locked banner is not orange-styled")
+	}
+}
+
+// TestLogin_SetsCookieAndRedirects ist der S13-02-FIX4-a-HOTFIX1
+// Regression-Test fuer den live-beobachteten Bug: POST mit
+// korrekten Credentials gab HTTP 200 + Login-Form zurueck statt
+// 303 + Set-Cookie. Hier pruefen wir explizit Cookie + Redirect-
+// Headers + Audit-Log.
+func TestLogin_SetsCookieAndRedirects(t *testing.T) {
+	env := newTestServer(t)
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 (See Other)", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/m" {
+		t.Errorf("Location = %q, want /m", loc)
+	}
+	cookie := findSessionCookie(resp)
+	if cookie == nil {
+		t.Fatal("Set-Cookie header missing on successful login")
+	}
+	if cookie.Value == "" {
+		t.Error("session cookie value is empty")
+	}
+	if !cookie.HttpOnly {
+		t.Error("session cookie not HttpOnly")
+	}
+	if cookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("session cookie SameSite = %v, want Strict", cookie.SameSite)
+	}
+
+	rows, err := env.audit.Recent(context.Background(), "viewer", 5)
+	if err != nil {
+		t.Fatalf("audit.Recent: %v", err)
+	}
+	var sawSuccess bool
+	for _, row := range rows {
+		if string(row.Outcome) == "success" && row.Username == testViewerUsername {
+			sawSuccess = true
+			break
+		}
+	}
+	if !sawSuccess {
+		t.Errorf("audit log missing success row for %q", testViewerUsername)
+	}
+}
+
+// TestLogin_CaseInsensitiveUsername ist der S13-02-FIX4-a-HOTFIX1
+// Hauptfix: SQL-Lookup ist jetzt case-insensitive, plus Umlaute
+// werden zu ae/oe/ue/ss aufgeloest. Wir seeden den Viewer mit
+// lowercase-Username und probieren mehrere Schreibweisen durch.
+func TestLogin_CaseInsensitiveUsername(t *testing.T) {
+	env := newTestServer(t)
+	env.seedViewerAs(t,
+		"0c:ea:14:dd:dd:dd",
+		"Daemgen",
+		"daemgen",
+		"TestPw-1234567X",
+	)
+
+	for _, typed := range []string{"daemgen", "Daemgen", "DAEMGEN", "Dämgen"} {
+		t.Run(typed, func(t *testing.T) {
+			env.srv.viewerLimiter.ClearUser("daemgen")
+			resp := env.loginViewer(t, typed, "TestPw-1234567X")
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Errorf("status = %d for typed %q, want 303", resp.StatusCode, typed)
+			}
+		})
 	}
 }
 
