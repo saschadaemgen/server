@@ -128,6 +128,37 @@ func (b *Bus) PublishAll(subjects []string, ev Event) int {
 	return total
 }
 
+// PublishExcluding fans the event out to every subscriber of
+// subject EXCEPT the channel returned by exclude. Used by the
+// "answered_elsewhere" path: one viewer wins the answer race
+// and pushes a cancel to every sibling subscriber on its own
+// MAC, but must not push the cancel back to itself (the winner
+// transitions to the in-call screen, not to the dismissed
+// state).
+//
+// exclude may be nil, in which case PublishExcluding behaves
+// like Publish.
+func (b *Bus) PublishExcluding(subject string, exclude <-chan Event, ev Event) int {
+	b.mu.RLock()
+	subs := b.subscribers[subject]
+	channels := make([]chan Event, 0, len(subs))
+	for ch := range subs {
+		if exclude != nil && (<-chan Event)(ch) == exclude {
+			continue
+		}
+		channels = append(channels, ch)
+	}
+	b.mu.RUnlock()
+	for _, ch := range channels {
+		select {
+		case ch <- ev:
+		default:
+			b.dropped.Add(1)
+		}
+	}
+	return len(channels)
+}
+
 // SubscriberCount returns how many subscribers a subject
 // currently has. Useful for tests and for logging when an
 // event has nowhere to go.

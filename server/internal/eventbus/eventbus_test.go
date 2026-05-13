@@ -86,6 +86,45 @@ func TestBus_DropsOnFullBuffer(t *testing.T) {
 	}
 }
 
+func TestBus_PublishExcluding(t *testing.T) {
+	b := New()
+	chSelf := b.Subscribe("mac")
+	chOther := b.Subscribe("mac")
+	defer b.Unsubscribe("mac", chSelf)
+	defer b.Unsubscribe("mac", chOther)
+
+	if n := b.PublishExcluding("mac", chSelf, Event{Type: "cancel"}); n != 1 {
+		t.Errorf("PublishExcluding returned %d, want 1 (the other)", n)
+	}
+	select {
+	case ev := <-chOther:
+		if ev.Type != "cancel" {
+			t.Errorf("ev.Type = %q", ev.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("other subscriber missed event")
+	}
+	select {
+	case ev := <-chSelf:
+		t.Fatalf("self subscriber received excluded event: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBus_PublishExcludingNilFallsThrough(t *testing.T) {
+	b := New()
+	ch := b.Subscribe("mac")
+	defer b.Unsubscribe("mac", ch)
+	if n := b.PublishExcluding("mac", nil, Event{Type: "x"}); n != 1 {
+		t.Errorf("PublishExcluding(nil) returned %d, want 1", n)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("event not delivered")
+	}
+}
+
 func TestBus_PublishAll(t *testing.T) {
 	b := New()
 	chA := b.Subscribe("a")
