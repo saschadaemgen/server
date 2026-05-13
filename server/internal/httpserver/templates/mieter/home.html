@@ -104,14 +104,22 @@
     <div class="bell-action">
       <button type="button" id="ring-decline" class="bell-btn bell-btn-decline"
               aria-label="Ignorieren">
-        {{icon "phone-off"}}
+        {{icon "bell-slash"}}
       </button>
       <span class="bell-btn-label">Ignorieren</span>
     </div>
     <div class="bell-action">
+      <button type="button" id="ring-door" class="bell-btn bell-btn-door"
+              aria-label="Tuer auf"
+              disabled title="Wird in Saison 13-03 funktional">
+        {{icon "key"}}
+      </button>
+      <span class="bell-btn-label">Tuer auf</span>
+    </div>
+    <div class="bell-action">
       <button type="button" id="ring-accept" class="bell-btn bell-btn-accept"
               aria-label="Annehmen"
-              disabled title="Wird in Saison 13-03 funktional">
+              disabled title="Wird in Saison 13-04/05 mit Stream funktional">
         {{icon "phone"}}
       </button>
       <span class="bell-btn-label">Annehmen</span>
@@ -174,7 +182,7 @@
       ? '<span class="text-tertiary text-mono">' + data.device_id + '</span>'
       : '';
     li.innerHTML =
-      '<div class="history-item-icon"></div>' +
+      '<div class="history-item-icon"><i class="ph ph-bell" aria-hidden="true"></i></div>' +
       '<div>' +
         '<div class="history-item-title">Hauseingang</div>' +
         '<div class="history-item-meta">' +
@@ -184,7 +192,7 @@
           '<span class="badge-new">neu</span>' +
         '</div>' +
       '</div>' +
-      '<div class="history-item-action"></div>';
+      '<div class="history-item-action"><i class="ph ph-caret-right" aria-hidden="true"></i></div>';
     historyList.insertBefore(li, historyList.firstChild);
   }
 
