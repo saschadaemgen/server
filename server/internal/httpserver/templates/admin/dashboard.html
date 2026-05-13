@@ -70,6 +70,32 @@
           <span>rollendes Fenster</span>
         </div>
       </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">ESP-Viewer</span>
+        </div>
+        <div class="stat-card-value">{{.Page.ESPAdopted}}</div>
+        <div class="stat-card-foot" style="display:flex; flex-wrap:wrap; gap:var(--space-2);">
+          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.ESPWithToken}} mit Token</span>
+          {{if .Page.ESPPending}}
+            <span class="status-pill"><span class="status-dot"></span>{{.Page.ESPPending}} pending</span>
+          {{end}}
+          {{if .Page.ESPLastDiscovery}}
+            <span style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">letzte Discovery: {{.Page.ESPLastDiscovery}}</span>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">ESP-Pager</span>
+        </div>
+        <div class="stat-card-value" style="color: var(--color-text-tertiary);">-</div>
+        <div class="stat-card-foot">
+          <span style="color: var(--color-text-tertiary);">geplant fuer kommende Saison</span>
+        </div>
+      </div>
     </div>
 
     <section class="app-card" style="margin-top: var(--space-6);">

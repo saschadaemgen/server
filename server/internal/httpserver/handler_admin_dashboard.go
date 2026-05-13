@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 	"time"
@@ -15,20 +16,29 @@ type adminUser struct {
 	Initials string
 }
 
-// adminDashboardData traegt die vier KPI-Karten plus zwei Listen
+// adminDashboardData traegt die KPI-Karten plus zwei Listen
 // (Klingel-Events + Login-Audit). Saison 13-02-FIX4-a-HOTFIX3:
 // alle Zahlen kommen aus der DB, keine Fake-Werte mehr.
+// Saison 13-02-FIX4-a-HOTFIX5: ESP-Viewer-Kachel (Live-Stats)
+// plus ESP-Pager-Platzhalter.
 type adminDashboardData struct {
-	User                adminUser
-	WebViewersTotal     int
-	WebViewersRunning   int
-	ActiveSessions      int
-	EventsToday         int
-	Events7d            int
-	RecentEvents        []dashRecentEvent
-	RecentEventsEmpty   bool
-	RecentAudit         []dashAuditRow
-	RecentAuditEmpty    bool
+	User              adminUser
+	WebViewersTotal   int
+	WebViewersRunning int
+	ActiveSessions    int
+	EventsToday       int
+	Events7d          int
+
+	ESPAdopted       int
+	ESPWithToken     int
+	ESPPending       int
+	ESPRejected      int
+	ESPLastDiscovery string
+
+	RecentEvents      []dashRecentEvent
+	RecentEventsEmpty bool
+	RecentAudit       []dashAuditRow
+	RecentAuditEmpty  bool
 }
 
 type dashRecentEvent struct {
@@ -66,12 +76,40 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	infoByMAC := map[string]mockmanager.ViewerInfo{}
 	for _, info := range infos {
 		infoByMAC[info.MAC] = info
-		if info.Type != mockmanager.TypeWeb {
-			continue
+		switch info.Type {
+		case mockmanager.TypeWeb:
+			data.WebViewersTotal++
+			if info.Running {
+				data.WebViewersRunning++
+			}
+		case mockmanager.TypeESP:
+			data.ESPAdopted++
+			if info.HasESPToken {
+				data.ESPWithToken++
+			}
 		}
-		data.WebViewersTotal++
-		if info.Running {
-			data.WebViewersRunning++
+	}
+
+	// ESP-Pending-Statistik plus juengster Discovery-Zeitstempel
+	// kommen direkt aus esp_pending_devices. Stiller Fail (Tabelle
+	// fehlt) blendet die Kachel-Werte einfach mit 0 aus.
+	if s.platformCfg != nil {
+		var (
+			pending     sql.NullInt64
+			rejected    sql.NullInt64
+			latestDisco sql.NullInt64
+		)
+		_ = s.platformCfg.DB().QueryRowContext(r.Context(),
+			`SELECT
+			   COALESCE(SUM(CASE WHEN rejected_at IS NULL THEN 1 ELSE 0 END), 0),
+			   COALESCE(SUM(CASE WHEN rejected_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+			   MAX(discovered_at)
+			 FROM esp_pending_devices`,
+		).Scan(&pending, &rejected, &latestDisco)
+		data.ESPPending = int(pending.Int64)
+		data.ESPRejected = int(rejected.Int64)
+		if latestDisco.Valid && latestDisco.Int64 > 0 {
+			data.ESPLastDiscovery = formatRelativeGerman(time.UnixMilli(latestDisco.Int64), now)
 		}
 	}
 
@@ -203,4 +241,3 @@ func initialsOf(name string) string {
 	last := strings.ToUpper(parts[len(parts)-1][:1])
 	return first + last
 }
-
