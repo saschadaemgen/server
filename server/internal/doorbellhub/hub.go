@@ -15,6 +15,14 @@
 // abort the dispatch (availability beats audit completeness for
 // the doorbell live channel; the warn log surfaces the gap).
 //
+// Saison 13-03: the hub now also publishes every start/cancel
+// to the eventbus.Bus (so adopted ESP-Viewers get the same
+// doorbell.ring/doorbell.cancel push their web-viewer cousins
+// already see) and calls into doorbellcalls.Service to track
+// the active-call lifecycle row that the answer/reject/end-call
+// endpoints arbitrate against. Both wires are best-effort: a
+// nil bus or nil calls service degrades to the prior behavior.
+//
 // Sends to subscriber channels are non-blocking; a backed-up
 // browser is dropped with a warn log and a Stats counter bump
 // rather than blocking the manager-side fan-out.
@@ -22,13 +30,16 @@ package doorbellhub
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"unifix.local/mock"
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/eventbus"
 )
 
 // Source is the subset of mockmanager.Manager that the hub
@@ -86,6 +97,8 @@ type Hub struct {
 	log     *slog.Logger
 	src     Source
 	history doorhistory.Store
+	bus     *eventbus.Bus
+	calls   *doorbellcalls.Service
 
 	mu          sync.RWMutex
 	subscribers map[string]map[*Subscriber]struct{}
@@ -94,10 +107,29 @@ type Hub struct {
 	eventsDropped atomic.Int64
 }
 
+// Options carries the optional Saison 13-03 dependencies. A
+// zero Options keeps Saison 12 behavior; Bus enables the
+// parallel eventbus push for ESP-Viewers; Calls enables the
+// doorbell_calls lifecycle row writes.
+type Options struct {
+	Bus   *eventbus.Bus
+	Calls *doorbellcalls.Service
+}
+
 // New constructs a Hub. Pass mockmanager.Manager as the source
 // and a doorhistory.Store for persistence; history may be nil
 // in narrow test setups (the hub then skips DB writes).
+//
+// Saison 13-03: NewWithOptions adds the EventBus + DoorbellCalls
+// wires. New is preserved as a thin shim so existing callers
+// (and the Saison-12 hub_test.go) keep compiling.
 func New(src Source, history doorhistory.Store, log *slog.Logger) *Hub {
+	return NewWithOptions(src, history, log, Options{})
+}
+
+// NewWithOptions builds a Hub with the optional Saison-13-03
+// extras populated.
+func NewWithOptions(src Source, history doorhistory.Store, log *slog.Logger, opts Options) *Hub {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -105,6 +137,8 @@ func New(src Source, history doorhistory.Store, log *slog.Logger) *Hub {
 		log:         log.With("component", "doorbellhub"),
 		src:         src,
 		history:     history,
+		bus:         opts.Bus,
+		calls:       opts.Calls,
 		subscribers: make(map[string]map[*Subscriber]struct{}),
 	}
 }
@@ -165,7 +199,8 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 		return
 	}
 	id := h.persistStart(ctx, ev)
-	h.broadcast(ev.MockMAC, Event{
+	h.startCall(ctx, ev)
+	hubEvent := Event{
 		Type:        TypeDoorbellStart,
 		EventID:     id,
 		MockMAC:     ev.MockMAC,
@@ -174,7 +209,9 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 		RoomID:      ev.RoomID,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
-	})
+	}
+	h.broadcast(ev.MockMAC, hubEvent)
+	h.publishToBus(ev.MockMAC, "doorbell.ring", hubEvent)
 }
 
 func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
@@ -183,12 +220,76 @@ func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
 		return
 	}
 	h.persistCancel(ctx, ev)
-	h.broadcast(ev.MockMAC, Event{
+	h.endCallTimeout(ctx, ev)
+	hubEvent := Event{
 		Type:        TypeDoorbellCancel,
 		MockMAC:     ev.MockMAC,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
-	})
+	}
+	h.broadcast(ev.MockMAC, hubEvent)
+	h.publishToBus(ev.MockMAC, "doorbell.cancel", hubEvent)
+}
+
+// startCall best-effort registers the lifecycle row. The
+// cancel_token is the natural call event_id (32-char one-shot
+// per UDM /remote_view -> /cancel_doorbell match key).
+func (h *Hub) startCall(ctx context.Context, ev mock.DoorbellEvent) {
+	if h.calls == nil || ev.CancelToken == "" {
+		return
+	}
+	if err := h.calls.Start(ctx, ev.CancelToken, ev.MockMAC, ev.DeviceID); err != nil {
+		h.log.Warn("doorbellcalls start failed",
+			"mac", ev.MockMAC,
+			"event_id", ev.CancelToken,
+			"err", err,
+		)
+	}
+}
+
+// endCallTimeout is the doorbellhub-side end-of-life: UDM sent
+// /cancel_doorbell_notification (or the inactivity timer fired)
+// before any viewer accepted. Idempotent so a real
+// rejected/answered_elsewhere/user_ended reason that landed
+// first via the HTTP endpoints survives.
+func (h *Hub) endCallTimeout(ctx context.Context, ev mock.DoorbellCancelEvent) {
+	if h.calls == nil || ev.CancelToken == "" {
+		return
+	}
+	err := h.calls.MarkEnded(ctx, ev.CancelToken, "", doorbellcalls.ReasonTimeout)
+	if err != nil && err.Error() != "doorbellcalls: call not found" {
+		h.log.Warn("doorbellcalls timeout end failed",
+			"mac", ev.MockMAC,
+			"event_id", ev.CancelToken,
+			"err", err,
+		)
+	}
+}
+
+// publishToBus serializes the doorbell_start/_cancel hub event
+// into the JSON shape the ESP firmware reads via SSE (matches
+// the briefing TEIL A.3 sample). event_id on the wire is the
+// stable cancel_token, not the doorhistory id, because the
+// HTTP-answer/reject endpoints look the row up by cancel_token.
+func (h *Hub) publishToBus(mockMAC, eventType string, hubEvent Event) {
+	if h.bus == nil {
+		return
+	}
+	payload := map[string]any{
+		"event_id":     hubEvent.CancelToken,
+		"mock_mac":     hubEvent.MockMAC,
+		"device_id":    hubEvent.DeviceID,
+		"room_id":      hubEvent.RoomID,
+		"cancel_token": hubEvent.CancelToken,
+		"request_id":   hubEvent.RequestID,
+		"created_at":   hubEvent.CreatedAt,
+	}
+	js, err := json.Marshal(payload)
+	if err != nil {
+		h.log.Warn("eventbus payload marshal failed", "err", err)
+		return
+	}
+	h.bus.Publish(mockMAC, eventbus.Event{Type: eventType, JSON: string(js)})
 }
 
 // persistStart writes the doorbell_start row and returns the new

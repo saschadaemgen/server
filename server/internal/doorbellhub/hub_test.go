@@ -6,13 +6,17 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"unifix.local/mock"
+	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/eventbus"
 )
 
 var errBoom = errors.New("history boom")
@@ -490,5 +494,102 @@ func TestRun_PersistFailureStillDispatches(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("persist failure swallowed the SSE dispatch")
+	}
+}
+
+// ---------- Saison 13-03: eventbus + doorbellcalls wires ----------
+
+func TestHub_PublishesToEventBus(t *testing.T) {
+	src := newFakeSource()
+	bus := eventbus.New()
+	mac := "0c:ea:14:42:42:42"
+	ch := bus.Subscribe(mac)
+	defer bus.Unsubscribe(mac, ch)
+
+	h := NewWithOptions(src, nil, quietLogger(), Options{Bus: bus})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	src.events <- mock.DoorbellEvent{
+		MockMAC:     mac,
+		RequestID:   "req-1",
+		DeviceID:    "intercom-1",
+		CancelToken: "tok-abc",
+		ReceivedAt:  time.Unix(1747000001, 0),
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "doorbell.ring" {
+			t.Errorf("ev.Type = %q, want doorbell.ring", ev.Type)
+		}
+		if !strings.Contains(ev.JSON, `"event_id":"tok-abc"`) {
+			t.Errorf("ev.JSON missing event_id=tok-abc: %s", ev.JSON)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("eventbus subscriber did not receive doorbell.ring")
+	}
+
+	src.cancels <- mock.DoorbellCancelEvent{
+		MockMAC:     mac,
+		CancelToken: "tok-abc",
+		ReceivedAt:  time.Unix(1747000005, 0),
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "doorbell.cancel" {
+			t.Errorf("ev.Type = %q, want doorbell.cancel", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("eventbus subscriber did not receive doorbell.cancel")
+	}
+}
+
+func TestHub_StartsAndEndsCallLifecycle(t *testing.T) {
+	src := newFakeSource()
+	dir := t.TempDir()
+	d, err := db.Open(filepath.Join(dir, "calls.db"))
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	defer d.Close()
+	calls := doorbellcalls.New(d.DB)
+
+	h := NewWithOptions(src, nil, quietLogger(), Options{Calls: calls})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	src.events <- mock.DoorbellEvent{
+		MockMAC:     "mac-x",
+		CancelToken: "tok-life",
+		DeviceID:    "intercom-x",
+		ReceivedAt:  time.Unix(1747000010, 0),
+	}
+	// Allow the dispatcher goroutine to insert.
+	time.Sleep(80 * time.Millisecond)
+	c, err := calls.Get(ctx, "tok-life")
+	if err != nil {
+		t.Fatalf("Get after start: %v", err)
+	}
+	if c.ViewerMAC != "mac-x" || c.DeviceID != "intercom-x" {
+		t.Errorf("call row = %+v", c)
+	}
+
+	src.cancels <- mock.DoorbellCancelEvent{
+		MockMAC:     "mac-x",
+		CancelToken: "tok-life",
+		ReceivedAt:  time.Unix(1747000040, 0),
+	}
+	time.Sleep(80 * time.Millisecond)
+	c, err = calls.Get(ctx, "tok-life")
+	if err != nil {
+		t.Fatalf("Get after cancel: %v", err)
+	}
+	if c.CancelReason != doorbellcalls.ReasonTimeout {
+		t.Errorf("CancelReason = %q, want %q", c.CancelReason, doorbellcalls.ReasonTimeout)
+	}
+	if c.EndedAt == nil {
+		t.Error("EndedAt is nil after cancel")
 	}
 }
