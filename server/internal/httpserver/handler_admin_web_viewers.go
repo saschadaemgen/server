@@ -12,6 +12,7 @@ import (
 
 	"github.com/skip2/go-qrcode"
 
+	"unifix.local/server/internal/access"
 	"unifix.local/server/internal/auth/argon2id"
 	"unifix.local/server/internal/auth/loginaudit"
 	"unifix.local/server/internal/mockmanager"
@@ -41,13 +42,15 @@ type adminWebViewersData struct {
 }
 
 type webViewerRow struct {
-	MAC           string
-	Name          string
-	Username      string
-	HasPassword   bool
-	PasswordSetAt string
-	LockedNow     bool
-	OnlineNow     bool
+	MAC             string
+	Name            string
+	Username        string
+	HasPassword     bool
+	PasswordSetAt   string
+	LockedNow       bool
+	OnlineNow       bool
+	LinkedUserID    string
+	LinkedUserName  string
 }
 
 func (s *Server) handleAdminWebViewersList(w http.ResponseWriter, r *http.Request) {
@@ -75,20 +78,46 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 	data := adminWebViewersData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
+	// User-IDs sammeln und in einem Call beim UserStore aufloesen,
+	// damit die Liste die Verknuepfungs-Spalte ohne N+1-Requests
+	// rendern kann.
+	userNames := map[string]string{}
+	if s.userStore != nil && s.userStore.IsConfigured() {
+		needed := map[string]bool{}
+		for _, info := range infos {
+			if info.LinkedUAUserID != "" {
+				needed[info.LinkedUAUserID] = true
+			}
+		}
+		if len(needed) > 0 {
+			res, err := s.userStore.List(r.Context(), access.ListParams{Page: 1, Size: usersMaxPageSize})
+			if err == nil {
+				for _, u := range res.Users {
+					if needed[u.ID] {
+						userNames[u.ID] = u.DisplayName()
+					}
+				}
+			}
+		}
+	}
 	for _, info := range infos {
 		if info.Type != mockmanager.TypeWeb {
 			continue
 		}
 		row := webViewerRow{
-			MAC:         info.MAC,
-			Name:        info.Name,
-			Username:    info.Username,
-			HasPassword: info.HasPassword,
-			OnlineNow:   info.Running,
-			LockedNow:   locked[info.Username],
+			MAC:          info.MAC,
+			Name:         info.Name,
+			Username:     info.Username,
+			HasPassword:  info.HasPassword,
+			OnlineNow:    info.Running,
+			LockedNow:    locked[info.Username],
+			LinkedUserID: info.LinkedUAUserID,
 		}
 		if info.PasswordSetAt != nil {
 			row.PasswordSetAt = info.PasswordSetAt.Format("02.01.2006 15:04")
+		}
+		if name, ok := userNames[info.LinkedUAUserID]; ok {
+			row.LinkedUserName = name
 		}
 		data.Viewers = append(data.Viewers, row)
 	}
@@ -160,12 +189,14 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	linkedUser := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
 	spec := mockmanager.ViewerSpec{
-		MAC:         mac,
-		Name:        name,
-		ServicePort: port,
-		Type:        mockmanager.TypeWeb,
-		Username:    suggestedUsername,
+		MAC:            mac,
+		Name:           name,
+		ServicePort:    port,
+		Type:           mockmanager.TypeWeb,
+		Username:       suggestedUsername,
+		LinkedUAUserID: linkedUser,
 	}
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
@@ -276,6 +307,31 @@ func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Requ
 		}
 		s.log.Error("rename viewer", "err", err, "mac_prefix", mac[:8])
 		http.Error(w, "Rename fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
+}
+
+// handleAdminWebViewersSetLink setzt oder loescht die
+// Verknuepfung viewer.linked_ua_user_id. Empty user_id loescht.
+func (s *Server) handleAdminWebViewersSetLink(w http.ResponseWriter, r *http.Request) {
+	mac := strings.ToLower(r.PathValue("mac"))
+	if !macFormat.MatchString(mac) {
+		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "ungueltige Formular-Daten.", http.StatusBadRequest)
+		return
+	}
+	userID := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
+	if err := s.mockMgr.SetLinkedUAUserID(r.Context(), mac, userID); err != nil {
+		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("set linked user", "err", err, "mac_prefix", mac[:8])
+		http.Error(w, "Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)

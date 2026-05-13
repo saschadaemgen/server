@@ -35,6 +35,7 @@
           <tr>
             <th>Wohnung</th>
             <th>Benutzername</th>
+            <th>Verknuepft mit</th>
             <th>Status</th>
             <th>Passwort gesetzt</th>
             <th style="text-align:right;">Aktionen</th>
@@ -48,6 +49,15 @@
                 <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
               </td>
               <td><code>{{.Username}}</code></td>
+              <td>
+                {{if .LinkedUserName}}
+                  <a href="/a/users/{{.LinkedUserID}}">{{.LinkedUserName}}</a>
+                {{else if .LinkedUserID}}
+                  <code style="color: var(--color-text-tertiary);">{{.LinkedUserID}}</code>
+                {{else}}
+                  <span style="color: var(--color-text-tertiary);">-</span>
+                {{end}}
+              </td>
               <td>
                 {{if .LockedNow}}
                   <span class="status-pill is-danger"><span class="status-dot"></span>Gesperrt</span>
@@ -75,7 +85,7 @@
               </td>
             </tr>
           {{else}}
-            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
+            <tr><td colspan="6" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
           {{end}}
         </tbody>
       </table>
@@ -117,6 +127,13 @@
               <label class="field-label" for="new-mac">MAC-Adresse (optional)</label>
               <input class="input" id="new-mac" name="mac" type="text" pattern="^([0-9a-f]{2}:){5}[0-9a-f]{2}$" placeholder="leer = automatisch generieren"/>
               <span class="field-hint">Lowercase hex mit Doppelpunkten, z.B. 0c:ea:14:42:42:42.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-link">Verknuepfen mit Benutzer (optional)</label>
+              <select class="input" id="new-link" name="linked_ua_user_id" data-user-dropdown>
+                <option value="">-- keine Verknuepfung --</option>
+              </select>
+              <span class="field-hint">UA-User; laedt beim Oeffnen des Modals.</span>
             </div>
           </div>
           <footer class="modal-footer">
@@ -204,6 +221,38 @@
       }
 
       // ---- Anlegen-Modal Open / Live-Preview ----
+      var userDropdownLoaded = false;
+      function loadUserDropdown() {
+        if (userDropdownLoaded) return;
+        var sel = document.querySelector('[data-user-dropdown]');
+        if (!sel) return;
+        userDropdownLoaded = true;
+        fetch('/a/users.json?size=100', {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            if (!j || !j.configured) {
+              userDropdownLoaded = false; // beim naechsten Versuch erneut probieren
+              var opt = document.createElement('option');
+              opt.value = '';
+              opt.textContent = '-- UA-API noch nicht konfiguriert --';
+              opt.disabled = true;
+              sel.appendChild(opt);
+              return;
+            }
+            (j.users || []).forEach(function (u) {
+              var opt = document.createElement('option');
+              opt.value = u.ID;
+              opt.textContent = u.DisplayName + (u.Email ? ' (' + u.Email + ')' : '');
+              sel.appendChild(opt);
+            });
+          })
+          .catch(function () {
+            userDropdownLoaded = false;
+          });
+      }
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="open-create"]');
         if (!btn) return;
@@ -211,6 +260,7 @@
         var modal = document.querySelector('[data-modal="create-viewer"]');
         if (modal) modal.classList.add('is-open');
         updateUsernamePreview();
+        loadUserDropdown();
       });
       document.addEventListener('input', function (e) {
         if (e.target.matches('[data-username-source], [data-username-input]')) {
