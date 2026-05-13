@@ -68,24 +68,26 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 
 // ViewerSpec describes one persisted viewer.
 type ViewerSpec struct {
-	MAC         string
-	Name        string
-	ServicePort uint16
-	Type        string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	Username    string
+	MAC             string
+	Name            string
+	ServicePort     uint16
+	Type            string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	Username        string
+	LinkedUAUserID  string // optional UA-Access-User-Verknuepfung
 }
 
 // ViewerInfo is the public view of one running viewer for the
 // admin UI.
 type ViewerInfo struct {
-	MAC           string
-	Name          string
-	ServicePort   uint16
-	Type          string
-	Username      string
-	HasPassword   bool
-	PasswordSetAt *time.Time
-	Running       bool
+	MAC             string
+	Name            string
+	ServicePort     uint16
+	Type            string
+	Username        string
+	HasPassword     bool
+	PasswordSetAt   *time.Time
+	LinkedUAUserID  string
+	Running         bool
 }
 
 // Options configures Manager construction.
@@ -165,7 +167,9 @@ func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh 
 // Called once at server boot.
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, type, COALESCE(username, '')
+		`SELECT mac, name, service_port, type,
+		        COALESCE(username, ''),
+		        COALESCE(linked_ua_user_id, '')
 		   FROM viewers
 		  WHERE type = ?
 		  ORDER BY mac`, TypeWeb)
@@ -178,7 +182,7 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 	for rows.Next() {
 		var spec ViewerSpec
 		var port int64
-		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.Username); err != nil {
+		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.Username, &spec.LinkedUAUserID); err != nil {
 			return fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		spec.ServicePort = uint16(port)
@@ -335,10 +339,10 @@ func (m *Manager) LookupByUsername(ctx context.Context, username string) (*Viewe
 		setAt      sql.NullInt64
 	)
 	err := m.db.QueryRowContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
 		   FROM viewers
 		  WHERE username = ? AND type = 'web'`, username).
-		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt)
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt, &info.LinkedUAUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", ErrViewerNotFound
 	}
@@ -388,9 +392,9 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		setAt      sql.NullInt64
 	)
 	err := m.db.QueryRowContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
 		   FROM viewers WHERE mac = ?`, mac).
-		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt)
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt, &info.LinkedUAUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -416,7 +420,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 // surfaced; running flag comes from the in-memory map.
 func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -432,7 +436,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			setAt      sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
-			&usernameDB, &hash, &setAt); err != nil {
+			&usernameDB, &hash, &setAt, &info.LinkedUAUserID); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		info.ServicePort = uint16(port)
@@ -495,14 +499,38 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	now := m.opts.Now().UnixMilli()
 	_, err := m.db.ExecContext(ctx,
 		`INSERT INTO viewers
-		   (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		   (mac, name, service_port, type, username, linked_ua_user_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
-		spec.Type, nullable(spec.Username), now, now,
+		spec.Type, nullable(spec.Username),
+		nullable(spec.LinkedUAUserID),
+		now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("mockmanager: insert: %w", err)
 	}
+	return nil
+}
+
+// SetLinkedUAUserID updates the optional UA-User-Verknuepfung.
+// Empty userID clears the link. Web-Viewer-Edit-Pfad nutzt das.
+func (m *Manager) SetLinkedUAUserID(ctx context.Context, mac, userID string) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET linked_ua_user_id = ?, updated_at = ? WHERE mac = ?`,
+		nullable(userID), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set linked ua user: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if entry, ok := m.viewers[mac]; ok {
+		entry.spec.LinkedUAUserID = userID
+	}
+	m.mu.Unlock()
 	return nil
 }
 
