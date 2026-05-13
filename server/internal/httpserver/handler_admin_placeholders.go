@@ -31,16 +31,6 @@ func (s *Server) handleAdminEspViewers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleAdminUsersPlaceholder(w http.ResponseWriter, r *http.Request) {
-	s.renderPlaceholder(w, r, "users-placeholder", placeholderData{
-		Title:    "Benutzer",
-		Lead:     "UA-Developer-API-Benutzer-Verwaltung (NFC-Karten, PIN-Codes, Touch-Pass).",
-		CardHead: "Geplant fuer FIX4-b",
-		CardBody: "Anlegen, Suchen und Verknuepfen von UniFi-Access-Benutzern mit unifix-Viewern. Magic-Link-Versand und QR-Onboarding sind ebenfalls Teil dieser Saison.",
-		NextBrief: "S13-02-FIX4-b",
-	})
-}
-
 func (s *Server) handleAdminEspPager(w http.ResponseWriter, r *http.Request) {
 	s.renderPlaceholder(w, r, "esp-pager", placeholderData{
 		Title:    "ESP-Pager",

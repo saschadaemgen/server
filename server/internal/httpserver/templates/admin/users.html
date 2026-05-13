@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unifix - Benutzer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Benutzer</h1>
+        <p class="page-subtitle">UA-Access-User aus der Developer-API. {{if .Page.Configured}}{{.Page.Total}} Eintraege.{{end}}</p>
+      </div>
+      <div class="page-actions">
+        {{if .Page.Configured}}
+        <button class="btn btn-primary" type="button" data-action="open-create-user">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Neuer Benutzer
+        </button>
+        {{end}}
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    {{if not .Page.Configured}}
+      <section class="app-card">
+        <div class="app-card-body" style="padding: var(--space-6);">
+          <h2 class="app-card-title">UA-Access noch nicht konfiguriert</h2>
+          <p style="color: var(--color-text-secondary);">Der Benutzer-Tab nutzt die UniFi-Access-Developer-API als Stammdaten-Quelle. Bitte zuerst unter <a href="/a/settings">Einstellungen</a> die Controller-URL und das API-Token eintragen.</p>
+        </div>
+      </section>
+    {{else}}
+      <div class="app-card">
+        <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
+          <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
+            <input class="input" name="q" type="search" placeholder="Name, Email, Personal-Nr." value="{{.Page.Query}}" style="max-width:320px;"/>
+            <select class="input" name="status" style="max-width:160px;">
+              <option value="" {{if eq .Page.StatusFilter ""}}selected{{end}}>Alle Status</option>
+              <option value="active" {{if eq .Page.StatusFilter "active"}}selected{{end}}>Aktiv</option>
+              <option value="deactivated" {{if eq .Page.StatusFilter "deactivated"}}selected{{end}}>Inaktiv</option>
+              <option value="pending" {{if eq .Page.StatusFilter "pending"}}selected{{end}}>Pending</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
+            {{if or .Page.Query .Page.StatusFilter}}
+              <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>
+            {{end}}
+          </form>
+        </div>
+
+        {{if not .Page.Users}}
+          <div class="app-card-body" style="text-align:center; padding: var(--space-6); color: var(--color-text-tertiary);">
+            {{if or .Page.Query .Page.StatusFilter}}
+              Keine Treffer fuer die aktuellen Filter.
+            {{else}}
+              Noch keine Benutzer angelegt. Mit "Neuer Benutzer" rechts oben einen ersten Eintrag erzeugen.
+            {{end}}
+          </div>
+        {{else}}
+          <table class="app-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Personal-Nr.</th>
+                <th>Status</th>
+                <th>Auth</th>
+                <th style="text-align:right;">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Page.Users}}
+                <tr>
+                  <td>
+                    <a href="/a/users/{{.ID}}" style="display:flex; gap:var(--space-2); align-items:center;">
+                      <span class="app-table-mark">{{.Initials}}</span>
+                      <strong>{{.DisplayName}}</strong>
+                    </a>
+                  </td>
+                  <td>{{.Email}}</td>
+                  <td>{{.EmployeeNumber}}</td>
+                  <td>
+                    {{if eq .Status "active"}}
+                      <span class="status-pill is-ok"><span class="status-dot"></span>{{.StatusLabel}}</span>
+                    {{else if eq .Status "deactivated"}}
+                      <span class="status-pill is-danger"><span class="status-dot"></span>{{.StatusLabel}}</span>
+                    {{else}}
+                      <span class="status-pill"><span class="status-dot"></span>{{.StatusLabel}}</span>
+                    {{end}}
+                  </td>
+                  <td>
+                    {{if .HasNFC}}<span class="badge">NFC</span>{{end}}
+                    {{if .HasPIN}}<span class="badge">PIN</span>{{end}}
+                  </td>
+                  <td style="text-align:right; white-space:nowrap;">
+                    {{if eq .Status "active"}}
+                      <form method="post" action="/a/users/{{.ID}}/deactivate" style="display:inline; margin:0;">
+                        <button class="btn btn-secondary btn-sm" type="submit">Deaktivieren</button>
+                      </form>
+                    {{else}}
+                      <form method="post" action="/a/users/{{.ID}}/activate" style="display:inline; margin:0;">
+                        <button class="btn btn-secondary btn-sm" type="submit">Aktivieren</button>
+                      </form>
+                    {{end}}
+                    <a class="btn btn-secondary btn-sm" href="/a/users/{{.ID}}">Detail</a>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{end}}
+
+        {{if .Page.PageCount}}
+          <div class="app-card-body" style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-3) var(--space-4); color: var(--color-text-tertiary);">
+            <span>Eintraege {{.Page.Total}} - Seite {{.Page.Page}} von {{.Page.PageCount}}</span>
+            <div style="display:flex; gap:var(--space-2);">
+              {{if .Page.Prev}}
+                <a class="btn btn-secondary btn-sm" href="?{{if .Page.Query}}q={{.Page.Query}}&{{end}}{{if .Page.StatusFilter}}status={{.Page.StatusFilter}}&{{end}}page={{.Page.Prev}}&size={{.Page.PageSize}}">Zurueck</a>
+              {{end}}
+              {{if .Page.Next}}
+                <a class="btn btn-secondary btn-sm" href="?{{if .Page.Query}}q={{.Page.Query}}&{{end}}{{if .Page.StatusFilter}}status={{.Page.StatusFilter}}&{{end}}page={{.Page.Next}}&size={{.Page.PageSize}}">Weiter</a>
+              {{end}}
+            </div>
+          </div>
+        {{end}}
+      </div>
+
+      <!-- Anlegen-Modal -->
+      <div class="modal-scrim" data-modal="create-user" role="dialog" aria-modal="true" aria-labelledby="create-user-title">
+        <div class="modal-glass">
+          <form method="post" action="/a/users">
+            <header class="modal-header">
+              <div>
+                <h2 id="create-user-title" class="modal-title">Neuen Benutzer anlegen</h2>
+                <p class="modal-sub">Stammdaten landen direkt in UniFi Access.</p>
+              </div>
+              <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </header>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
+              <div class="field">
+                <label class="field-label" for="cu-first">Vorname</label>
+                <input class="input" id="cu-first" name="first_name" type="text" required maxlength="64"/>
+              </div>
+              <div class="field">
+                <label class="field-label" for="cu-last">Nachname</label>
+                <input class="input" id="cu-last" name="last_name" type="text" required maxlength="64"/>
+              </div>
+              <div class="field">
+                <label class="field-label" for="cu-email">E-Mail</label>
+                <input class="input" id="cu-email" name="email" type="email" maxlength="128"/>
+              </div>
+              <div class="field">
+                <label class="field-label" for="cu-emp">Personal-Nr. (optional)</label>
+                <input class="input" id="cu-emp" name="employee_number" type="text" maxlength="32"/>
+              </div>
+            </div>
+            <footer class="modal-footer">
+              <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+              <button class="btn btn-primary" type="submit">Anlegen</button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    {{end}}
+  </main>
+
+  <script src="/static/interactions.js"></script>
+  <script>
+    (function () {
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-create-user"]');
+        if (!btn) return;
+        e.preventDefault();
+        var m = document.querySelector('[data-modal="create-user"]');
+        if (m) m.classList.add('is-open');
+      });
+      document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-action="close-modal"]')) {
+          var m = e.target.closest('.modal-scrim');
+          if (m) m.classList.remove('is-open');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

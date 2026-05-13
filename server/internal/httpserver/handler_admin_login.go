@@ -175,7 +175,7 @@ func navSlotFor(name string) string {
 		return "web-viewers"
 	case "esp-viewers":
 		return "esp-viewers"
-	case "users-placeholder":
+	case "users", "user-detail":
 		return "users"
 	case "esp-pager":
 		return "esp-pager"
@@ -197,6 +197,10 @@ func extractUser(data any) adminUser {
 	case adminSettingsData:
 		return v.User
 	case adminWebViewersData:
+		return v.User
+	case adminUsersData:
+		return v.User
+	case adminUserDetailData:
 		return v.User
 	case placeholderData:
 		return v.User

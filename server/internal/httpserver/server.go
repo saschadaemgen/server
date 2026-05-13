@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"unifix.local/server/internal/access"
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/loginaudit"
@@ -32,6 +33,14 @@ import (
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/uaapi"
 )
+
+// UserStoreLike ist die schmale Sicht auf access.UserStore die
+// das Admin-UI braucht, plus ein IsConfigured-Check fuer die
+// "noch nicht eingerichtet"-UI-Pfade.
+type UserStoreLike interface {
+	access.UserStore
+	IsConfigured() bool
+}
 
 // Deps bundles every dependency the HTTP layer needs. Pass the
 // same struct to New regardless of which sub-set of features
@@ -50,6 +59,10 @@ type Deps struct {
 	// UA is built lazily by main once the operator has saved a
 	// base URL and token. Nil means "not configured yet".
 	UA *uaapi.Client
+	// UserStore ist der UserStore-Wrapper um den UA-Client (siehe
+	// access/ua). Nil = UA noch nicht konfiguriert; das Admin-UI
+	// zeigt dann einen Hinweis statt einer leeren Liste.
+	UserStore UserStoreLike
 	// Hub fans doorbell events from mockmanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
@@ -76,6 +89,7 @@ type Server struct {
 	viewerLimiter   *ratelimit.Limiter
 	adminLimiter    *ratelimit.Limiter
 	ua              *uaapi.Client
+	userStore       UserStoreLike
 	hub             *doorbellhub.Hub
 	history         doorhistory.Store
 	eventsHeartbeat time.Duration
@@ -110,6 +124,7 @@ func New(deps Deps) (*Server, error) {
 		viewerLimiter:   deps.ViewerLimiter,
 		adminLimiter:    deps.AdminLimiter,
 		ua:              deps.UA,
+		userStore:       deps.UserStore,
 		hub:             deps.Hub,
 		history:         deps.History,
 		eventsHeartbeat: deps.EventsHeartbeat,
@@ -166,14 +181,25 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersUnlock)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/rename", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersRename)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
+	s.mux.Handle("POST /a/web-viewers/{mac}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetLink)))
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 
-	// Platzhalter-Seiten fuer kommende Saison-Briefings (FIX4-b,
-	// FIX4-c, spaeter FIX4-d). Sie rendern nur eine kleine
-	// "kommt bald"-Karte und melden keinen 404.
+	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspViewers)))
-	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersPlaceholder)))
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
+
+	// Benutzer-CRUD (Saison 13-02-FIX4-b). UA-Access-Developer-API
+	// ist die Source-of-Truth; alle Zugriffe gehen ueber das
+	// access.UserStore-Interface.
+	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
+	s.mux.Handle("GET /a/users.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersListJSON)))
+	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
+	s.mux.Handle("GET /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDetail)))
+	s.mux.Handle("POST /a/users/{id}/update", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersUpdate)))
+	s.mux.Handle("POST /a/users/{id}/activate", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersActivate)))
+	s.mux.Handle("POST /a/users/{id}/deactivate", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDeactivate)))
+	s.mux.Handle("POST /a/users/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
+	s.mux.Handle("DELETE /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
 }
 
 // Handler returns the underlying mux so callers (tests) can wrap
