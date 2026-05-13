@@ -226,11 +226,15 @@
     if (window.unifix.dropdownInit) return; // doppelt-Init verhindern
 
     var openInstance = null;
+    // Saison 13-02-FIX4-a-HOTFIX7: closeOpen muss den vollen
+    // Teardown machen, sonst bleibt das Panel als Waise im body
+    // wenn Modal mit X/Esc/Backdrop geschlossen wird. Vorher
+    // setzte closeOpen nur die is-open-Klasse am Container, das
+    // portalierte Panel hing weiter sichtbar im body mit
+    // position:fixed + z-index:9999 + display:flex.
     function closeOpen() {
       if (!openInstance) return;
-      openInstance.el.classList.remove('is-open');
-      openInstance.trigger.setAttribute('aria-expanded', 'false');
-      openInstance = null;
+      close(openInstance);
     }
 
     function escapeHtml(s) {
@@ -441,6 +445,15 @@
       inst.trigger.setAttribute('aria-expanded', 'true');
       inst.search.value = '';
       inst.active = 0;
+      // Saison 13-02-FIX4-a-HOTFIX7: Owner-ID-Tracking. Falls
+      // ein Modal-Close-Pfad das Panel direkt ueber dem body
+      // sucht (Fallback), kann er via data-dropdown-owner den
+      // urspruenglichen Container wiederfinden und das Panel
+      // sauber zurueckraeumen.
+      if (!inst.el.id) {
+        inst.el.id = 'dd-' + Math.random().toString(36).slice(2, 10);
+      }
+      inst.panel.dataset.dropdownOwner = inst.el.id;
       // Portal: Panel an document.body anhaengen falls noch im Container.
       if (inst.panel.parentNode !== document.body) {
         document.body.appendChild(inst.panel);
@@ -572,6 +585,64 @@
         if (trigger) trigger.focus();
       }
     });
+
+    // Saison 13-02-FIX4-a-HOTFIX7: Modal-Close fegt Waisen mit.
+    // Wenn ein [data-modal] seine is-open-Klasse verliert (X-Knopf,
+    // Esc, Backdrop-Klick, Library-API closeModal), schliessen wir
+    // jedes verbliebene offene Panel via closeOpen, und greifen
+    // zusaetzlich nach im body uebriggebliebenen Panels die der
+    // sauberen Pfad verpasst haben sollte (Belt-und-Hosentraeger).
+    function sweepOrphanPanels() {
+      var orphans = document.body.querySelectorAll(':scope > .dropdown-panel');
+      for (var i = 0; i < orphans.length; i++) {
+        var panel = orphans[i];
+        var ownerID = panel.dataset.dropdownOwner;
+        panel.classList.remove('is-open');
+        panel.removeAttribute('style');
+        if (ownerID) {
+          var owner = document.getElementById(ownerID);
+          if (owner) owner.appendChild(panel);
+        }
+      }
+    }
+
+    var modalCloseObserver = new MutationObserver(function (records) {
+      var sawClose = false;
+      for (var i = 0; i < records.length; i++) {
+        var r = records[i];
+        if (r.type !== 'attributes' || r.attributeName !== 'class') continue;
+        var el = r.target;
+        if (!el || !el.matches || !el.matches('[data-modal]')) continue;
+        if (!el.classList.contains('is-open')) {
+          sawClose = true;
+        }
+      }
+      if (!sawClose) return;
+      if (openInstance) closeOpen();
+      sweepOrphanPanels();
+    });
+    function observeModal(m) {
+      modalCloseObserver.observe(m, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    }
+    document.querySelectorAll('[data-modal]').forEach(observeModal);
+    // Modals die spaeter ins DOM kommen (htmx etc.) auch beobachten.
+    var modalInsertObserver = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType !== 1) continue;
+          if (n.matches && n.matches('[data-modal]')) observeModal(n);
+          if (n.querySelectorAll) {
+            n.querySelectorAll('[data-modal]').forEach(observeModal);
+          }
+        }
+      }
+    });
+    modalInsertObserver.observe(document.body, { childList: true, subtree: true });
 
     function initAll(root) {
       var nodes = (root || document).querySelectorAll('[data-dropdown]');
