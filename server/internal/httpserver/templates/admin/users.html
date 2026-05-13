@@ -43,12 +43,17 @@
         <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
           <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
             <input class="input" name="q" type="search" placeholder="Name, Email, Personal-Nr." value="{{.Page.Query}}" style="max-width:320px;"/>
-            <select class="input" name="status" style="max-width:160px;">
-              <option value="" {{if eq .Page.StatusFilter ""}}selected{{end}}>Alle Status</option>
-              <option value="active" {{if eq .Page.StatusFilter "active"}}selected{{end}}>Aktiv</option>
-              <option value="deactivated" {{if eq .Page.StatusFilter "deactivated"}}selected{{end}}>Inaktiv</option>
-              <option value="pending" {{if eq .Page.StatusFilter "pending"}}selected{{end}}>Pending</option>
-            </select>
+            <div class="dropdown" data-dropdown
+                 data-dropdown-source="inline"
+                 data-dropdown-value="{{.Page.StatusFilter}}"
+                 style="max-width:160px;">
+              <select name="status" data-dropdown-target>
+                <option value="" {{if eq .Page.StatusFilter ""}}selected{{end}}>Alle Status</option>
+                <option value="active" {{if eq .Page.StatusFilter "active"}}selected{{end}}>Aktiv</option>
+                <option value="deactivated" {{if eq .Page.StatusFilter "deactivated"}}selected{{end}}>Inaktiv</option>
+                <option value="pending" {{if eq .Page.StatusFilter "pending"}}selected{{end}}>Pending</option>
+              </select>
+            </div>
             <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
             {{if or .Page.Query .Page.StatusFilter}}
               <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>

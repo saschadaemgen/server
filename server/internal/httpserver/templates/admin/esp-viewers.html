@@ -152,9 +152,17 @@
             </div>
             <div class="field">
               <label class="field-label" for="adopt-link">Verknuepfen mit Benutzer (optional)</label>
-              <select class="input" id="adopt-link" name="linked_ua_user_id" data-user-dropdown>
-                <option value="">-- keine Verknuepfung --</option>
-              </select>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --">
+                <select id="adopt-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
             </div>
           </div>
           <footer class="modal-footer">
@@ -169,31 +177,11 @@
   <script src="/static/interactions.js"></script>
   <script>
     (function () {
-      // ---- User-Dropdown lazy-load ----
-      var userDropdownLoaded = false;
-      function loadUserDropdown() {
-        if (userDropdownLoaded) return;
-        var sel = document.querySelector('[data-user-dropdown]');
-        if (!sel) return;
-        userDropdownLoaded = true;
-        fetch('/a/users.json?size=100', {
-          headers: { 'Accept': 'application/json' },
-          credentials: 'same-origin'
-        })
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (j) {
-            if (!j || !j.configured) { userDropdownLoaded = false; return; }
-            (j.users || []).forEach(function (u) {
-              var opt = document.createElement('option');
-              opt.value = u.ID;
-              opt.textContent = u.DisplayName + (u.Email ? ' (' + u.Email + ')' : '');
-              sel.appendChild(opt);
-            });
-          })
-          .catch(function () { userDropdownLoaded = false; });
-      }
-
       // ---- Adopt-Modal Open ----
+      // Saison 13-02-FIX4-a-HOTFIX5: User-Dropdown laeuft jetzt
+      // ueber das gemeinsame Custom-Dropdown-Modul aus _nav.html;
+      // dieses laed die Optionen via fetch beim ersten Open des
+      // Dropdowns selbst.
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="open-adopt"]');
         if (!btn) return;
@@ -208,7 +196,6 @@
         var nameEl = modal.querySelector('#adopt-name');
         if (nameEl) { nameEl.value = ''; setTimeout(function () { nameEl.focus(); }, 50); }
         modal.classList.add('is-open');
-        loadUserDropdown();
       });
 
       // ---- Modal-Close ----
