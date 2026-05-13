@@ -621,6 +621,44 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	return nil
 }
 
+// SiblingESPMACs liefert alle ESP-Viewer-MACs die an demselben
+// UA-User haengen wie der uebergebene MAC, ausser dem MAC selbst.
+// Wird vom /esp/answer-Pfad genutzt um "answered elsewhere"-
+// Cancel-Events an die anderen Geraete des Mieters zu pushen.
+// Wenn der Viewer keine linked_ua_user_id hat, gibt es per
+// Definition keine Siblings (leere Liste, kein Fehler).
+func (m *Manager) SiblingESPMACs(ctx context.Context, mac string) ([]string, error) {
+	var linked sql.NullString
+	err := m.db.QueryRowContext(ctx,
+		`SELECT linked_ua_user_id FROM viewers WHERE mac = ?`, mac).Scan(&linked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrViewerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mockmanager: sibling lookup self: %w", err)
+	}
+	if !linked.Valid || linked.String == "" {
+		return nil, nil
+	}
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac FROM viewers
+		  WHERE type = 'esp' AND linked_ua_user_id = ? AND mac <> ?`,
+		linked.String, mac)
+	if err != nil {
+		return nil, fmt.Errorf("mockmanager: sibling query: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var sibling string
+		if err := rows.Scan(&sibling); err != nil {
+			return nil, fmt.Errorf("mockmanager: sibling scan: %w", err)
+		}
+		out = append(out, sibling)
+	}
+	return out, rows.Err()
+}
+
 // TouchESPSeen aktualisiert nur updated_at fuer einen ESP-Viewer.
 // Wird vom /esp/heartbeat-Fallback und vom /esp/state-Endpoint
 // genutzt, damit das Admin-Dashboard ein "zuletzt gesehen"

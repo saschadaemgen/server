@@ -192,6 +192,77 @@ func (s *Server) publishToESP(mac string, ev eventbus.Event) int {
 	return s.eventBus.Publish(mac, ev)
 }
 
+// espAnswerRequest is the JSON body of POST /esp/answer.
+type espAnswerRequest struct {
+	EventID string `json:"event_id"`
+	Action  string `json:"action"` // "answer" | "reject"
+}
+
+// handleESPAnswer marks the active doorbell event for the calling
+// ESP as answered or rejected, and pushes a doorbell.cancel to
+// every other ESP-Viewer that the same UA-user owns (so phones,
+// tablets, panels stop ringing).
+//
+// FIX4-d implements the push side and the audit trail; the
+// actual audio-relay setup (WebRTC handshake, RTC offer / answer
+// exchange between caller and answerer) lands in S13-03 together
+// with the /remote_view wire-up.
+func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	var body espAnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.EventID == "" {
+		http.Error(w, "event_id required", http.StatusBadRequest)
+		return
+	}
+	var reason string
+	switch body.Action {
+	case "answer":
+		reason = "answered_elsewhere"
+	case "reject":
+		reason = "rejected"
+	default:
+		http.Error(w, "action must be 'answer' or 'reject'", http.StatusBadRequest)
+		return
+	}
+
+	cancelJSON := fmt.Sprintf(`{"event_id":%q,"reason":%q}`, body.EventID, reason)
+	cancelEvent := eventbus.Event{Type: "doorbell.cancel", JSON: cancelJSON}
+
+	if body.Action == "reject" {
+		// Reject schiesst auch dem antwortenden ESP selbst den
+		// Cancel-Event - die UI kann das Ringing-Overlay schliessen
+		// ohne lokales Branching.
+		s.publishToESP(mac, cancelEvent)
+	}
+	siblings, err := s.mockMgr.SiblingESPMACs(r.Context(), mac)
+	if err != nil {
+		s.log.Error("esp answer siblings", "err", err, "mac_prefix", mac[:8])
+	}
+	if s.eventBus != nil && len(siblings) > 0 {
+		s.eventBus.PublishAll(siblings, cancelEvent)
+	}
+	s.log.Info("esp answer",
+		"mac_prefix", mac[:8],
+		"event_id", body.EventID,
+		"action", body.Action,
+		"siblings_notified", len(siblings),
+	)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":                true,
+		"siblings_notified": len(siblings),
+	})
+}
+
 // handleESPHeartbeat is the polling fallback for environments
 // where SSE is blocked. ESPs that fail to keep /esp/events open
 // hit this endpoint on a slower interval. The response is

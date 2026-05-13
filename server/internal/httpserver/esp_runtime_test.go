@@ -345,6 +345,57 @@ func TestESPEvents_HandlesMultipleClients(t *testing.T) {
 	}
 }
 
+func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	// Zwei ESPs am selben UA-User. Sibling = B aus A's Sicht.
+	tokA := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+	_ = adoptESPForTest(t, env, "0c:ea:14:bb:cc:dd", "Wohnung A2")
+	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), espTestMAC, "u1"); err != nil {
+		t.Fatalf("link A: %v", err)
+	}
+	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:bb:cc:dd", "u1"); err != nil {
+		t.Fatalf("link B: %v", err)
+	}
+
+	// B subscribed via Bus direkt (statt SSE).
+	bus := env.srv.EventBus()
+	bCh := bus.Subscribe("0c:ea:14:bb:cc:dd")
+	defer bus.Unsubscribe("0c:ea:14:bb:cc:dd", bCh)
+
+	// A schickt "answer".
+	body, _ := json.Marshal(map[string]any{
+		"event_id": "evt_abc",
+		"action":   "answer",
+	})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/answer", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tokA)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/answer: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := readBodyBytes(resp)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+	}
+
+	// B sollte einen doorbell.cancel-Event sehen.
+	select {
+	case ev := <-bCh:
+		if ev.Type != "doorbell.cancel" {
+			t.Errorf("ev.Type = %q, want doorbell.cancel", ev.Type)
+		}
+		if !strings.Contains(ev.JSON, "answered_elsewhere") {
+			t.Errorf("ev.JSON = %q, want reason answered_elsewhere", ev.JSON)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sibling never received cancel event")
+	}
+}
+
 // readBodyBytes is a small reader helper that does not consume
 // the body via the existing readBody util (which returns string
 // and closes already).

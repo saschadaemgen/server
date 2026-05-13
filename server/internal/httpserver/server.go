@@ -218,6 +218,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /esp/config", s.requireESPBearer(http.HandlerFunc(s.handleESPConfig)))
 	s.mux.Handle("GET /esp/events", s.requireESPBearer(http.HandlerFunc(s.handleESPEvents)))
 	s.mux.Handle("GET /esp/heartbeat", s.requireESPBearer(http.HandlerFunc(s.handleESPHeartbeat)))
+	s.mux.Handle("POST /esp/answer", s.requireESPBearer(http.HandlerFunc(s.handleESPAnswer)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
