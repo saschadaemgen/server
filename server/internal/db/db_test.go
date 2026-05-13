@@ -39,12 +39,12 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 5 {
-		t.Errorf("schema_version = %d, want 5", version)
+	if version != 6 {
+		t.Errorf("schema_version = %d, want 6", version)
 	}
 	for _, table := range []string{
-		"magic_link_tokens", "mieter_sessions", "admin_sessions", "mock_viewers",
-		"admin_users", "platform_config", "door_events",
+		"viewers", "viewer_sessions", "admin_sessions",
+		"admin_users", "platform_config", "door_events", "login_audit",
 	} {
 		var name string
 		err := d.QueryRow(
@@ -52,6 +52,17 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 		).Scan(&name)
 		if err != nil {
 			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+	// Saison 13-02-FIX4-a: magic_link_tokens und mock_viewers
+	// muessen weg sein.
+	for _, gone := range []string{"magic_link_tokens", "mock_viewers", "mieter_sessions"} {
+		var name string
+		err := d.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, gone,
+		).Scan(&name)
+		if err == nil {
+			t.Errorf("table %s still present after migration 006", gone)
 		}
 	}
 }
@@ -70,7 +81,7 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer d.Close()
-	for _, v := range []int{1, 2, 3, 4, 5} {
+	for _, v := range []int{1, 2, 3, 4, 5, 6} {
 		var count int
 		if err := d.QueryRow(
 			`SELECT COUNT(*) FROM schema_version WHERE version = ?`, v,
@@ -189,46 +200,53 @@ func TestOpen_CreatesParentDirIfMissing(t *testing.T) {
 	}
 }
 
-func TestMigration002_Applied(t *testing.T) {
-	d, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	var max int
-	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&max); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if max < 2 {
-		t.Errorf("MAX(version) = %d, want >= 2", max)
-	}
-}
+// ----- viewers Tabelle (Saison 13-02-FIX4-a, Migration 006) -----
 
-func TestMigration002_MockViewersTableExists(t *testing.T) {
+func TestViewers_TableExists(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
 	var name string
-	err = d.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='mock_viewers'`,
-	).Scan(&name)
-	if err != nil {
-		t.Fatalf("mock_viewers table missing: %v", err)
+	if err := d.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='viewers'`,
+	).Scan(&name); err != nil {
+		t.Fatalf("viewers table missing: %v", err)
 	}
-	for _, idx := range []string{"idx_mock_viewers_port"} {
-		var idxName string
+	for _, idx := range []string{
+		"idx_viewers_service_port",
+		"idx_viewers_username",
+		"idx_viewers_type",
+	} {
+		var n string
 		err := d.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, idx,
-		).Scan(&idxName)
+		).Scan(&n)
 		if err != nil {
 			t.Errorf("index %s missing: %v", idx, err)
 		}
 	}
 }
 
-func TestMigration002_UniquePortConstraint(t *testing.T) {
+func TestViewers_TypeCheck(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	now := int64(1747000000000)
+	_, err = d.Exec(
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "x", 8080, "wrong-type", now, now,
+	)
+	if err == nil {
+		t.Fatal("insert with type='wrong-type' succeeded, CHECK constraint missing")
+	}
+}
+
+func TestViewers_UniquePort(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -236,21 +254,23 @@ func TestMigration002_UniquePortConstraint(t *testing.T) {
 	defer d.Close()
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:42:42:42", "viewer-1", 8080, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "v1", 8080, "user-a", now, now,
 	); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 	_, err = d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:42:42:43", "viewer-2", 8080, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:42:42:43", "v2", 8080, "user-b", now, now,
 	)
 	if err == nil {
-		t.Fatal("second insert with same port succeeded, want unique-constraint error")
+		t.Fatal("duplicate port insert succeeded, unique index missing")
 	}
 }
 
-func TestMigration002_UniqueMACConstraint(t *testing.T) {
+func TestViewers_UniqueUsername(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -258,76 +278,38 @@ func TestMigration002_UniqueMACConstraint(t *testing.T) {
 	defer d.Close()
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:42:42:42", "viewer-1", 8080, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:42:42:42", "v1", 8080, "alice", now, now,
 	); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 	_, err = d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:42:42:42", "viewer-dup", 8081, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:42:42:43", "v2", 8081, "alice", now, now,
 	)
 	if err == nil {
-		t.Fatal("second insert with same MAC succeeded, want primary-key error")
+		t.Fatal("duplicate username insert succeeded, unique index missing")
 	}
-}
-
-// ----- Migration 004 -----
-
-func TestMigration004_DropsUAUserIDFromMockViewers(t *testing.T) {
-	d, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	// ua_user_id column must be gone.
-	_, err = d.Exec(`SELECT ua_user_id FROM mock_viewers LIMIT 1`)
-	if err == nil {
-		t.Error("ua_user_id column still present in mock_viewers")
-	}
-	// Old index gone too.
-	var name string
-	err = d.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_mock_viewers_ua_user'`,
-	).Scan(&name)
-	if err == nil {
-		t.Error("idx_mock_viewers_ua_user still exists; migration 004 should have dropped it")
-	}
-}
-
-func TestMigration004_MieterSessionsHasMockFK(t *testing.T) {
-	d, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	now := int64(1747000000000)
-	// Insert without an existing mock must fail because of FK.
-	_, err = d.Exec(
-		`INSERT INTO mieter_sessions (session_id, mock_mac, created_at, last_seen, expires_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"sess-1", "0c:ea:14:00:00:00", now, now, now,
-	)
-	if err == nil {
-		t.Fatal("inserted mieter session without matching mock_viewer; FK not enforced")
-	}
-	// Now create the mock, insert should succeed.
+	// NULL-Usernames sind erlaubt fuer ESP-Viewer ohne Username.
 	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:00:00:00", "x", 9000, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'esp', ?, ?)`,
+		"0c:ea:14:99:99:99", "esp1", 8082, now, now,
 	); err != nil {
-		t.Fatalf("insert mock: %v", err)
+		t.Errorf("esp insert without username failed: %v", err)
 	}
 	if _, err := d.Exec(
-		`INSERT INTO mieter_sessions (session_id, mock_mac, created_at, last_seen, expires_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"sess-1", "0c:ea:14:00:00:00", now, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'esp', ?, ?)`,
+		"0c:ea:14:99:99:9a", "esp2", 8083, now, now,
 	); err != nil {
-		t.Fatalf("insert mieter session with valid FK: %v", err)
+		t.Errorf("second esp insert without username failed: %v", err)
 	}
 }
 
-func TestMigration004_CascadeDeletesSessionOnMockRemoval(t *testing.T) {
+func TestViewerSessions_CascadeOnViewerDelete(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -335,149 +317,102 @@ func TestMigration004_CascadeDeletesSessionOnMockRemoval(t *testing.T) {
 	defer d.Close()
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:cc:dd:ee", "x", 9001, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:cc:cc:cc", "x", 9100, "x", now, now,
 	); err != nil {
-		t.Fatalf("insert mock: %v", err)
+		t.Fatalf("seed viewer: %v", err)
 	}
 	if _, err := d.Exec(
-		`INSERT INTO mieter_sessions (session_id, mock_mac, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		"sess-cascade", "0c:ea:14:cc:dd:ee", now, now, now,
+		`INSERT INTO viewer_sessions (session_id, viewer_mac, created_at, last_seen, expires_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"sess-x", "0c:ea:14:cc:cc:cc", now, now, now,
 	); err != nil {
-		t.Fatalf("insert session: %v", err)
+		t.Fatalf("seed session: %v", err)
 	}
-	if _, err := d.Exec(
-		`INSERT INTO magic_link_tokens (token, mock_mac, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-		"tok-cascade", "0c:ea:14:cc:dd:ee", now, now,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
+	if _, err := d.Exec(`DELETE FROM viewers WHERE mac = ?`, "0c:ea:14:cc:cc:cc"); err != nil {
+		t.Fatalf("delete viewer: %v", err)
 	}
-	if _, err := d.Exec(`DELETE FROM mock_viewers WHERE mac = ?`, "0c:ea:14:cc:dd:ee"); err != nil {
-		t.Fatalf("delete mock: %v", err)
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`,
+		"0c:ea:14:cc:cc:cc").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
 	}
-	for _, q := range []struct {
-		label string
-		stmt  string
-	}{
-		{"mieter_sessions", `SELECT COUNT(*) FROM mieter_sessions WHERE mock_mac = ?`},
-		{"magic_link_tokens", `SELECT COUNT(*) FROM magic_link_tokens WHERE mock_mac = ?`},
-	} {
-		var n int
-		if err := d.QueryRow(q.stmt, "0c:ea:14:cc:dd:ee").Scan(&n); err != nil {
-			t.Fatalf("count %s: %v", q.label, err)
-		}
-		if n != 0 {
-			t.Errorf("%s row count after cascade = %d, want 0", q.label, n)
-		}
+	if n != 0 {
+		t.Errorf("viewer_sessions cascade missed; remaining = %d", n)
 	}
 }
 
-func TestMigration004_AdminSessionsTableExists(t *testing.T) {
-	d, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	var name string
-	if err := d.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='admin_sessions'`,
-	).Scan(&name); err != nil {
-		t.Fatalf("admin_sessions table missing: %v", err)
-	}
-	// The old shared sessions table must be gone.
-	err = d.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'`,
-	).Scan(&name)
-	if err == nil {
-		t.Error("shared sessions table still present; migration 004 should have replaced it with mieter_sessions and admin_sessions")
-	}
-}
-
-// ----- Migration 005 -----
-
-func TestMigration005_DoorEventsHasMockFK(t *testing.T) {
+func TestDoorEvents_FKAndCascade(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
 	now := int64(1747000000)
-	// Insert without an existing mock must fail because of FK.
 	_, err = d.Exec(
-		`INSERT INTO door_events (mock_mac, event_type, occurred_at) VALUES (?, ?, ?)`,
+		`INSERT INTO door_events (viewer_mac, event_type, occurred_at) VALUES (?, ?, ?)`,
 		"0c:ea:14:11:22:33", "doorbell_start", now,
 	)
 	if err == nil {
-		t.Fatal("inserted door_events without matching mock_viewer; FK not enforced")
+		t.Fatal("insert without viewer succeeded, FK not enforced")
 	}
 	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"0c:ea:14:11:22:33", "history", 9100, now*1000, now*1000,
+		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+		"0c:ea:14:11:22:33", "y", 9200, "y", now*1000, now*1000,
 	); err != nil {
-		t.Fatalf("insert mock: %v", err)
-	}
-	if _, err := d.Exec(
-		`INSERT INTO door_events (mock_mac, event_type, occurred_at) VALUES (?, ?, ?)`,
-		"0c:ea:14:11:22:33", "doorbell_start", now,
-	); err != nil {
-		t.Fatalf("insert door event with valid FK: %v", err)
-	}
-}
-
-func TestMigration005_CascadeDeletesEventsOnMockRemoval(t *testing.T) {
-	d, err := Open(tempDBPath(t))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer d.Close()
-	now := int64(1747000000)
-	const mac = "0c:ea:14:de:ad:11"
-	if _, err := d.Exec(
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		mac, "cascade", 9101, now*1000, now*1000,
-	); err != nil {
-		t.Fatalf("insert mock: %v", err)
+		t.Fatalf("seed viewer: %v", err)
 	}
 	for i := 0; i < 3; i++ {
 		if _, err := d.Exec(
-			`INSERT INTO door_events (mock_mac, event_type, occurred_at) VALUES (?, ?, ?)`,
-			mac, "doorbell_start", now+int64(i),
+			`INSERT INTO door_events (viewer_mac, event_type, occurred_at) VALUES (?, ?, ?)`,
+			"0c:ea:14:11:22:33", "doorbell_start", now+int64(i),
 		); err != nil {
-			t.Fatalf("insert event %d: %v", i, err)
+			t.Fatalf("insert event: %v", err)
 		}
 	}
-	if _, err := d.Exec(`DELETE FROM mock_viewers WHERE mac = ?`, mac); err != nil {
-		t.Fatalf("delete mock: %v", err)
+	if _, err := d.Exec(`DELETE FROM viewers WHERE mac = ?`, "0c:ea:14:11:22:33"); err != nil {
+		t.Fatalf("delete viewer: %v", err)
 	}
 	var n int
-	if err := d.QueryRow(
-		`SELECT COUNT(*) FROM door_events WHERE mock_mac = ?`, mac,
-	).Scan(&n); err != nil {
-		t.Fatalf("count door_events after cascade: %v", err)
+	if err := d.QueryRow(`SELECT COUNT(*) FROM door_events WHERE viewer_mac = ?`,
+		"0c:ea:14:11:22:33").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("door_events not cascaded; remaining count = %d", n)
+		t.Errorf("door_events cascade missed; remaining = %d", n)
 	}
 }
 
-func TestMigration005_IndexesPresent(t *testing.T) {
+func TestLoginAudit_TableShape(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer d.Close()
-	want := []string{
-		"idx_door_events_mock_mac_occurred",
-		"idx_door_events_unread",
-		"idx_door_events_occurred_at",
+	now := int64(1747000000000)
+	if _, err := d.Exec(
+		`INSERT INTO login_audit (timestamp, realm, username, ip, user_agent, outcome)
+		 VALUES (?, 'viewer', 'alice', '1.1.1.1', 'curl', 'success')`,
+		now,
+	); err != nil {
+		t.Fatalf("insert audit: %v", err)
 	}
-	for _, name := range want {
-		var got string
-		err := d.QueryRow(
-			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name,
-		).Scan(&got)
-		if err != nil {
-			t.Errorf("index %s missing: %v", name, err)
-		}
+	_, err = d.Exec(
+		`INSERT INTO login_audit (timestamp, realm, outcome)
+		 VALUES (?, 'wrong-realm', 'success')`,
+		now,
+	)
+	if err == nil {
+		t.Fatal("realm-CHECK didn't reject bad realm")
+	}
+	_, err = d.Exec(
+		`INSERT INTO login_audit (timestamp, realm, outcome)
+		 VALUES (?, 'viewer', 'wrong-outcome')`,
+		now,
+	)
+	if err == nil {
+		t.Fatal("outcome-CHECK didn't reject bad outcome")
 	}
 }
