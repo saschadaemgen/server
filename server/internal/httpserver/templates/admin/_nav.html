@@ -143,6 +143,25 @@
     overflow-y: auto;
     flex: 1;
     background-color: #0e1014 !important;
+    /* Saison 13-02-FIX4-a-HOTFIX8: dunkle Scrollbar. Firefox
+       nutzt scrollbar-width + scrollbar-color, Chromium und
+       Edge die ::-webkit-scrollbar-Pseudoelemente. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar {
+    width: 8px;
+    background-color: #14161c;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-track {
+    background-color: #14161c;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.20);
+    border-radius: 4px;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.30);
   }
   .dropdown-panel .dropdown-option {
     padding: 10px 12px;
