@@ -201,6 +201,21 @@
                 </select>
               </div>
             </div>
+
+            <hr style="border:none; border-top:1px solid rgba(255,255,255,0.10); margin:8px 0;" />
+
+            <div class="field">
+              <label class="field-label" for="edit-login-url">Login-Link fuer den Mieter</label>
+              <div style="display:flex; gap:var(--space-2); align-items:stretch;">
+                <input type="text" id="edit-login-url" class="input" readonly style="flex:1; user-select:all;"/>
+                <button class="btn btn-secondary" type="button" data-action="copy-link" data-target="#edit-login-url">Kopieren</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">QR-Code zum Scannen</label>
+              <div id="edit-qr-code" style="display:flex; justify-content:center; background:#ffffff; padding:12px; border-radius:8px; min-height:80px;"></div>
+            </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
@@ -292,6 +307,24 @@
           // konservativ via change-Event.
           if (sel) sel.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        // Saison 13-02-FIX4-a-HOTFIX8: Login-Link + QR lazy nachladen.
+        var urlInput = modal.querySelector('#edit-login-url');
+        var qrSlot = modal.querySelector('#edit-qr-code');
+        if (urlInput) urlInput.value = '';
+        if (qrSlot) qrSlot.innerHTML = '';
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/login-info', {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            if (!j) return;
+            if (urlInput) urlInput.value = j.login_url || '';
+            if (qrSlot) qrSlot.innerHTML = j.qr_svg || '';
+          })
+          .catch(function (err) {
+            if (window.console) console.warn('login-info load failed', err);
+          });
         modal.classList.add('is-open');
       });
 
