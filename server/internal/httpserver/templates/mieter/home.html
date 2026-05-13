@@ -6,6 +6,44 @@
   <title>unifix · {{.UnitName}}</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
+  <style>
+    /* Saison 13-02-FIX3b responsive overrides for the
+       Claude-Design .stage frame:
+
+         - Desktop (>=1024px): iPad-Pro-like bezel, max-bleed.
+         - Tablet  (640-1023px): a touch larger than the
+           library default.
+         - Phone   (<640px): no bezel, device fills the
+           viewport (Sascha asked for full-bleed below 640,
+           the library only goes full-bleed below 480).
+
+       Library defaults remain in components.css; the rules
+       below win because the layout sheet is linked AFTER the
+       library and the selectors are equally specific. */
+
+    @media (min-width: 640px) {
+      .stage {
+        width: min(520px, 80vw);
+        height: min(1040px, 92vh);
+        border-radius: 44px;
+      }
+    }
+    @media (min-width: 1024px) {
+      .stage {
+        width: min(600px, 42vw);
+        height: min(1100px, 92vh);
+      }
+    }
+    @media (max-width: 639px) {
+      .stage-room { background: var(--color-bg); }
+      .stage {
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
 </head>
 <body class="stage-room">
 
@@ -15,23 +53,6 @@
     {{template "intercom-ringing.html" .}}
   </div>
 
-  <script>
-    // The library snippets include `is-open` for standalone demo
-    // browsing; strip it on first paint so sheets, overlays and
-    // modals start hidden in the integrated app.
-    (function () {
-      var sels = [
-        '[data-overlay]',
-        '[data-sheet]',
-        '[data-sheet-scrim]',
-        '[data-modal]'
-      ];
-      var nodes = document.querySelectorAll(sels.join(','));
-      for (var i = 0; i < nodes.length; i++) {
-        nodes[i].classList.remove('is-open');
-      }
-    })();
-  </script>
   <script src="/static/interactions.js"></script>
   <script>
     unifix.connectSSE("/m/events", {
