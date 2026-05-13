@@ -534,12 +534,20 @@
     // Saison 13-02-FIX4-a-HOTFIX6: Panel lebt im Portal-Mode als
     // Sibling von body, daher muss die Innen-Check beides
     // beruecksichtigen (Container UND Panel).
-    document.addEventListener('click', function (e) {
+    //
+    // Saison 13-02-FIX4-a-HOTFIX7: mousedown statt click, plus
+    // Capture-Phase. Im Live-Test feuerte der bubble-click-Handler
+    // nicht zuverlaessig, weil die design-library ihren eigenen
+    // click-Handler hat (interactions.js) und Option-Klicks bei
+    // uns auch select() aufrufen. mousedown in capture feuert vor
+    // allen anderen Handlern und ist immun gegen spaeteres
+    // preventDefault/stopPropagation.
+    document.addEventListener('mousedown', function (e) {
       if (!openInstance) return;
       if (openInstance.el.contains(e.target)) return;
       if (openInstance.panel.contains(e.target)) return;
       closeOpen();
-    });
+    }, true);
 
     // Saison 13-02-FIX4-a-HOTFIX6: Scroll und Resize wuerden die
     // Panel-Position einfrieren (top/left aus getBoundingClientRect
