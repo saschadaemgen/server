@@ -63,3 +63,17 @@ remains for archival reference.
 
 - Project: https://github.com/bigskysoftware/htmx
 - License: BSD 2-Clause
+
+## hashicorp/mdns (and its miekg/dns dependency)
+
+Local-network service advertisement (`_unifix._tcp.local`) so
+adopted ESP-Viewers can discover the server's IP and port
+without manual configuration. Saison 13-02-FIX4-d. The standard
+library has no mDNS / Bonjour primitive; hashicorp/mdns is the
+established Go-ecosystem implementation and is what every other
+RPi-tier deployment (Tailscale, k3s, etc.) reaches for. Brings
+miekg/dns as a transitive dependency.
+
+- Project: https://github.com/hashicorp/mdns
+- License: MIT
+- Transitive: github.com/miekg/dns (BSD 3-Clause)
