@@ -8,7 +8,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"unifix.local/server/internal/eventbus"
 )
+
+// eventbusEvent is a tiny test-only helper so the test file
+// does not have to construct eventbus.Event literals all over.
+func eventbusEvent(typ, data string) eventbus.Event {
+	return eventbus.Event{Type: typ, JSON: data}
+}
 
 // adoptESPForTest discovers + adopts an ESP-Viewer and returns
 // the freshly issued bearer token (clear-text, picked up via
@@ -144,6 +153,195 @@ func TestESPConfig_ReturnsAllFields(t *testing.T) {
 		if _, ok := ui[k]; !ok {
 			t.Errorf("missing ui.%s", k)
 		}
+	}
+}
+
+// startSSE opens an SSE stream for the given bearer and returns
+// the underlying *http.Response plus a cancel func. The caller
+// reads the body to consume events. The response context is
+// cancelled when the test ends.
+func startSSE(t *testing.T, env *testEnv, tok string) (*http.Response, context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, env.ts.URL+"/esp/events", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		cancel()
+		t.Fatalf("GET /esp/events: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		cancel()
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		resp.Body.Close()
+		cancel()
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	return resp, cancel
+}
+
+// readSSEEvent reads one event: <name>\ndata: <data>\n\n frame.
+// Returns ("", "") on read error / EOF.
+func readSSEEvent(t *testing.T, resp *http.Response) (eventName, data string) {
+	t.Helper()
+	buf := make([]byte, 1)
+	var line strings.Builder
+	var lines []string
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if buf[0] == '\n' {
+				lines = append(lines, line.String())
+				line.Reset()
+				// Blank line marks end of an event.
+				if len(lines) >= 2 && lines[len(lines)-1] == "" {
+					var e, d string
+					for _, l := range lines {
+						if strings.HasPrefix(l, "event: ") {
+							e = strings.TrimPrefix(l, "event: ")
+						} else if strings.HasPrefix(l, "data: ") {
+							d = strings.TrimPrefix(l, "data: ")
+						}
+					}
+					return e, d
+				}
+				continue
+			}
+			line.WriteByte(buf[0])
+		}
+		if err != nil {
+			return "", ""
+		}
+	}
+}
+
+func TestESPEvents_SendsHeartbeat(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	// Heartbeat-Tick auf 50ms drosseln damit der Test schnell laeuft.
+	env.srv.eventsHeartbeat = 50 * time.Millisecond
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	resp, cancel := startSSE(t, env, tok)
+	defer cancel()
+	defer resp.Body.Close()
+
+	// Erstes Event ist der Initial-Heartbeat. Zweites Event sollte
+	// nach <= 200ms vom Ticker kommen.
+	name, _ := readSSEEvent(t, resp)
+	if name != "heartbeat" {
+		t.Fatalf("initial event = %q, want heartbeat", name)
+	}
+	done := make(chan struct{})
+	var second string
+	go func() {
+		second, _ = readSSEEvent(t, resp)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second heartbeat never arrived")
+	}
+	if second != "heartbeat" {
+		t.Errorf("second event = %q, want heartbeat", second)
+	}
+}
+
+func TestESPEvents_DeliversPublishedEvent(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.srv.eventsHeartbeat = 10 * time.Second // keep heartbeat out of the way
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	resp, cancel := startSSE(t, env, tok)
+	defer cancel()
+	defer resp.Body.Close()
+
+	// Consume initial heartbeat.
+	if name, _ := readSSEEvent(t, resp); name != "heartbeat" {
+		t.Fatalf("initial event = %q, want heartbeat", name)
+	}
+
+	// Publish from the test side.
+	env.srv.EventBus().Publish(espTestMAC, eventbusEvent("doorbell.ring", `{"event_id":"evt_x"}`))
+
+	done := make(chan struct{})
+	var ev, data string
+	go func() {
+		ev, data = readSSEEvent(t, resp)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("published event never arrived")
+	}
+	if ev != "doorbell.ring" {
+		t.Errorf("event = %q, want doorbell.ring", ev)
+	}
+	if !strings.Contains(data, "evt_x") {
+		t.Errorf("data = %q", data)
+	}
+}
+
+func TestESPEvents_HandlesMultipleClients(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.srv.eventsHeartbeat = 10 * time.Second
+	tokA := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+	tokB := adoptESPForTest(t, env, "0c:ea:14:bb:cc:dd", "Wohnung B")
+
+	respA, cancelA := startSSE(t, env, tokA)
+	defer cancelA()
+	defer respA.Body.Close()
+	respB, cancelB := startSSE(t, env, tokB)
+	defer cancelB()
+	defer respB.Body.Close()
+
+	// Drain initial heartbeats.
+	for _, r := range []*http.Response{respA, respB} {
+		if name, _ := readSSEEvent(t, r); name != "heartbeat" {
+			t.Fatalf("initial event = %q", name)
+		}
+	}
+
+	// Wait until both subscriptions are registered with the bus.
+	bus := env.srv.EventBus()
+	deadline := time.Now().Add(2 * time.Second)
+	for bus.SubscriberCount(espTestMAC) == 0 || bus.SubscriberCount("0c:ea:14:bb:cc:dd") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscribers never registered")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	bus.Publish(espTestMAC, eventbusEvent("doorbell.ring", `{"who":"A"}`))
+	bus.Publish("0c:ea:14:bb:cc:dd", eventbusEvent("doorbell.ring", `{"who":"B"}`))
+
+	readNext := func(r *http.Response) (string, string) {
+		ch := make(chan struct{}, 1)
+		var n, d string
+		go func() { n, d = readSSEEvent(t, r); ch <- struct{}{} }()
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("event missed")
+		}
+		return n, d
+	}
+
+	_, dA := readNext(respA)
+	_, dB := readNext(respB)
+	if !strings.Contains(dA, `"who":"A"`) {
+		t.Errorf("client A got %q", dA)
+	}
+	if !strings.Contains(dB, `"who":"B"`) {
+		t.Errorf("client B got %q", dB)
 	}
 }
 

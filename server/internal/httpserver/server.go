@@ -29,6 +29,7 @@ import (
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/uaapi"
@@ -74,7 +75,12 @@ type Deps struct {
 	// Zero falls back to defaultEventsHeartbeat (30s); tests
 	// inject something shorter.
 	EventsHeartbeat time.Duration
-	Log             *slog.Logger
+	// EventBus is the per-viewer push bus the protected ESP
+	// runtime endpoints (SSE) subscribe to. Nil falls back to a
+	// fresh bus created in New, so callers that don't need to
+	// share the bus across packages can leave this empty.
+	EventBus *eventbus.Bus
+	Log      *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -93,10 +99,15 @@ type Server struct {
 	hub             *doorbellhub.Hub
 	history         doorhistory.Store
 	eventsHeartbeat time.Duration
+	eventBus        *eventbus.Bus
 	log             *slog.Logger
 	mux             *http.ServeMux
 	tpl             *adminTemplates
 }
+
+// EventBus exposes the in-process event bus so callers (main,
+// the doorbell wire-up in S13-03) can publish to viewers.
+func (s *Server) EventBus() *eventbus.Bus { return s.eventBus }
 
 // New constructs the Server with all routes registered.
 func New(deps Deps) (*Server, error) {
@@ -113,6 +124,9 @@ func New(deps Deps) (*Server, error) {
 	if deps.AdminLimiter == nil {
 		deps.AdminLimiter = ratelimit.New()
 	}
+	if deps.EventBus == nil {
+		deps.EventBus = eventbus.New()
+	}
 	srv := &Server{
 		cfg:             deps.Config,
 		sessions:        deps.Sessions,
@@ -128,6 +142,7 @@ func New(deps Deps) (*Server, error) {
 		hub:             deps.Hub,
 		history:         deps.History,
 		eventsHeartbeat: deps.EventsHeartbeat,
+		eventBus:        deps.EventBus,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -201,6 +216,7 @@ func (s *Server) routes() {
 	// Token wurde im Adoption-Flow generiert und vom ESP via
 	// /esp/discover/status abgeholt.
 	s.mux.Handle("GET /esp/config", s.requireESPBearer(http.HandlerFunc(s.handleESPConfig)))
+	s.mux.Handle("GET /esp/events", s.requireESPBearer(http.HandlerFunc(s.handleESPEvents)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))

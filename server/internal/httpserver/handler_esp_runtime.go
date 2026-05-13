@@ -18,10 +18,19 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
+	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 )
+
+// espHeartbeatInterval is how often the SSE stream emits a
+// "heartbeat" event when there is no real traffic. Most home
+// routers and HTTPS-terminating proxies drop idle TCP after
+// 60 seconds; 30 keeps us comfortably under that.
+const espHeartbeatInterval = 30 * time.Second
 
 // espConfigResponse is the JSON shape returned by GET /esp/config.
 // Fields the ESP firmware reads to draw its UI and connect to the
@@ -106,4 +115,79 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleESPEvents holds a server-sent-events stream open for the
+// calling ESP-Viewer. The stream emits:
+//
+//	event: heartbeat                              every ~30 seconds
+//	event: doorbell.ring   data: {ev-json}        on /remote_view (S13-03)
+//	event: doorbell.cancel data: {ev-json}        on UA cancel or peer-answer
+//	event: config.changed                         on admin edit (later seasons)
+//	event: auth.token.rotate                      on regenerate-token (later)
+//
+// Each viewer's events come from eventbus.Bus.Subscribe(mac); the
+// publisher side belongs to the doorbell-hub / admin-edit code
+// path that follows in S13-03.
+func (s *Server) handleESPEvents(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	if s.eventBus == nil {
+		http.Error(w, "event bus not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch := s.eventBus.Subscribe(mac)
+	defer s.eventBus.Unsubscribe(mac, ch)
+
+	hb := espHeartbeatInterval
+	if s.eventsHeartbeat > 0 {
+		hb = s.eventsHeartbeat
+	}
+	ticker := time.NewTicker(hb)
+	defer ticker.Stop()
+
+	// Initial heartbeat so the client confirms the stream is open.
+	writeSSE(w, flusher, "heartbeat", fmt.Sprintf(`{"server_time":%d}`, time.Now().Unix()))
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			writeSSE(w, flusher, ev.Type, ev.JSON)
+		case <-ticker.C:
+			writeSSE(w, flusher, "heartbeat", fmt.Sprintf(`{"server_time":%d}`, time.Now().Unix()))
+		}
+	}
+}
+
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType, data string) {
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
+	flusher.Flush()
+}
+
+// publishToESP is a small convenience for the doorbell wire-up
+// in S13-03 to push without importing eventbus directly.
+func (s *Server) publishToESP(mac string, ev eventbus.Event) int {
+	if s.eventBus == nil {
+		return 0
+	}
+	return s.eventBus.Publish(mac, ev)
 }
