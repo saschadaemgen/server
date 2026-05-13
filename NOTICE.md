@@ -23,6 +23,17 @@ The library is treated as approved spec; integration code may
 adapt it (form action paths, field names) but must not change
 CSS class names, token values, or the inline SVG icon paths.
 
+## golang.org/x/crypto
+
+Server-side password hashing (Argon2id) and the legacy bcrypt
+verify path used in the rehash-on-login migration (Saison
+13-02-FIX4-a).
+
+- Project:   https://golang.org/x/crypto
+- License:   BSD-3-Clause
+- Imports:   golang.org/x/crypto/argon2
+             golang.org/x/crypto/bcrypt
+
 ## go-qrcode
 
 Server-side QR-code generation for the admin Magic-Link modal
