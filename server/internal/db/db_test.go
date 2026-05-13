@@ -39,8 +39,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 6 {
-		t.Errorf("schema_version = %d, want 6", version)
+	if version != 7 {
+		t.Errorf("schema_version = %d, want 7", version)
 	}
 	for _, table := range []string{
 		"viewers", "viewer_sessions", "admin_sessions",
@@ -81,7 +81,7 @@ func TestOpen_IdempotentReapply(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer d.Close()
-	for _, v := range []int{1, 2, 3, 4, 5, 6} {
+	for _, v := range []int{1, 2, 3, 4, 5, 6, 7} {
 		var count int
 		if err := d.QueryRow(
 			`SELECT COUNT(*) FROM schema_version WHERE version = ?`, v,
