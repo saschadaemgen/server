@@ -29,9 +29,9 @@ func seedViewer(t *testing.T, d *db.DB, mac string, port int) {
 	t.Helper()
 	now := time.Now().UnixMilli()
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-		 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		mac, "Test "+mac, port, "test-"+mac, now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, 'web', ?, ?)`,
+		mac, "Test "+mac, port, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer: %v", err)
 	}

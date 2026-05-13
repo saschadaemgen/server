@@ -22,14 +22,14 @@ func newStore(t *testing.T) (*SQLStore, *db.DB) {
 	t.Cleanup(func() { _ = d.Close() })
 	now := int64(1747000000000)
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		testMockMAC, "Familie Mueller 2OG", 8100, "user-a", now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?)`,
+		testMockMAC, "Familie Mueller 2OG", 8100, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer A: %v", err)
 	}
 	if _, err := d.Exec(
-		`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-		testMockMACB, "Wohnung 2", 8101, "user-b", now, now,
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?)`,
+		testMockMACB, "Wohnung 2", 8101, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer B: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"unifix.local/server/internal/auth/loginaudit"
 	"unifix.local/server/internal/auth/ratelimit"
 	"unifix.local/server/internal/auth/session"
+	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 )
 
@@ -53,64 +54,68 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
 		return
 	}
-	usernameRaw := strings.TrimSpace(r.PostForm.Get("username"))
-	username := sanitizeUsername(usernameRaw)
+	// Form-Field heisst weiter "username" (Browser-autofill nutzt
+	// das HTML-Attribut), aber inhaltlich ist es jetzt der
+	// Wohnungs-Name. Audit-Log und Limiter-Bucket nutzen den
+	// normalisierten Wert als stabilen Key.
+	nameRaw := strings.TrimSpace(r.PostForm.Get("username"))
+	lookupKey := mockmanager.NormalizeName(nameRaw)
 	password := r.PostForm.Get("password")
 	ip := clientIP(r)
 	ua := r.UserAgent()
 
 	log := s.log.With(
 		"event", "viewer_login",
-		"username", usernameRaw,
-		"username_lookup", username,
+		"name", nameRaw,
+		"name_lookup", lookupKey,
 		"ip", ip,
 	)
 	log.Info("attempt")
 
-	if usernameRaw == "" || password == "" {
+	if nameRaw == "" || password == "" {
 		log.Info("rejected", "reason", "missing_field")
 		s.renderViewerLogin(w, viewerLoginPageData{
-			Username:     usernameRaw,
-			ErrorMessage: "Benutzername und Passwort sind Pflicht.",
+			Username:     nameRaw,
+			ErrorMessage: "Wohnungs-Name und Passwort sind Pflicht.",
 		})
 		return
 	}
 
-	dec := s.viewerLimiter.Allow(ip, username)
+	dec := s.viewerLimiter.Allow(ip, lookupKey)
 	if dec != ratelimit.Allow {
 		log.Warn("blocked", "reason", "rate_limit", "decision", dec)
 		s.recordAudit(r, loginaudit.Entry{
 			Realm:     loginaudit.RealmViewer,
-			Username:  usernameRaw,
+			Username:  nameRaw,
 			IP:        ip,
 			UserAgent: ua,
 			Outcome:   loginaudit.OutcomeLocked,
 		})
 		s.renderViewerLogin(w, viewerLoginPageData{
-			Username: usernameRaw,
+			Username: nameRaw,
 			Locked:   true,
 		})
 		return
 	}
 
-	info, hash, err := s.mockMgr.LookupByUsername(r.Context(), username)
+	info, hash, err := s.mockMgr.LookupByName(r.Context(), nameRaw)
 	if err != nil || hash == "" {
-		s.viewerLimiter.RegisterFailure(ip, username)
-		reason := "user_not_found"
+		s.viewerLimiter.RegisterFailure(ip, lookupKey)
+		reason := "viewer_not_found"
 		if err == nil && hash == "" {
 			reason = "no_password_set"
 		}
 		log.Info("denied", "reason", reason, "lookup_err", err)
 		s.recordAudit(r, loginaudit.Entry{
 			Realm:     loginaudit.RealmViewer,
-			Username:  usernameRaw,
+			Username:  nameRaw,
 			IP:        ip,
 			UserAgent: ua,
 			Outcome:   loginaudit.OutcomeFail,
 		})
 		s.renderViewerLogin(w, viewerLoginPageData{
-			Username:     usernameRaw,
-			ErrorMessage: "Falscher Benutzername oder Passwort.",
+			Username:     nameRaw,
+			ErrorMessage: "Falscher Name oder Passwort.",
 		})
 		return
 	}
@@ -121,27 +126,27 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, verr := argon2id.VerifyWithPepper(password, pepper, hash)
 	if verr != nil || !ok {
-		s.viewerLimiter.RegisterFailure(ip, username)
+		s.viewerLimiter.RegisterFailure(ip, lookupKey)
 		log.Info("denied", "reason", "argon2_verify_failed",
 			"verify_ok", ok, "verify_err", verr,
 			"viewer_mac", info.MAC,
 		)
 		s.recordAudit(r, loginaudit.Entry{
 			Realm:     loginaudit.RealmViewer,
-			Username:  usernameRaw,
+			Username:  nameRaw,
 			ViewerMAC: info.MAC,
 			IP:        ip,
 			UserAgent: ua,
 			Outcome:   loginaudit.OutcomeFail,
 		})
 		s.renderViewerLogin(w, viewerLoginPageData{
-			Username:     usernameRaw,
-			ErrorMessage: "Falscher Benutzername oder Passwort.",
+			Username:     nameRaw,
+			ErrorMessage: "Falscher Name oder Passwort.",
 		})
 		return
 	}
 
-	s.viewerLimiter.RegisterSuccess(username)
+	s.viewerLimiter.RegisterSuccess(lookupKey)
 
 	// Bestehende Session desselben Browsers wird verworfen, damit
 	// es keinen Doppel-Eintrag gibt. Andere Sessions des Viewers
@@ -162,7 +167,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	s.recordAudit(r, loginaudit.Entry{
 		Realm:     loginaudit.RealmViewer,
-		Username:  usernameRaw,
+		Username:  nameRaw,
 		ViewerMAC: info.MAC,
 		IP:        ip,
 		UserAgent: ua,

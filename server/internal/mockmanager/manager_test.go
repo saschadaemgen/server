@@ -129,9 +129,9 @@ func TestLoadFromDB_StartsPersistedViewers(t *testing.T) {
 	}
 	for _, s := range specs {
 		_, err := mgr.db.Exec(
-			`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
-			 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
-			s.MAC, s.Name, int64(s.ServicePort), s.Name, now, now,
+			`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+			 VALUES (?, ?, ?, 'web', ?, ?)`,
+			s.MAC, s.Name, int64(s.ServicePort), now, now,
 		)
 		if err != nil {
 			t.Fatalf("seed insert: %v", err)

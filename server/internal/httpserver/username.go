@@ -2,66 +2,53 @@ package httpserver
 
 import "strings"
 
-// sanitizeUsername bringt einen Anzeigenamen ODER eine Mieter-
-// Login-Eingabe auf die kanonische Form, in der wir Usernames in
-// der viewers-Tabelle ablegen:
+// normalizeForCompare bringt einen Wohnungs-Namen auf eine
+// kanonische Vergleichs-Form. Beide Seiten (Anlegen und Login)
+// gehen durch diese Funktion; der gespeicherte name bleibt
+// ORIGINAL (mit Umlaut, Grossschreibung, Leerzeichen). Nur der
+// Vergleich normalisiert.
 //
-//	"Familie Mueller 2OG"  -> "familie-mueller-2og"
-//	"Familie Müller"       -> "familie-mueller"
-//	"Daemgen"              -> "daemgen"
-//	"Dämgen"               -> "daemgen"
-//	"  Hänsel.Gretel  "    -> "haensel.gretel"
+//	"Familie Mueller 2OG"  == "familie mueller 2og"
+//	"Dämgen"               == "Daemgen"               == "DAEMGEN"
+//	"Müller  Hof"          == "mueller hof"           (doppel-Whitespace zusammen)
 //
-// Ablauf: TrimSpace -> Umlaute zu ae/oe/ue/ss -> lowercase ->
-// nur a-z 0-9 _ . durchlassen, Whitespace/Sonderzeichen werden
-// '-'. Doppelte '-' werden zu einem zusammengezogen, fuehrende/
-// abschliessende '-' weggeschnitten. Anschliessend Mindest- und
-// Maximal-Laenge (3..32).
-//
-// Saison 13-02-FIX4-a-HOTFIX3: diese Funktion ist die EINE
-// kanonische Normalisierung. Sie laeuft sowohl beim Anlegen
-// (Admin-Eingabe) als auch beim Login (Mieter-Eingabe), und die
-// Migration 007 spiegelt einen Teil davon in SQL. Damit findet
-// LookupByUsername mit exact-match das richtige Row, egal ob der
-// Mieter "Dämgen", "Daemgen" oder "DAEMGEN" tippt.
-func sanitizeUsername(name string) string {
-	name = strings.TrimSpace(name)
-	expanded := expandGermanUmlauts(name)
-	var b strings.Builder
-	prevDash := false
-	for _, c := range strings.ToLower(expanded) {
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '.', c == '_':
-			b.WriteRune(c)
-			prevDash = false
-		case c == ' ', c == '-', c == '\t':
-			if !prevDash {
-				b.WriteRune('-')
-				prevDash = true
-			}
-		// alles andere (incl. Sonderzeichen, Umlaute-bereits-aufgeloest-
-		// gibts hier nicht) wird verworfen.
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if len(out) < 3 {
-		out = out + "-viewer"
-		out = strings.Trim(out, "-")
-	}
-	if len(out) > 32 {
-		out = out[:32]
-	}
-	return out
+// Saison 13-02-FIX4-a-HOTFIX4 hat die separate Username-Spalte
+// abgeschafft und nutzt den Wohnungs-Namen direkt als Login.
+func normalizeForCompare(s string) string {
+	s = expandGermanUmlauts(s)
+	s = strings.ToLower(s)
+	s = strings.TrimSpace(s)
+	s = collapseWhitespace(s)
+	return s
 }
 
 // expandGermanUmlauts ersetzt ä/ö/ü/ß und ihre Grossschreibungen
-// durch die zwei-Zeichen-ASCII-Aequivalente. Wird sowohl direkt
-// im sanitizeUsername aufgerufen als auch in der SQL-Migration
-// (siehe migrations/007_normalize_viewer_usernames.sql) gespiegelt.
+// durch die zwei-Zeichen-ASCII-Aequivalente.
 func expandGermanUmlauts(s string) string {
 	r := strings.NewReplacer(
 		"ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss",
 		"Ä", "ae", "Ö", "oe", "Ü", "ue",
 	)
 	return r.Replace(s)
+}
+
+// collapseWhitespace ersetzt jede Whitespace-Sequenz (Spaces,
+// Tabs, Mehrfach-Spaces) durch einen einzelnen Space. So
+// matched "Familie  Mueller" gegen "Familie Mueller".
+func collapseWhitespace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inWS := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !inWS {
+				b.WriteByte(' ')
+				inWS = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		inWS = false
+	}
+	return b.String()
 }

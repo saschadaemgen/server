@@ -20,24 +20,22 @@ import (
 // cleanly.
 func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Reader, *http.Response, context.CancelFunc) {
 	t.Helper()
-	// Saison 13-02-FIX4-a-HOTFIX3: Usernames sind exact-match;
-	// die Test-Helper muss daher den sanitized-Wert wirklich in
-	// die DB schieben. Wir leiten den Username aus dem letzten
-	// MAC-Oktett ab und schmeissen Doppelpunkte raus.
+	// Saison 13-02-FIX4-a-HOTFIX4: Login geht via Name. Wir
+	// generieren einen einzigartigen Namen pro MAC.
 	tail := strings.ReplaceAll(viewerMAC[len(viewerMAC)-5:], ":", "")
-	username := "test-" + tail
+	viewerName := "Test Viewer " + tail
 	if _, err := env.mockMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
-			env.seedViewerAs(t, viewerMAC, "Test Viewer", username, "TestPw-1234567X")
+			env.seedViewerAs(t, viewerMAC, viewerName, "TestPw-1234567X")
 		} else {
 			t.Fatalf("GetViewerInfo: %v", err)
 		}
 	}
-	info, _, err := env.mockMgr.LookupByUsername(context.Background(), username)
+	info, _, err := env.mockMgr.LookupByName(context.Background(), viewerName)
 	if err != nil {
-		t.Fatalf("LookupByUsername: %v", err)
+		t.Fatalf("LookupByName: %v", err)
 	}
-	resp := env.loginViewer(t, info.Username, "TestPw-1234567X")
+	resp := env.loginViewer(t, info.Name, "TestPw-1234567X")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login status = %d, want 303", resp.StatusCode)

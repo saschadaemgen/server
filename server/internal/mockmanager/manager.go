@@ -45,7 +45,7 @@ var (
 	ErrMACInUse       = errors.New("mockmanager: mac already registered")
 	ErrPortInUse      = errors.New("mockmanager: service_port already registered")
 	ErrViewerNotFound = errors.New("mockmanager: viewer not found")
-	ErrUsernameInUse  = errors.New("mockmanager: username already in use")
+	ErrNameInUse      = errors.New("mockmanager: viewer name already in use")
 )
 
 // Viewer is the subset of mock.Viewer that Manager needs. Defined
@@ -67,27 +67,30 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 }
 
 // ViewerSpec describes one persisted viewer.
+//
+// Saison 13-02-FIX4-a-HOTFIX4: Username-Slot ist abgeschafft;
+// der Wohnungs-Name ist der Login. NameMatcher als optionales
+// Field kann ein vor-normalisierter Wert vom Caller sein
+// (Default: leer -> Manager normalisiert intern).
 type ViewerSpec struct {
-	MAC             string
-	Name            string
-	ServicePort     uint16
-	Type            string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	Username        string
-	LinkedUAUserID  string // optional UA-Access-User-Verknuepfung
+	MAC            string
+	Name           string
+	ServicePort    uint16
+	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	LinkedUAUserID string // optional UA-Access-User-Verknuepfung
 }
 
 // ViewerInfo is the public view of one running viewer for the
 // admin UI.
 type ViewerInfo struct {
-	MAC             string
-	Name            string
-	ServicePort     uint16
-	Type            string
-	Username        string
-	HasPassword     bool
-	PasswordSetAt   *time.Time
-	LinkedUAUserID  string
-	Running         bool
+	MAC            string
+	Name           string
+	ServicePort    uint16
+	Type           string
+	HasPassword    bool
+	PasswordSetAt  *time.Time
+	LinkedUAUserID string
+	Running        bool
 }
 
 // Options configures Manager construction.
@@ -168,7 +171,6 @@ func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh 
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type,
-		        COALESCE(username, ''),
 		        COALESCE(linked_ua_user_id, '')
 		   FROM viewers
 		  WHERE type = ?
@@ -182,7 +184,7 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 	for rows.Next() {
 		var spec ViewerSpec
 		var port int64
-		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.Username, &spec.LinkedUAUserID); err != nil {
+		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.LinkedUAUserID); err != nil {
 			return fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		spec.ServicePort = uint16(port)
@@ -207,7 +209,11 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 
 // AddViewer registers a new viewer: persists it to viewers then
 // spawns its goroutine. Returns ErrMACInUse, ErrPortInUse or
-// ErrUsernameInUse on collision with an existing row.
+// ErrNameInUse on collision with an existing row.
+//
+// Saison 13-02-FIX4-a-HOTFIX4: Name-Uniqueness ist normalisiert
+// (case + Umlaute + Whitespace), damit zwei Eintraege "Familie
+// Mueller" und "FAMILIE MUELLER" als Duplikat erkannt werden.
 func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	if err := validateSpec(spec); err != nil {
 		return err
@@ -222,13 +228,22 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	if _, exists := m.viewers[spec.MAC]; exists {
 		return ErrMACInUse
 	}
+	specKey := NormalizeName(spec.Name)
 	for _, e := range m.viewers {
 		if e.spec.ServicePort == spec.ServicePort {
 			return ErrPortInUse
 		}
-		if spec.Username != "" && e.spec.Username == spec.Username {
-			return ErrUsernameInUse
+		if NormalizeName(e.spec.Name) == specKey {
+			return ErrNameInUse
 		}
+	}
+	// In-Memory hat nur die laufenden web-type-Viewer. ESP-Eintraege
+	// und vor LoadFromDB persistierte Reihen muessen direkt aus der
+	// DB geprueft werden.
+	if exists, err := m.nameExistsLocked(ctx, specKey, spec.MAC); err != nil {
+		return err
+	} else if exists {
+		return ErrNameInUse
 	}
 
 	if err := m.insertViewerLocked(ctx, spec); err != nil {
@@ -279,10 +294,20 @@ func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	return nil
 }
 
-// Rename updates the viewer's display name in-place.
+// Rename updates the viewer's display name in-place. Doppelte
+// normalisierte Namen werden zurueckgewiesen (ErrNameInUse).
 func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	if newName == "" {
 		return errors.New("mockmanager: name must not be empty")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	exists, err := m.nameExistsLocked(ctx, NormalizeName(newName), mac)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrNameInUse
 	}
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
@@ -295,11 +320,9 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	if n == 0 {
 		return ErrViewerNotFound
 	}
-	m.mu.Lock()
 	if entry, ok := m.viewers[mac]; ok {
 		entry.spec.Name = newName
 	}
-	m.mu.Unlock()
 	return nil
 }
 
@@ -321,51 +344,90 @@ func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
 	return nil
 }
 
-// LookupByUsername returns the viewer record for the given
-// username (web-type only). Used by the viewer-login handler.
+// LookupByName findet den Web-Viewer dessen Name (case-insensitive,
+// umlaut-tolerant, whitespace-tolerant) der Eingabe entspricht.
 //
-// Saison 13-02-FIX4-a-HOTFIX3: exact-match lookup. Migration 007
-// normalisiert die viewers.username-Spalte, und der Caller (Login-
-// Handler) jagt seine Eingabe durch dasselbe sanitizeUsername,
-// das auch beim Anlegen lief. Ergebnis: kein LOWER mehr noetig,
-// die Indizes greifen sauber und Umlaute / Mixed-Case passen
-// symmetrisch.
-func (m *Manager) LookupByUsername(ctx context.Context, username string) (*ViewerInfo, string, error) {
-	var (
-		info       ViewerInfo
-		port       int64
-		usernameDB sql.NullString
-		hash       sql.NullString
-		setAt      sql.NullInt64
-	)
-	err := m.db.QueryRowContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
-		   FROM viewers
-		  WHERE username = ? AND type = 'web'`, username).
-		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt, &info.LinkedUAUserID)
-	if errors.Is(err, sql.ErrNoRows) {
+// Saison 13-02-FIX4-a-HOTFIX4: ersetzt LookupByUsername. Der
+// Wohnungs-Name IST jetzt der Login; Mieter darf "Familie
+// Mueller 2OG", "familie mueller 2og" oder "Dämgen" tippen und
+// findet jedes Mal denselben Eintrag.
+//
+// Implementation: alle Web-Viewer rauslesen und in Go vergleichen.
+// Bei <1000 Wohnungen pro Server vernachlaessigbar; SQLite hat
+// kein Built-in fuer "deutsche Umlaute aufloesen und collapse
+// whitespace", deshalb keine WHERE-Klausel.
+func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, string, error) {
+	target := NormalizeName(name)
+	if target == "" {
 		return nil, "", ErrViewerNotFound
 	}
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		   FROM viewers
+		  WHERE type = 'web'`)
 	if err != nil {
-		return nil, "", fmt.Errorf("mockmanager: lookup username: %w", err)
+		return nil, "", fmt.Errorf("mockmanager: lookup name: %w", err)
 	}
-	info.ServicePort = uint16(port)
-	if usernameDB.Valid {
-		info.Username = usernameDB.String
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			info  ViewerInfo
+			port  int64
+			hash  sql.NullString
+			setAt sql.NullInt64
+		)
+		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
+			&hash, &setAt, &info.LinkedUAUserID); err != nil {
+			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
+		}
+		if NormalizeName(info.Name) != target {
+			continue
+		}
+		info.ServicePort = uint16(port)
+		if hash.Valid {
+			info.HasPassword = true
+		}
+		if setAt.Valid {
+			t := time.UnixMilli(setAt.Int64)
+			info.PasswordSetAt = &t
+		}
+		m.mu.Lock()
+		if _, ok := m.viewers[info.MAC]; ok {
+			info.Running = true
+		}
+		m.mu.Unlock()
+		return &info, hashOrEmpty(hash), nil
 	}
-	if hash.Valid {
-		info.HasPassword = true
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("mockmanager: rows: %w", err)
 	}
-	if setAt.Valid {
-		t := time.UnixMilli(setAt.Int64)
-		info.PasswordSetAt = &t
+	return nil, "", ErrViewerNotFound
+}
+
+// nameExistsLocked prueft ob ein Eintrag mit dem normalisierten
+// Namen schon existiert. excludeMAC darf der MAC des aktuellen
+// Subjects sein (fuer Rename-Pfade); leer = alles pruefen.
+func (m *Manager) nameExistsLocked(ctx context.Context, target, excludeMAC string) (bool, error) {
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac, name FROM viewers`)
+	if err != nil {
+		return false, fmt.Errorf("mockmanager: name check: %w", err)
 	}
-	m.mu.Lock()
-	if _, ok := m.viewers[info.MAC]; ok {
-		info.Running = true
+	defer rows.Close()
+	for rows.Next() {
+		var mac, name string
+		if err := rows.Scan(&mac, &name); err != nil {
+			return false, fmt.Errorf("mockmanager: name check scan: %w", err)
+		}
+		if mac == excludeMAC {
+			continue
+		}
+		if NormalizeName(name) == target {
+			return true, nil
+		}
 	}
-	m.mu.Unlock()
-	return &info, hashOrEmpty(hash), nil
+	return false, rows.Err()
 }
 
 // GetViewerInfo returns the snapshot for one viewer by MAC, or
@@ -385,16 +447,15 @@ func (m *Manager) GetViewerInfo(ctx context.Context, mac string) (*ViewerInfo, e
 
 func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error) {
 	var (
-		info       ViewerInfo
-		port       int64
-		usernameDB sql.NullString
-		hash       sql.NullString
-		setAt      sql.NullInt64
+		info  ViewerInfo
+		port  int64
+		hash  sql.NullString
+		setAt sql.NullInt64
 	)
 	err := m.db.QueryRowContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
 		   FROM viewers WHERE mac = ?`, mac).
-		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt, &info.LinkedUAUserID)
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt, &info.LinkedUAUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -402,9 +463,6 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		return nil, fmt.Errorf("mockmanager: load info: %w", err)
 	}
 	info.ServicePort = uint16(port)
-	if usernameDB.Valid {
-		info.Username = usernameDB.String
-	}
 	if hash.Valid {
 		info.HasPassword = true
 	}
@@ -420,7 +478,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 // surfaced; running flag comes from the in-memory map.
 func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, type, username, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -429,20 +487,16 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	out := make([]ViewerInfo, 0)
 	for rows.Next() {
 		var (
-			info       ViewerInfo
-			port       int64
-			usernameDB sql.NullString
-			hash       sql.NullString
-			setAt      sql.NullInt64
+			info  ViewerInfo
+			port  int64
+			hash  sql.NullString
+			setAt sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
-			&usernameDB, &hash, &setAt, &info.LinkedUAUserID); err != nil {
+			&hash, &setAt, &info.LinkedUAUserID); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		info.ServicePort = uint16(port)
-		if usernameDB.Valid {
-			info.Username = usernameDB.String
-		}
 		if hash.Valid {
 			info.HasPassword = true
 		}
@@ -499,10 +553,10 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	now := m.opts.Now().UnixMilli()
 	_, err := m.db.ExecContext(ctx,
 		`INSERT INTO viewers
-		   (mac, name, service_port, type, username, linked_ua_user_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		   (mac, name, service_port, type, linked_ua_user_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
-		spec.Type, nullable(spec.Username),
+		spec.Type,
 		nullable(spec.LinkedUAUserID),
 		now, now,
 	)
