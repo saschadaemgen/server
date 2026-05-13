@@ -324,6 +324,151 @@ func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
+// handleAdminWebViewersEdit ist der atomische Edit-Pfad fuer
+// Name + Passwort + Verknuepfung in EINEM Request. Body
+// (form-encoded oder JSON): name (Pflicht), password (leer =
+// nicht aendern), linked_ua_user_id (leer = keine Verknuepfung).
+//
+// Saison 13-02-FIX4-a-HOTFIX5: ersetzt die drei einzelnen
+// Endpoints rename / set-password / link aus dem Bearbeiten-
+// Modal-Flow. Hintergrund: Single-Save-Klick mit klarer
+// Erwartung welche Felder genau geaendert wurden.
+func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Request) {
+	mac := strings.ToLower(r.PathValue("mac"))
+	if !macFormat.MatchString(mac) {
+		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
+		return
+	}
+
+	var newName, newPW, newLink string
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var body struct {
+			Name           string `json:"name"`
+			Password       string `json:"password"`
+			LinkedUAUserID string `json:"linked_ua_user_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
+			return
+		}
+		newName = strings.TrimSpace(body.Name)
+		newPW = body.Password
+		newLink = strings.TrimSpace(body.LinkedUAUserID)
+	} else {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
+			return
+		}
+		newName = strings.TrimSpace(r.PostForm.Get("name"))
+		newPW = r.PostForm.Get("password")
+		newLink = strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
+	}
+
+	if newName == "" || len(newName) > 64 {
+		http.Error(w, "Wohnungs-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
+		return
+	}
+
+	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	if err != nil {
+		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("get viewer info", "err", err, "mac_prefix", mac[:8])
+		http.Error(w, "Lookup fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+
+	nameChanged := mockmanager.NormalizeName(info.Name) != mockmanager.NormalizeName(newName)
+	pwChanged := newPW != ""
+	linkChanged := info.LinkedUAUserID != newLink
+
+	if nameChanged {
+		if err := s.mockMgr.Rename(r.Context(), mac, newName); err != nil {
+			switch {
+			case errors.Is(err, mockmanager.ErrNameInUse):
+				http.Error(w,
+					"Wohnungs-Name ist bereits vergeben (case-insensitive). Bitte einen anderen Namen waehlen.",
+					http.StatusConflict)
+			case errors.Is(err, mockmanager.ErrViewerNotFound):
+				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			default:
+				s.log.Error("edit rename", "err", err, "mac_prefix", mac[:8])
+				http.Error(w, "Umbenennen fehlgeschlagen.", http.StatusInternalServerError)
+			}
+			return
+		}
+	}
+
+	if linkChanged {
+		if err := s.mockMgr.SetLinkedUAUserID(r.Context(), mac, newLink); err != nil {
+			s.log.Error("edit set link", "err", err, "mac_prefix", mac[:8])
+			http.Error(w, "Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Passwort als letztes, damit ein Hash-Fehler die schon
+	// gespeicherten Name- und Link-Aenderungen nicht zurueckwirft
+	// (wir muessen sowieso roll-forward operieren, weil SQLite
+	// ohne SAVEPOINT kein partielles Rollback unterstuetzt).
+	var resp credentialsResponse
+	if pwChanged {
+		resp, err = s.storePasswordForViewer(r.Context(), info.MAC, newName, newPW, r)
+		if err != nil {
+			s.log.Error("edit set password", "err", err, "mac_prefix", mac[:8])
+			http.Error(w, "Passwort-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+		if _, err := s.sessions.RevokeAllForViewer(r.Context(), info.MAC); err != nil {
+			s.log.Warn("revoke sessions after pw change", "err", err)
+		}
+	}
+
+	s.log.Info("web viewer edited",
+		"mac_prefix", mac[:8],
+		"name_changed", nameChanged,
+		"pw_changed", pwChanged,
+		"link_changed", linkChanged,
+	)
+
+	if wantsJSON(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		payload := map[string]any{
+			"mac":               info.MAC,
+			"name":              newName,
+			"linked_ua_user_id": newLink,
+			"name_changed":      nameChanged,
+			"pw_changed":        pwChanged,
+			"link_changed":      linkChanged,
+		}
+		if pwChanged {
+			payload["password"] = resp.Password
+			payload["login_url"] = resp.LoginURL
+			payload["qr_svg"] = resp.QRSVG
+		}
+		_ = json.NewEncoder(w).Encode(payload)
+		return
+	}
+	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
+}
+
+// handleAdminWebViewersGeneratePW liefert ein frisches Zufalls-
+// Passwort OHNE es zu speichern. Das UI uebernimmt es ins
+// Passwort-Feld; gespeichert wird erst beim "Speichern"-Klick
+// im Bearbeiten-Modal.
+func (s *Server) handleAdminWebViewersGeneratePW(w http.ResponseWriter, r *http.Request) {
+	pw, err := password.Generate()
+	if err != nil {
+		s.log.Error("generate password", "err", err)
+		http.Error(w, "Passwort-Generierung fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]string{"password": pw})
+}
+
 // handleAdminWebViewersSetLink setzt oder loescht die
 // Verknuepfung viewer.linked_ua_user_id. Empty user_id loescht.
 func (s *Server) handleAdminWebViewersSetLink(w http.ResponseWriter, r *http.Request) {
@@ -515,6 +660,3 @@ func generateUbiquitiMAC() (string, error) {
 	}
 	return fmt.Sprintf("0c:ea:14:%02x:%02x:%02x", b[0], b[1], b[2]), nil
 }
-
-
-
