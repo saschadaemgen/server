@@ -82,47 +82,59 @@
 </main>
 
 <!--
-  Saison 13-02-FIX: full-screen FaceTime-lock-screen overlay.
-  Always renders on black, regardless of light/dark theme,
-  because incoming-call screens are an Apple convention.
+  Saison 13-02-FIX1c: bell overlay 1:1 from briefing. Inline SVG
+  for the four icons because the Phosphor webfont did not always
+  hit the size targets in FIX1b. Markup and CSS values are NOT
+  to be tweaked here; the layout is the result of Sascha's chat
+  iteration and is contracted spec.
 -->
-<div id="ring-overlay" class="bell-overlay">
-  <div class="bell-hero">
-    <span class="bell-glow-ring bell-glow-ring-1"></span>
-    <span class="bell-glow-ring bell-glow-ring-2"></span>
-    <span class="bell-glow-ring bell-glow-ring-3"></span>
-    <span class="bell-icon">{{icon "bell-ring"}}</span>
-  </div>
+<div class="bell-overlay" id="bell-overlay">
+  <div class="bell-bg"></div>
 
-  <div class="bell-caller">
-    <h1 class="bell-caller-title">Klingelt</h1>
-    <p class="bell-caller-sub">{{.MockName}}</p>
-    <p id="ring-time" class="bell-caller-time">-</p>
+  <div class="bell-hero">
+    <div class="bell-wrap">
+      <span class="bell-ring"></span>
+      <span class="bell-ring bell-ring-2"></span>
+      <span class="bell-ring bell-ring-3"></span>
+      <div class="bell-circle">
+        <svg class="bell-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M221.8,175.94c-5.55-9.56-13.8-36.61-13.8-71.94a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="bell-texts">
+      <h1 class="bell-title">Klingelt</h1>
+      <p class="bell-sub">{{.MockName}}</p>
+    </div>
   </div>
 
   <div class="bell-actions">
-    <div class="bell-action">
-      <button type="button" id="ring-decline" class="bell-btn bell-btn-decline"
-              aria-label="Ignorieren">
-        {{icon "bell-slash"}}
+    <div class="bell-col">
+      <button class="bell-btn bell-btn-decline" id="bell-decline" aria-label="Ignorieren">
+        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M53.92,34.62A8,8,0,1,0,42.08,45.38L65.66,71.32A79.65,79.65,0,0,0,48,104c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0h26.41l8.4,9.24a8,8,0,1,0,11.84-10.76ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a63.7,63.7,0,0,1,13-38.62L177.61,184ZM82.46,48.0a64,64,0,0,1,109.45,52c0,29,5.74,52.55,10.59,65.45L82.46,48.0Z"/>
+        </svg>
       </button>
-      <span class="bell-btn-label">Ignorieren</span>
+      <span class="bell-label">Ignorieren</span>
     </div>
-    <div class="bell-action">
-      <button type="button" id="ring-door" class="bell-btn bell-btn-door"
-              aria-label="Tuer auf"
-              disabled title="Wird in Saison 13-03 funktional">
-        {{icon "key"}}
+
+    <div class="bell-col">
+      <button class="bell-btn bell-btn-unlock bell-btn-off" id="bell-unlock" aria-label="Tuer auf" disabled>
+        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M160,16A80.07,80.07,0,0,0,83.91,120.78L26.34,178.34A8,8,0,0,0,24,184v40a8,8,0,0,0,8,8H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A80,80,0,1,0,160,16Zm0,144a64.1,64.1,0,0,1-15.74-2,8,8,0,0,0-7.66,2.08L116.69,180.69H96a8,8,0,0,0-8,8v8H72a8,8,0,0,0-8,8v8H40V187.31l58.59-58.59a8,8,0,0,0,2.08-7.66A64,64,0,1,1,160,160Zm12-88a12,12,0,1,1-12-12A12,12,0,0,1,172,72Z"/>
+        </svg>
       </button>
-      <span class="bell-btn-label">Tuer auf</span>
+      <span class="bell-label">Tuer auf</span>
     </div>
-    <div class="bell-action">
-      <button type="button" id="ring-accept" class="bell-btn bell-btn-accept"
-              aria-label="Annehmen"
-              disabled title="Wird in Saison 13-04/05 mit Stream funktional">
-        {{icon "phone"}}
+
+    <div class="bell-col">
+      <button class="bell-btn bell-btn-accept bell-btn-off" id="bell-accept" aria-label="Annehmen" disabled>
+        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M222.37,158.46l-47.11-21.11-.13-.06a16,16,0,0,0-15.17,1.4,8.12,8.12,0,0,0-.75.56L134.87,160c-15.42-7.49-31.34-23.29-38.83-38.51l20.78-24.71c.2-.25.39-.5.57-.77a16,16,0,0,0,1.32-15.06l0-.12L97.54,33.64a16,16,0,0,0-16.62-9.52A56.26,56.26,0,0,0,32,80c0,79.4,64.6,144,144,144a56.26,56.26,0,0,0,55.88-48.92A16,16,0,0,0,222.37,158.46ZM176,208A128.14,128.14,0,0,1,48,80,40.2,40.2,0,0,1,82.87,40a.61.61,0,0,0,0,.12l21,47L83.2,111.86a6.13,6.13,0,0,0-.57.77,16,16,0,0,0-1,15.7c9.06,18.53,27.73,37.06,46.46,46.11a16,16,0,0,0,15.75-1.14,8.44,8.44,0,0,0,.74-.56L168.89,152l47,21.05h.13A40.21,40.21,0,0,1,176,208Z"/>
+        </svg>
       </button>
-      <span class="bell-btn-label">Annehmen</span>
+      <span class="bell-label">Annehmen</span>
     </div>
   </div>
 </div>
@@ -132,9 +144,9 @@
   var evtSource    = new EventSource('/m/events');
   var statusEl     = document.getElementById('status');
   var statusLabel  = document.getElementById('status-label');
-  var overlay      = document.getElementById('ring-overlay');
-  var timeEl       = document.getElementById('ring-time');
-  var declineBtn   = document.getElementById('ring-decline');
+  var overlay      = document.getElementById('bell-overlay');
+  var bellSub      = overlay ? overlay.querySelector('.bell-sub') : null;
+  var declineBtn   = document.getElementById('bell-decline');
   var unreadBadge  = document.getElementById('unread-badge');
   var historyList  = document.getElementById('history-list');
   var mockName     = {{.MockName | printf "%q"}};
@@ -164,12 +176,6 @@
     return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
       ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
-  function formatTimeOnly(unixMillis) {
-    var d = new Date(unixMillis);
-    var pad = function(n) { return n.toString().padStart(2, '0'); };
-    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-  }
-
   function prependHistory(data) {
     if (!historyList || !data.event_id) return;
     var empty = historyList.querySelector('.history-empty');
@@ -198,18 +204,15 @@
 
   function showRing(data) {
     if (!overlay) return;
-    var ts = data.created_at || Date.now();
-    timeEl.textContent = formatTimeOnly(ts);
-    overlay.classList.remove('is-leaving');
+    if (bellSub && data && data.intercom_name) {
+      bellSub.textContent = data.intercom_name;
+    }
     overlay.classList.add('is-open');
   }
 
   function hideRing() {
-    if (!overlay || !overlay.classList.contains('is-open')) return;
-    overlay.classList.add('is-leaving');
-    setTimeout(function() {
-      overlay.classList.remove('is-open', 'is-leaving');
-    }, 200);
+    if (!overlay) return;
+    overlay.classList.remove('is-open');
   }
 
   evtSource.addEventListener('doorbell_start', function(e) {
