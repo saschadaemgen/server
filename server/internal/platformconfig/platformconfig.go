@@ -21,6 +21,12 @@ const (
 	KeyUAAPIBaseURL    = "ua_api_base_url"
 	KeyUAAPIToken      = "ua_api_token"
 	KeyViewerPwPepper  = "viewer_pw_pepper"
+	// KeyIntercomToDoor is the JSON-encoded mapping from intercom
+	// MAC (with colons, lowercase) to UA-Access door id used by
+	// the Saison 13-03 unlock flow. Saison 13 keeps the mapping
+	// admin-curated; a later season can fetch it from UA-API.
+	// Example value: {"28:70:4e:31:e2:9c": "<hub-uuid>"}.
+	KeyIntercomToDoor = "intercom_to_door"
 )
 
 // Service combines the DB and the secrets service.
