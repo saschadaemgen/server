@@ -100,12 +100,18 @@
           <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
             <div class="field">
               <label class="field-label" for="new-name">Wohnungs-Name</label>
-              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG"/>
+              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG" data-username-source/>
+              <span class="field-hint">Mieter sehen diesen Namen als Anzeige; Umlaute und Leerzeichen sind erlaubt.</span>
             </div>
             <div class="field">
               <label class="field-label" for="new-username">Benutzername (optional)</label>
-              <input class="input" id="new-username" name="username" type="text" pattern="[A-Za-z0-9._\-]{3,32}" placeholder="leer = aus Name ableiten"/>
-              <span class="field-hint">3-32 Zeichen aus a-z, 0-9, _ und . erlaubt. Umlaute werden zu ae/oe/ue aufgeloest.</span>
+              <input class="input" id="new-username" name="username" type="text" placeholder="leer = aus Name ableiten" data-username-input/>
+              <span class="field-hint">Beim Speichern wird der finale Username aus a-z, 0-9, _, . und - normalisiert.</span>
+            </div>
+            <div class="field">
+              <label class="field-label">Anmelde-Username (Vorschau)</label>
+              <div class="input" data-username-preview style="color: var(--color-text-secondary); font-family: var(--font-mono);">-</div>
+              <span class="field-hint">So gibt der Mieter den Namen ein. Aktualisiert sich live beim Tippen.</span>
             </div>
             <div class="field">
               <label class="field-label" for="new-mac">MAC-Adresse (optional)</label>
@@ -122,18 +128,97 @@
     </div>
   </main>
 
+  <style>
+    /* Orange Warn-Banner fuer "Passwort wird nur einmal gezeigt".
+       Library hat nur red/green; orange ist eigene Variante. */
+    .banner-orange {
+      background: rgba(249, 115, 22, 0.15);
+      color: rgb(249, 115, 22);
+      border: 1px solid rgba(249, 115, 22, 0.45);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      font-weight: var(--fw-medium);
+    }
+    /* Copy-Button-Layout: Feld + Button nebeneinander. */
+    .field-with-copy {
+      display: flex;
+      gap: var(--space-2);
+      align-items: stretch;
+    }
+    .field-with-copy .input {
+      flex: 1;
+    }
+    .field-with-copy .copy-btn {
+      flex: none;
+      padding: 0 var(--space-3);
+      min-width: 96px;
+    }
+    .copy-btn.is-copied {
+      background: rgba(34, 197, 94, 0.18);
+      color: rgb(34, 197, 94);
+      border-color: rgba(34, 197, 94, 0.45);
+    }
+  </style>
   <script src="/static/interactions.js"></script>
   <script>
     (function () {
-      // Anlegen-Modal Open-Handler.
+      // ---- sanitizeUsername (JS-Spiegel der Go-Funktion) ----
+      // Server-Seite ist die Autoritaet; dieser Spiegel ist nur
+      // fuer das Live-Preview-Field im Anlegen-Modal.
+      var UMLAUTS = {
+        'ä':'ae','ö':'oe','ü':'ue','ß':'ss',
+        'Ä':'ae','Ö':'oe','Ü':'ue'
+      };
+      function sanitizeUsername(input) {
+        var s = (input || '').trim();
+        // Umlaute aufloesen
+        s = s.replace(/[äöüÄÖÜß]/g, function (c) { return UMLAUTS[c] || c; });
+        s = s.toLowerCase();
+        var out = '';
+        var prevDash = false;
+        for (var i = 0; i < s.length; i++) {
+          var c = s[i];
+          if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '.' || c === '_') {
+            out += c;
+            prevDash = false;
+          } else if (c === ' ' || c === '-' || c === '\t') {
+            if (!prevDash) { out += '-'; prevDash = true; }
+          }
+        }
+        out = out.replace(/^-+|-+$/g, '');
+        if (out.length < 3) out = out + '-viewer';
+        if (out.length > 32) out = out.slice(0, 32);
+        return out;
+      }
+
+      function updateUsernamePreview() {
+        var modal = document.querySelector('[data-modal="create-viewer"]');
+        if (!modal) return;
+        var nameEl = modal.querySelector('[data-username-source]');
+        var userEl = modal.querySelector('[data-username-input]');
+        var prevEl = modal.querySelector('[data-username-preview]');
+        if (!prevEl) return;
+        var raw = (userEl && userEl.value.trim()) || (nameEl && nameEl.value) || '';
+        if (!raw) { prevEl.textContent = '-'; return; }
+        prevEl.textContent = sanitizeUsername(raw);
+      }
+
+      // ---- Anlegen-Modal Open / Live-Preview ----
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="open-create"]');
         if (!btn) return;
         e.preventDefault();
         var modal = document.querySelector('[data-modal="create-viewer"]');
         if (modal) modal.classList.add('is-open');
+        updateUsernamePreview();
       });
-      // Close-Handler (Modal-X + Cancel + Scrim-Klick).
+      document.addEventListener('input', function (e) {
+        if (e.target.matches('[data-username-source], [data-username-input]')) {
+          updateUsernamePreview();
+        }
+      });
+
+      // ---- Modal-Close (X + Cancel) ----
       document.addEventListener('click', function (e) {
         if (e.target.closest('[data-action="close-modal"]')) {
           var m = e.target.closest('.modal-scrim');
@@ -141,9 +226,40 @@
         }
       });
 
-      // Credentials-Form-Pfad: anstatt Standard-POST machen wir
-      // einen Fetch und ersetzen den Form-Container durch das
-      // Credentials-Modal-HTML aus der Server-Antwort.
+      // ---- Copy-Button mit visuellem Feedback ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-copy-target]');
+        if (!btn) return;
+        e.preventDefault();
+        var sel = btn.getAttribute('data-copy-target');
+        var src = document.querySelector(sel);
+        if (!src) return;
+        var text = src.textContent || '';
+        var done = function () {
+          var label = btn.querySelector('[data-copy-label]');
+          var orig = label ? label.textContent : '';
+          btn.classList.add('is-copied');
+          if (label) label.textContent = 'Kopiert';
+          setTimeout(function () {
+            btn.classList.remove('is-copied');
+            if (label) label.textContent = orig;
+          }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(done);
+        } else {
+          // Fallback: textarea selektieren
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (err) {}
+          ta.remove();
+          done();
+        }
+      });
+
+      // ---- Credentials-Submit-Pfad ----
       document.addEventListener('submit', function (e) {
         var form = e.target.closest('form[data-credentials-form]');
         if (!form) return;
@@ -160,11 +276,9 @@
             return r.json();
           })
           .then(function (j) {
-            // Modal schliessen
             document.querySelectorAll('.modal-scrim.is-open').forEach(function (m) {
               m.classList.remove('is-open');
             });
-            // Credentials-Modal-Container einhaengen
             var existing = document.querySelector('[data-modal="credentials"]');
             if (existing) existing.remove();
             var div = document.createElement('div');
@@ -179,27 +293,62 @@
       function renderCredentials(j) {
         // Struktur strikt nach Library-Konvention:
         //   modal-scrim > modal-glass > modal-header / modal-body / modal-footer
-        // Die library-interactions.js prueft modal-glass als
-        // Inner-Container, sonst schliesst sie bei JEDEM Klick im
-        // Modal-Bereich.
+        // Die library-interactions.js prueft modal-glass als Inner-
+        // Container, sonst schliesst sie bei JEDEM Klick im Modal.
+        var name = escape(j.name);
+        var username = escape(j.username);
+        var password = escape(j.password);
+        var loginURL = escape(j.login_url);
+        var qrSVG = j.qr_svg || '';
         return ''
           + '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
           +   '<div class="modal-glass">'
           +     '<header class="modal-header">'
           +       '<div>'
-          +         '<h2 class="modal-title">Zugangsdaten fuer ' + escape(j.name) + '</h2>'
-          +         '<p class="modal-sub">Passwort wird nur EIN MAL angezeigt. Bitte sofort an den Mieter weitergeben.</p>'
+          +         '<h2 class="modal-title">Zugangsdaten fuer ' + name + '</h2>'
+          +         '<p class="modal-sub">Anmelde-Username: <code>' + username + '</code></p>'
           +       '</div>'
           +       '<button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">'
           +         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
           +       '</button>'
           +     '</header>'
           +     '<div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">'
-          +       '<div class="field"><label class="field-label">Benutzername</label><div class="input" style="user-select:all;">' + escape(j.username) + '</div></div>'
-          +       '<div class="field"><label class="field-label">Passwort</label><div class="input" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
-          +       '<div class="field"><label class="field-label">Login-Link</label><div class="input" style="user-select:all; word-break:break-all;">' + escape(j.login_url) + '</div></div>'
-          +       '<div class="qr-box" style="display:flex; justify-content:center;">' + (j.qr_svg || '') + '</div>'
-          +       '<p class="field-hint" style="text-align:center;">QR scannen oeffnet die Login-Seite. Username und Passwort vom Zettel uebertragen.</p>'
+          +       '<div class="banner banner-orange" role="status">'
+          +         'Achtung: Passwort wird nur EINMAL angezeigt. Bitte sofort sicher weitergeben oder notieren.'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Benutzername</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" id="cred-username" style="user-select:all;">' + username + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-username">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Passwort</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + password + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-password">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Login-Link</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" id="cred-url" style="user-select:all; word-break:break-all;">' + loginURL + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-url">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="qr-box" style="display:flex; justify-content:center;">' + qrSVG + '</div>'
+          +       '<p class="field-hint" style="text-align:center;">Mieter kann den QR-Code mit dem Handy scannen und sich dann mit Username und Passwort vom Zettel anmelden.</p>'
           +     '</div>'
           +     '<footer class="modal-footer">'
           +       '<button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button>'
