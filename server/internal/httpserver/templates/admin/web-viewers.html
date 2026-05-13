@@ -83,7 +83,7 @@
 
     <!-- Anlegen-Modal -->
     <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true">
-      <div class="modal modal-md">
+      <div class="modal modal-glass modal-md">
         <form method="post" action="/a/web-viewers" data-credentials-form>
           <div class="modal-head">
             <h2 class="modal-title">Web-Viewer anlegen</h2>
@@ -171,16 +171,21 @@
       });
 
       function renderCredentials(j) {
+        // modal-glass-Klasse ist Pflicht: das library-interactions.js
+        // schliesst das Modal nur wenn der Klick AUSSERHALB einer
+        // .modal-glass-Box landet (closest('.modal-glass') !== null
+        // -> Klick ist innerhalb -> bleibt offen).
         return '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
-          + '<div class="modal modal-md">'
+          + '<div class="modal modal-glass modal-md">'
           + '<div class="modal-head"><h2 class="modal-title">Zugangsdaten fuer ' + escape(j.name) + '</h2>'
           + '<button class="btn-icon btn-ghost" type="button" data-action="close-modal" aria-label="Schliessen">x</button></div>'
           + '<div class="modal-body">'
           + '<p class="modal-sub">Passwort wird nur EIN MAL angezeigt. Bitte sofort an den Mieter weitergeben.</p>'
-          + '<div class="field"><label class="field-label">Benutzername</label><div class="input">' + escape(j.username) + '</div></div>'
-          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Passwort</label><div class="input" style="font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
-          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Login-Link</label><div class="input" style="word-break:break-all;">' + escape(j.login_url) + '</div></div>'
+          + '<div class="field"><label class="field-label">Benutzername</label><div class="input" style="user-select:all;">' + escape(j.username) + '</div></div>'
+          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Passwort</label><div class="input" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
+          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Login-Link</label><div class="input" style="user-select:all; word-break:break-all;">' + escape(j.login_url) + '</div></div>'
           + '<div class="qr-box" style="margin-top:var(--space-4); display:flex; justify-content:center;">' + (j.qr_svg || '') + '</div>'
+          + '<p class="field-hint" style="text-align:center;">QR scannen oeffnet die Login-Seite. Username und Passwort vom Zettel uebertragen (Pre-Fill ist absichtlich aus Sicherheitsgruenden weg).</p>'
           + '</div>'
           + '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button></div>'
           + '</div></div>';
