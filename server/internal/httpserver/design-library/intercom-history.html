@@ -1,0 +1,62 @@
+<!--
+  unifix · intercom-history.html
+  Verlauf — bottom sheet sliding up over the idle screen.
+
+  Rendered ON TOP of the idle screen markup. In Go-templates,
+  treat as an always-present overlay whose visibility is
+  controlled by adding/removing `is-open` on `.scrim` and
+  `.sheet`. interactions.js handles the toggle.
+
+    <div class="stage">
+      {{template "intercom-idle"    .}}
+      {{template "intercom-history" .}}
+    </div>
+
+  Required server data:
+    .HistoryItems   — slice of { Where, When, Unread }
+-->
+
+<!-- Backdrop scrim (tap to dismiss) -->
+<div class="scrim is-open" data-sheet-scrim="history" aria-hidden="true"></div>
+
+<!-- Sheet -->
+<aside class="sheet is-open"
+       data-sheet="history"
+       role="dialog"
+       aria-modal="true"
+       aria-label="Verlauf">
+
+  <div class="sheet-handle" data-action="close-sheet" aria-hidden="true"></div>
+
+  <div class="sheet-header">
+    <h2 class="sheet-title">Verlauf</h2>
+    <button class="sheet-close" data-action="close-sheet" aria-label="Verlauf schließen">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 6l12 12M18 6 6 18"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="sheet-list">
+    {{range .HistoryItems}}
+      <div class="history-item{{if .Unread}} is-unread{{end}}" role="button" tabindex="0">
+        <div class="history-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M5.5 17a.6.6 0 0 1-.5-1l1.1-1.4c.3-.4.4-.8.4-1.2V10a5.5 5.5 0 0 1 11 0v3.4c0 .4.1.8.4 1.2L19 16a.6.6 0 0 1-.5 1h-13Z"/>
+            <path d="M9.4 18.4a.6.6 0 0 1 1.1.3 1.5 1.5 0 0 0 3 0 .6.6 0 0 1 1.1-.3 2.6 2.6 0 0 1-5.2 0Z"/>
+          </svg>
+        </div>
+        <div class="history-body">
+          <span class="history-where">{{.Where}}</span>
+          <span class="history-when">{{.When}}</span>
+        </div>
+        {{if .Unread}}<span class="history-tag">neu</span>{{end}}
+      </div>
+    {{else}}
+      <div style="padding: var(--space-8); text-align: center; color: var(--color-text-tertiary);">
+        Noch keine Klingel-Ereignisse.
+      </div>
+    {{end}}
+  </div>
+
+</aside>

@@ -7,36 +7,43 @@ import (
 	"strings"
 )
 
-// staticFS holds the small set of files we ship verbatim to the
-// browser: theme.css today, future fonts or images later. The
-// embed directive bundles them into the binary so the server has
-// no on-disk dependency.
+// designLibraryFS is the Claude-Design library bundle (S13-02-FIX3).
+// tokens.css, components.css and interactions.js are exposed
+// verbatim under /static/; the HTML snippets are parsed as Go
+// templates by templates.go (same embed FS, different consumer).
 //
-//go:embed static/*
-var staticFS embed.FS
+//go:embed design-library/*
+var designLibraryFS embed.FS
 
-// staticHandler returns an http.Handler that serves files from
-// the embedded static/ directory under the /static/ URL prefix.
-// All assets get a long Cache-Control because they are immutable
-// per build; the binary version is the cache key.
+// staticHandler serves the css + js assets from the embedded
+// design-library at /static/<name>. The HTML snippets in the
+// same directory are NOT served as static files; they are
+// parsed into the html/template registry instead.
 func staticHandler() http.Handler {
-	sub, err := fs.Sub(staticFS, "static")
+	sub, err := fs.Sub(designLibraryFS, "design-library")
 	if err != nil {
-		// embed.FS guarantees the subtree exists at compile time;
-		// a panic here means the build was broken intentionally.
 		panic("staticHandler: " + err.Error())
 	}
 	file := http.FileServer(http.FS(sub))
-	return http.StripPrefix("/static/", cacheableStatic(file))
+	return http.StripPrefix("/static/", assetGate(file))
 }
 
-// cacheableStatic adds Cache-Control to text/style responses so
-// browsers do not refetch theme.css on every page load.
-func cacheableStatic(next http.Handler) http.Handler {
+// assetGate adds Cache-Control headers for the CSS/JS bundle and
+// rejects requests for the HTML snippets so a misguided client
+// cannot scrape the template source through /static/.
+func assetGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".css") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, ".css"):
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
 			w.Header().Set("Cache-Control", "public, max-age=3600")
+		case strings.HasSuffix(r.URL.Path, ".js"):
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		case strings.HasSuffix(r.URL.Path, ".html"),
+			strings.HasSuffix(r.URL.Path, ".md"):
+			http.NotFound(w, r)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

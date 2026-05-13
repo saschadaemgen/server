@@ -1,0 +1,208 @@
+<!--
+  unifix · admin-settings.html
+  Organisations- und Integrations-Einstellungen für Hausverwalter.
+
+    <body class="admin-shell">
+      {{template "admin-settings" .}}
+    </body>
+
+  Required server data:
+    .User              — { Name, Initials }
+    .Settings          — {
+                           OrgName, TimeZone,
+                           UAControllerURL, UAStatus ("connected"|"error"|"untested"),
+                           UALastSync,
+                           MagicLinkLifetime, MagicLinkRenew,
+                           SMTPHost, SMTPFrom,
+                           AdminTheme ("dark"|"light"|"system")
+                         }
+    .CSRFToken         — string
+-->
+
+<nav class="admin-nav" aria-label="Hauptnavigation">
+  <a class="admin-nav-brand" href="/a/">
+    <span class="admin-nav-brand-mark" aria-hidden="true">u</span>
+    <span>unifix</span>
+  </a>
+  <div class="admin-nav-links" role="navigation">
+    <a class="admin-nav-link" href="/a/">Dashboard</a>
+    <a class="admin-nav-link" href="/a/users">Mieter</a>
+    <a class="admin-nav-link" href="/a/mocks">Mock-Tools</a>
+    <a class="admin-nav-link is-active" href="/a/settings">Einstellungen</a>
+  </div>
+  <div class="admin-nav-actions">
+    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
+      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
+      <span class="admin-nav-user-name">{{.User.Name}}</span>
+    </div>
+  </div>
+</nav>
+
+<main class="page" role="main" style="max-width: 880px;">
+
+  <header class="page-header">
+    <div class="page-title-stack">
+      <h1 class="page-title">Einstellungen</h1>
+      <p class="page-subtitle">Organisation, Integrationen und Sicherheit.</p>
+    </div>
+  </header>
+
+  <form method="post" action="/a/settings" style="display: flex; flex-direction: column; gap: var(--space-7);">
+    <input type="hidden" name="_csrf" value="{{.CSRFToken}}"/>
+
+    <!-- Allgemein -->
+    <section class="set-section">
+      <div class="set-section-title">Allgemein</div>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Organisation</span>
+            <span class="set-row-sub">Name auf Mieter-Geräten und in E-Mails.</span>
+          </div>
+          <input class="input" name="org_name" value="{{.Settings.OrgName}}" style="max-width: 280px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Zeitzone</span>
+            <span class="set-row-sub">Für Zeitstempel und Ruhezeit-Berechnung.</span>
+          </div>
+          <select class="input" name="time_zone" style="max-width: 280px;">
+            <option value="Europe/Berlin"{{if eq .Settings.TimeZone "Europe/Berlin"}} selected{{end}}>Europe/Berlin (UTC+1)</option>
+            <option value="Europe/Vienna"{{if eq .Settings.TimeZone "Europe/Vienna"}} selected{{end}}>Europe/Vienna (UTC+1)</option>
+            <option value="Europe/Zurich"{{if eq .Settings.TimeZone "Europe/Zurich"}} selected{{end}}>Europe/Zurich (UTC+1)</option>
+            <option value="UTC"{{if eq .Settings.TimeZone "UTC"}} selected{{end}}>UTC</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- UA Integration -->
+    <section class="set-section">
+      <div class="set-section-title">UniFi Access Integration</div>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Controller-URL</span>
+            <span class="set-row-sub">Adresse des UA-Controllers im lokalen Netz.</span>
+          </div>
+          <input class="input" name="ua_controller_url" type="url" value="{{.Settings.UAControllerURL}}" placeholder="https://ua.local:12445" style="max-width: 280px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Verbindung</span>
+            <span class="set-row-sub">
+              {{if .Settings.UALastSync}}Letzter Sync: {{.Settings.UALastSync}}{{else}}Noch nicht synchronisiert.{{end}}
+            </span>
+          </div>
+          {{if eq .Settings.UAStatus "connected"}}
+            <span class="status-pill is-ok"><span class="status-dot"></span>Verbunden</span>
+          {{else if eq .Settings.UAStatus "error"}}
+            <span class="status-pill is-danger"><span class="status-dot"></span>Fehler</span>
+          {{else}}
+            <span class="status-pill"><span class="status-dot"></span>Nicht getestet</span>
+          {{end}}
+        </div>
+        <div class="set-row is-interactive" data-action="test-ua">
+          <div class="set-row-main">
+            <span class="set-row-label">Verbindung testen</span>
+            <span class="set-row-sub">Sendet einen Ping an den Controller.</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" type="button">Test starten</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Magic-Link Sicherheit -->
+    <section class="set-section">
+      <div class="set-section-title">Magic-Link-Sicherheit</div>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Gültigkeitsdauer</span>
+            <span class="set-row-sub">Wie lange ein Magic Link nach Versand gültig bleibt.</span>
+          </div>
+          <select class="input" name="magic_link_lifetime" style="max-width: 240px;">
+            <option value="24h"{{if eq .Settings.MagicLinkLifetime "24h"}} selected{{end}}>24 Stunden</option>
+            <option value="7d"{{if eq .Settings.MagicLinkLifetime "7d"}} selected{{end}}>7 Tage</option>
+            <option value="30d"{{if eq .Settings.MagicLinkLifetime "30d"}} selected{{end}}>30 Tage</option>
+            <option value="never"{{if eq .Settings.MagicLinkLifetime "never"}} selected{{end}}>Unbegrenzt</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Automatische Verlängerung</span>
+            <span class="set-row-sub">Bei aktiver Nutzung Link automatisch verlängern.</span>
+          </div>
+          <button type="button" class="toggle{{if .Settings.MagicLinkRenew}} is-on{{end}}" role="switch" aria-checked="{{.Settings.MagicLinkRenew}}" data-toggle-name="magic_link_renew">
+            <span class="toggle-knob"></span>
+          </button>
+          <input type="hidden" name="magic_link_renew" value="{{.Settings.MagicLinkRenew}}"/>
+        </div>
+      </div>
+    </section>
+
+    <!-- Benachrichtigungen -->
+    <section class="set-section">
+      <div class="set-section-title">Benachrichtigungen</div>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">SMTP-Host</span>
+            <span class="set-row-sub">Für ausgehende E-Mails (Magic Links, Reports).</span>
+          </div>
+          <input class="input" name="smtp_host" value="{{.Settings.SMTPHost}}" placeholder="smtp.example.com:587" style="max-width: 280px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Absender-Adresse</span>
+            <span class="set-row-sub">Erscheint als From: in Mieter-Mails.</span>
+          </div>
+          <input class="input" name="smtp_from" type="email" value="{{.Settings.SMTPFrom}}" placeholder="noreply@hausverwaltung.de" style="max-width: 280px;"/>
+        </div>
+      </div>
+    </section>
+
+    <!-- Erscheinungsbild -->
+    <section class="set-section">
+      <div class="set-section-title">Erscheinungsbild (Admin)</div>
+      <div class="set-card is-padded">
+        <div class="segment" role="radiogroup" aria-label="Erscheinungsbild">
+          <button type="button" class="{{if eq .Settings.AdminTheme "light"}}is-active{{end}}" data-theme="light">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="4"/>
+              <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>
+            </svg>
+            Hell
+          </button>
+          <button type="button" class="{{if eq .Settings.AdminTheme "dark"}}is-active{{end}}" data-theme="dark">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+            </svg>
+            Dunkel
+          </button>
+          <button type="button" class="{{if eq .Settings.AdminTheme "system"}}is-active{{end}}" data-theme="system">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8"/>
+              <path d="M12 4v16"/>
+            </svg>
+            System
+          </button>
+        </div>
+        <input type="hidden" name="admin_theme" value="{{.Settings.AdminTheme}}"/>
+      </div>
+    </section>
+
+    <!-- Save bar -->
+    <footer style="display: flex; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--color-hairline);">
+      <button type="button" class="btn btn-ghost">Verwerfen</button>
+      <button type="submit" class="btn btn-primary">Änderungen speichern</button>
+    </footer>
+
+  </form>
+
+</main>

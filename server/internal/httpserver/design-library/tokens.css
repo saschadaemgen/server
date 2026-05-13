@@ -1,0 +1,276 @@
+/* ============================================================
+   unifix · Design Tokens
+   ------------------------------------------------------------
+   Single source of truth for all design values.
+   Every component class in components.css must consume these.
+
+   Theme:  default is dark; opt into light via
+           <html data-theme="light"> or <body data-theme="light">.
+           "system" preference can be wired via interactions.js.
+   ============================================================ */
+
+:root,
+:root[data-theme="dark"] {
+
+  /* ------------------------------------------------------------
+     SURFACE COLORS
+     ------------------------------------------------------------ */
+
+  /* Room (the page background, behind the device viewer) */
+  --color-room:                #000000;
+
+  /* App-level background of any web view (admin pages) */
+  --color-bg:                  #08090c;
+  /* One step elevated (cards, sheets, headers) */
+  --color-bg-elev:             #0e1014;
+  /* Two steps elevated (popovers, hover'd cards) */
+  --color-bg-elev-2:           #14161c;
+
+  /* The camera viewport area in the intercom — intentionally
+     stays dark in both themes since it shows a video feed. */
+  --color-stream-bg:           #050608;
+
+  /* Hairlines (1px borders) */
+  --color-hairline:            rgba(255, 255, 255, 0.06);
+  --color-hairline-strong:     rgba(255, 255, 255, 0.10);
+
+  /* Glass surfaces (translucent layers, e.g. button bg) */
+  --color-surface-1:           rgba(255, 255, 255, 0.04);
+  --color-surface-2:           rgba(255, 255, 255, 0.06);
+  --color-surface-3:           rgba(255, 255, 255, 0.10);
+  --color-surface-hover:       rgba(255, 255, 255, 0.08);
+
+  /* Frosted-glass sheet background (history sheet, modal) */
+  --color-sheet-bg:            rgba(22, 22, 26, 0.86);
+  --color-modal-bg:            rgba(22, 22, 26, 0.94);
+
+  /* Scrim behind sheets and modals */
+  --color-scrim:               rgba(0, 0, 0, 0.45);
+
+  /* ------------------------------------------------------------
+     TEXT
+     ------------------------------------------------------------ */
+
+  --color-text:                rgba(255, 255, 255, 1.00);
+  --color-text-secondary:      rgba(255, 255, 255, 0.62);
+  --color-text-tertiary:       rgba(255, 255, 255, 0.42);
+  --color-text-quaternary:     rgba(255, 255, 255, 0.22);
+
+  /* Inverse text — for use on accent-colored fills */
+  --color-text-on-accent:      #ffffff;
+
+  /* ------------------------------------------------------------
+     BUTTON GRADIENT (theme-sensitive — flips for light)
+     Used on .btn-glass and .action (intercom action bar)
+     ------------------------------------------------------------ */
+
+  --grad-btn-from:             rgba(255, 255, 255, 0.08);
+  --grad-btn-to:                rgba(255, 255, 255, 0.03);
+  --grad-btn-hi-from:          rgba(255, 255, 255, 0.14);
+  --grad-btn-hi-to:            rgba(255, 255, 255, 0.06);
+
+  /* Highlight (inset top sheen) */
+  --color-btn-highlight:       rgba(255, 255, 255, 0.18);
+
+  /* ------------------------------------------------------------
+     SHADOWS (theme-sensitive)
+     ------------------------------------------------------------ */
+
+  --shadow-sm:                 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-md:                 0 6px 14px -6px rgba(0, 0, 0, 0.55);
+  --shadow-lg:                 0 20px 40px -10px rgba(0, 0, 0, 0.55);
+  --shadow-xl:                 0 40px 80px -20px rgba(0, 0, 0, 0.65);
+
+  /* For "lifted" panels e.g. modal cards */
+  --shadow-modal:              0 30px 80px -20px rgba(0, 0, 0, 0.70);
+
+  /* ------------------------------------------------------------
+     STREAM-SLOT TEXT (always-dark camera viewport)
+     ------------------------------------------------------------ */
+
+  --color-stream-text:           rgba(255, 255, 255, 1.00);
+  --color-stream-text-secondary: rgba(255, 255, 255, 0.62);
+  --color-stream-text-tertiary:  rgba(255, 255, 255, 0.42);
+  --color-stream-text-quaternary:rgba(255, 255, 255, 0.22);
+}
+
+
+/* ============================================================
+   LIGHT THEME OVERRIDES
+   Only surfaces, text, button gradients and shadows flip.
+   Accents (brand/danger/warn/ok) stay constant — see below.
+   ============================================================ */
+
+:root[data-theme="light"] {
+
+  --color-room:                #e6e6ea;
+
+  --color-bg:                  #f3f3f5;
+  --color-bg-elev:             #ffffff;
+  --color-bg-elev-2:           #fafafb;
+
+  /* Stream stays dark even in light mode (video viewport) */
+  --color-stream-bg:           #050608;
+
+  --color-hairline:            rgba(0, 0, 0, 0.08);
+  --color-hairline-strong:     rgba(0, 0, 0, 0.14);
+
+  --color-surface-1:           rgba(0, 0, 0, 0.035);
+  --color-surface-2:           rgba(0, 0, 0, 0.055);
+  --color-surface-3:           rgba(0, 0, 0, 0.08);
+  --color-surface-hover:       rgba(0, 0, 0, 0.06);
+
+  --color-sheet-bg:            rgba(248, 248, 250, 0.88);
+  --color-modal-bg:            rgba(255, 255, 255, 0.96);
+
+  --color-scrim:               rgba(0, 0, 0, 0.25);
+
+  --color-text:                #18181b;
+  --color-text-secondary:      rgba(0, 0, 0, 0.62);
+  --color-text-tertiary:       rgba(0, 0, 0, 0.42);
+  --color-text-quaternary:     rgba(0, 0, 0, 0.22);
+
+  --grad-btn-from:             rgba(0, 0, 0, 0.06);
+  --grad-btn-to:                rgba(0, 0, 0, 0.02);
+  --grad-btn-hi-from:          rgba(0, 0, 0, 0.10);
+  --grad-btn-hi-to:            rgba(0, 0, 0, 0.04);
+
+  --color-btn-highlight:       rgba(255, 255, 255, 0.6);
+
+  --shadow-sm:                 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md:                 0 6px 14px -6px rgba(0, 0, 0, 0.10);
+  --shadow-lg:                 0 20px 40px -12px rgba(0, 0, 0, 0.10);
+  --shadow-xl:                 0 32px 64px -16px rgba(0, 0, 0, 0.12);
+  --shadow-modal:              0 24px 64px -16px rgba(0, 0, 0, 0.16);
+
+  /* Stream-internal text values are kept dark since the stream
+     itself stays dark in both themes. */
+}
+
+
+/* ============================================================
+   CONSTANT TOKENS — identical across themes
+   Brand accents, semantic colors, typography, spacing, radii,
+   easings, motion, z-index.
+   ============================================================ */
+
+:root {
+
+  /* ------------------------------------------------------------
+     ACCENTS / SEMANTIC COLORS
+     ------------------------------------------------------------ */
+
+  /* Primary brand — used for door-unlock, links, focus rings */
+  --color-accent:              #3d7bff;
+  --color-accent-soft:         rgba(61, 123, 255, 0.18);
+  --color-accent-glow:         rgba(61, 123, 255, 0.50);
+
+  /* Danger — destructive actions, "ignore call" */
+  --color-danger:              #e84a44;
+  --color-danger-soft:         rgba(232, 74, 68, 0.15);
+  --color-danger-glow:         rgba(232, 74, 68, 0.50);
+
+  /* Warning — pending states, "door unlock" (caution) */
+  --color-warn:                #f0962a;
+  --color-warn-soft:           rgba(240, 150, 42, 0.15);
+  --color-warn-glow:           rgba(240, 150, 42, 0.50);
+
+  /* OK / success — "online", accepted, healthy */
+  --color-ok:                  #2cc66a;
+  --color-ok-soft:             rgba(44, 198, 106, 0.15);
+  --color-ok-glow:             rgba(44, 198, 106, 0.50);
+
+  /* ------------------------------------------------------------
+     TYPOGRAPHY
+     ------------------------------------------------------------ */
+
+  /* System font stack — no Google Fonts, no SF Pro pinning */
+  --font-sans:    system-ui, "Segoe UI Variable", "Segoe UI",
+                  "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono",
+                  "Roboto Mono", Menlo, Consolas, monospace;
+
+  /* Type scale (size, weight, letter-spacing) */
+  --fs-xs:        11px;   /* labels, captions */
+  --fs-sm:        12px;   /* secondary copy */
+  --fs-base:      14px;   /* body text */
+  --fs-md:        15px;   /* emphasized body */
+  --fs-lg:        17px;   /* sub-headlines */
+  --fs-xl:        22px;   /* page title */
+  --fs-2xl:       28px;   /* big numbers, stat cards */
+  --fs-3xl:       36px;   /* hero text (Klingelt) */
+
+  --fw-regular:   400;
+  --fw-medium:    500;
+  --fw-semibold:  600;
+  --fw-bold:      700;
+
+  --ls-tight:    -0.025em;
+  --ls-snug:     -0.01em;
+  --ls-normal:    0;
+  --ls-wide:      0.04em;
+  --ls-wider:     0.06em;
+  --ls-widest:    0.08em;
+
+  /* ------------------------------------------------------------
+     SPACING (4px base grid)
+     ------------------------------------------------------------ */
+
+  --space-1:      4px;
+  --space-2:      8px;
+  --space-3:      12px;
+  --space-4:      14px;   /* common row padding */
+  --space-5:      16px;
+  --space-6:      20px;
+  --space-7:      24px;
+  --space-8:      28px;
+  --space-9:      32px;
+  --space-10:     40px;
+  --space-12:     48px;
+  --space-14:     56px;
+  --space-16:     64px;
+  --space-20:     80px;
+  --space-24:     96px;
+
+  /* ------------------------------------------------------------
+     BORDER RADIUS
+     ------------------------------------------------------------ */
+
+  --radius-xs:    6px;    /* tags, small chips */
+  --radius-sm:    9px;    /* squircle icon bubbles */
+  --radius-md:    12px;   /* segment buttons */
+  --radius-lg:    16px;   /* cards, list groups */
+  --radius-xl:    20px;   /* big cards, modal */
+  --radius-2xl:   22px;   /* stream slot */
+  --radius-3xl:   28px;   /* bottom sheet */
+  --radius-device:44px;   /* device shell */
+  --radius-full:  9999px; /* pills, circles */
+
+  /* ------------------------------------------------------------
+     MOTION
+     ------------------------------------------------------------ */
+
+  /* Spring-like ease, native-feeling */
+  --ease-spring:    cubic-bezier(0.32, 0.72, 0, 1);
+  /* Smooth out */
+  --ease-out:       cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* Standard ease (in-out) */
+  --ease-in-out:    cubic-bezier(0.4, 0, 0.2, 1);
+
+  --dur-fast:       120ms;
+  --dur-base:       200ms;
+  --dur-slow:       320ms;
+  --dur-sheet:      360ms;
+  --dur-overlay:    240ms;
+
+  /* ------------------------------------------------------------
+     Z-INDEX
+     ------------------------------------------------------------ */
+
+  --z-base:         1;
+  --z-sticky:       10;
+  --z-overlay:      100;
+  --z-sheet:        200;
+  --z-modal:        300;
+  --z-toast:        400;
+}

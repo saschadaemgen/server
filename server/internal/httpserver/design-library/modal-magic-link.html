@@ -1,0 +1,104 @@
+<!--
+  unifix · modal-magic-link.html
+  Modal: Magic-Link für einen Mieter anzeigen / senden.
+
+  Rendered once per page; visibility is controlled by adding
+  `is-open` on `.modal-scrim` (interactions.js handles it).
+
+    <body class="admin-shell">
+      ...
+      {{template "modal-magic-link" .}}
+    </body>
+
+  Required server data (set when modal opens):
+    .Modal.Unit         — { Name, TenantName, Email }
+    .Modal.MagicLinkURL — full URL incl. token
+    .Modal.ExpiresIn    — pre-formatted "in 6 Tagen, 23 h"
+    .Modal.QRSVG        — optional inline-SVG QR; omit to show
+                          the placeholder included below
+-->
+
+<div class="modal-scrim is-open"
+     data-modal="magic-link"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="magic-link-title">
+
+  <div class="modal-glass">
+
+    <header class="modal-header">
+      <div>
+        <h2 class="modal-title" id="magic-link-title">Magic Link für {{.Modal.Unit.Name}}</h2>
+        <p class="modal-sub">{{.Modal.Unit.TenantName}} · {{.Modal.Unit.Email}}</p>
+      </div>
+      <button class="modal-close" data-action="close-modal" aria-label="Schließen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 6l12 12M18 6 6 18"/>
+        </svg>
+      </button>
+    </header>
+
+    <div class="modal-body" style="display: flex; flex-direction: column; gap: var(--space-5);">
+
+      <!-- QR placeholder (will be replaced with real SVG QR in production) -->
+      <div class="qr-box" aria-label="QR-Code zum Magic Link">
+        {{if .Modal.QRSVG}}
+          {{.Modal.QRSVG}}
+        {{else}}
+          QR
+        {{end}}
+      </div>
+
+      <!-- URL + copy -->
+      <div class="field">
+        <label class="field-label">Magic-Link-URL</label>
+        <div class="link-row">
+          <div class="link-row-url" data-magic-url>{{.Modal.MagicLinkURL}}</div>
+          <button class="link-row-copy" type="button" data-action="copy-magic-link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="8" y="8" width="12" height="12" rx="2"/>
+              <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
+            </svg>
+            <span data-copy-label>Kopieren</span>
+          </button>
+        </div>
+        <div class="field-hint">Wird automatisch ungültig {{.Modal.ExpiresIn}}.</div>
+      </div>
+
+      <!-- Lifetime / regenerate hint -->
+      <div style="display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--color-warn-soft); border: 1px solid var(--color-warn-soft); border-radius: var(--radius-md); color: var(--color-warn);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;">
+          <circle cx="12" cy="12" r="8.5"/>
+          <path d="M12 8v5l3 1.5"/>
+        </svg>
+        <div style="font-size: var(--fs-sm); color: var(--color-text);">
+          Diesen Link nicht öffentlich teilen — er gewährt vollen Zugriff auf das Intercom-Gerät dieser Wohnung.
+        </div>
+      </div>
+
+    </div>
+
+    <footer class="modal-footer">
+      <button type="button" class="btn btn-ghost btn-sm" data-action="regenerate-magic-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 10a8 8 0 0 1 13.7-5.7L20 6"/>
+          <path d="M20 4v4h-4"/>
+          <path d="M20 14a8 8 0 0 1-13.7 5.7L4 18"/>
+          <path d="M4 20v-4h4"/>
+        </svg>
+        Neu generieren
+      </button>
+      <div style="flex: 1;"></div>
+      <button type="button" class="btn btn-secondary" data-action="close-modal">Schließen</button>
+      <button type="button" class="btn btn-primary" data-action="send-magic-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18v12H3z"/>
+          <path d="M3 7l9 6 9-6"/>
+        </svg>
+        Per E-Mail senden
+      </button>
+    </footer>
+
+  </div>
+
+</div>

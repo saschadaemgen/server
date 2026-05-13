@@ -1,0 +1,160 @@
+<!--
+  unifix · admin-users.html
+  Mieter-Verwaltung. Liste aller Tenants mit Magic-Link-Status.
+
+    <body class="admin-shell">
+      {{template "admin-users" .}}
+    </body>
+
+  Required server data:
+    .User           — { Name, Initials }
+    .Tenants        — slice of {
+                        ID, UnitName, UnitMark, TenantName, Email,
+                        MagicLinkStatus ("active"|"expired"|"not-sent"),
+                        MagicLinkExpiry, LastSeen
+                      }
+    .Pagination     — { Page, Total, PerPage }
+-->
+
+<nav class="admin-nav" aria-label="Hauptnavigation">
+  <a class="admin-nav-brand" href="/a/">
+    <span class="admin-nav-brand-mark" aria-hidden="true">u</span>
+    <span>unifix</span>
+  </a>
+  <div class="admin-nav-links" role="navigation">
+    <a class="admin-nav-link" href="/a/">Dashboard</a>
+    <a class="admin-nav-link is-active" href="/a/users">Mieter</a>
+    <a class="admin-nav-link" href="/a/mocks">Mock-Tools</a>
+    <a class="admin-nav-link" href="/a/settings">Einstellungen</a>
+  </div>
+  <div class="admin-nav-actions">
+    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
+      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
+      <span class="admin-nav-user-name">{{.User.Name}}</span>
+    </div>
+  </div>
+</nav>
+
+<main class="page" role="main">
+
+  <header class="page-header">
+    <div class="page-title-stack">
+      <h1 class="page-title">Mieter</h1>
+      <p class="page-subtitle">{{.Pagination.Total}} Mieter über alle Wohnungen.</p>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-secondary" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M12 19l-4-4M12 19l4-4M5 5h14"/>
+        </svg>
+        CSV-Export
+      </button>
+      <button class="btn btn-primary" type="button" data-action="add-tenant">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Mieter hinzufügen
+      </button>
+    </div>
+  </header>
+
+  <div class="app-card">
+
+    <div class="app-card-head">
+      <div class="toolbar" style="flex: 1;">
+        <label class="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="6"/>
+            <path d="M16 16l4 4"/>
+          </svg>
+          <input type="search" name="q" placeholder="Wohnung, Name oder E-Mail suchen…"/>
+        </label>
+        <div class="segment" role="radiogroup" aria-label="Filter" style="grid-template-columns: repeat(4, auto);">
+          <button class="is-active" type="button">Alle</button>
+          <button class="" type="button">Aktiv</button>
+          <button class="" type="button">Abgelaufen</button>
+          <button class="" type="button">Ohne Link</button>
+        </div>
+      </div>
+    </div>
+
+    <table class="app-table">
+      <thead>
+        <tr>
+          <th style="width: 40px;"><input type="checkbox" class="checkbox" aria-label="Alle auswählen"/></th>
+          <th>Wohnung &amp; Mieter</th>
+          <th>E-Mail</th>
+          <th>Magic Link</th>
+          <th>Letzte Aktivität</th>
+          <th class="col-shrink"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Tenants}}
+          <tr>
+            <td><input type="checkbox" class="checkbox" value="{{.ID}}" aria-label="{{.TenantName}} auswählen"/></td>
+            <td>
+              <div class="cell-id">
+                <div class="cell-id-mark">{{.UnitMark}}</div>
+                <div class="cell-id-stack">
+                  <span class="cell-id-name">{{.UnitName}}</span>
+                  <span class="cell-id-meta">{{.TenantName}}</span>
+                </div>
+              </div>
+            </td>
+            <td class="muted">{{.Email}}</td>
+            <td>
+              {{if eq .MagicLinkStatus "active"}}
+                <span class="status-pill is-ok"><span class="status-dot"></span>Aktiv · {{.MagicLinkExpiry}}</span>
+              {{else if eq .MagicLinkStatus "expired"}}
+                <span class="status-pill is-warn"><span class="status-dot"></span>Abgelaufen</span>
+              {{else}}
+                <span class="status-pill"><span class="status-dot"></span>Noch nicht gesendet</span>
+              {{end}}
+            </td>
+            <td class="muted">{{.LastSeen}}</td>
+            <td class="col-shrink">
+              <div style="display: flex; gap: var(--space-1);">
+                <button class="btn btn-ghost btn-sm" type="button" data-action="open-magic-link" data-tenant="{{.ID}}" title="Magic Link">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 14a4 4 0 0 0 5.7 0l4-4a4 4 0 0 0-5.7-5.7l-1 1"/>
+                    <path d="M14 10a4 4 0 0 0-5.7 0l-4 4a4 4 0 0 0 5.7 5.7l1-1"/>
+                  </svg>
+                  Link
+                </button>
+                <button class="btn btn-ghost btn-sm btn-icon" type="button" aria-label="Optionen für {{.TenantName}}">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="6" cy="12" r="1.6"/>
+                    <circle cx="12" cy="12" r="1.6"/>
+                    <circle cx="18" cy="12" r="1.6"/>
+                  </svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    <!-- Pagination footer -->
+    <div class="app-card-head" style="border-top: 1px solid var(--color-hairline); border-bottom: 0;">
+      <span class="muted" style="font-size: var(--fs-sm);">
+        Seite {{.Pagination.Page}} · {{.Pagination.PerPage}} pro Seite · {{.Pagination.Total}} gesamt
+      </span>
+      <div style="display: flex; gap: var(--space-1);">
+        <button class="btn btn-ghost btn-sm btn-icon" type="button" aria-label="Vorige Seite">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-sm btn-icon" type="button" aria-label="Nächste Seite">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</main>

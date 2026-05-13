@@ -1,0 +1,197 @@
+<!--
+  unifix · admin-dashboard.html
+  Overview page for the Hausverwalter. Stat tiles + activity feed.
+
+    <body class="admin-shell">
+      {{template "admin-dashboard" .}}
+    </body>
+
+  Required server data:
+    .User           — { Name, Initials }
+    .Stats          — { ActiveDevices, EventsToday, EventsTrend,
+                        CamerasOnline, CamerasTotal, ActiveTenants }
+    .RecentEvents   — slice of { When, UnitName, DoorName, Action, Status }
+-->
+
+<nav class="admin-nav" aria-label="Hauptnavigation">
+  <a class="admin-nav-brand" href="/a/">
+    <span class="admin-nav-brand-mark" aria-hidden="true">u</span>
+    <span>unifix</span>
+  </a>
+  <div class="admin-nav-links" role="navigation">
+    <a class="admin-nav-link is-active" href="/a/">Dashboard</a>
+    <a class="admin-nav-link" href="/a/users">Mieter</a>
+    <a class="admin-nav-link" href="/a/mocks">Mock-Tools</a>
+    <a class="admin-nav-link" href="/a/settings">Einstellungen</a>
+  </div>
+  <div class="admin-nav-actions">
+    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
+      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
+      <span class="admin-nav-user-name">{{.User.Name}}</span>
+    </div>
+  </div>
+</nav>
+
+<main class="page" role="main">
+
+  <header class="page-header">
+    <div class="page-title-stack">
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-subtitle">Übersicht über alle Standorte, Geräte und Mieter.</p>
+    </div>
+    <div class="page-actions">
+      <div class="segment" role="radiogroup" aria-label="Zeitraum" style="grid-template-columns: repeat(3, auto);">
+        <button class="" type="button">Heute</button>
+        <button class="is-active" type="button">7 Tage</button>
+        <button class="" type="button">30 Tage</button>
+      </div>
+      <button class="btn btn-primary" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Mieter hinzufügen
+      </button>
+    </div>
+  </header>
+
+  <!-- KPI tiles -->
+  <div class="stat-grid">
+
+    <div class="stat-card is-accent">
+      <div class="stat-card-head">
+        <span class="stat-card-label">Aktive Geräte</span>
+        <div class="stat-card-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="6.5" width="13" height="11" rx="2.2"/>
+            <path d="M16 10l5-2.6v9.2L16 14z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card-value">{{.Stats.ActiveDevices}}</div>
+      <div class="stat-card-foot">
+        <span class="status-pill is-ok"><span class="status-dot"></span>Alle online</span>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-head">
+        <span class="stat-card-label">Klingel-Events heute</span>
+        <div class="stat-card-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5.5 17h13l-1.4-1.8c-.4-.5-.6-1.1-.6-1.8V10a4.5 4.5 0 0 0-9 0v3.4c0 .7-.2 1.3-.6 1.8L5.5 17Z"/>
+            <path d="M10 19.5a2 2 0 0 0 4 0"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card-value">{{.Stats.EventsToday}}</div>
+      <div class="stat-card-foot">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 14l5-5 5 5"/>
+        </svg>
+        <span style="color: var(--color-ok); font-weight: var(--fw-medium);">{{.Stats.EventsTrend}}</span>
+        <span>vs. gestern</span>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-head">
+        <span class="stat-card-label">Kameras online</span>
+        <div class="stat-card-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7.5C3 6.7 3.7 6 4.5 6h11c.8 0 1.5.7 1.5 1.5v9c0 .8-.7 1.5-1.5 1.5h-11C3.7 18 3 17.3 3 16.5v-9Z"/>
+            <path d="M17 10l4-2v8l-4-2"/>
+            <circle cx="10" cy="12" r="2.5"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card-value">
+        {{.Stats.CamerasOnline}}
+        <span style="font-size: var(--fs-base); color: var(--color-text-tertiary); font-weight: var(--fw-medium);">/ {{.Stats.CamerasTotal}}</span>
+      </div>
+      <div class="stat-card-foot">
+        <span class="status-pill is-warn"><span class="status-dot"></span>3 mit Warnung</span>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-card-head">
+        <span class="stat-card-label">Aktive Mieter</span>
+        <div class="stat-card-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9" cy="9" r="3.5"/>
+            <path d="M3 19a6 6 0 0 1 12 0"/>
+            <circle cx="17" cy="9" r="2.5"/>
+            <path d="M16 19a5 5 0 0 1 5-5"/>
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card-value">{{.Stats.ActiveTenants}}</div>
+      <div class="stat-card-foot muted">Magic Links aktiv</div>
+    </div>
+
+  </div>
+
+  <!-- Recent activity table -->
+  <section class="section-block">
+    <div class="section-block-header">
+      <h2 class="section-block-title">Letzte Ereignisse</h2>
+      <a class="btn btn-ghost btn-sm" href="/a/events">
+        Alle anzeigen
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 6l6 6-6 6"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="app-card">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>Zeit</th>
+            <th>Wohnung</th>
+            <th>Tür</th>
+            <th>Aktion</th>
+            <th class="col-shrink">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .RecentEvents}}
+            <tr>
+              <td class="col-mono">{{.When}}</td>
+              <td>
+                <div class="cell-id">
+                  <div class="cell-id-mark">{{.UnitMark}}</div>
+                  <div class="cell-id-stack">
+                    <span class="cell-id-name">{{.UnitName}}</span>
+                    <span class="cell-id-meta">{{.TenantName}}</span>
+                  </div>
+                </div>
+              </td>
+              <td>{{.DoorName}}</td>
+              <td>{{.Action}}</td>
+              <td class="col-shrink">
+                {{if eq .Status "answered"}}
+                  <span class="badge badge-ok">Angenommen</span>
+                {{else if eq .Status "ignored"}}
+                  <span class="badge">Ignoriert</span>
+                {{else if eq .Status "missed"}}
+                  <span class="badge badge-warn">Verpasst</span>
+                {{else if eq .Status "opened"}}
+                  <span class="badge badge-accent">Tür geöffnet</span>
+                {{else}}
+                  <span class="badge">{{.Status}}</span>
+                {{end}}
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>

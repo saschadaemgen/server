@@ -1,0 +1,76 @@
+<!--
+  unifix · intercom-ringing.html
+  Doorbell ringing — full-cover overlay with wobble bell + pulse rings.
+
+  Rendered ON TOP of the idle screen. Visibility is controlled
+  by adding/removing `is-open` on `.ringing`. interactions.js
+  reacts to SSE `doorbell_start` / `doorbell_cancel`.
+
+    <div class="stage">
+      {{template "intercom-idle"    .}}
+      {{template "intercom-ringing" .}}
+    </div>
+
+  Required server data:
+    .DoorName       — Tür-Bezeichnung, e.g. "Hauseingang"
+-->
+
+<div class="ringing is-open" data-overlay="ringing" data-screen="ringing">
+
+  <!-- Bell hero with three concentric pulse rings -->
+  <div class="bell-hero-wrap" aria-hidden="true">
+    <span class="bell-pulse p1"></span>
+    <span class="bell-pulse p2"></span>
+    <span class="bell-pulse p3"></span>
+    <div class="bell-hero">
+      <svg width="80" height="80" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M5.5 17a.6.6 0 0 1-.5-1l1.1-1.4c.3-.4.4-.8.4-1.2V10a5.5 5.5 0 0 1 11 0v3.4c0 .4.1.8.4 1.2L19 16a.6.6 0 0 1-.5 1h-13Z"/>
+        <path d="M9.4 18.4a.6.6 0 0 1 1.1.3 1.5 1.5 0 0 0 3 0 .6.6 0 0 1 1.1-.3 2.6 2.6 0 0 1-5.2 0Z"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Headline + sub -->
+  <div class="ring-text">
+    <h1 class="ring-headline">Klingelt</h1>
+    <p class="ring-sub">{{.DoorName}}</p>
+  </div>
+
+  <!-- Action row: ignore · unlock · accept -->
+  <div class="ring-actions" role="group" aria-label="Anruf-Aktionen">
+
+    <div class="ring-col">
+      <button class="ring-btn is-danger" data-action="ignore-call" aria-label="Ignorieren">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5.5 17h13l-1.4-1.8c-.4-.5-.6-1.1-.6-1.8V10a4.5 4.5 0 0 0-9 0v3.4c0 .7-.2 1.3-.6 1.8L5.5 17Z"/>
+          <path d="M10 19.5a2 2 0 0 0 4 0"/>
+          <path d="M4 4l16 16"/>
+        </svg>
+      </button>
+      <span class="ring-label">Ignorieren</span>
+    </div>
+
+    <div class="ring-col">
+      <button class="ring-btn is-warn is-disabled" data-action="unlock-door" disabled aria-label="Tür öffnen">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="14" r="3.5"/>
+          <path d="M10.5 12.5 20 3"/>
+          <path d="M17 6l2 2"/>
+          <path d="M15 8l2 2"/>
+        </svg>
+      </button>
+      <span class="ring-label">Tür auf</span>
+    </div>
+
+    <div class="ring-col">
+      <button class="ring-btn is-ok is-disabled" data-action="accept-call" disabled aria-label="Annehmen">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5.5C5 4.7 5.7 4 6.5 4h2.2c.7 0 1.3.5 1.5 1.2l.7 2.6c.2.7-.1 1.4-.7 1.8L8.8 10.6a11 11 0 0 0 4.6 4.6l1-1.4c.4-.6 1.1-.9 1.8-.7l2.6.7c.7.2 1.2.8 1.2 1.5v2.2c0 .8-.7 1.5-1.5 1.5A13.5 13.5 0 0 1 5 5.5Z"/>
+        </svg>
+      </button>
+      <span class="ring-label">Annehmen</span>
+    </div>
+
+  </div>
+
+</div>

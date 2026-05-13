@@ -5,121 +5,148 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"regexp"
 	"strings"
 )
 
-//go:embed templates/*.html templates/admin/*.html templates/mieter/*.html
+// htmlCommentRE matches HTML comment blocks. The Claude-Design
+// library files start with extensive doc comments that contain
+// example {{template "..." .}} action snippets. Go's
+// html/template parses those actions even inside <!-- ... -->,
+// so we strip the comments before handing the body to Parse
+// (saving a "no such template" runtime error from a phantom
+// reference). Production rendering does not need the comments.
+var htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+//go:embed templates/admin/*.html templates/mieter/*.html
 var templatesFS embed.FS
 
-// sharedPartials lists template files that must be available in
-// every template set (admin pages plus mieter pages). theme_head
-// emits the inline detection script, tailwind config, and CSS
-// variables; theme_toggle is the sun/moon button used in headers.
-var sharedPartials = []string{
-	"templates/theme_head.html",
-	"templates/theme_toggle.html",
-}
-
-// adminTemplates bundles the admin-UI templates. Each page
-// template is parsed together with the shared layout.html so
-// {{template "content" .}} resolves to the page body and the
-// `layout` block wraps it with nav + chrome.
+// adminTemplates bundles every page template the http handlers
+// can render. Each entry is a complete html/template tree that
+// can run on its own via ExecuteTemplate(w, name, data).
 //
-// Partials (mocks_row, users_row, _error) are parsed separately
-// because htmx requests render only the fragment without the
-// layout wrapper.
-//
-// Tenant-facing pages live under templates/mieter/ and use a
-// different look (no admin nav). They are parsed as standalone
-// templates without the admin layout.
+// Saison 13-02-FIX3: the Claude-Design library now provides the
+// page-level HTML for every screen. The files in templates/...
+// are thin layout-shells that include the library snippets via
+// {{template "snippet-name.html" .}}. The CSS/JS/library shells
+// are wired in static.go via the same embed FS that this file
+// reads its snippets from.
 type adminTemplates struct {
-	pages    map[string]*template.Template
-	partials *template.Template
-	mieter   map[string]*template.Template
+	pages  map[string]*template.Template
+	mieter map[string]*template.Template
 }
 
 // macIDFromMAC turns a colon-separated MAC into a CSS-safe
-// suffix for HTML id attributes. Doppelpunkte sind technisch
-// valide in HTML-IDs, kollidieren aber mit dem CSS-Selector-
-// Pseudo-Klassen-Praefix, deshalb stolpert htmx beim
-// querySelectorAll. Wir strippen die Doppelpunkte und nutzen
-// einen klaren Praefix wie "mock-row-" um Kollisionen mit
-// echten CSS-Klassen zu vermeiden.
+// suffix for HTML id attributes. Kept for callers that still
+// need the helper.
 func macIDFromMAC(mac string) string {
 	return strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 }
 
+// adminLibraryFor lists the design-library snippets each admin
+// page shell needs. login is the only page that does not embed
+// the magic-link modal.
+var adminLibraryFor = map[string][]string{
+	"login":     {"admin-login.html"},
+	"dashboard": {"admin-dashboard.html", "modal-magic-link.html"},
+	"users":     {"admin-users.html", "modal-magic-link.html"},
+	"mocks":     {"admin-mocks.html", "modal-magic-link.html"},
+	"settings":  {"admin-settings.html", "modal-magic-link.html"},
+}
+
 func newAdminTemplates() (*adminTemplates, error) {
 	funcMap := template.FuncMap{
-		"icon":  renderIcon,
 		"macID": macIDFromMAC,
 	}
 
-	pageNames := []string{"login", "dashboard", "settings", "mocks_list", "users_list"}
-	pages := make(map[string]*template.Template, len(pageNames))
-	for _, name := range pageNames {
-		files := append([]string{},
-			"templates/layout.html",
+	pages := make(map[string]*template.Template, len(adminLibraryFor))
+	for name, snippets := range adminLibraryFor {
+		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(
+			templatesFS,
 			"templates/admin/"+name+".html",
-			"templates/admin/mocks_row.html",
-			"templates/admin/users_row.html",
 		)
-		files = append(files, sharedPartials...)
-		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(templatesFS, files...)
 		if err != nil {
-			return nil, fmt.Errorf("parse admin page %s: %w", name, err)
+			return nil, fmt.Errorf("parse admin shell %s: %w", name, err)
+		}
+		if err := addLibrarySnippets(tmpl, snippets); err != nil {
+			return nil, fmt.Errorf("attach snippets to %s: %w", name, err)
 		}
 		pages[name] = tmpl
 	}
 
-	partials, err := template.New("partials").Funcs(funcMap).ParseFS(
+	mieter := make(map[string]*template.Template, 1)
+	homeShell, err := template.New("home").Funcs(funcMap).ParseFS(
 		templatesFS,
-		"templates/admin/mocks_row.html",
-		"templates/admin/users_row.html",
-		"templates/admin/_error.html",
-		"templates/admin/magic_link_modal.html",
+		"templates/mieter/home.html",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("parse admin partials: %w", err)
+		return nil, fmt.Errorf("parse mieter shell: %w", err)
 	}
-
-	mieterNames := []string{"home"}
-	mieter := make(map[string]*template.Template, len(mieterNames))
-	for _, name := range mieterNames {
-		files := append([]string{}, "templates/mieter/"+name+".html")
-		files = append(files, sharedPartials...)
-		tmpl, err := template.New("mieter_"+name).Funcs(funcMap).ParseFS(templatesFS, files...)
-		if err != nil {
-			return nil, fmt.Errorf("parse mieter page %s: %w", name, err)
-		}
-		mieter[name] = tmpl
+	if err := addLibrarySnippets(homeShell, []string{
+		"intercom-idle.html",
+		"intercom-history.html",
+		"intercom-ringing.html",
+	}); err != nil {
+		return nil, fmt.Errorf("attach mieter snippets: %w", err)
 	}
+	mieter["home"] = homeShell
 
-	return &adminTemplates{pages: pages, partials: partials, mieter: mieter}, nil
+	return &adminTemplates{pages: pages, mieter: mieter}, nil
 }
 
-// renderPage executes the named page template against the
-// shared layout.
+// addLibrarySnippets reads each library file out of the embedded
+// design-library FS and registers it as a named template inside
+// tmpl. The template name is the file basename so the shell can
+// pull it in with `{{template "intercom-idle.html" .}}`.
+func addLibrarySnippets(tmpl *template.Template, names []string) error {
+	for _, s := range names {
+		body, err := designLibraryFS.ReadFile("design-library/" + s)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", s, err)
+		}
+		clean := htmlCommentRE.ReplaceAllString(string(body), "")
+		if _, err := tmpl.New(s).Parse(clean); err != nil {
+			return fmt.Errorf("parse %s: %w", s, err)
+		}
+	}
+	return nil
+}
+
+// renderPage executes the named admin shell. The shell pulls in
+// the page-specific Claude-Design snippet via {{template ...}}.
 func (t *adminTemplates) renderPage(w io.Writer, name string, data any) error {
 	tmpl, ok := t.pages[name]
 	if !ok {
 		return fmt.Errorf("unknown page template %q", name)
 	}
-	return tmpl.ExecuteTemplate(w, "layout", data)
+	return tmpl.ExecuteTemplate(w, name+".html", data)
 }
 
-// renderPartial executes a single fragment template (e.g. one
-// mock row or an error blurb) without the layout.
+// renderPartial renders a single named template (typically a
+// library snippet) without the surrounding shell. Looked up
+// inside whichever admin page has it parsed.
 func (t *adminTemplates) renderPartial(w io.Writer, name string, data any) error {
-	return t.partials.ExecuteTemplate(w, name, data)
+	for _, tmpl := range t.pages {
+		if lookup := tmpl.Lookup(name); lookup != nil {
+			return lookup.Execute(w, data)
+		}
+	}
+	return fmt.Errorf("unknown partial %q", name)
 }
 
-// renderMieter executes a tenant-facing page. These pages carry
-// their own <head>/<body> so no layout wrapping is applied.
+// renderMieter executes the tenant-facing home shell.
 func (t *adminTemplates) renderMieter(w io.Writer, name string, data any) error {
 	tmpl, ok := t.mieter[name]
 	if !ok {
 		return fmt.Errorf("unknown mieter template %q", name)
 	}
-	return tmpl.ExecuteTemplate(w, "mieter_"+name, data)
+	target := tmpl.Lookup(name + ".html")
+	if target == nil {
+		names := make([]string, 0)
+		for _, sub := range tmpl.Templates() {
+			names = append(names, sub.Name())
+		}
+		return fmt.Errorf("mieter template %s.html not in set; have: %v", name, names)
+	}
+	return target.Execute(w, data)
 }

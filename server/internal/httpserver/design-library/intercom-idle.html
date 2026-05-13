@@ -1,0 +1,125 @@
+<!--
+  unifix · intercom-idle.html
+  Tenant-facing idle screen. Drop into a host page whose <body>
+  has the `.stage-room` class:
+
+    <body class="stage-room">
+      {{template "intercom-idle" .}}
+    </body>
+
+  Required server data:
+    .UnitName       — Wohnungs-Bezeichnung, e.g. "Dämgen"
+    .DoorName       — Tür-Bezeichnung, e.g. "Hauseingang"
+    .Now            — pre-formatted time HH:MM:SS (or hydrate client-side)
+    .NowDate        — pre-formatted "Di, 13. Mai"
+    .DND            — bool, "do not disturb" active
+    .HasUnread      — bool, unread bell events
+-->
+
+<div class="stage" data-screen="idle">
+  <div class="screen-idle">
+
+    <!-- Top bar: identity · controls · clock -->
+    <div class="topbar">
+
+      <div class="identity">
+        <span class="identity-sub">{{if .DND}}Nicht stören{{else}}Online{{end}}</span>
+        <span class="identity-unit">{{.UnitName}}</span>
+      </div>
+
+      <div class="control-group" role="toolbar" aria-label="Geräte-Steuerung">
+
+        <button class="ctrl" data-action="open-cameras" aria-label="Kameras" title="Kameras">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="6.5" width="13" height="11" rx="2.2"/>
+            <path d="M16 10l5-2.6v9.2L16 14z"/>
+          </svg>
+        </button>
+
+        <span class="ctrl-sep" aria-hidden="true"></span>
+
+        <button class="ctrl{{if .DND}} is-on{{end}}" data-action="toggle-dnd" aria-pressed="{{.DND}}" aria-label="Nicht stören" title="Nicht stören">
+          {{if .DND}}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5.5 17h13l-1.4-1.8c-.4-.5-.6-1.1-.6-1.8V10a4.5 4.5 0 0 0-9 0v3.4c0 .7-.2 1.3-.6 1.8L5.5 17Z"/>
+              <path d="M10 19.5a2 2 0 0 0 4 0"/>
+              <path d="M4 4l16 16"/>
+            </svg>
+          {{else}}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5.5 17h13l-1.4-1.8c-.4-.5-.6-1.1-.6-1.8V10a4.5 4.5 0 0 0-9 0v3.4c0 .7-.2 1.3-.6 1.8L5.5 17Z"/>
+              <path d="M10 19.5a2 2 0 0 0 4 0"/>
+            </svg>
+          {{end}}
+        </button>
+
+        <span class="ctrl-sep" aria-hidden="true"></span>
+
+        <button class="ctrl" data-action="open-settings" aria-label="Einstellungen" title="Einstellungen">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="2.6"/>
+            <path d="M19.4 14.6a1.5 1.5 0 0 0 .3 1.7l.1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.5 1.5 0 0 0-1.7-.3 1.5 1.5 0 0 0-.9 1.4V20a1.7 1.7 0 1 1-3.4 0v-.1a1.5 1.5 0 0 0-1-1.4 1.5 1.5 0 0 0-1.7.3l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.5 1.5 0 0 0 .3-1.7 1.5 1.5 0 0 0-1.4-.9H4a1.7 1.7 0 1 1 0-3.4h.1a1.5 1.5 0 0 0 1.4-1 1.5 1.5 0 0 0-.3-1.7l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.5 1.5 0 0 0 1.7.3h.1A1.5 1.5 0 0 0 10.4 4v-.1a1.7 1.7 0 1 1 3.4 0V4a1.5 1.5 0 0 0 .9 1.4 1.5 1.5 0 0 0 1.7-.3l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.5 1.5 0 0 0-.3 1.7v.1a1.5 1.5 0 0 0 1.4.9H20a1.7 1.7 0 1 1 0 3.4h-.1a1.5 1.5 0 0 0-1.4.9Z"/>
+          </svg>
+        </button>
+
+      </div>
+
+      <div class="clock" aria-label="{{.NowDate}}, {{.Now}}">
+        <span class="clock-date">{{.NowDate}}</span>
+        <span class="clock-time" data-bind="clock-time">{{.Now}}</span>
+      </div>
+
+    </div>
+
+    <!-- Stream slot: where the camera feed renders. Always-dark. -->
+    <div class="stream" role="img" aria-label="Kamerastream {{.DoorName}}">
+      <div class="stream-hint">
+        <div class="stream-hint-inner">
+          <div class="stream-hint-orb" aria-hidden="true">
+            <span class="stream-hint-dot"></span>
+          </div>
+          <div class="stream-hint-text">
+            <span class="stream-hint-label">Bereit</span>
+            <span class="stream-hint-sub">warte auf klingel</span>
+          </div>
+        </div>
+      </div>
+      <div class="stream-meta">
+        <span class="stream-meta-dot"></span>
+        <span>cam · {{.DoorName}}</span>
+      </div>
+    </div>
+
+    <!-- Action bar: microphone · door-unlock · history -->
+    <div class="actions" role="toolbar" aria-label="Aktionen">
+
+      <button class="action" data-action="toggle-mic" aria-label="Mikrofon" title="Mikrofon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="3" width="6" height="11" rx="3"/>
+          <path d="M6 11a6 6 0 0 0 12 0"/>
+          <path d="M12 17v3"/>
+          <path d="M9 20h6"/>
+        </svg>
+      </button>
+
+      <button class="action is-primary" data-action="unlock-door" aria-label="Tür öffnen" title="Tür öffnen">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="14" r="3.5"/>
+          <path d="M10.5 12.5 20 3"/>
+          <path d="M17 6l2 2"/>
+          <path d="M15 8l2 2"/>
+        </svg>
+      </button>
+
+      <button class="action" data-action="open-history" aria-label="Verlauf" title="Verlauf">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8.5"/>
+          <path d="M12 7.5V12l3 2"/>
+        </svg>
+        {{if .HasUnread}}<span class="action-badge" aria-hidden="true"></span>{{end}}
+      </button>
+
+    </div>
+
+  </div>
+</div>
