@@ -129,9 +129,9 @@ func TestLoadFromDB_StartsPersistedViewers(t *testing.T) {
 	}
 	for _, s := range specs {
 		_, err := mgr.db.Exec(
-			`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?)`,
-			s.MAC, s.Name, int64(s.ServicePort), now, now,
+			`INSERT INTO viewers (mac, name, service_port, type, username, created_at, updated_at)
+			 VALUES (?, ?, ?, 'web', ?, ?, ?)`,
+			s.MAC, s.Name, int64(s.ServicePort), s.Name, now, now,
 		)
 		if err != nil {
 			t.Fatalf("seed insert: %v", err)
@@ -160,10 +160,10 @@ func TestAddViewer_PersistsToDB(t *testing.T) {
 	var name string
 	var port int64
 	err := mgr.db.QueryRow(
-		`SELECT name, service_port FROM mock_viewers WHERE mac = ?`, spec.MAC,
+		`SELECT name, service_port FROM viewers WHERE mac = ?`, spec.MAC,
 	).Scan(&name, &port)
 	if err != nil {
-		t.Fatalf("query mock_viewers: %v", err)
+		t.Fatalf("query viewers: %v", err)
 	}
 	if name != spec.Name {
 		t.Errorf("persisted name = %q, want %q", name, spec.Name)
@@ -261,7 +261,7 @@ func TestRemoveViewer_DeletesFromDB(t *testing.T) {
 	}
 	var count int
 	if err := mgr.db.QueryRow(
-		`SELECT COUNT(*) FROM mock_viewers WHERE mac = ?`, spec.MAC,
+		`SELECT COUNT(*) FROM viewers WHERE mac = ?`, spec.MAC,
 	).Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestRemoveViewer_UnknownReturnsError(t *testing.T) {
 	}
 }
 
-func TestRemoveViewer_CascadesSessionsAndTokens(t *testing.T) {
+func TestRemoveViewer_CascadesSessions(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	spec := sampleSpec("0c:ea:14:cc:dd:ee", 8082)
 	if err := mgr.AddViewer(context.Background(), spec); err != nil {
@@ -286,36 +286,23 @@ func TestRemoveViewer_CascadesSessionsAndTokens(t *testing.T) {
 	}
 	now := time.Now().UnixMilli()
 	if _, err := mgr.db.Exec(
-		`INSERT INTO mieter_sessions (session_id, mock_mac, created_at, last_seen, expires_at)
+		`INSERT INTO viewer_sessions (session_id, viewer_mac, created_at, last_seen, expires_at)
 		 VALUES (?, ?, ?, ?, ?)`,
 		"sess-x", spec.MAC, now, now, now,
 	); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	if _, err := mgr.db.Exec(
-		`INSERT INTO magic_link_tokens (token, mock_mac, created_at, expires_at)
-		 VALUES (?, ?, ?, ?)`,
-		"tok-x", spec.MAC, now, now,
-	); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
 	if err := mgr.RemoveViewer(context.Background(), spec.MAC); err != nil {
 		t.Fatalf("RemoveViewer: %v", err)
 	}
-	for _, q := range []struct {
-		label string
-		sql   string
-	}{
-		{"mieter_sessions", `SELECT COUNT(*) FROM mieter_sessions WHERE mock_mac = ?`},
-		{"magic_link_tokens", `SELECT COUNT(*) FROM magic_link_tokens WHERE mock_mac = ?`},
-	} {
-		var n int
-		if err := mgr.db.QueryRow(q.sql, spec.MAC).Scan(&n); err != nil {
-			t.Fatalf("count %s: %v", q.label, err)
-		}
-		if n != 0 {
-			t.Errorf("%s count after RemoveViewer = %d, want 0 (FK cascade)", q.label, n)
-		}
+	var n int
+	if err := mgr.db.QueryRow(
+		`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, spec.MAC,
+	).Scan(&n); err != nil {
+		t.Fatalf("count viewer_sessions: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("viewer_sessions count after RemoveViewer = %d, want 0 (FK cascade)", n)
 	}
 }
 

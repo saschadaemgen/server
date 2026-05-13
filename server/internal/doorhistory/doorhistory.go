@@ -55,7 +55,7 @@ type Event struct {
 }
 
 // AdminStats aggregates door_events for the admin dashboard. The
-// PerMock map is keyed by mock_mac so callers can join against
+// PerMock map is keyed by viewer_mac so callers can join against
 // mock_viewers.name for display.
 type AdminStats struct {
 	Total24h   int
@@ -77,7 +77,7 @@ type Store interface {
 }
 
 // ErrNotFound is returned by UpdateCancel when no matching open
-// start row exists for (mock_mac, cancel_token).
+// start row exists for (viewer_mac, cancel_token).
 var ErrNotFound = errors.New("doorhistory: not found")
 
 // SQLStore is the production Store backed by the platform sqlite
@@ -98,7 +98,7 @@ func NewSQLStore(db *sql.DB) *SQLStore {
 // than NULL so callers do not have to special-case nil.
 func (s *SQLStore) Insert(ctx context.Context, ev Event, rawFrame []byte) (int64, error) {
 	if ev.MockMAC == "" {
-		return 0, errors.New("doorhistory: mock_mac must not be empty")
+		return 0, errors.New("doorhistory: viewer_mac must not be empty")
 	}
 	if ev.EventType == "" {
 		return 0, errors.New("doorhistory: event_type must not be empty")
@@ -111,7 +111,7 @@ func (s *SQLStore) Insert(ctx context.Context, ev Event, rawFrame []byte) (int64
 	}
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO door_events
-		   (mock_mac, event_type, intercom_mac, occurred_at,
+		   (viewer_mac, event_type, intercom_mac, occurred_at,
 		    cancel_token, room_id, raw_frame)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		ev.MockMAC,
@@ -133,7 +133,7 @@ func (s *SQLStore) Insert(ctx context.Context, ev Event, rawFrame []byte) (int64
 }
 
 // UpdateCancel marks the youngest open doorbell_start event for
-// (mock_mac, cancel_token) as cancelled. "Open" means
+// (viewer_mac, cancel_token) as cancelled. "Open" means
 // cancelled_at IS NULL. If no row matches we return ErrNotFound;
 // callers can warn-log and continue.
 func (s *SQLStore) UpdateCancel(ctx context.Context, mockMAC, cancelToken string, cancelledAt time.Time) error {
@@ -145,7 +145,7 @@ func (s *SQLStore) UpdateCancel(ctx context.Context, mockMAC, cancelToken string
 		    SET cancelled_at = ?
 		  WHERE id = (
 		      SELECT id FROM door_events
-		       WHERE mock_mac = ?
+		       WHERE viewer_mac = ?
 		         AND cancel_token = ?
 		         AND cancelled_at IS NULL
 		       ORDER BY occurred_at DESC
@@ -183,7 +183,7 @@ func (s *SQLStore) MarkRead(ctx context.Context, mockMAC string, eventIDs []int6
 	}
 	q := `UPDATE door_events
 	         SET read_at = ?
-	       WHERE mock_mac = ?
+	       WHERE viewer_mac = ?
 	         AND read_at IS NULL
 	         AND id IN (` + strings.Join(placeholders, ",") + `)`
 	if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
@@ -201,7 +201,7 @@ func (s *SQLStore) MarkAllRead(ctx context.Context, mockMAC string, readAt time.
 		return nil
 	}
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE door_events SET read_at = ? WHERE mock_mac = ? AND read_at IS NULL`,
+		`UPDATE door_events SET read_at = ? WHERE viewer_mac = ? AND read_at IS NULL`,
 		readAt.Unix(), mockMAC,
 	); err != nil {
 		return fmt.Errorf("doorhistory: mark all read: %w", err)
@@ -220,12 +220,12 @@ func (s *SQLStore) ListForMock(ctx context.Context, mockMAC string, limit int) (
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mock_mac, event_type, intercom_mac, occurred_at,
+		`SELECT id, viewer_mac, event_type, intercom_mac, occurred_at,
 		        cancelled_at, answered_at, ended_at,
 		        cancel_token, room_id, read_at,
 		        prev_hash, entry_hash
 		   FROM door_events
-		  WHERE mock_mac = ?
+		  WHERE viewer_mac = ?
 		  ORDER BY occurred_at DESC, id DESC
 		  LIMIT ?`,
 		mockMAC, limit,
@@ -257,7 +257,7 @@ func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	}
 	var n int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM door_events WHERE mock_mac = ? AND read_at IS NULL`,
+		`SELECT COUNT(*) FROM door_events WHERE viewer_mac = ? AND read_at IS NULL`,
 		mockMAC,
 	).Scan(&n)
 	if err != nil {
@@ -293,11 +293,11 @@ func (s *SQLStore) AggregateAdmin(ctx context.Context, now time.Time) (AdminStat
 		return AdminStats{}, fmt.Errorf("doorhistory: aggregate 30d: %w", err)
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT mock_mac, COUNT(*) AS n
+		`SELECT viewer_mac, COUNT(*) AS n
 		   FROM door_events
 		  WHERE event_type = ?
 		    AND occurred_at >= ?
-		  GROUP BY mock_mac
+		  GROUP BY viewer_mac
 		  ORDER BY n DESC`,
 		TypeDoorbellStart, cutoff24h,
 	)

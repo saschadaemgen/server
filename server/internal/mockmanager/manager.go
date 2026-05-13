@@ -1,14 +1,13 @@
-// Package mockmanager owns the lifecycle of embedded mock
-// viewers inside unifix-server. Each viewer runs as a goroutine
-// hosted by the server process; the manager loads persisted
-// viewer specs from the mock_viewers table on boot, starts the
-// goroutines, multiplexes their event channels, and handles
-// admin-driven add/remove operations.
+// Package mockmanager owns the lifecycle of embedded mock viewers
+// inside unifix-server. Each viewer runs as a goroutine hosted by
+// the server process; the manager loads persisted specs from the
+// viewers table on boot, starts the goroutines, multiplexes their
+// event channels, and handles admin-driven add / remove operations.
 //
-// Saison 12-06 refactor: ua_user_id is gone. Mock-MAC is the
-// only routing key. Tenants reach a mock via a magic-link the
-// admin generates; the link binds the resulting browser session
-// to mock_mac, not to a user.
+// Saison 13-02-FIX4-a: the persistence table is now `viewers`
+// (was mock_viewers) and rows can be of type 'web' or 'esp'. The
+// manager only spawns goroutines for type 'web'; ESP viewers are
+// authenticated separately and run on real hardware.
 //
 // The manager exposes a Viewer interface and a ViewerFactory so
 // tests can inject a fake viewer instead of spinning up the real
@@ -17,6 +16,7 @@ package mockmanager
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,11 +34,18 @@ const (
 	multiplexCancelBuffer = 64
 )
 
+// Viewer-Type-Konstanten (Spalte viewers.type).
+const (
+	TypeWeb = "web"
+	TypeESP = "esp"
+)
+
 // Sentinel errors. Callers check via errors.Is.
 var (
 	ErrMACInUse       = errors.New("mockmanager: mac already registered")
 	ErrPortInUse      = errors.New("mockmanager: service_port already registered")
 	ErrViewerNotFound = errors.New("mockmanager: viewer not found")
+	ErrUsernameInUse  = errors.New("mockmanager: username already in use")
 )
 
 // Viewer is the subset of mock.Viewer that Manager needs. Defined
@@ -59,20 +66,26 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 	return mock.New(cfg, log)
 }
 
-// ViewerSpec describes one persisted mock viewer.
+// ViewerSpec describes one persisted viewer.
 type ViewerSpec struct {
 	MAC         string
 	Name        string
 	ServicePort uint16
+	Type        string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	Username    string
 }
 
-// ViewerInfo is the public view of one running mock viewer for
-// the admin UI.
+// ViewerInfo is the public view of one running viewer for the
+// admin UI.
 type ViewerInfo struct {
-	MAC         string
-	Name        string
-	ServicePort uint16
-	Running     bool
+	MAC           string
+	Name          string
+	ServicePort   uint16
+	Type          string
+	Username      string
+	HasPassword   bool
+	PasswordSetAt *time.Time
+	Running       bool
 }
 
 // Options configures Manager construction.
@@ -96,7 +109,7 @@ type Options struct {
 	Now func() time.Time
 }
 
-// Manager runs and supervises a collection of mock viewers.
+// Manager runs and supervises a collection of viewers.
 type Manager struct {
 	db   *db.DB
 	log  *slog.Logger
@@ -140,18 +153,22 @@ func New(d *db.DB, log *slog.Logger, opts Options) *Manager {
 	}
 }
 
-// Events returns the multiplexed channel of doorbell events
-// from every running viewer.
+// Events returns the multiplexed channel of doorbell events from
+// every running viewer.
 func (m *Manager) Events() <-chan mock.DoorbellEvent { return m.eventCh }
 
 // Cancels returns the multiplexed channel of doorbell cancels.
 func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh }
 
-// LoadFromDB reads every row from mock_viewers and starts a
-// goroutine per row. Called once at server boot.
+// LoadFromDB reads every web-type row from viewers and starts a
+// goroutine per row. ESP rows are skipped (handled separately).
+// Called once at server boot.
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port FROM mock_viewers ORDER BY mac`)
+		`SELECT mac, name, service_port, type, COALESCE(username, '')
+		   FROM viewers
+		  WHERE type = ?
+		  ORDER BY mac`, TypeWeb)
 	if err != nil {
 		return fmt.Errorf("mockmanager: load: %w", err)
 	}
@@ -161,7 +178,7 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 	for rows.Next() {
 		var spec ViewerSpec
 		var port int64
-		if err := rows.Scan(&spec.MAC, &spec.Name, &port); err != nil {
+		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.Username); err != nil {
 			return fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		spec.ServicePort = uint16(port)
@@ -180,16 +197,19 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 			continue
 		}
 	}
-	m.log.Info("loaded mock viewers", "count", len(specs))
+	m.log.Info("loaded web viewers", "count", len(specs))
 	return nil
 }
 
-// AddViewer registers a new mock viewer: persists it to mock_viewers
-// then spawns its goroutine. Returns ErrMACInUse or ErrPortInUse on
-// collision with an already-running viewer.
+// AddViewer registers a new viewer: persists it to viewers then
+// spawns its goroutine. Returns ErrMACInUse, ErrPortInUse or
+// ErrUsernameInUse on collision with an existing row.
 func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	if err := validateSpec(spec); err != nil {
 		return err
+	}
+	if spec.Type == "" {
+		spec.Type = TypeWeb
 	}
 
 	m.mu.Lock()
@@ -202,78 +222,234 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 		if e.spec.ServicePort == spec.ServicePort {
 			return ErrPortInUse
 		}
+		if spec.Username != "" && e.spec.Username == spec.Username {
+			return ErrUsernameInUse
+		}
 	}
 
 	if err := m.insertViewerLocked(ctx, spec); err != nil {
 		return err
 	}
 
-	if err := m.startViewerLocked(spec); err != nil {
-		// Best-effort rollback: drop the row so the next call
-		// is not blocked by a phantom entry.
-		_, _ = m.db.ExecContext(ctx, `DELETE FROM mock_viewers WHERE mac = ?`, spec.MAC)
-		return err
+	if spec.Type == TypeWeb {
+		if err := m.startViewerLocked(spec); err != nil {
+			// Best-effort rollback: drop the row so the next call
+			// is not blocked by a phantom entry.
+			_, _ = m.db.ExecContext(ctx, `DELETE FROM viewers WHERE mac = ?`, spec.MAC)
+			return err
+		}
 	}
 	return nil
 }
 
 // RemoveViewer cancels the viewer goroutine, waits for it to
 // stop (or for ctx to expire), then deletes the row. The
-// foreign-key cascade in the schema sweeps any magic_link_tokens
-// and mieter_sessions bound to this mock with the same DELETE.
+// foreign-key cascade in the schema sweeps any viewer_sessions
+// bound to this viewer with the same DELETE.
 func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	m.mu.Lock()
 	entry, ok := m.viewers[mac]
-	if !ok {
-		m.mu.Unlock()
-		return ErrViewerNotFound
-	}
-	delete(m.viewers, mac)
 	m.mu.Unlock()
 
-	entry.cancel()
-	select {
-	case <-entry.done:
-	case <-ctx.Done():
+	// Cancel running goroutine if any (ESP rows have none).
+	if ok {
+		m.mu.Lock()
+		delete(m.viewers, mac)
+		m.mu.Unlock()
+		entry.cancel()
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+		}
 	}
 
-	if _, err := m.db.ExecContext(ctx,
-		`DELETE FROM mock_viewers WHERE mac = ?`, mac,
-	); err != nil {
+	res, err := m.db.ExecContext(ctx,
+		`DELETE FROM viewers WHERE mac = ?`, mac)
+	if err != nil {
 		return fmt.Errorf("mockmanager: delete: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 && !ok {
+		return ErrViewerNotFound
 	}
 	return nil
 }
 
-// GetViewerInfo returns the snapshot for one running viewer by
-// MAC, or ErrViewerNotFound if the MAC is unknown.
-func (m *Manager) GetViewerInfo(_ context.Context, mac string) (*ViewerInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	e, ok := m.viewers[mac]
-	if !ok {
-		return nil, ErrViewerNotFound
+// Rename updates the viewer's display name in-place.
+func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
+	if newName == "" {
+		return errors.New("mockmanager: name must not be empty")
 	}
-	return &ViewerInfo{
-		MAC:         e.spec.MAC,
-		Name:        e.spec.Name,
-		ServicePort: e.spec.ServicePort,
-		Running:     true,
-	}, nil
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET name = ?, updated_at = ? WHERE mac = ?`,
+		newName, now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: rename: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if entry, ok := m.viewers[mac]; ok {
+		entry.spec.Name = newName
+	}
+	m.mu.Unlock()
+	return nil
 }
 
-// ListViewers returns the snapshot of currently registered viewers.
-func (m *Manager) ListViewers(_ context.Context) ([]ViewerInfo, error) {
+// SetPasswordHash stores the Argon2id PHC string and stamps
+// password_set_at.
+func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET password_hash = ?, password_set_at = ?, updated_at = ?
+		 WHERE mac = ?`,
+		hash, now, now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set password: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// LookupByUsername returns the viewer record for the given
+// username (web-type only). Used by the viewer-login handler.
+func (m *Manager) LookupByUsername(ctx context.Context, username string) (*ViewerInfo, string, error) {
+	var (
+		info       ViewerInfo
+		port       int64
+		usernameDB sql.NullString
+		hash       sql.NullString
+		setAt      sql.NullInt64
+	)
+	err := m.db.QueryRowContext(ctx,
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		   FROM viewers
+		  WHERE username = ? AND type = 'web'`, username).
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", ErrViewerNotFound
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("mockmanager: lookup username: %w", err)
+	}
+	info.ServicePort = uint16(port)
+	if usernameDB.Valid {
+		info.Username = usernameDB.String
+	}
+	if hash.Valid {
+		info.HasPassword = true
+	}
+	if setAt.Valid {
+		t := time.UnixMilli(setAt.Int64)
+		info.PasswordSetAt = &t
+	}
+	m.mu.Lock()
+	if _, ok := m.viewers[info.MAC]; ok {
+		info.Running = true
+	}
+	m.mu.Unlock()
+	return &info, hashOrEmpty(hash), nil
+}
+
+// GetViewerInfo returns the snapshot for one viewer by MAC, or
+// ErrViewerNotFound if the MAC is unknown.
+func (m *Manager) GetViewerInfo(ctx context.Context, mac string) (*ViewerInfo, error) {
+	info, err := m.loadInfo(ctx, mac)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	if _, ok := m.viewers[info.MAC]; ok {
+		info.Running = true
+	}
+	m.mu.Unlock()
+	return info, nil
+}
+
+func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error) {
+	var (
+		info       ViewerInfo
+		port       int64
+		usernameDB sql.NullString
+		hash       sql.NullString
+		setAt      sql.NullInt64
+	)
+	err := m.db.QueryRowContext(ctx,
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		   FROM viewers WHERE mac = ?`, mac).
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &usernameDB, &hash, &setAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrViewerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mockmanager: load info: %w", err)
+	}
+	info.ServicePort = uint16(port)
+	if usernameDB.Valid {
+		info.Username = usernameDB.String
+	}
+	if hash.Valid {
+		info.HasPassword = true
+	}
+	if setAt.Valid {
+		t := time.UnixMilli(setAt.Int64)
+		info.PasswordSetAt = &t
+	}
+	return &info, nil
+}
+
+// ListViewers returns the snapshot of every persisted viewer
+// (web + esp). Reads from the DB so esp-type rows are also
+// surfaced; running flag comes from the in-memory map.
+func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac, name, service_port, type, username, password_hash, password_set_at
+		   FROM viewers ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("mockmanager: list: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ViewerInfo, 0)
+	for rows.Next() {
+		var (
+			info       ViewerInfo
+			port       int64
+			usernameDB sql.NullString
+			hash       sql.NullString
+			setAt      sql.NullInt64
+		)
+		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
+			&usernameDB, &hash, &setAt); err != nil {
+			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
+		}
+		info.ServicePort = uint16(port)
+		if usernameDB.Valid {
+			info.Username = usernameDB.String
+		}
+		if hash.Valid {
+			info.HasPassword = true
+		}
+		if setAt.Valid {
+			t := time.UnixMilli(setAt.Int64)
+			info.PasswordSetAt = &t
+		}
+		out = append(out, info)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("mockmanager: list rows: %w", err)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]ViewerInfo, 0, len(m.viewers))
-	for _, e := range m.viewers {
-		out = append(out, ViewerInfo{
-			MAC:         e.spec.MAC,
-			Name:        e.spec.Name,
-			ServicePort: e.spec.ServicePort,
-			Running:     true,
-		})
+	for i := range out {
+		if _, ok := m.viewers[out[i].MAC]; ok {
+			out[i].Running = true
+		}
 	}
 	return out, nil
 }
@@ -311,9 +487,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error {
 	now := m.opts.Now().UnixMilli()
 	_, err := m.db.ExecContext(ctx,
-		`INSERT INTO mock_viewers (mac, name, service_port, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		spec.MAC, spec.Name, int64(spec.ServicePort), now, now,
+		`INSERT INTO viewers
+		   (mac, name, service_port, type, username, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		spec.MAC, spec.Name, int64(spec.ServicePort),
+		spec.Type, nullable(spec.Username), now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("mockmanager: insert: %w", err)
@@ -416,5 +594,22 @@ func validateSpec(spec ViewerSpec) error {
 	if spec.ServicePort == 0 {
 		return errors.New("mockmanager: ServicePort must be > 0")
 	}
+	if spec.Type != "" && spec.Type != TypeWeb && spec.Type != TypeESP {
+		return fmt.Errorf("mockmanager: Type %q must be 'web' or 'esp'", spec.Type)
+	}
 	return nil
+}
+
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func hashOrEmpty(h sql.NullString) string {
+	if h.Valid {
+		return h.String
+	}
+	return ""
 }
