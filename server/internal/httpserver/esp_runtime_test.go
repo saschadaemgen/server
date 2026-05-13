@@ -103,6 +103,50 @@ func TestESPAuth_AcceptsValidToken(t *testing.T) {
 	}
 }
 
+func TestESPConfig_ReturnsAllFields(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/config", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /esp/config: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["mieter_name"] != "Wohnung A" {
+		t.Errorf("mieter_name = %v, want Wohnung A", got["mieter_name"])
+	}
+	for _, key := range []string{"location_name", "stream", "doors", "cameras", "ui"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("missing field %q", key)
+		}
+	}
+	stream, _ := got["stream"].(map[string]any)
+	for _, k := range []string{"url", "type", "auth_header", "fallback_url"} {
+		if _, ok := stream[k]; !ok {
+			t.Errorf("missing stream.%s", k)
+		}
+	}
+	ui, _ := got["ui"].(map[string]any)
+	for _, k := range []string{"language", "screensaver_after_sec", "brightness_idle"} {
+		if _, ok := ui[k]; !ok {
+			t.Errorf("missing ui.%s", k)
+		}
+	}
+}
+
 // readBodyBytes is a small reader helper that does not consume
 // the body via the existing readBody util (which returns string
 // and closes already).

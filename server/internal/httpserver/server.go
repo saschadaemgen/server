@@ -197,6 +197,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /esp/discover", s.handleESPDiscover)
 	s.mux.HandleFunc("GET /esp/discover/status", s.handleESPStatus)
 
+	// ESP-Runtime (Saison 13-02-FIX4-d). Bearer-Token-geschuetzt;
+	// Token wurde im Adoption-Flow generiert und vom ESP via
+	// /esp/discover/status abgeholt.
+	s.mux.Handle("GET /esp/config", s.requireESPBearer(http.HandlerFunc(s.handleESPConfig)))
+
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
 	s.mux.Handle("GET /a/esp-viewers.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersListJSON)))
