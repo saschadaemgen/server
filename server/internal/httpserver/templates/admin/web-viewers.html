@@ -69,9 +69,11 @@
                 {{if .HasPassword}}{{.PasswordSetAt}}{{else}}<em>noch nicht gesetzt</em>{{end}}
               </td>
               <td style="text-align:right; white-space:nowrap;">
-                <form method="post" action="/a/web-viewers/{{.MAC}}/reset-pw" style="display:inline; margin:0;" data-credentials-form>
-                  <button class="btn btn-secondary btn-sm" type="submit">Neues Passwort</button>
-                </form>
+                <button class="btn btn-secondary btn-sm" type="button"
+                        data-action="open-edit"
+                        data-mac="{{.MAC}}"
+                        data-name="{{.Name}}"
+                        data-link="{{.LinkedUserID}}">Bearbeiten</button>
                 {{if .LockedNow}}
                   <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
                     <button class="btn btn-secondary btn-sm" type="submit">Sperre aufheben</button>
@@ -118,15 +120,78 @@
             </div>
             <div class="field">
               <label class="field-label" for="new-link">Verknuepfen mit Benutzer (optional)</label>
-              <select class="input" id="new-link" name="linked_ua_user_id" data-user-dropdown>
-                <option value="">-- keine Verknuepfung --</option>
-              </select>
-              <span class="field-hint">UA-User; laedt beim Oeffnen des Modals.</span>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --">
+                <select id="new-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+              <span class="field-hint">UA-User; laedt beim Oeffnen des Dropdowns.</span>
             </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
             <button class="btn btn-primary" type="submit">Anlegen</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <!-- Bearbeiten-Modal. Saison 13-02-FIX4-a-HOTFIX5: einheitlicher
+         Edit-Pfad fuer Name, Passwort und Verknuepfung. Passwort leer
+         lassen = nicht aendern; "Neu generieren"-Knopf befuellt das
+         Feld ohne zu speichern. Speichern-Klick schickt alles in
+         einem Request. -->
+    <div class="modal-scrim" data-modal="edit-viewer" role="dialog" aria-modal="true" aria-labelledby="edit-viewer-title">
+      <div class="modal-glass">
+        <form data-edit-form>
+          <header class="modal-header">
+            <div>
+              <h2 id="edit-viewer-title" class="modal-title">Web-Viewer bearbeiten</h2>
+              <p class="modal-sub" data-edit-sub>MAC: <code data-edit-mac></code></p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
+            <div class="field">
+              <label class="field-label" for="edit-name">Wohnungs-Name</label>
+              <input class="input" id="edit-name" name="name" type="text" required maxlength="64"/>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-pw">Neues Passwort (leer = nicht aendern)</label>
+              <div class="field-with-toggle">
+                <input class="input" id="edit-pw" name="password" type="password" autocomplete="new-password" placeholder="leer = Passwort bleibt"/>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="toggle-pw" data-target="#edit-pw">Zeigen</button>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="generate-pw" data-target="#edit-pw">Neu generieren</button>
+              </div>
+              <span class="field-hint">Aenderung invalidiert alle bestehenden Sessions. Wird nur EINMAL angezeigt, sobald gespeichert ist.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-link">Verknuepfen mit Benutzer (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --"
+                   data-edit-link-dropdown>
+                <select id="edit-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Speichern</button>
           </footer>
         </form>
       </div>
@@ -168,49 +233,16 @@
   <script src="/static/interactions.js"></script>
   <script>
     (function () {
-      // ---- Anlegen-Modal Open + Dropdown-Lazy-Load ----
-      var userDropdownLoaded = false;
-      function loadUserDropdown() {
-        if (userDropdownLoaded) return;
-        var sel = document.querySelector('[data-user-dropdown]');
-        if (!sel) return;
-        userDropdownLoaded = true;
-        fetch('/a/users.json?size=100', {
-          headers: { 'Accept': 'application/json' },
-          credentials: 'same-origin'
-        })
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (j) {
-            if (!j || !j.configured) {
-              userDropdownLoaded = false;
-              var opt = document.createElement('option');
-              opt.value = '';
-              opt.textContent = '-- UA-API noch nicht konfiguriert --';
-              opt.disabled = true;
-              sel.appendChild(opt);
-              return;
-            }
-            (j.users || []).forEach(function (u) {
-              var opt = document.createElement('option');
-              opt.value = u.ID;
-              opt.textContent = u.DisplayName + (u.Email ? ' (' + u.Email + ')' : '');
-              sel.appendChild(opt);
-            });
-          })
-          .catch(function () {
-            userDropdownLoaded = false;
-          });
-      }
+      // ---- Anlegen-Modal ----
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="open-create"]');
         if (!btn) return;
         e.preventDefault();
         var modal = document.querySelector('[data-modal="create-viewer"]');
         if (modal) modal.classList.add('is-open');
-        loadUserDropdown();
       });
 
-      // ---- Show/Hide Passwort-Feld im Anlegen-Modal ----
+      // ---- Show/Hide Passwort-Feld ----
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="toggle-pw"]');
         if (!btn) return;
@@ -225,6 +257,124 @@
           input.type = 'password';
           btn.textContent = 'Zeigen';
         }
+      });
+
+      // ---- Bearbeiten-Modal Open ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-edit"]');
+        if (!btn) return;
+        e.preventDefault();
+        var mac = btn.getAttribute('data-mac');
+        var name = btn.getAttribute('data-name') || '';
+        var link = btn.getAttribute('data-link') || '';
+        var modal = document.querySelector('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        modal.setAttribute('data-mac', mac);
+        var macSlot = modal.querySelector('[data-edit-mac]');
+        if (macSlot) macSlot.textContent = mac;
+        var nameInput = modal.querySelector('#edit-name');
+        if (nameInput) nameInput.value = name;
+        var pwInput = modal.querySelector('#edit-pw');
+        if (pwInput) {
+          pwInput.value = '';
+          pwInput.type = 'password';
+        }
+        var pwToggle = modal.querySelector('[data-action="toggle-pw"][data-target="#edit-pw"]');
+        if (pwToggle) pwToggle.textContent = 'Zeigen';
+        // Custom-Dropdown: ueber data-dropdown-value vorbefuellen.
+        var dd = modal.querySelector('[data-edit-link-dropdown]');
+        if (dd) {
+          dd.setAttribute('data-dropdown-value', link);
+          var sel = dd.querySelector('select[data-dropdown-target]');
+          if (sel) sel.value = link;
+          // Wenn der Dropdown-Cache schon geladen ist, applyValue
+          // sofort triggern; das Custom-Dropdown-JS exportiert
+          // dafuer keinen Public-Hook, also setzen wir das Label
+          // konservativ via change-Event.
+          if (sel) sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        modal.classList.add('is-open');
+      });
+
+      // ---- Neu-Generieren-Knopf ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="generate-pw"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = btn.closest('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Kein Viewer gewaehlt.');
+          return;
+        }
+        var sel = btn.getAttribute('data-target');
+        var input = document.querySelector(sel);
+        if (!input) return;
+        btn.disabled = true;
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/generate-pw', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            input.value = j.password || '';
+            input.type = 'text';
+            var pwToggle = modal.querySelector('[data-action="toggle-pw"][data-target="' + sel + '"]');
+            if (pwToggle) pwToggle.textContent = 'Verbergen';
+          })
+          .catch(function (err) {
+            alert('Generierung fehlgeschlagen: ' + err.message);
+          })
+          .finally(function () { btn.disabled = false; });
+      });
+
+      // ---- Bearbeiten-Modal Save ----
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('form[data-edit-form]');
+        if (!form) return;
+        e.preventDefault();
+        var modal = form.closest('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Kein Viewer gewaehlt.');
+          return;
+        }
+        var data = new FormData(form);
+        var pw = data.get('password') || '';
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/edit', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: new URLSearchParams(data),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+            }
+            return r.json();
+          })
+          .then(function (j) {
+            modal.classList.remove('is-open');
+            if (pw) {
+              // PW geaendert: Credentials-Modal mit neuem PW zeigen.
+              var existing = document.querySelector('[data-modal="credentials"]');
+              if (existing) existing.remove();
+              var div = document.createElement('div');
+              div.innerHTML = renderCredentials(j);
+              document.body.appendChild(div.firstElementChild);
+            } else {
+              location.reload();
+            }
+          })
+          .catch(function (err) {
+            alert('Speichern fehlgeschlagen: ' + (err.message || err));
+          });
       });
 
       // ---- Modal-Close (X + Cancel) ----
