@@ -14,31 +14,24 @@ import (
 	"unifix.local/server/internal/mockmanager"
 )
 
-// loginAndOpenEvents performs the magic-link login flow and then
-// opens the SSE stream as that tenant. Returns the bufio.Reader
-// for line-by-line consumption and a cancel that closes the
-// stream cleanly.
-//
-// Saison 12-06: the test mock is seeded by the caller before
-// invoking this helper, because magic_link_tokens.mock_mac FKs
-// on mock_viewers.mac.
-func loginAndOpenEvents(t *testing.T, env *testEnv, mockMAC string) (*bufio.Reader, *http.Response, context.CancelFunc) {
+// loginAndOpenEvents performs the username+password login flow and
+// then opens the SSE stream as that viewer. Returns the bufio.Reader
+// for line-by-line consumption and a cancel that closes the stream
+// cleanly.
+func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Reader, *http.Response, context.CancelFunc) {
 	t.Helper()
-	if _, err := env.mockMgr.GetViewerInfo(context.Background(), mockMAC); err != nil {
+	if _, err := env.mockMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
-			env.seedMockAs(t, mockMAC, "Test Mock")
+			env.seedViewerAs(t, viewerMAC, "Test Viewer", "test-"+viewerMAC[len(viewerMAC)-5:], "TestPw-1234567X")
 		} else {
 			t.Fatalf("GetViewerInfo: %v", err)
 		}
 	}
-	token, err := env.magic.Create(context.Background(), mockMAC)
+	info, _, err := env.mockMgr.LookupByUsername(context.Background(), "test-"+viewerMAC[len(viewerMAC)-5:])
 	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
+		t.Fatalf("LookupByUsername: %v", err)
 	}
-	resp, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
+	resp := env.loginViewer(t, info.Username, "TestPw-1234567X")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("login status = %d, want 303", resp.StatusCode)
@@ -134,8 +127,8 @@ func TestEvents_RequiresSession(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303 (redirect to login)", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("Location = %q, want /m/login", loc)
+	if loc := resp.Header.Get("Location"); loc != "/m" {
+		t.Errorf("Location = %q, want /m", loc)
 	}
 }
 
@@ -143,7 +136,7 @@ func TestEvents_RequiresSession(t *testing.T) {
 
 func TestEvents_SetsSSEHeaders(t *testing.T) {
 	env := newTestServer(t)
-	br, resp, cancel := loginAndOpenEvents(t, env, testMockMAC)
+	br, resp, cancel := loginAndOpenEvents(t, env, testViewerMAC)
 	defer cancel()
 	_ = br
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
@@ -161,13 +154,13 @@ func TestEvents_SetsSSEHeaders(t *testing.T) {
 
 func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	env := newTestServer(t)
-	br, _, cancel := loginAndOpenEvents(t, env, testMockMAC)
+	br, _, cancel := loginAndOpenEvents(t, env, testViewerMAC)
 	defer cancel()
 
 	// Push an event into the hub for this mock.
-	env.hub.Publish(testMockMAC, doorbellhub.Event{
+	env.hub.Publish(testViewerMAC, doorbellhub.Event{
 		Type:      doorbellhub.TypeDoorbellStart,
-		MockMAC:   testMockMAC,
+		MockMAC:   testViewerMAC,
 		RequestID: "req-1",
 		DeviceID:  "0c:ea:14:11:11:11",
 		CreatedAt: 1747000000000,
@@ -196,7 +189,7 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	if payload.TS == "" {
 		t.Errorf("ts = empty in SSE payload")
 	}
-	if payload.Raw.MockMAC != testMockMAC {
+	if payload.Raw.MockMAC != testViewerMAC {
 		t.Errorf("raw.MockMAC = %q", payload.Raw.MockMAC)
 	}
 	if payload.Raw.RequestID != "req-1" {
@@ -206,7 +199,7 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 
 func TestEvents_IgnoresEventsForOtherMocks(t *testing.T) {
 	env := newTestServer(t)
-	br, _, cancel := loginAndOpenEvents(t, env, testMockMAC)
+	br, _, cancel := loginAndOpenEvents(t, env, testViewerMAC)
 	defer cancel()
 
 	// Event addressed to a different mock must not reach our subscriber.
@@ -237,7 +230,7 @@ func TestEvents_IgnoresEventsForOtherMocks(t *testing.T) {
 
 func TestEvents_SendsHeartbeat(t *testing.T) {
 	env := newTestServer(t)
-	br, _, cancel := loginAndOpenEvents(t, env, testMockMAC)
+	br, _, cancel := loginAndOpenEvents(t, env, testViewerMAC)
 	defer cancel()
 
 	// The test config uses a 50 ms heartbeat. Read lines for up
@@ -274,7 +267,7 @@ func TestEvents_SendsHeartbeat(t *testing.T) {
 
 func TestEvents_CleanupRunsOnClientDisconnect(t *testing.T) {
 	env := newTestServer(t)
-	_, _, cancel := loginAndOpenEvents(t, env, testMockMAC)
+	_, _, cancel := loginAndOpenEvents(t, env, testViewerMAC)
 
 	// Wait for the subscription to register.
 	deadline := time.Now().Add(time.Second)

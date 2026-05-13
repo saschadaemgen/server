@@ -2,18 +2,38 @@ package httpserver
 
 import "net/http"
 
-// Admin session cookie. Scoped to /a/ so it never gets sent to
-// the tenant /m/ tree and vice versa.
+// Admin-Session-Cookie. Wie das Viewer-Cookie: __Host-Prefix und
+// Path=/ in Production, "unifix_a_session" mit Path=/a/ in DevMode.
 const (
-	AdminSessionCookieName = "unifix_a_session"
-	AdminSessionCookiePath = "/a/"
+	adminCookieNameSecure = "__Host-unifix_admin"
+	adminCookieNameDev    = "unifix_a_session"
+	adminCookiePathSecure = "/"
+	adminCookiePathDev    = "/a/"
 )
+
+// AdminSessionCookieName / -Path sind Test-Defaults.
+const AdminSessionCookieName = adminCookieNameDev
+const AdminSessionCookiePath = adminCookiePathDev
+
+func (s *Server) adminCookieName() string {
+	if s.cfg.DevMode {
+		return adminCookieNameDev
+	}
+	return adminCookieNameSecure
+}
+
+func (s *Server) adminCookiePath() string {
+	if s.cfg.DevMode {
+		return adminCookiePathDev
+	}
+	return adminCookiePathSecure
+}
 
 func (s *Server) setAdminSessionCookie(w http.ResponseWriter, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     AdminSessionCookieName,
+		Name:     s.adminCookieName(),
 		Value:    sessionID,
-		Path:     AdminSessionCookiePath,
+		Path:     s.adminCookiePath(),
 		HttpOnly: true,
 		Secure:   !s.cfg.DevMode,
 		SameSite: http.SameSiteStrictMode,
@@ -23,9 +43,9 @@ func (s *Server) setAdminSessionCookie(w http.ResponseWriter, sessionID string) 
 
 func (s *Server) clearAdminSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     AdminSessionCookieName,
+		Name:     s.adminCookieName(),
 		Value:    "",
-		Path:     AdminSessionCookiePath,
+		Path:     s.adminCookiePath(),
 		HttpOnly: true,
 		Secure:   !s.cfg.DevMode,
 		SameSite: http.SameSiteStrictMode,
@@ -33,8 +53,8 @@ func (s *Server) clearAdminSessionCookie(w http.ResponseWriter) {
 	})
 }
 
-func readAdminSessionCookie(r *http.Request) string {
-	c, err := r.Cookie(AdminSessionCookieName)
+func (s *Server) readAdminSessionCookie(r *http.Request) string {
+	c, err := r.Cookie(s.adminCookieName())
 	if err != nil {
 		return ""
 	}

@@ -3,24 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>unifix · {{.UnitName}}</title>
+  <title>unifix - {{.UnitName}}</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
   <style>
-    /* Saison 13-02-FIX3b responsive overrides for the
-       Claude-Design .stage frame:
-
-         - Desktop (>=1024px): iPad-Pro-like bezel, max-bleed.
-         - Tablet  (640-1023px): a touch larger than the
-           library default.
-         - Phone   (<640px): no bezel, device fills the
-           viewport (Sascha asked for full-bleed below 640,
-           the library only goes full-bleed below 480).
-
-       Library defaults remain in components.css; the rules
-       below win because the layout sheet is linked AFTER the
-       library and the selectors are equally specific. */
-
     @media (min-width: 640px) {
       .stage {
         width: min(520px, 80vw);

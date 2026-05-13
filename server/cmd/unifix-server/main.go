@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,7 +14,8 @@ import (
 
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
-	"unifix.local/server/internal/auth/magiclink"
+	"unifix.local/server/internal/auth/loginaudit"
+	"unifix.local/server/internal/auth/ratelimit"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
@@ -51,11 +54,24 @@ func main() {
 	}
 	defer database.Close()
 
-	magicSvc := magiclink.New(database)
+	platformCfg := platformconfig.New(database, secretsSvc)
+
+	// Saison 13-02-FIX4-a: ein 32-Byte Pepper fuer Argon2id wird
+	// beim ersten Boot generiert und ab dann persistent benutzt.
+	// Der Master-Key (UNIFIX_SECRETS_KEY) verschluesselt den Pepper
+	// im platform_config-Eintrag.
+	if err := ensurePepper(context.Background(), platformCfg, log); err != nil {
+		log.Error("ensure viewer pepper failed", "err", err)
+		os.Exit(1)
+	}
+
+	pepperBridge := platformPepperBridge{cfg: platformCfg}
+	adminSvc := admin.New(database, admin.WithPepper(pepperBridge))
 	sessionSvc := session.New(database)
 	adminSessionSvc := adminsession.New(database)
-	adminSvc := admin.New(database)
-	platformCfg := platformconfig.New(database, secretsSvc)
+	auditSvc := loginaudit.New(database)
+	viewerLimiter := ratelimit.New()
+	adminLimiter := ratelimit.New()
 	historyStore := doorhistory.NewSQLStore(database.DB)
 
 	mockMgr := mockmanager.New(database, log, mockmanager.Options{
@@ -84,6 +100,9 @@ func main() {
 		}
 	}()
 
+	// Background-Job: Login-Audit alle 6h aufraeumen (90d-Retention).
+	go runAuditCleanup(ctx, auditSvc, log)
+
 	// Build the UA client lazily: only if the operator has already
 	// stored a base URL and token via the admin settings page.
 	var uaClient *uaapi.Client
@@ -98,12 +117,14 @@ func main() {
 
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
-		MagicLink:      magicSvc,
 		Sessions:       sessionSvc,
 		AdminSessions:  adminSessionSvc,
 		MockManager:    mockMgr,
 		Admin:          adminSvc,
 		PlatformConfig: platformCfg,
+		Audit:          auditSvc,
+		ViewerLimiter:  viewerLimiter,
+		AdminLimiter:   adminLimiter,
 		UA:             uaClient,
 		Hub:            hub,
 		History:        historyStore,
@@ -134,6 +155,60 @@ func main() {
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server stopped", "err", err)
 			os.Exit(1)
+		}
+	}
+}
+
+// platformPepperBridge adaptiert *platformconfig.Service an das
+// admin.PepperSource-Interface ohne dass das admin-Paket einen
+// platformconfig-Import braucht.
+type platformPepperBridge struct {
+	cfg *platformconfig.Service
+}
+
+func (b platformPepperBridge) GetPepper(ctx context.Context) (string, error) {
+	return b.cfg.GetSecret(ctx, platformconfig.KeyViewerPwPepper)
+}
+
+// ensurePepper sorgt dafuer dass der Argon2id-Pepper-Eintrag
+// existiert. Wenn nicht: 32 Bytes crypto/rand erzeugen, hex-codiert
+// als Klartext-String dem secrets-Service uebergeben (der hex-string
+// wird als Pepper benutzt; AES-256-GCM verschluesselt ihn).
+func ensurePepper(ctx context.Context, cfg *platformconfig.Service, log *slog.Logger) error {
+	existing, err := cfg.GetSecret(ctx, platformconfig.KeyViewerPwPepper)
+	if err == nil && existing != "" {
+		return nil
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	pepper := hex.EncodeToString(raw)
+	if err := cfg.SetSecret(ctx, platformconfig.KeyViewerPwPepper, pepper); err != nil {
+		return err
+	}
+	log.Info("viewer password pepper generated and stored")
+	return nil
+}
+
+// runAuditCleanup laeuft alle 6h und loescht login_audit-Zeilen
+// aelter als die Default-Retention (90d).
+func runAuditCleanup(ctx context.Context, audit *loginaudit.Service, log *slog.Logger) {
+	tick := time.NewTicker(6 * time.Hour)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			n, err := audit.Cleanup(ctx, loginaudit.DefaultRetention)
+			if err != nil {
+				log.Warn("login_audit cleanup failed", "err", err)
+				continue
+			}
+			if n > 0 {
+				log.Info("login_audit cleanup removed", "count", n)
+			}
 		}
 	}
 }

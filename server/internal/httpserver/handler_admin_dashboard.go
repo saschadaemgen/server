@@ -1,48 +1,48 @@
 package httpserver
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"time"
 
 	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/platformconfig"
+	"unifix.local/server/internal/mockmanager"
 )
 
-// adminUser is the {Name, Initials} bag the Claude-Design admin
-// snippets expect in `.User`. We derive Initials from Name.
+// adminUser is the {Name, Initials} bag.
 type adminUser struct {
 	Name     string
 	Initials string
 }
 
-// adminDashboardData carries the {{.User}}, {{.Stats}} and
-// {{.RecentEvents}} fields the library admin-dashboard.html
-// snippet renders.
+// adminDashboardData traegt die echten Werte fuer das Dashboard:
+// Web-Viewer-Anzahl, Klingel-Events, aktive Sessions, Audit-Liste.
 type adminDashboardData struct {
-	User         adminUser
-	Stats        adminStats
-	RecentEvents []adminRecentEvent
+	User           adminUser
+	WebViewers     int
+	WebViewersOn   int
+	EventsToday    int
+	EventsTrend    string
+	ActiveSessions int
+	RecentEvents   []dashRecentEvent
+	RecentAudit    []dashAuditRow
 }
 
-type adminStats struct {
-	ActiveDevices int
-	EventsToday   int
-	EventsTrend   string // pre-formatted e.g. "+12%"
-	CamerasOnline int
-	CamerasTotal  int
-	ActiveTenants int
+type dashRecentEvent struct {
+	When      string
+	UnitName  string
+	UnitMark  string
+	DoorName  string
+	Action    string
+	Status    string
 }
 
-type adminRecentEvent struct {
-	When       string
-	UnitName   string
-	UnitMark   string
-	TenantName string
-	DoorName   string
-	Action     string
-	Status     string // "answered" | "ignored" | "missed" | "opened" | ...
+type dashAuditRow struct {
+	When     string
+	User     string
+	IP       string
+	Outcome  string
+	Realm    string
 }
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
@@ -52,44 +52,33 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
 
-	mocks, err := s.mockMgr.ListViewers(r.Context())
+	infos, err := s.mockMgr.ListViewers(r.Context())
 	if err == nil {
-		data.Stats.ActiveDevices = len(mocks)
-		data.Stats.CamerasTotal = len(mocks)
-		for _, m := range mocks {
-			if m.Running {
-				data.Stats.CamerasOnline++
+		for _, info := range infos {
+			if info.Type != mockmanager.TypeWeb {
+				continue
+			}
+			data.WebViewers++
+			if info.Running {
+				data.WebViewersOn++
 			}
 		}
 	}
 
-	// UA-User count - fall back to ActiveDevices when UA-API is not configured.
-	if s.ua != nil {
-		if users, err := s.ua.ListUsers(r.Context()); err == nil {
-			data.Stats.ActiveTenants = len(users)
-		}
-	} else {
-		base, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyUAAPIBaseURL)
-		if base != "" {
-			data.Stats.ActiveTenants = data.Stats.ActiveDevices
-		}
-	}
-
-	// Door-event counters from doorhistory.
 	if s.history != nil {
 		if agg, err := s.history.AggregateAdmin(r.Context(), time.Now()); err == nil {
-			data.Stats.EventsToday = agg.Total24h
-			data.Stats.EventsTrend = trendArrow(agg.Total24h, agg.Total7d/7)
+			data.EventsToday = agg.Total24h
+			data.EventsTrend = trendArrow(agg.Total24h, agg.Total7d/7)
 		}
-		// Recent events: pull the most-recent N for whichever mock fired.
-		// We pick the first mock's history as a proxy until a global feed exists.
-		if len(mocks) > 0 {
-			recent, _ := s.history.ListForMock(r.Context(), mocks[0].MAC, 10)
+		// Recent events: pull from the most-active mocks. Until a
+		// global feed exists, take the first viewer's history.
+		if len(infos) > 0 {
+			recent, _ := s.history.ListForMock(r.Context(), infos[0].MAC, 10)
 			for _, ev := range recent {
-				data.RecentEvents = append(data.RecentEvents, adminRecentEvent{
+				data.RecentEvents = append(data.RecentEvents, dashRecentEvent{
 					When:     ev.OccurredAt.Format("15:04"),
-					UnitName: mocks[0].Name,
-					UnitMark: initialsOf(mocks[0].Name),
+					UnitName: infos[0].Name,
+					UnitMark: initialsOf(infos[0].Name),
 					DoorName: doorNameFromIntercom(ev.IntercomMAC),
 					Action:   "Klingel",
 					Status:   eventStatusFor(ev),
@@ -98,11 +87,31 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if s.sessions != nil {
+		if n, err := s.sessions.ActiveCount(r.Context()); err == nil {
+			data.ActiveSessions = n
+		}
+	}
+
+	if s.audit != nil {
+		entries, err := s.audit.Recent(r.Context(), "", 20)
+		if err == nil {
+			for _, e := range entries {
+				data.RecentAudit = append(data.RecentAudit, dashAuditRow{
+					When:    e.Timestamp.Local().Format("15:04:05"),
+					User:    e.Username,
+					IP:      e.IP,
+					Outcome: string(e.Outcome),
+					Realm:   string(e.Realm),
+				})
+			}
+		}
+	}
+
 	s.renderAdminPage(w, "dashboard", data)
 }
 
-// trendArrow renders a tiny percent-trend string like "+12%" or
-// "-8%". Without baseline the string is a neutral "+0%".
+// trendArrow renders a tiny percent-trend string like "+12%" or "-8%".
 func trendArrow(today int, baseline int) string {
 	if baseline == 0 {
 		if today == 0 {
@@ -159,9 +168,7 @@ func doorNameFromIntercom(mac string) string {
 	return mac
 }
 
-// initialsOf takes "Sascha Daemgen" -> "SD", "saschsa" -> "S",
-// "" -> "?". Used for the avatar bubble in the admin nav and
-// the per-row identity column.
+// initialsOf takes "Sascha Daemgen" -> "SD".
 func initialsOf(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -176,16 +183,3 @@ func initialsOf(name string) string {
 	return first + last
 }
 
-// currentSchemaVersion is kept for diagnostic uses; the Claude-
-// Design dashboard does not surface it directly anymore.
-func (s *Server) currentSchemaVersion(ctx context.Context) (int, error) {
-	if s.platformCfg == nil {
-		return 0, nil
-	}
-	row := s.sessionsDB().QueryRowContext(ctx, `SELECT MAX(version) FROM schema_version`)
-	var v int
-	if err := row.Scan(&v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}

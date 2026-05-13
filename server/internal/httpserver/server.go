@@ -1,8 +1,12 @@
 // Package httpserver hosts the unifix HTTP surface. Two trees:
 //
-//	/m/   tenant-facing: magic-link login, home stub, logout.
+//	/m/   tenant-facing: username/password login, home (intercom),
+//	                     logout (POST), SSE stream.
 //	/a/   admin-facing:  login (+ first-run setup), dashboard,
-//	                     settings, mock-viewer CRUD, UA-user CRUD.
+//	                     web-viewer CRUD (mit Passwort-Reset und
+//	                     Rate-Limit-Unlock), settings, plus
+//	                     Platzhalter-Seiten fuer esp-viewers,
+//	                     users (UA-API), esp-pager.
 //
 // Pure net/http with Go 1.22 ServeMux pattern routing. No router
 // or web-framework dependency. TLS is provided by the standard
@@ -17,7 +21,8 @@ import (
 
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
-	"unifix.local/server/internal/auth/magiclink"
+	"unifix.local/server/internal/auth/loginaudit"
+	"unifix.local/server/internal/auth/ratelimit"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/doorbellhub"
@@ -31,17 +36,16 @@ import (
 // same struct to New regardless of which sub-set of features
 // the caller wants enabled; nullable fields like UA degrade
 // gracefully.
-//
-// Saison 12-06 refactor: Sessions now means MIETER sessions
-// (bound to mock_mac). Admin sessions live in their own service.
 type Deps struct {
 	Config         config.Config
-	MagicLink      *magiclink.Service
 	Sessions       *session.Service
 	AdminSessions  *adminsession.Service
 	MockManager    *mockmanager.Manager
 	Admin          *admin.Service
 	PlatformConfig *platformconfig.Service
+	Audit          *loginaudit.Service
+	ViewerLimiter  *ratelimit.Limiter
+	AdminLimiter   *ratelimit.Limiter
 	// UA is built lazily by main once the operator has saved a
 	// base URL and token. Nil means "not configured yet".
 	UA *uaapi.Client
@@ -49,8 +53,8 @@ type Deps struct {
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
 	// History persists doorbell events for the /m/ list and the
-	// /a/ dashboard statistics (Saison 13-01). Nil means the UI
-	// shows an empty list and zero counters.
+	// /a/ dashboard statistics. Nil means the UI shows an empty
+	// list and zero counters.
 	History doorhistory.Store
 	// EventsHeartbeat overrides the SSE keepalive interval.
 	// Zero falls back to defaultEventsHeartbeat (30s); tests
@@ -62,12 +66,14 @@ type Deps struct {
 // Server owns the mux and references the auth services.
 type Server struct {
 	cfg             config.Config
-	magic           *magiclink.Service
 	sessions        *session.Service
 	adminSessions   *adminsession.Service
 	mockMgr         *mockmanager.Manager
 	admin           *admin.Service
 	platformCfg     *platformconfig.Service
+	audit           *loginaudit.Service
+	viewerLimiter   *ratelimit.Limiter
+	adminLimiter    *ratelimit.Limiter
 	ua              *uaapi.Client
 	hub             *doorbellhub.Hub
 	history         doorhistory.Store
@@ -75,7 +81,6 @@ type Server struct {
 	log             *slog.Logger
 	mux             *http.ServeMux
 	tpl             *adminTemplates
-	uaFactory       func() *uaapi.Client // for late-binding after settings save
 }
 
 // New constructs the Server with all routes registered.
@@ -87,14 +92,22 @@ func New(deps Deps) (*Server, error) {
 	if deps.Log == nil {
 		deps.Log = slog.Default()
 	}
+	if deps.ViewerLimiter == nil {
+		deps.ViewerLimiter = ratelimit.New()
+	}
+	if deps.AdminLimiter == nil {
+		deps.AdminLimiter = ratelimit.New()
+	}
 	srv := &Server{
 		cfg:             deps.Config,
-		magic:           deps.MagicLink,
 		sessions:        deps.Sessions,
 		adminSessions:   deps.AdminSessions,
 		mockMgr:         deps.MockManager,
 		admin:           deps.Admin,
 		platformCfg:     deps.PlatformConfig,
+		audit:           deps.Audit,
+		viewerLimiter:   deps.ViewerLimiter,
+		adminLimiter:    deps.AdminLimiter,
 		ua:              deps.UA,
 		hub:             deps.Hub,
 		history:         deps.History,
@@ -115,38 +128,43 @@ func (s *Server) SetUAClient(c *uaapi.Client) {
 }
 
 func (s *Server) routes() {
-	// Static assets (theme.css, future images). Embedded into the
-	// binary via go:embed; served with a long Cache-Control.
+	// Static assets (CSS, JS, icons). Embedded into the binary
+	// via go:embed; served with a long Cache-Control.
 	s.mux.Handle("GET /static/", staticHandler())
 
-	// Tenant tree.
-	// Saison 13-02: no /m/logout endpoint. The mieter UI dropped
-	// its logout button and the cookie is quasi-permanent. To
-	// rotate a tenant the admin removes or replaces the mock.
-	s.mux.HandleFunc("GET /m/login", s.handleLogin)
+	// Tenant tree (/m).
+	s.mux.HandleFunc("GET /m", s.handleViewerRoot)
+	s.mux.HandleFunc("POST /m", s.handleViewerLoginPost)
+	s.mux.HandleFunc("POST /m/logout", s.handleViewerLogout)
 	s.mux.Handle("GET /m/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
 	s.mux.Handle("GET /m/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
-	// Admin tree.
+	// Admin tree (/a).
 	s.mux.HandleFunc("GET /a/login", s.handleAdminLoginGet)
 	s.mux.HandleFunc("POST /a/login", s.handleAdminLoginPost)
 	s.mux.Handle("POST /a/logout", s.requireAdminSession(http.HandlerFunc(s.handleAdminLogout)))
 	s.mux.Handle("GET /a/{$}", s.requireAdminSession(http.HandlerFunc(s.handleAdminDashboard)))
+
 	s.mux.Handle("GET /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsGet)))
 	s.mux.Handle("POST /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsPost)))
-	s.mux.Handle("GET /a/mocks", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksList)))
-	s.mux.Handle("POST /a/mocks", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksCreate)))
-	s.mux.Handle("DELETE /a/mocks/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksDelete)))
-	s.mux.Handle("POST /a/mocks/{mac}/magic-link", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksMagicLink)))
-	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
-	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
-	s.mux.Handle("DELETE /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
-	// Saison 13-02-FIX3b: the admin-users table renders one
-	// row per mock-viewer and wires its Magic-Link button to
-	// /a/users/{mac}/magic-link. Same handler as the older
-	// /a/mocks/.../magic-link route - the path is just the
-	// library's natural slot for the action.
-	s.mux.Handle("POST /a/users/{mac}/magic-link", s.requireAdminSession(http.HandlerFunc(s.handleAdminMocksMagicLink)))
+	s.mux.Handle("POST /a/settings/admin-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminPasswordPost)))
+	s.mux.Handle("POST /a/settings/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminUnlockLock)))
+
+	// Web-Viewer-CRUD (ersetzt das alte /a/mocks).
+	s.mux.Handle("GET /a/web-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersList)))
+	s.mux.Handle("POST /a/web-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersCreate)))
+	s.mux.Handle("POST /a/web-viewers/{mac}/reset-pw", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersResetPW)))
+	s.mux.Handle("POST /a/web-viewers/{mac}/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersUnlock)))
+	s.mux.Handle("POST /a/web-viewers/{mac}/rename", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersRename)))
+	s.mux.Handle("POST /a/web-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
+	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
+
+	// Platzhalter-Seiten fuer kommende Saison-Briefings (FIX4-b,
+	// FIX4-c, spaeter FIX4-d). Sie rendern nur eine kleine
+	// "kommt bald"-Karte und melden keinen 404.
+	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspViewers)))
+	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersPlaceholder)))
+	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
 }
 
 // Handler returns the underlying mux so callers (tests) can wrap

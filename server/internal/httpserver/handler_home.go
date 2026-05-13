@@ -10,28 +10,27 @@ import (
 	"unifix.local/server/internal/mockmanager"
 )
 
-// MieterHistoryLimit caps the number of door_events shown on the
-// /m/ list (was the FIX1 history card, now the bottom-sheet list).
-const MieterHistoryLimit = 20
+// ViewerHistoryLimit caps the number of door_events shown on the
+// /m/ list.
+const ViewerHistoryLimit = 20
 
-// mieterHomeData is the payload for the Claude-Design intercom
+// viewerHomeData is the payload for the Claude-Design intercom
 // snippets. The library uses three pages of fields under one
 // flat struct; we mirror their names exactly so the snippets
 // can be reused unchanged.
-type mieterHomeData struct {
+type viewerHomeData struct {
 	UnitName     string
 	DoorName     string
 	Now          string             // "HH:MM:SS"
 	NowDate      string             // "Di, 13. Mai"
 	DND          bool
 	HasUnread    bool
-	HistoryItems []mieterHistoryRow // {Where, When, Unread}
+	HistoryItems []viewerHistoryRow // {Where, When, Unread}
 }
 
-// mieterHistoryRow matches the design-library shape for one
-// history-sheet entry. Field names follow the library's
-// {{range .HistoryItems}} expectations.
-type mieterHistoryRow struct {
+// viewerHistoryRow matches the design-library shape for one
+// history-sheet entry.
+type viewerHistoryRow struct {
 	Where  string
 	When   string
 	Unread bool
@@ -44,15 +43,16 @@ type mieterHistoryRow struct {
 // Rendern werden die angezeigten ungelesenen Events asynchron
 // als gelesen markiert.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	mac := MockMACFromContext(r.Context())
+	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
-		http.Redirect(w, r, "/m/login", http.StatusSeeOther)
+		http.Redirect(w, r, "/m", http.StatusSeeOther)
 		return
 	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
-			http.Redirect(w, r, "/m/login", http.StatusSeeOther)
+			s.clearSessionCookie(w)
+			http.Redirect(w, r, "/m", http.StatusSeeOther)
 			return
 		}
 		s.log.Error("get viewer info", "err", err, "mac_prefix", safePrefix(mac))
@@ -60,15 +60,15 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, unread := s.loadMieterHistory(r.Context(), mac)
-	rows := make([]mieterHistoryRow, 0, len(history))
+	history, unread := s.loadViewerHistory(r.Context(), mac)
+	rows := make([]viewerHistoryRow, 0, len(history))
 	displayedIDs := make([]int64, 0, len(history))
 	for _, ev := range history {
 		where := ev.IntercomMAC
 		if where == "" {
 			where = "Hauseingang"
 		}
-		rows = append(rows, mieterHistoryRow{
+		rows = append(rows, viewerHistoryRow{
 			Where:  where,
 			When:   formatGermanWhen(ev.OccurredAt),
 			Unread: ev.ReadAt == nil,
@@ -79,7 +79,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	data := mieterHomeData{
+	data := viewerHomeData{
 		UnitName:     info.Name,
 		DoorName:     "Hauseingang",
 		Now:          now.Format("15:04:05"),
@@ -89,8 +89,8 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		HistoryItems: rows,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.renderMieter(w, "home", data); err != nil {
-		s.log.Error("render mieter home", "err", err)
+	if err := s.tpl.renderViewer(w, "home", data); err != nil {
+		s.log.Error("render viewer home", "err", err)
 		return
 	}
 
@@ -105,13 +105,13 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// loadMieterHistory returns the list plus unread count, both 0 if
+// loadViewerHistory returns the list plus unread count, both 0 if
 // the history store is not wired.
-func (s *Server) loadMieterHistory(ctx context.Context, mac string) ([]doorhistory.Event, int) {
+func (s *Server) loadViewerHistory(ctx context.Context, mac string) ([]doorhistory.Event, int) {
 	if s.history == nil {
 		return nil, 0
 	}
-	list, err := s.history.ListForMock(ctx, mac, MieterHistoryLimit)
+	list, err := s.history.ListForMock(ctx, mac, ViewerHistoryLimit)
 	if err != nil {
 		s.log.Warn("doorhistory list failed", "mac", mac, "err", err)
 		return nil, 0

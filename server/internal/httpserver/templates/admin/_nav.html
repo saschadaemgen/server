@@ -1,0 +1,35 @@
+{{define "admin-nav"}}
+<nav class="admin-nav" aria-label="Hauptnavigation">
+  <a class="admin-nav-brand" href="/a/">
+    <span class="admin-nav-brand-mark" aria-hidden="true">u</span>
+    <span>unifix</span>
+  </a>
+  <div class="admin-nav-links" role="navigation">
+    <a class="admin-nav-link{{if eq .ActiveNav "dashboard"}} is-active{{end}}" href="/a/">Dashboard</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "web-viewers"}} is-active{{end}}" href="/a/web-viewers">Web-Viewer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "esp-viewers"}} is-active{{end}}" href="/a/esp-viewers">ESP-Viewer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users">Benutzer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "esp-pager"}} is-active{{end}}" href="/a/esp-pager">ESP-Pager</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "settings"}} is-active{{end}}" href="/a/settings">Einstellungen</a>
+  </div>
+  <div class="admin-nav-actions">
+    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
+      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
+      <span class="admin-nav-user-name">{{.User.Name}}</span>
+    </div>
+    <form method="post" action="/a/logout" style="margin:0;">
+      <button class="btn-icon btn-ghost" type="submit" title="Abmelden" aria-label="Abmelden">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 5H5v14h10"/>
+          <path d="M15 9l4 3-4 3M9 12h10"/>
+        </svg>
+      </button>
+    </form>
+  </div>
+</nav>
+{{end}}

@@ -3,14 +3,98 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>unifix · Dashboard</title>
+  <title>unifix - Dashboard</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
 </head>
 <body class="admin-shell">
 
-  {{template "admin-dashboard.html" .}}
-  {{template "modal-magic-link.html" .}}
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Live-Stand der Plattform.</p>
+      </div>
+    </header>
+
+    <div class="stat-grid">
+      <div class="stat-card is-accent">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Web-Viewer</span>
+        </div>
+        <div class="stat-card-value">{{.Page.WebViewers}}</div>
+        <div class="stat-card-foot">
+          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.WebViewersOn}} online</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Klingel-Events 24h</span>
+        </div>
+        <div class="stat-card-value">{{.Page.EventsToday}}</div>
+        <div class="stat-card-foot">
+          <span style="color: var(--color-text-secondary); font-weight: var(--fw-medium);">{{.Page.EventsTrend}}</span>
+          <span>vs. 7d-Schnitt</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Aktive Sessions</span>
+        </div>
+        <div class="stat-card-value">{{.Page.ActiveSessions}}</div>
+        <div class="stat-card-foot">
+          <span>angemeldete Browser</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="app-card" style="margin-top: var(--space-6);">
+      <div class="app-card-head">
+        <h2 class="app-card-title">Letzte Klingel-Ereignisse</h2>
+      </div>
+      <table class="app-table">
+        <thead><tr><th>Zeit</th><th>Wohnung</th><th>Tuer</th><th>Status</th></tr></thead>
+        <tbody>
+          {{range .Page.RecentEvents}}
+            <tr>
+              <td>{{.When}}</td>
+              <td>{{.UnitName}}</td>
+              <td>{{.DoorName}}</td>
+              <td>{{.Status}}</td>
+            </tr>
+          {{else}}
+            <tr><td colspan="4" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Ereignisse.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="app-card" style="margin-top: var(--space-6);">
+      <div class="app-card-head">
+        <h2 class="app-card-title">Letzte Anmeldungen</h2>
+      </div>
+      <table class="app-table">
+        <thead><tr><th>Zeit</th><th>Bereich</th><th>User</th><th>IP</th><th>Resultat</th></tr></thead>
+        <tbody>
+          {{range .Page.RecentAudit}}
+            <tr>
+              <td>{{.When}}</td>
+              <td>{{.Realm}}</td>
+              <td>{{.User}}</td>
+              <td>{{.IP}}</td>
+              <td>{{.Outcome}}</td>
+            </tr>
+          {{else}}
+            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Anmeldungen.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </section>
+  </main>
 
   <script src="/static/interactions.js"></script>
 </body>

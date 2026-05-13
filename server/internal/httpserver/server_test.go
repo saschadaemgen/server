@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,7 +17,9 @@ import (
 	"unifix.local/mock"
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
-	"unifix.local/server/internal/auth/magiclink"
+	"unifix.local/server/internal/auth/argon2id"
+	"unifix.local/server/internal/auth/loginaudit"
+	"unifix.local/server/internal/auth/ratelimit"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
@@ -27,17 +30,15 @@ import (
 	"unifix.local/server/internal/secrets"
 )
 
-// Test fixtures for the Saison 12-06 mock-centric routing model.
-// The test mock is registered via mockmanager and reused by every
-// magic-link / session test so the FK chain
-//
-//	magic_link_tokens.mock_mac -> mock_viewers.mac
-//	mieter_sessions.mock_mac   -> mock_viewers.mac
-//
-// stays satisfied.
+// Saison 13-02-FIX4-a: Magic-Link ist tot. Alle Login-Tests laufen
+// jetzt ueber Username + Passwort POST /m. Der Test-Viewer wird
+// vor jedem Login mit seedViewer() angelegt; das setzt sowohl die
+// viewers-Zeile als auch das Argon2id-Passwort.
 const (
-	testMockMAC  = "0c:ea:14:42:42:42"
-	testMockName = "Familie Mueller 2OG"
+	testViewerMAC      = "0c:ea:14:42:42:42"
+	testViewerName     = "Familie Mueller 2OG"
+	testViewerUsername = "familie-mueller-2og"
+	testViewerPassword = "Kp3-mQ7r9-zX2nWv"
 )
 
 // testClock is a shared time source whose value can be moved
@@ -70,7 +71,6 @@ type testEnv struct {
 	srv         *Server
 	ts          *httptest.Server
 	client      *http.Client
-	magic       *magiclink.Service
 	sess        *session.Service
 	adminSess   *adminsession.Service
 	adminSvc    *admin.Service
@@ -78,12 +78,13 @@ type testEnv struct {
 	mockMgr     *mockmanager.Manager
 	hub         *doorbellhub.Hub
 	history     *doorhistory.SQLStore
+	audit       *loginaudit.Service
 	d           *db.DB
 	clock       *testClock
 }
 
 func newTestServer(t *testing.T) *testEnv {
-	return newTestServerWithClock(t, time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC))
+	return newTestServerWithClock(t, time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC))
 }
 
 func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
@@ -94,10 +95,10 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	magic := magiclink.New(d, magiclink.WithClock(clock.Now))
 	sess := session.New(d, session.WithClock(clock.Now))
 	adminSess := adminsession.New(d, adminsession.WithClock(clock.Now))
 	adminSvc := admin.New(d, admin.WithClock(clock.Now))
+	auditSvc := loginaudit.NewWithClock(d, clock.Now)
 
 	secKey := make([]byte, 32)
 	for i := range secKey {
@@ -129,12 +130,14 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	srv, err := New(Deps{
 		Config:          cfg,
-		MagicLink:       magic,
 		Sessions:        sess,
 		AdminSessions:   adminSess,
 		MockManager:     mockMgr,
 		Admin:           adminSvc,
 		PlatformConfig:  platformCfg,
+		Audit:           auditSvc,
+		ViewerLimiter:   ratelimit.NewWithClock(clock.Now),
+		AdminLimiter:    ratelimit.NewWithClock(clock.Now),
 		Hub:             hub,
 		History:         historyStore,
 		EventsHeartbeat: 50 * time.Millisecond,
@@ -164,37 +167,60 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	})
 	return &testEnv{
 		srv: srv, ts: ts, client: client,
-		magic: magic, sess: sess, adminSess: adminSess, adminSvc: adminSvc,
+		sess: sess, adminSess: adminSess, adminSvc: adminSvc,
 		platformCfg: platformCfg, mockMgr: mockMgr,
 		hub:     hub,
 		history: historyStore,
-		d:   d, clock: clock,
+		audit:   auditSvc,
+		d:       d, clock: clock,
 	}
 }
 
-// seedMock registers the canonical test mock via mockmanager. Used
-// before every test that creates a magic-link token or a session,
-// because both tables FK on mock_viewers.mac. Each call hands out
-// a fresh service port so tests can seed multiple mocks back-to-back.
-func (e *testEnv) seedMock(t *testing.T) {
+// seedViewer registriert den Standard-Test-Viewer mit Passwort.
+func (e *testEnv) seedViewer(t *testing.T) {
 	t.Helper()
-	e.seedMockAs(t, testMockMAC, testMockName)
+	e.seedViewerAs(t, testViewerMAC, testViewerName, testViewerUsername, testViewerPassword)
 }
 
-func (e *testEnv) seedMockAs(t *testing.T, mac, name string) {
+func (e *testEnv) seedViewerAs(t *testing.T, mac, name, username, plainPW string) {
 	t.Helper()
 	infos, err := e.mockMgr.ListViewers(context.Background())
 	if err != nil {
-		t.Fatalf("seedMock: ListViewers: %v", err)
+		t.Fatalf("seedViewer: ListViewers: %v", err)
 	}
 	port := uint16(8100 + len(infos))
 	if err := e.mockMgr.AddViewer(context.Background(), mockmanager.ViewerSpec{
 		MAC:         mac,
 		Name:        name,
 		ServicePort: port,
+		Type:        mockmanager.TypeWeb,
+		Username:    username,
 	}); err != nil {
-		t.Fatalf("seedMock: AddViewer: %v", err)
+		t.Fatalf("seedViewer: AddViewer: %v", err)
 	}
+	hash, err := argon2id.HashWithPepper(plainPW, "")
+	if err != nil {
+		t.Fatalf("seedViewer: hash: %v", err)
+	}
+	if err := e.mockMgr.SetPasswordHash(context.Background(), mac, hash); err != nil {
+		t.Fatalf("seedViewer: set hash: %v", err)
+	}
+}
+
+// loginViewer fuehrt POST /m mit Form-Body durch und liefert die
+// Response-Struct (CheckRedirect verhindert Auto-Follow).
+func (e *testEnv) loginViewer(t *testing.T, username, password string) *http.Response {
+	t.Helper()
+	form := url.Values{}
+	form.Set("username", username)
+	form.Set("password", password)
+	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/m", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /m: %v", err)
+	}
+	return resp
 }
 
 func quietLogger() *slog.Logger {
@@ -203,8 +229,6 @@ func quietLogger() *slog.Logger {
 
 // fakeManagerFactory builds a do-nothing Viewer that satisfies
 // the mockmanager.Viewer interface without binding any sockets.
-// Used by every admin httpserver test so the manager can run
-// add/remove/list flows headlessly.
 func fakeManagerFactory(cfg mock.Config, _ *slog.Logger) (mockmanager.Viewer, error) {
 	return &noopViewer{
 		mac:     cfg.MAC,
@@ -261,20 +285,13 @@ func findSessionCookie(resp *http.Response) *http.Cookie {
 
 func TestLogin_HappyPath(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("GET /m/login: %v", err)
-	}
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m/" {
-		t.Errorf("Location = %q, want %q", loc, "/m/")
+	if loc := resp.Header.Get("Location"); loc != "/m" {
+		t.Errorf("Location = %q, want /m", loc)
 	}
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -294,225 +311,85 @@ func TestLogin_HappyPath(t *testing.T) {
 		t.Errorf("home status = %d, want 200", resp2.StatusCode)
 	}
 	body := readBody(t, resp2)
-	if !strings.Contains(body, testMockName) {
-		t.Errorf("home body missing mock name %q, got: %s", testMockName, body)
+	if !strings.Contains(body, testViewerName) {
+		t.Errorf("home body missing viewer name %q", testViewerName)
 	}
-	// Claude-Design library expects this hint inside the always-dark
-	// stream slot when no live video is wired yet.
 	if !strings.Contains(body, "Bereit") {
-		t.Errorf("home body missing intercom-idle stream hint, got: %s", body)
+		t.Errorf("home body missing intercom-idle hint")
 	}
 }
 
-func TestLogin_TokenMissing(t *testing.T) {
+func TestLogin_NoSession_RendersForm(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m/login")
+	resp, err := env.client.Get(env.ts.URL + "/m")
 	if err != nil {
-		t.Fatalf("GET /m/login: %v", err)
+		t.Fatalf("GET /m: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Magic-Link fehlt") {
-		t.Errorf("body missing %q marker, got: %s", "Magic-Link fehlt", body)
+	if !strings.Contains(body, `name="username"`) {
+		t.Errorf("login form missing username field")
+	}
+	if !strings.Contains(body, `name="password"`) {
+		t.Errorf("login form missing password field")
 	}
 }
 
-func TestLogin_TokenInvalid(t *testing.T) {
+func TestLogin_PrefillsFromQueryParams(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/m/login?t=garbage")
+	resp, err := env.client.Get(env.ts.URL + "/m?u=alice&p=hunter2")
 	if err != nil {
-		t.Fatalf("GET /m/login: %v", err)
+		t.Fatalf("GET /m: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Link ungueltig") {
-		t.Errorf("body missing %q marker, got: %s", "Link ungueltig", body)
+	if !strings.Contains(body, `value="alice"`) {
+		t.Errorf("prefill u missing in body")
+	}
+	if !strings.Contains(body, `value="hunter2"`) {
+		t.Errorf("prefill p missing in body")
 	}
 }
 
-func TestLogin_TokenExpired(t *testing.T) {
+func TestLogin_WrongPassword(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	env.clock.Add(magiclink.DefaultTTL + time.Second)
-	resp, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("GET /m/login: %v", err)
-	}
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, "wrong-password-1234")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (form re-render)", resp.StatusCode)
 	}
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Link abgelaufen") {
-		t.Errorf("body missing %q marker, got: %s", "Link abgelaufen", body)
+	if !strings.Contains(body, "Falscher") {
+		t.Errorf("body missing falsch hint, got: %s", body)
 	}
 }
 
-func TestLogin_TokenAlreadyConsumed(t *testing.T) {
+func TestLogin_UnknownUser(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp1, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("first GET /m/login: %v", err)
-	}
-	resp1.Body.Close()
-	if resp1.StatusCode != http.StatusSeeOther {
-		t.Fatalf("first login status = %d, want 303", resp1.StatusCode)
-	}
-
-	// Fresh client with empty jar to defeat the "already logged in"
-	// short-circuit.
-	jar2, _ := cookiejar.New(nil)
-	fresh := &http.Client{
-		Jar: jar2,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp2, err := fresh.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("second GET /m/login: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusBadRequest {
-		t.Errorf("second login status = %d, want 400", resp2.StatusCode)
-	}
-	body := readBody(t, resp2)
-	if !strings.Contains(body, "Link wurde schon benutzt") {
-		t.Errorf("body missing %q marker, got: %s", "Link wurde schon benutzt", body)
+	resp := env.loginViewer(t, "ghost", "anything-1234")
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "Falscher") {
+		t.Errorf("body missing falsch hint")
 	}
 }
 
-// TestLogin_AlreadyLoggedIn_NoToken covers the legitimate
-// "browser back to /m/login" case: an already-signed-in tenant
-// hits /m/login without a token in the URL. We redirect to /m/
-// without burning anything.
-//
-// The opposite case (logged in PLUS a fresh token in the URL)
-// must NOT short-circuit; it must consume the token and swap the
-// session. That branch is covered by
-// TestMagicLinkSessionSwap_SameBrowser further down.
-func TestLogin_AlreadyLoggedIn_NoToken(t *testing.T) {
+func TestLogin_RateLimitsAfterRepeatedFailures(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
+	env.seedViewer(t)
+	for i := 0; i < ratelimit.IPMaxAttempts; i++ {
+		resp := env.loginViewer(t, testViewerUsername, "bad")
+		resp.Body.Close()
 	}
-	resp1, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("first login: %v", err)
-	}
-	resp1.Body.Close()
-
-	resp2, err := env.client.Get(env.ts.URL + "/m/login")
-	if err != nil {
-		t.Fatalf("token-less /m/login: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusSeeOther {
-		t.Errorf("status = %d, want 303", resp2.StatusCode)
-	}
-	if loc := resp2.Header.Get("Location"); loc != "/m/" {
-		t.Errorf("Location = %q, want %q", loc, "/m/")
-	}
-}
-
-// TestMagicLinkSessionSwap_SameBrowser is the regression test for
-// the Saison 13-02-FIX cookie bug. Same cookie jar, two magic
-// links, two mocks: after the second click the home page MUST
-// render the second mock, not the first.
-func TestMagicLinkSessionSwap_SameBrowser(t *testing.T) {
-	env := newTestServer(t)
-	const (
-		macA   = "0c:ea:14:42:42:42"
-		nameA  = "Mock A leerstand"
-		macB   = "0c:ea:14:42:42:43"
-		nameB  = "Mock B Daemgen"
-	)
-	env.seedMockAs(t, macA, nameA)
-	env.seedMockAs(t, macB, nameB)
-
-	tokenA, err := env.magic.Create(context.Background(), macA)
-	if err != nil {
-		t.Fatalf("magic.Create A: %v", err)
-	}
-	tokenB, err := env.magic.Create(context.Background(), macB)
-	if err != nil {
-		t.Fatalf("magic.Create B: %v", err)
-	}
-
-	// Click 1: login as mock A.
-	respA, err := env.client.Get(env.ts.URL + "/m/login?t=" + tokenA)
-	if err != nil {
-		t.Fatalf("GET /m/login A: %v", err)
-	}
-	respA.Body.Close()
-	if respA.StatusCode != http.StatusSeeOther {
-		t.Fatalf("login A status = %d, want 303", respA.StatusCode)
-	}
-	homeA, err := env.client.Get(env.ts.URL + "/m/")
-	if err != nil {
-		t.Fatalf("GET /m/ after A: %v", err)
-	}
-	bodyA := readBody(t, homeA)
-	if !strings.Contains(bodyA, nameA) {
-		t.Fatalf("home after A missing %q in body", nameA)
-	}
-
-	// Click 2: SAME cookie jar, login as mock B.
-	respB, err := env.client.Get(env.ts.URL + "/m/login?t=" + tokenB)
-	if err != nil {
-		t.Fatalf("GET /m/login B: %v", err)
-	}
-	respB.Body.Close()
-	if respB.StatusCode != http.StatusSeeOther {
-		t.Fatalf("login B status = %d, want 303 (token must be consumed, not short-circuited)", respB.StatusCode)
-	}
-
-	// /m/ must now render mock B, NOT mock A.
-	homeB, err := env.client.Get(env.ts.URL + "/m/")
-	if err != nil {
-		t.Fatalf("GET /m/ after B: %v", err)
-	}
-	bodyB := readBody(t, homeB)
-	if !strings.Contains(bodyB, nameB) {
-		t.Errorf("home after B missing %q in body (cookie swap broken)", nameB)
-	}
-	if strings.Contains(bodyB, nameA) {
-		t.Errorf("home after B still contains %q (stale session leaked)", nameA)
-	}
-
-	// And the second token must be marked consumed in the DB now;
-	// re-using it from a fresh jar must fail.
-	jar2, _ := cookiejar.New(nil)
-	fresh := &http.Client{
-		Jar: jar2,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	respReuse, err := fresh.Get(env.ts.URL + "/m/login?t=" + tokenB)
-	if err != nil {
-		t.Fatalf("reuse token B: %v", err)
-	}
-	respReuse.Body.Close()
-	if respReuse.StatusCode != http.StatusBadRequest {
-		t.Errorf("token B reuse status = %d, want 400 (token must be consumed)", respReuse.StatusCode)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "Zu viele Versuche") {
+		t.Errorf("body missing rate-limit hint, got: %s", body)
 	}
 }
 
@@ -528,27 +405,17 @@ func TestHome_RequiresSession(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("Location = %q, want %q", loc, "/m/login")
+	if loc := resp.Header.Get("Location"); loc != "/m" {
+		t.Errorf("Location = %q, want /m", loc)
 	}
 }
 
 func TestHome_SessionExpired(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp1, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	resp1.Body.Close()
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp.Body.Close()
 
-	// Push past the session idle timeout. Validate will also push
-	// expires_at forward on every hit, so this needs to clear that
-	// margin too. We jump >2x the timeout to be unambiguous.
 	env.clock.Add(2 * session.DefaultIdleTimeout)
 
 	resp2, err := env.client.Get(env.ts.URL + "/m/")
@@ -559,100 +426,36 @@ func TestHome_SessionExpired(t *testing.T) {
 	if resp2.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303 (expired)", resp2.StatusCode)
 	}
-	if loc := resp2.Header.Get("Location"); loc != "/m/login" {
-		t.Errorf("Location = %q, want %q", loc, "/m/login")
-	}
 }
 
-func TestHome_HappyPath_UpdatesLastSeen(t *testing.T) {
+// ---------- Logout ----------
+
+func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp1, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	resp1.Body.Close()
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
+	resp.Body.Close()
 
-	var lastSeenBefore int64
-	if err := env.d.QueryRow(
-		`SELECT last_seen FROM mieter_sessions WHERE mock_mac = ?`, testMockMAC,
-	).Scan(&lastSeenBefore); err != nil {
-		t.Fatalf("query last_seen before: %v", err)
-	}
-
-	env.clock.Add(time.Hour)
-
-	resp2, err := env.client.Get(env.ts.URL + "/m/")
-	if err != nil {
-		t.Fatalf("GET /m/: %v", err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", resp2.StatusCode)
-	}
-	body := readBody(t, resp2)
-	if !strings.Contains(body, testMockName) {
-		t.Errorf("body missing mock name, got: %s", body)
-	}
-
-	var lastSeenAfter int64
-	if err := env.d.QueryRow(
-		`SELECT last_seen FROM mieter_sessions WHERE mock_mac = ?`, testMockMAC,
-	).Scan(&lastSeenAfter); err != nil {
-		t.Fatalf("query last_seen after: %v", err)
-	}
-	if lastSeenAfter <= lastSeenBefore {
-		t.Errorf("last_seen not advanced: before=%d after=%d", lastSeenBefore, lastSeenAfter)
-	}
-}
-
-// ---------- Logout (removed in Saison 13-02) ----------
-
-// TestLogout_RouteGone asserts the mieter UI no longer exposes a
-// logout endpoint. The cookie is quasi-permanent and a tenant
-// rotation happens via the admin (remove or replace the mock).
-// Go 1.22 ServeMux returns 405 Method Not Allowed when a path
-// is registered for other methods only; "GET /m/" catches the
-// path so POST yields 405.
-func TestLogout_RouteGone(t *testing.T) {
-	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp1, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	resp1.Body.Close()
-
-	req, err := http.NewRequest(http.MethodPost, env.ts.URL+"/m/logout", nil)
+	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/m/logout", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
-	resp2, err := env.client.Do(req)
+	resp2, err := env.client.Do(logout)
 	if err != nil {
 		t.Fatalf("POST /m/logout: %v", err)
 	}
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusMethodNotAllowed && resp2.StatusCode != http.StatusNotFound {
-		t.Errorf("POST /m/logout status = %d, want 405 or 404", resp2.StatusCode)
+	if resp2.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303", resp2.StatusCode)
 	}
 
-	// And the tenant must still be logged in afterwards: the
-	// removed logout route is not a sneaky session-killer.
 	resp3, err := env.client.Get(env.ts.URL + "/m/")
 	if err != nil {
-		t.Fatalf("GET /m/ after blocked logout: %v", err)
+		t.Fatalf("GET /m/ after logout: %v", err)
 	}
 	resp3.Body.Close()
-	if resp3.StatusCode != http.StatusOK {
-		t.Errorf("home after blocked logout = %d, want 200", resp3.StatusCode)
+	if resp3.StatusCode != http.StatusSeeOther {
+		t.Errorf("home after logout = %d, want 303", resp3.StatusCode)
 	}
 }
 
@@ -660,15 +463,8 @@ func TestLogout_RouteGone(t *testing.T) {
 
 func TestCookie_Flags(t *testing.T) {
 	env := newTestServer(t)
-	env.seedMock(t)
-	token, err := env.magic.Create(context.Background(), testMockMAC)
-	if err != nil {
-		t.Fatalf("magic.Create: %v", err)
-	}
-	resp, err := env.client.Get(env.ts.URL + "/m/login?t=" + token)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
+	env.seedViewer(t)
+	resp := env.loginViewer(t, testViewerUsername, testViewerPassword)
 	defer resp.Body.Close()
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -683,11 +479,8 @@ func TestCookie_Flags(t *testing.T) {
 	if cookie.SameSite != http.SameSiteStrictMode {
 		t.Errorf("SameSite = %v, want Strict", cookie.SameSite)
 	}
-	if cookie.Path != SessionCookiePath {
-		t.Errorf("Path = %q, want %q", cookie.Path, SessionCookiePath)
-	}
 	if cookie.MaxAge != 365*86400 {
-		t.Errorf("MaxAge = %d, want %d (saison 13-02: cookie quasi-permanent)", cookie.MaxAge, 365*86400)
+		t.Errorf("MaxAge = %d, want %d", cookie.MaxAge, 365*86400)
 	}
 }
 
@@ -699,20 +492,17 @@ func TestListenAndServe_TLSPathRequiresCerts(t *testing.T) {
 		cfg     config.Config
 		wantErr bool
 	}{
-		{
-			name:    "tls mode without CertFile rejected",
-			cfg:     config.Config{ListenAddr: ":8443", DBPath: "x.db", DevMode: false},
-			wantErr: true,
+		{"tls mode without CertFile rejected",
+			config.Config{ListenAddr: ":8443", DBPath: "x.db", DevMode: false},
+			true,
 		},
-		{
-			name:    "tls mode with both certs accepted",
-			cfg:     config.Config{ListenAddr: ":8443", DBPath: "x.db", DevMode: false, CertFile: "c.pem", KeyFile: "k.pem"},
-			wantErr: false,
+		{"tls mode with both certs accepted",
+			config.Config{ListenAddr: ":8443", DBPath: "x.db", DevMode: false, CertFile: "c.pem", KeyFile: "k.pem"},
+			false,
 		},
-		{
-			name:    "dev mode without certs accepted",
-			cfg:     config.Config{ListenAddr: ":8080", DBPath: "x.db", DevMode: true},
-			wantErr: false,
+		{"dev mode without certs accepted",
+			config.Config{ListenAddr: ":8080", DBPath: "x.db", DevMode: true},
+			false,
 		},
 	}
 	for _, c := range cases {

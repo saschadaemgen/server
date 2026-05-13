@@ -21,12 +21,9 @@ func AdminUserFromContext(ctx context.Context) string {
 // /a/login. It reads the admin cookie, validates the session
 // against the admin_sessions service, and exposes the admin
 // username on the context.
-//
-// Saison 12-06: admin sessions live in their own table now, no
-// more "_admin_<user>" prefix surrogate.
 func (s *Server) requireAdminSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sid := readAdminSessionCookie(r)
+		sid := s.readAdminSessionCookie(r)
 		if sid == "" {
 			http.Redirect(w, r, "/a/login", http.StatusSeeOther)
 			return

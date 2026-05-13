@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unifix - ESP-Viewer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main" style="max-width: 720px;">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">{{.Page.Title}}</h1>
+        <p class="page-subtitle">{{.Page.Lead}}</p>
+      </div>
+    </header>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2 class="app-card-title">{{.Page.CardHead}}</h2>
+        <span class="badge">{{.Page.NextBrief}}</span>
+      </div>
+      <div class="app-card-body">
+        <p>{{.Page.CardBody}}</p>
+        <p style="color: var(--color-text-tertiary);">Diese Seite ist nur ein Platzhalter im Menue, damit der Routing-Pfad reserviert bleibt.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

@@ -2,29 +2,59 @@ package httpserver
 
 import "net/http"
 
-// Session cookie naming. Path is scoped to /m/ so admin and other
-// future sub-trees do not see the tenant session cookie.
+// Viewer-Session-Cookie. Saison 13-02-FIX4-a:
+//
+// In Production (Secure=true) wird der __Host-Prefix gesetzt; das
+// schliesst per RFC 6265bis Domain-Pinning, Path-Bypass und HTTP-
+// Cookies vollstaendig aus. Damit aendert sich auch der Path: __Host-
+// erfordert Path=/ , also liegt das Cookie nicht mehr nur unter
+// /m/ . Da Admin- und Viewer-Cookie unterschiedliche Namen haben
+// stoert das nicht (siehe cookie_admin.go).
+//
+// In DevMode (UNIFIX_DEV_MODE=1, plain HTTP) ist Secure unmoeglich
+// und damit der __Host-Prefix nicht regelkonform; die Browser
+// wuerden ihn ablehnen. Wir fallen dann auf "unifix_viewer" ohne
+// Prefix zurueck (akzeptierter Trade-Off, dokumentiert).
+//
+// MaxAge ist quasi-permanent (1 Jahr); das DB-rolling-renewal in
+// session.Validate sorgt fuer "echte" 30-Tage-Idle-Loesung.
 const (
-	SessionCookieName = "unifix_m_session"
-	SessionCookiePath = "/m/"
-
-	// Saison 13-02: the mieter UI dropped the logout button.
-	// Mieter sessions are now quasi-permanent: the cookie carries
-	// a one-year MaxAge so a tenant can close the browser and
-	// come back weeks later still logged in. The DB session row
-	// still expires after session.DefaultIdleTimeout (30d
-	// rolling), and a longer-absent tenant simply hits the
-	// magic-link login flow again.
-	sessionCookieMaxAge = 365 * 24 * 3600
+	viewerCookieNameSecure = "__Host-unifix_viewer"
+	viewerCookieNameDev    = "unifix_viewer"
+	viewerCookiePathSecure = "/"
+	viewerCookiePathDev    = "/m/"
+	sessionCookieMaxAge    = 365 * 24 * 3600
 )
 
-// setSessionCookie writes the session cookie. Secure is on
-// outside DevMode; SameSite is always Strict.
+// SessionCookieName ist nur ein Default fuer Tests; Production-
+// Code geht ueber Server.viewerCookieName.
+const SessionCookieName = viewerCookieNameDev
+
+// SessionCookiePath ist nur ein Default fuer Tests; Production-
+// Code geht ueber Server.viewerCookiePath.
+const SessionCookiePath = viewerCookiePathDev
+
+func (s *Server) viewerCookieName() string {
+	if s.cfg.DevMode {
+		return viewerCookieNameDev
+	}
+	return viewerCookieNameSecure
+}
+
+func (s *Server) viewerCookiePath() string {
+	if s.cfg.DevMode {
+		return viewerCookiePathDev
+	}
+	return viewerCookiePathSecure
+}
+
+// setSessionCookie writes the session cookie. Secure is on outside
+// DevMode; SameSite is always Strict.
 func (s *Server) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
+		Name:     s.viewerCookieName(),
 		Value:    sessionID,
-		Path:     SessionCookiePath,
+		Path:     s.viewerCookiePath(),
 		HttpOnly: true,
 		Secure:   !s.cfg.DevMode,
 		SameSite: http.SameSiteStrictMode,
@@ -32,20 +62,22 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	})
 }
 
-// Saison 13-02-FIX note: the cookie-swap bug reported by Sascha
-// turned out to be the optimistic short-circuit in handler_login,
-// not multi-path cookie pollution. The handler now consumes the
-// token whenever the URL carries one, and the regression is
-// covered by TestMagicLinkSessionSwap_SameBrowser. If a future
-// build ever needs to wipe a legacy cookie scope (e.g. an older
-// version that scoped to "/"), reintroduce a helper here and
-// call it BEFORE setSessionCookie, but mind that any tests that
-// pick the first matching cookie via response order will then
-// have to filter out the wipe entry.
+// clearSessionCookie loescht das Viewer-Session-Cookie (Logout-Pfad).
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     s.viewerCookieName(),
+		Value:    "",
+		Path:     s.viewerCookiePath(),
+		HttpOnly: true,
+		Secure:   !s.cfg.DevMode,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
 
 // readSessionCookie returns the cookie value or "" if absent.
-func readSessionCookie(r *http.Request) string {
-	c, err := r.Cookie(SessionCookieName)
+func (s *Server) readSessionCookie(r *http.Request) string {
+	c, err := r.Cookie(s.viewerCookieName())
 	if err != nil {
 		return ""
 	}

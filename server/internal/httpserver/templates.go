@@ -13,60 +13,57 @@ import (
 // library files start with extensive doc comments that contain
 // example {{template "..." .}} action snippets. Go's
 // html/template parses those actions even inside <!-- ... -->,
-// so we strip the comments before handing the body to Parse
-// (saving a "no such template" runtime error from a phantom
-// reference). Production rendering does not need the comments.
+// so we strip the comments before handing the body to Parse.
 var htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
 
 // libraryDemoOpenRE strips the `is-open` class from the modal,
 // sheet, scrim and overlay elements where the library bakes it
-// in as a standalone-demo convenience. The class name is the
-// runtime trigger for `display: flex` / `visibility: visible`,
-// so leaving it in causes a flash-of-open-modal on first paint
-// (S13-02-FIX3b live-test bug). interactions.js still adds the
-// class back when the user opens a modal/sheet/overlay, so the
-// runtime behaviour is unchanged.
+// in as a standalone-demo convenience.
 var libraryDemoOpenRE = regexp.MustCompile(`\bis-open\b`)
 
-//go:embed templates/admin/*.html templates/mieter/*.html
+// libraryNavRE strippt den Library-eigenen <nav class="admin-nav">
+// ...</nav>-Block aus den Library-Snippets. Saison 13-02-FIX4-a
+// haengt eine neue Nav (Web-Viewer, ESP-Viewer, Benutzer, ...) an
+// und kann den alten Block (Mieter, Mock-Tools) nicht direkt in
+// den Library-Files anpassen, weil die Library als heilig gilt.
+var libraryNavRE = regexp.MustCompile(`(?s)<nav class="admin-nav".*?</nav>\s*`)
+
+//go:embed templates/admin/*.html templates/viewer/*.html
 var templatesFS embed.FS
 
 // adminTemplates bundles every page template the http handlers
 // can render. Each entry is a complete html/template tree that
 // can run on its own via ExecuteTemplate(w, name, data).
-//
-// Saison 13-02-FIX3: the Claude-Design library now provides the
-// page-level HTML for every screen. The files in templates/...
-// are thin layout-shells that include the library snippets via
-// {{template "snippet-name.html" .}}. The CSS/JS/library shells
-// are wired in static.go via the same embed FS that this file
-// reads its snippets from.
 type adminTemplates struct {
 	pages  map[string]*template.Template
-	mieter map[string]*template.Template
+	viewer map[string]*template.Template
 }
 
 // macIDFromMAC turns a colon-separated MAC into a CSS-safe
-// suffix for HTML id attributes. Kept for callers that still
-// need the helper.
+// suffix for HTML id attributes.
 func macIDFromMAC(mac string) string {
 	return strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 }
 
 // adminLibraryFor lists the design-library snippets each admin
-// page shell needs. login is the only page that does not embed
-// the magic-link modal.
+// page shell needs. login uses the library card; alle anderen
+// admin-Seiten haben in Saison 13-02-FIX4-a eigene schlanke
+// Templates (Vokabular- und Nav-Wechsel passt nicht 1:1 in die
+// Library-Snippets, und die Library bleibt heilig).
 var adminLibraryFor = map[string][]string{
-	"login":     {"admin-login.html"},
-	"dashboard": {"admin-dashboard.html", "modal-magic-link.html"},
-	"users":     {"admin-users.html", "modal-magic-link.html"},
-	"mocks":     {"admin-mocks.html", "modal-magic-link.html"},
-	"settings":  {"admin-settings.html", "modal-magic-link.html"},
+	"login":             {"admin-login.html"},
+	"dashboard":         {},
+	"settings":          {},
+	"web-viewers":       {},
+	"esp-viewers":       {},
+	"users-placeholder": {},
+	"esp-pager":         {},
 }
 
 func newAdminTemplates() (*adminTemplates, error) {
 	funcMap := template.FuncMap{
-		"macID": macIDFromMAC,
+		"macID":    macIDFromMAC,
+		"safeHTML": func(s string) template.HTML { return template.HTML(s) },
 	}
 
 	pages := make(map[string]*template.Template, len(adminLibraryFor))
@@ -74,6 +71,8 @@ func newAdminTemplates() (*adminTemplates, error) {
 		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(
 			templatesFS,
 			"templates/admin/"+name+".html",
+			"templates/admin/_nav.html",
+			"templates/admin/_credentials_modal.html",
 		)
 		if err != nil {
 			return nil, fmt.Errorf("parse admin shell %s: %w", name, err)
@@ -84,30 +83,39 @@ func newAdminTemplates() (*adminTemplates, error) {
 		pages[name] = tmpl
 	}
 
-	mieter := make(map[string]*template.Template, 1)
+	viewer := make(map[string]*template.Template, 2)
 	homeShell, err := template.New("home").Funcs(funcMap).ParseFS(
 		templatesFS,
-		"templates/mieter/home.html",
+		"templates/viewer/home.html",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("parse mieter shell: %w", err)
+		return nil, fmt.Errorf("parse viewer home shell: %w", err)
 	}
 	if err := addLibrarySnippets(homeShell, []string{
 		"intercom-idle.html",
 		"intercom-history.html",
 		"intercom-ringing.html",
 	}); err != nil {
-		return nil, fmt.Errorf("attach mieter snippets: %w", err)
+		return nil, fmt.Errorf("attach viewer home snippets: %w", err)
 	}
-	mieter["home"] = homeShell
+	viewer["home"] = homeShell
 
-	return &adminTemplates{pages: pages, mieter: mieter}, nil
+	loginShell, err := template.New("login").Funcs(funcMap).ParseFS(
+		templatesFS,
+		"templates/viewer/login.html",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse viewer login shell: %w", err)
+	}
+	viewer["login"] = loginShell
+
+	return &adminTemplates{pages: pages, viewer: viewer}, nil
 }
 
 // addLibrarySnippets reads each library file out of the embedded
-// design-library FS and registers it as a named template inside
-// tmpl. The template name is the file basename so the shell can
-// pull it in with `{{template "intercom-idle.html" .}}`.
+// design-library FS, strips the inline nav block, the demo
+// `is-open` class and the doc comments, then registers the body
+// as a named template inside tmpl.
 func addLibrarySnippets(tmpl *template.Template, names []string) error {
 	for _, s := range names {
 		body, err := designLibraryFS.ReadFile("design-library/" + s)
@@ -116,6 +124,7 @@ func addLibrarySnippets(tmpl *template.Template, names []string) error {
 		}
 		clean := htmlCommentRE.ReplaceAllString(string(body), "")
 		clean = libraryDemoOpenRE.ReplaceAllString(clean, "")
+		clean = libraryNavRE.ReplaceAllString(clean, "")
 		if _, err := tmpl.New(s).Parse(clean); err != nil {
 			return fmt.Errorf("parse %s: %w", s, err)
 		}
@@ -123,8 +132,7 @@ func addLibrarySnippets(tmpl *template.Template, names []string) error {
 	return nil
 }
 
-// renderPage executes the named admin shell. The shell pulls in
-// the page-specific Claude-Design snippet via {{template ...}}.
+// renderPage executes the named admin shell.
 func (t *adminTemplates) renderPage(w io.Writer, name string, data any) error {
 	tmpl, ok := t.pages[name]
 	if !ok {
@@ -134,8 +142,8 @@ func (t *adminTemplates) renderPage(w io.Writer, name string, data any) error {
 }
 
 // renderPartial renders a single named template (typically a
-// library snippet) without the surrounding shell. Looked up
-// inside whichever admin page has it parsed.
+// shared snippet like "credentials-modal") without the
+// surrounding shell.
 func (t *adminTemplates) renderPartial(w io.Writer, name string, data any) error {
 	for _, tmpl := range t.pages {
 		if lookup := tmpl.Lookup(name); lookup != nil {
@@ -145,19 +153,15 @@ func (t *adminTemplates) renderPartial(w io.Writer, name string, data any) error
 	return fmt.Errorf("unknown partial %q", name)
 }
 
-// renderMieter executes the tenant-facing home shell.
-func (t *adminTemplates) renderMieter(w io.Writer, name string, data any) error {
-	tmpl, ok := t.mieter[name]
+// renderViewer executes a viewer-side shell (login or home).
+func (t *adminTemplates) renderViewer(w io.Writer, name string, data any) error {
+	tmpl, ok := t.viewer[name]
 	if !ok {
-		return fmt.Errorf("unknown mieter template %q", name)
+		return fmt.Errorf("unknown viewer template %q", name)
 	}
 	target := tmpl.Lookup(name + ".html")
 	if target == nil {
-		names := make([]string, 0)
-		for _, sub := range tmpl.Templates() {
-			names = append(names, sub.Name())
-		}
-		return fmt.Errorf("mieter template %s.html not in set; have: %v", name, names)
+		return fmt.Errorf("viewer template %s.html not in set", name)
 	}
 	return target.Execute(w, data)
 }

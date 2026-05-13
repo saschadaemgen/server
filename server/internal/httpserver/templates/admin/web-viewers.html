@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unifix - Web-Viewer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Web-Viewer</h1>
+        <p class="page-subtitle">Browser-basierte Klingel-Empfaenger pro Wohnung. Username + Passwort.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" type="button" data-action="open-create">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Web-Viewer anlegen
+        </button>
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    <div class="app-card">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>Wohnung</th>
+            <th>Benutzername</th>
+            <th>Status</th>
+            <th>Passwort gesetzt</th>
+            <th style="text-align:right;">Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Page.Viewers}}
+            <tr id="row-{{macID .MAC}}">
+              <td>
+                <strong>{{.Name}}</strong>
+                <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
+              </td>
+              <td><code>{{.Username}}</code></td>
+              <td>
+                {{if .LockedNow}}
+                  <span class="status-pill is-danger"><span class="status-dot"></span>Gesperrt</span>
+                {{else if .OnlineNow}}
+                  <span class="status-pill is-ok"><span class="status-dot"></span>Online</span>
+                {{else}}
+                  <span class="status-pill"><span class="status-dot"></span>Offline</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .HasPassword}}{{.PasswordSetAt}}{{else}}<em>noch nicht gesetzt</em>{{end}}
+              </td>
+              <td style="text-align:right; white-space:nowrap;">
+                <form method="post" action="/a/web-viewers/{{.MAC}}/reset-pw" style="display:inline; margin:0;" data-credentials-form>
+                  <button class="btn btn-secondary btn-sm" type="submit">Passwort zuruecksetzen</button>
+                </form>
+                {{if .LockedNow}}
+                  <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
+                    <button class="btn btn-secondary btn-sm" type="submit">Sperre aufheben</button>
+                  </form>
+                {{end}}
+                <form method="post" action="/a/web-viewers/{{.MAC}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Viewer endgueltig loeschen? Sessions werden invalidiert.');">
+                  <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
+                </form>
+              </td>
+            </tr>
+          {{else}}
+            <tr><td colspan="5" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Anlegen-Modal -->
+    <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true">
+      <div class="modal modal-md">
+        <form method="post" action="/a/web-viewers" data-credentials-form>
+          <div class="modal-head">
+            <h2 class="modal-title">Web-Viewer anlegen</h2>
+            <button class="btn-icon btn-ghost" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label class="field-label" for="new-name">Wohnungs-Name</label>
+              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG"/>
+            </div>
+            <div class="field" style="margin-top:var(--space-3);">
+              <label class="field-label" for="new-username">Benutzername (optional)</label>
+              <input class="input" id="new-username" name="username" type="text" pattern="[A-Za-z0-9._\-]{3,32}" placeholder="leer = aus Name ableiten"/>
+              <span class="field-hint">3-32 Zeichen aus a-z, 0-9, _ und . erlaubt.</span>
+            </div>
+            <div class="field" style="margin-top:var(--space-3);">
+              <label class="field-label" for="new-mac">MAC-Adresse (optional)</label>
+              <input class="input" id="new-mac" name="mac" type="text" pattern="^([0-9a-f]{2}:){5}[0-9a-f]{2}$" placeholder="leer = automatisch generieren"/>
+              <span class="field-hint">Lowercase hex mit Doppelpunkten, z.B. 0c:ea:14:42:42:42.</span>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Anlegen</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+  <script>
+    (function () {
+      // Anlegen-Modal Open-Handler.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-create"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = document.querySelector('[data-modal="create-viewer"]');
+        if (modal) modal.classList.add('is-open');
+      });
+      // Close-Handler (Modal-X + Cancel + Scrim-Klick).
+      document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-action="close-modal"]')) {
+          var m = e.target.closest('.modal-scrim');
+          if (m) m.classList.remove('is-open');
+        }
+      });
+
+      // Credentials-Form-Pfad: anstatt Standard-POST machen wir
+      // einen Fetch und ersetzen den Form-Container durch das
+      // Credentials-Modal-HTML aus der Server-Antwort.
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('form[data-credentials-form]');
+        if (!form) return;
+        e.preventDefault();
+        var data = new FormData(form);
+        fetch(form.action, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: new URLSearchParams(data),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            // Modal schliessen
+            document.querySelectorAll('.modal-scrim.is-open').forEach(function (m) {
+              m.classList.remove('is-open');
+            });
+            // Credentials-Modal-Container einhaengen
+            var existing = document.querySelector('[data-modal="credentials"]');
+            if (existing) existing.remove();
+            var div = document.createElement('div');
+            div.innerHTML = renderCredentials(j);
+            document.body.appendChild(div.firstElementChild);
+          })
+          .catch(function (err) {
+            alert('Fehler: ' + err.message);
+          });
+      });
+
+      function renderCredentials(j) {
+        return '<div class="modal-scrim is-open" data-modal="credentials" role="dialog" aria-modal="true">'
+          + '<div class="modal modal-md">'
+          + '<div class="modal-head"><h2 class="modal-title">Zugangsdaten fuer ' + escape(j.name) + '</h2>'
+          + '<button class="btn-icon btn-ghost" type="button" data-action="close-modal" aria-label="Schliessen">x</button></div>'
+          + '<div class="modal-body">'
+          + '<p class="modal-sub">Passwort wird nur EIN MAL angezeigt. Bitte sofort an den Mieter weitergeben.</p>'
+          + '<div class="field"><label class="field-label">Benutzername</label><div class="input">' + escape(j.username) + '</div></div>'
+          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Passwort</label><div class="input" style="font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div></div>'
+          + '<div class="field" style="margin-top:var(--space-3);"><label class="field-label">Login-Link</label><div class="input" style="word-break:break-all;">' + escape(j.login_url) + '</div></div>'
+          + '<div class="qr-box" style="margin-top:var(--space-4); display:flex; justify-content:center;">' + (j.qr_svg || '') + '</div>'
+          + '</div>'
+          + '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button></div>'
+          + '</div></div>';
+      }
+      function escape(s) {
+        return String(s || '').replace(/[&<>\"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

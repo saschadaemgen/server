@@ -3,14 +3,144 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>unifix · Einstellungen</title>
+  <title>unifix - Einstellungen</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
 </head>
 <body class="admin-shell">
 
-  {{template "admin-settings.html" .}}
-  {{template "modal-magic-link.html" .}}
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main" style="max-width: 880px;">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Einstellungen</h1>
+        <p class="page-subtitle">UniFi-Access-Anbindung, Admin-Konto, Audit.</p>
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    <section class="set-section">
+      <div class="set-section-title">UniFi Access Integration</div>
+      <form class="set-card" method="post" action="/a/settings">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Controller-URL</span>
+            <span class="set-row-sub">UA-Controller im lokalen Netz, z.B. https://unifi.local</span>
+          </div>
+          <input class="input" name="ua_controller_url" type="url" value="{{.Page.UA.BaseURL}}" placeholder="https://unifi.local:12445" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">API-Token</span>
+            <span class="set-row-sub">Bearer-Token aus dem UA-Portal. Wird AES-256-GCM-verschluesselt gespeichert. Bei Austausch hier neu eintragen.</span>
+          </div>
+          <input class="input" name="token" type="password" value="" placeholder="{{if .Page.UA.HasToken}}* * * (gesetzt){{else}}noch nicht gesetzt{{end}}" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Verbindung</span>
+            <span class="set-row-sub">Status der UA-API-Konfiguration.</span>
+          </div>
+          {{if eq .Page.UA.Status "connected"}}
+            <span class="status-pill is-ok"><span class="status-dot"></span>Konfiguriert</span>
+          {{else}}
+            <span class="status-pill"><span class="status-dot"></span>Nicht getestet</span>
+          {{end}}
+        </div>
+        <div class="set-row">
+          <div class="set-row-main"></div>
+          <button class="btn btn-primary" type="submit">Speichern</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Admin-Passwort</div>
+      <form class="set-card" method="post" action="/a/settings/admin-password">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Aktuelles Passwort</span>
+          </div>
+          <input class="input" name="old_password" type="password" required style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Neues Passwort</span>
+            <span class="set-row-sub">Mindestens 12 Zeichen.</span>
+          </div>
+          <input class="input" name="new_password" type="password" required minlength="12" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Bestaetigung</span>
+          </div>
+          <input class="input" name="confirm_password" type="password" required minlength="12" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main"></div>
+          <button class="btn btn-secondary" type="submit">Passwort aendern</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Login-Sperren</div>
+      <div class="set-card">
+        {{if .Page.Locks}}
+          <table class="app-table">
+            <thead><tr><th>Typ</th><th>Wert</th><th>Versuche</th><th>Sperre laeuft</th><th></th></tr></thead>
+            <tbody>
+              {{range .Page.Locks}}
+                <tr>
+                  <td>{{.Kind}}</td>
+                  <td><code>{{.Value}}</code></td>
+                  <td>{{.Attempts}}</td>
+                  <td>{{if .UntilLabel}}{{.UntilLabel}}{{else}}-{{end}}</td>
+                  <td>
+                    <form method="post" action="/a/settings/unlock" style="margin:0;">
+                      <input type="hidden" name="kind" value="{{.Kind}}"/>
+                      <input type="hidden" name="value" value="{{.Value}}"/>
+                      <button class="btn btn-secondary btn-sm" type="submit">Entsperren</button>
+                    </form>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{else}}
+          <p class="set-row-sub">Keine aktiven Sperren.</p>
+        {{end}}
+      </div>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Login-Audit</div>
+      <div class="set-card">
+        {{if .Page.Audit}}
+          <table class="app-table">
+            <thead><tr><th>Zeit</th><th>Bereich</th><th>User</th><th>IP</th><th>Resultat</th></tr></thead>
+            <tbody>
+              {{range .Page.Audit}}
+                <tr>
+                  <td>{{.When}}</td>
+                  <td>{{.Realm}}</td>
+                  <td>{{.User}}</td>
+                  <td>{{.IP}}</td>
+                  <td>{{.Outcome}}</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{else}}
+          <p class="set-row-sub">Noch keine Anmeldungen.</p>
+        {{end}}
+      </div>
+    </section>
+  </main>
 
   <script src="/static/interactions.js"></script>
 </body>
