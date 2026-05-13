@@ -697,163 +697,202 @@ a.app-card:hover {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ------------------------------------------------------------------
-   Bell overlay (iOS FaceTime lock-screen).
-   Always rendered on a pure-black backdrop regardless of theme,
-   because incoming-call screens are an Apple convention.
-   ------------------------------------------------------------------ */
+/* ============================================================
+   BELL OVERLAY - S13-02-FIX1c finale Vorlage
+   ============================================================ */
 
 .bell-overlay {
   position: fixed;
   inset: 0;
+  background: #000;
   z-index: 50;
-  display: none;
+  display: none;  /* hidden by default - JS toggles to flex */
   flex-direction: column;
-  justify-content: space-between;
-  padding: 80px 32px 56px;
-  color: #ffffff;
-  font-family: var(--font-system);
-  background: #000000;
-  background-image:
-    radial-gradient(ellipse at top, rgba(255, 255, 255, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at center, rgba(10, 132, 255, 0.06) 0%, transparent 70%);
-  animation: backdrop-fade-in 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  animation: bell-fade-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.bell-overlay.is-open    { display: flex; }
-.bell-overlay.is-leaving { animation: backdrop-fade-out 200ms ease both; }
+.bell-overlay.is-open {
+  display: flex;
+}
+@keyframes bell-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.bell-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 25%, rgba(10,132,255,0.18), transparent 55%),
+    radial-gradient(ellipse at top, rgba(255,255,255,0.025), transparent 50%);
+  z-index: 0;
+  pointer-events: none;
+}
 
 .bell-hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 90px;
+  position: relative;
+  z-index: 2;
+}
+
+.bell-wrap {
+  width: 160px;
+  height: 160px;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.bell-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(10,132,255,0.5);
+  animation: bell-pulse 2400ms ease-out infinite;
+}
+.bell-ring-2 { animation-delay: 800ms; }
+.bell-ring-3 { animation-delay: 1600ms; }
+@keyframes bell-pulse {
+  0%   { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.bell-circle {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+  border: 1px solid rgba(255,255,255,0.1);
   display: grid;
   place-items: center;
   position: relative;
-  margin-top: 56px;
-}
-.bell-glow-ring {
-  position: absolute;
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(10, 132, 255, 0.40) 0%, transparent 70%);
-  animation: bell-pulse 2400ms ease-out infinite;
-  pointer-events: none;
-}
-.bell-glow-ring-2 { animation-delay: 800ms; }
-.bell-glow-ring-3 { animation-delay: 1600ms; }
-.bell-icon {
-  width: 160px;
-  height: 160px;
-  color: #ffffff;
-  filter:
-    drop-shadow(0 0 24px rgba(10, 132, 255, 0.65))
-    drop-shadow(0 0 60px rgba(10, 132, 255, 0.35));
-  animation: bell-wobble 2400ms ease-in-out infinite;
-  position: relative;
   z-index: 2;
-  display: inline-grid;
-  place-items: center;
-  font-size: 140px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.2),
+    0 0 50px rgba(10,132,255,0.5),
+    0 0 100px rgba(10,132,255,0.25);
+  animation: bell-wobble 2400ms ease-in-out infinite;
 }
-.bell-icon .ph { font-size: inherit; }
-@media (max-width: 640px) {
-  .bell-icon { width: 120px; height: 120px; font-size: 104px; }
-  .bell-glow-ring { width: 160px; height: 160px; }
-  .bell-overlay { padding: 56px 24px 40px; }
+@keyframes bell-wobble {
+  0%, 55%, 100% { transform: rotate(0deg); }
+  60% { transform: rotate(-10deg); }
+  65% { transform: rotate(10deg); }
+  70% { transform: rotate(-6deg); }
+  75% { transform: rotate(6deg); }
+  80% { transform: rotate(0deg); }
 }
 
-.bell-caller {
-  text-align: center;
-  margin-top: 48px;
-  color: #ffffff;
+.bell-icon-svg {
+  width: 80px;
+  height: 80px;
+  color: white;
+  filter: drop-shadow(0 0 14px rgba(10,132,255,0.7));
 }
-.bell-caller-title {
+
+.bell-texts {
+  margin-top: 36px;
+  text-align: center;
+}
+
+.bell-title {
   font-size: 36px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  color: white;
   margin: 0;
+  letter-spacing: -0.025em;
 }
-.bell-caller-sub {
-  font-size: 19px;
+
+.bell-sub {
+  font-size: 17px;
+  color: rgba(255,255,255,0.65);
+  margin: 8px 0 0;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.7);
-  margin: 6px 0 0;
-}
-.bell-caller-time {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-  margin: 24px 0 0;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
 }
 
 .bell-actions {
+  padding: 0 36px 64px;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: flex-start;
-  gap: 56px;
-  margin-bottom: 0;
+  position: relative;
+  z-index: 2;
 }
-@media (max-width: 480px) {
-  .bell-actions { gap: 28px; }
-}
-.bell-action {
+
+.bell-col {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
 }
+
 .bell-btn {
   width: 76px;
   height: 76px;
   border-radius: 50%;
-  border: 0;
-  cursor: pointer;
+  border: none;
+  padding: 0;
   display: grid;
   place-items: center;
-  color: #ffffff;
-  transition: transform 120ms ease-out, box-shadow 200ms ease-out, opacity 200ms ease;
+  cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
 }
-.bell-btn:hover:not(:disabled) { transform: scale(1.06); }
-.bell-btn:active:not(:disabled) { transform: scale(0.94); }
-.bell-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.bell-btn .ph { font-size: 32px; }
-.bell-btn-decline {
-  background: var(--accent-red);
-  box-shadow: 0 8px 24px rgba(255, 59, 48, 0.5);
-}
-.bell-btn-door {
-  background: var(--accent-amber);
-  box-shadow: 0 8px 24px rgba(255, 159, 10, 0.5);
-}
-.bell-btn-accept {
-  background: var(--accent-green);
-  box-shadow: 0 8px 24px rgba(52, 199, 89, 0.5);
-}
-.bell-btn-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
+.bell-btn:active { transform: scale(0.92); }
+
+.bell-btn-svg {
+  width: 34px;
+  height: 34px;
+  color: white;
 }
 
-@keyframes bell-pulse {
-  0%   { transform: scale(0.9); opacity: 0.7; }
-  100% { transform: scale(1.8); opacity: 0; }
+.bell-btn-decline {
+  background: #ff453a;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    0 8px 20px rgba(255,69,58,0.5);
 }
-@keyframes bell-wobble {
-  0%, 60%, 100% { transform: rotate(0deg); }
-  65%           { transform: rotate(-12deg); }
-  70%           { transform: rotate(12deg); }
-  75%           { transform: rotate(-8deg); }
-  80%           { transform: rotate(8deg); }
-  85%           { transform: rotate(0deg); }
+
+.bell-btn-unlock {
+  background: #ff9f0a;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    0 8px 20px rgba(255,159,10,0.5);
 }
-@keyframes backdrop-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+
+.bell-btn-accept {
+  background: #30d158;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    0 8px 20px rgba(48,209,88,0.5);
 }
-@keyframes backdrop-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+
+.bell-btn-off {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bell-btn-off:active { transform: none; }
+
+.bell-label {
+  color: rgba(255,255,255,0.85);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 480px) {
+  .bell-hero { padding-top: 60px; }
+  .bell-wrap, .bell-circle { width: 120px; height: 120px; }
+  .bell-icon-svg { width: 60px; height: 60px; }
+  .bell-title { font-size: 28px; }
+  .bell-sub { font-size: 15px; }
+  .bell-actions { padding: 0 20px 40px; }
+  .bell-btn { width: 68px; height: 68px; }
+  .bell-btn-svg { width: 30px; height: 30px; }
 }
 
 /* ------------------------------------------------------------------
@@ -870,7 +909,11 @@ a.app-card:hover {
   display: grid;
   place-items: center;
   padding: 24px;
-  animation: backdrop-fade-in 200ms ease both;
+  animation: modal-backdrop-fade-in 200ms ease both;
+}
+@keyframes modal-backdrop-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .modal-glass {
   width: 100%;
