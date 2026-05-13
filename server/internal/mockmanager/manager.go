@@ -69,15 +69,19 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 // ViewerSpec describes one persisted viewer.
 //
 // Saison 13-02-FIX4-a-HOTFIX4: Username-Slot ist abgeschafft;
-// der Wohnungs-Name ist der Login. NameMatcher als optionales
-// Field kann ein vor-normalisierter Wert vom Caller sein
-// (Default: leer -> Manager normalisiert intern).
+// der Wohnungs-Name ist der Login.
+// Saison 13-02-FIX4-c: ESPModel / ESPFwVersion / ESPTokenHash
+// werden nur bei Type='esp' beachtet. Bei TypeWeb bleiben sie
+// leer.
 type ViewerSpec struct {
 	MAC            string
 	Name           string
 	ServicePort    uint16
 	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
 	LinkedUAUserID string // optional UA-Access-User-Verknuepfung
+	ESPModel       string
+	ESPFwVersion   string
+	ESPTokenHash   string
 }
 
 // ViewerInfo is the public view of one running viewer for the
@@ -90,6 +94,9 @@ type ViewerInfo struct {
 	HasPassword    bool
 	PasswordSetAt  *time.Time
 	LinkedUAUserID string
+	ESPModel       string
+	ESPFwVersion   string
+	HasESPToken    bool
 	Running        bool
 }
 
@@ -362,7 +369,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		return nil, "", ErrViewerNotFound
 	}
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		`SELECT mac, name, service_port, type, password_hash, password_set_at,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -372,13 +380,17 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 
 	for rows.Next() {
 		var (
-			info  ViewerInfo
-			port  int64
-			hash  sql.NullString
-			setAt sql.NullInt64
+			info     ViewerInfo
+			port     int64
+			hash     sql.NullString
+			setAt    sql.NullInt64
+			espModel sql.NullString
+			espFW    sql.NullString
+			espHash  sql.NullString
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
-			&hash, &setAt, &info.LinkedUAUserID); err != nil {
+			&hash, &setAt, &info.LinkedUAUserID,
+			&espModel, &espFW, &espHash); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if NormalizeName(info.Name) != target {
@@ -391,6 +403,15 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		if setAt.Valid {
 			t := time.UnixMilli(setAt.Int64)
 			info.PasswordSetAt = &t
+		}
+		if espModel.Valid {
+			info.ESPModel = espModel.String
+		}
+		if espFW.Valid {
+			info.ESPFwVersion = espFW.String
+		}
+		if espHash.Valid && espHash.String != "" {
+			info.HasESPToken = true
 		}
 		m.mu.Lock()
 		if _, ok := m.viewers[info.MAC]; ok {
@@ -447,15 +468,20 @@ func (m *Manager) GetViewerInfo(ctx context.Context, mac string) (*ViewerInfo, e
 
 func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error) {
 	var (
-		info  ViewerInfo
-		port  int64
-		hash  sql.NullString
-		setAt sql.NullInt64
+		info     ViewerInfo
+		port     int64
+		hash     sql.NullString
+		setAt    sql.NullInt64
+		espModel sql.NullString
+		espFW    sql.NullString
+		espHash  sql.NullString
 	)
 	err := m.db.QueryRowContext(ctx,
-		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		`SELECT mac, name, service_port, type, password_hash, password_set_at,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
 		   FROM viewers WHERE mac = ?`, mac).
-		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt, &info.LinkedUAUserID)
+		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
+			&info.LinkedUAUserID, &espModel, &espFW, &espHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -470,6 +496,15 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		t := time.UnixMilli(setAt.Int64)
 		info.PasswordSetAt = &t
 	}
+	if espModel.Valid {
+		info.ESPModel = espModel.String
+	}
+	if espFW.Valid {
+		info.ESPFwVersion = espFW.String
+	}
+	if espHash.Valid && espHash.String != "" {
+		info.HasESPToken = true
+	}
 	return &info, nil
 }
 
@@ -478,7 +513,8 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 // surfaced; running flag comes from the in-memory map.
 func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, name, service_port, type, password_hash, password_set_at, COALESCE(linked_ua_user_id, '')
+		`SELECT mac, name, service_port, type, password_hash, password_set_at,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -487,13 +523,17 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	out := make([]ViewerInfo, 0)
 	for rows.Next() {
 		var (
-			info  ViewerInfo
-			port  int64
-			hash  sql.NullString
-			setAt sql.NullInt64
+			info     ViewerInfo
+			port     int64
+			hash     sql.NullString
+			setAt    sql.NullInt64
+			espModel sql.NullString
+			espFW    sql.NullString
+			espHash  sql.NullString
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
-			&hash, &setAt, &info.LinkedUAUserID); err != nil {
+			&hash, &setAt, &info.LinkedUAUserID,
+			&espModel, &espFW, &espHash); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		info.ServicePort = uint16(port)
@@ -503,6 +543,15 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		if setAt.Valid {
 			t := time.UnixMilli(setAt.Int64)
 			info.PasswordSetAt = &t
+		}
+		if espModel.Valid {
+			info.ESPModel = espModel.String
+		}
+		if espFW.Valid {
+			info.ESPFwVersion = espFW.String
+		}
+		if espHash.Valid && espHash.String != "" {
+			info.HasESPToken = true
 		}
 		out = append(out, info)
 	}
@@ -553,17 +602,58 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	now := m.opts.Now().UnixMilli()
 	_, err := m.db.ExecContext(ctx,
 		`INSERT INTO viewers
-		   (mac, name, service_port, type, linked_ua_user_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		   (mac, name, service_port, type, linked_ua_user_id,
+		    esp_model, esp_fw_version, esp_token_hash,
+		    created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
 		spec.Type,
 		nullable(spec.LinkedUAUserID),
+		nullable(spec.ESPModel),
+		nullable(spec.ESPFwVersion),
+		nullable(spec.ESPTokenHash),
 		now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("mockmanager: insert: %w", err)
 	}
 	return nil
+}
+
+// SetESPTokenHash speichert einen frisch generierten Token-Hash
+// fuer einen adoptierten ESP-Viewer. Die alte token-hash-Zeile
+// wird einfach ueberschrieben (Token-Rotation).
+func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET esp_token_hash = ?, updated_at = ?
+		 WHERE mac = ? AND type = 'esp'`,
+		nullable(hash), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set esp token: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// LookupESPTokenHash gibt den Token-Hash fuer einen adoptierten
+// ESP-Viewer zurueck. Wird in FIX4-d von der Bearer-Auth-
+// Middleware genutzt; in FIX4-c nur fuer die Status-Poll-Logik.
+func (m *Manager) LookupESPTokenHash(ctx context.Context, mac string) (string, error) {
+	var hash sql.NullString
+	err := m.db.QueryRowContext(ctx,
+		`SELECT esp_token_hash FROM viewers WHERE mac = ? AND type = 'esp'`,
+		mac).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrViewerNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("mockmanager: lookup esp token: %w", err)
+	}
+	return hashOrEmpty(hash), nil
 }
 
 // SetLinkedUAUserID updates the optional UA-User-Verknuepfung.
