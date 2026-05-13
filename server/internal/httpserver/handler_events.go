@@ -86,13 +86,39 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeSSEEvent emits one SSE record. The empty line at the end
-// is required by the protocol.
+// writeSSEEvent emits one SSE record per the Claude-Design
+// library contract (S13-02-FIX3):
+//
+//	event: doorbell_start
+//	data:  { "door": "Hauseingang", "ts": "2026-05-13T23:36:14Z" }
+//
+// The hub's richer Event struct (MockMAC, RequestID, RoomID...)
+// is shrunk to the two fields the library client expects. We
+// also keep the legacy fields available under nested "raw" so
+// future frontends can opt in without a hub change.
+//
+// The empty line at the end is required by the SSE protocol.
 func writeSSEEvent(w http.ResponseWriter, ev doorbellhub.Event) error {
-	data, err := json.Marshal(ev)
+	payload := map[string]any{
+		"door": doorNameFor(ev),
+		"ts":   time.UnixMilli(ev.CreatedAt).UTC().Format(time.RFC3339),
+		"raw":  ev,
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
 	return err
+}
+
+// doorNameFor maps the doorbellhub Event onto a human door label
+// for the SSE payload. The hub does not yet carry a door name
+// (mock_mac is the routing key), so for now we surface the
+// device MAC when present and fall back to "Hauseingang".
+func doorNameFor(ev doorbellhub.Event) string {
+	if ev.DeviceID != "" {
+		return ev.DeviceID
+	}
+	return "Hauseingang"
 }

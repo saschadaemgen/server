@@ -11,44 +11,40 @@ import (
 )
 
 // MieterHistoryLimit caps the number of door_events shown on the
-// /m/ list. Twenty is generous for a single household; older
-// entries are still in the DB and surface through an admin
-// detail page (Saison 13-02 or later).
+// /m/ list (was the FIX1 history card, now the bottom-sheet list).
 const MieterHistoryLimit = 20
 
+// mieterHomeData is the payload for the Claude-Design intercom
+// snippets. The library uses three pages of fields under one
+// flat struct; we mirror their names exactly so the snippets
+// can be reused unchanged.
 type mieterHomeData struct {
-	MockMAC     string
-	MockName    string
-	History     []mieterHistoryRow
-	UnreadCount int
+	UnitName     string
+	DoorName     string
+	Now          string             // "HH:MM:SS"
+	NowDate      string             // "Di, 13. Mai"
+	DND          bool
+	HasUnread    bool
+	HistoryItems []mieterHistoryRow // {Where, When, Unread}
 }
 
-// mieterHistoryRow is the per-row payload for the history card.
-// We pre-format strings server-side so the template stays small
-// and de-CH locale conventions stay in one place.
+// mieterHistoryRow matches the design-library shape for one
+// history-sheet entry. Field names follow the library's
+// {{range .HistoryItems}} expectations.
 type mieterHistoryRow struct {
-	ID          int64
-	OccurredAt  string
-	Status      string
-	IntercomMAC string
-	Unread      bool
+	Where  string
+	When   string
+	Unread bool
 }
 
-// handleHome renders the tenant landing page. The page hosts an
-// EventSource subscription on /m/events, a hidden doorbell
-// overlay, and a list of the most recent doorbell events.
+// handleHome renders the tenant intercom-viewer page (the
+// Claude-Design library produces the markup; we provide data).
 //
-// Saison 13-01: every render also marks the displayed events as
-// read (Variante A from the briefing). Live pushes via SSE that
-// arrive after the render stay unread until the next reload, so
-// the user can see "neu" appear when they leave the page open.
+// Saison 13-01 Mark-Read-Variante-A bleibt aktiv: nach dem
+// Rendern werden die angezeigten ungelesenen Events asynchron
+// als gelesen markiert.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	mac := MockMACFromContext(r.Context())
-	// Defensive: refuse to fall back to "any mock" when the
-	// session somehow landed here without a MAC on the context.
-	// requireSession should never let that happen, but if it
-	// ever does we redirect to /m/login rather than show the
-	// first mock-by-row-order (Saison 13-02-FIX guardrail).
 	if mac == "" {
 		http.Redirect(w, r, "/m/login", http.StatusSeeOther)
 		return
@@ -68,23 +64,29 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	rows := make([]mieterHistoryRow, 0, len(history))
 	displayedIDs := make([]int64, 0, len(history))
 	for _, ev := range history {
+		where := ev.IntercomMAC
+		if where == "" {
+			where = "Hauseingang"
+		}
 		rows = append(rows, mieterHistoryRow{
-			ID:          ev.ID,
-			OccurredAt:  ev.OccurredAt.Local().Format("02.01.2006 15:04"),
-			Status:      statusFor(ev),
-			IntercomMAC: ev.IntercomMAC,
-			Unread:      ev.ReadAt == nil,
+			Where:  where,
+			When:   formatGermanWhen(ev.OccurredAt),
+			Unread: ev.ReadAt == nil,
 		})
 		if ev.ReadAt == nil {
 			displayedIDs = append(displayedIDs, ev.ID)
 		}
 	}
 
+	now := time.Now()
 	data := mieterHomeData{
-		MockMAC:     info.MAC,
-		MockName:    info.Name,
-		History:     rows,
-		UnreadCount: unread,
+		UnitName:     info.Name,
+		DoorName:     "Hauseingang",
+		Now:          now.Format("15:04:05"),
+		NowDate:      formatGermanDate(now),
+		DND:          false,
+		HasUnread:    unread > 0,
+		HistoryItems: rows,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderMieter(w, "home", data); err != nil {
@@ -92,10 +94,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Variante A: mark the rendered (and previously unread) events
-	// as read AFTER the page is flushed. A failure here is benign;
-	// the next page load corrects it. We use a fresh context so a
-	// client disconnect during write does not cancel the update.
 	if len(displayedIDs) > 0 && s.history != nil {
 		go func(ids []int64) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -108,7 +106,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadMieterHistory returns the list plus unread count, both 0 if
-// the history store is not wired (tests, narrow setups).
+// the history store is not wired.
 func (s *Server) loadMieterHistory(ctx context.Context, mac string) ([]doorhistory.Event, int) {
 	if s.history == nil {
 		return nil, 0
@@ -126,27 +124,65 @@ func (s *Server) loadMieterHistory(ctx context.Context, mac string) ([]doorhisto
 	return list, unread
 }
 
-// statusFor maps the four time fields on a door_events row to a
-// short German status label for the mieter UI. Most rows are
-// either "laeuft" (in flight) or "abgebrochen"; "beantwortet" and
-// "beendet" are wired now even though answer / end events get
-// written first in Saison 13-03.
-func statusFor(ev doorhistory.Event) string {
-	switch {
-	case ev.EndedAt != nil:
-		return "beendet"
-	case ev.AnsweredAt != nil:
-		return "beantwortet"
-	case ev.CancelledAt != nil:
-		return "abgebrochen"
-	default:
-		return "laeuft"
+// formatGermanDate renders "Di, 13. Mai" style strings for the
+// clock-area in the intercom topbar.
+func formatGermanDate(t time.Time) string {
+	weekdays := [...]string{"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}
+	months := [...]string{
+		"Januar", "Februar", "Maerz", "April", "Mai", "Juni",
+		"Juli", "August", "September", "Oktober", "November", "Dezember",
 	}
+	t = t.Local()
+	day := t.Day()
+	month := months[int(t.Month())-1]
+	return weekdays[int(t.Weekday())] + ", " +
+		formatInt(day) + ". " + month
+}
+
+// formatGermanWhen renders "Heute 23:36" / "Gestern 19:14" /
+// "Mi, 11.5. 14:02" for the history-sheet rows.
+func formatGermanWhen(t time.Time) string {
+	t = t.Local()
+	now := time.Now()
+	hhmm := t.Format("15:04")
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if !t.Before(startOfToday) {
+		return "Heute " + hhmm
+	}
+	if !t.Before(startOfToday.AddDate(0, 0, -1)) {
+		return "Gestern " + hhmm
+	}
+	weekdays := [...]string{"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"}
+	return weekdays[int(t.Weekday())] + ", " +
+		formatInt(t.Day()) + "." + formatInt(int(t.Month())) + ". " + hhmm
+}
+
+// formatInt is a small int-to-string helper that avoids pulling
+// strconv into this file just for two call-sites.
+func formatInt(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [11]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 // safePrefix returns the first 8 chars of a MAC for logging
-// without leaking the full address. Falls back to the whole
-// string for unexpectedly short input.
+// without leaking the full address.
 func safePrefix(mac string) string {
 	if len(mac) < 8 {
 		return mac

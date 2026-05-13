@@ -1,235 +1,45 @@
-{{define "mieter_home"}}<!doctype html>
+<!doctype html>
 <html lang="de">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>unifix</title>
-{{template "theme_head" .}}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>unifix · {{.UnitName}}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
 </head>
-<body>
+<body class="stage-room">
 
-<header class="app-header">
-  <div class="app-header-grid mieter">
-    <a class="app-brand" href="/m/">
-      <span class="app-brand-mark">{{icon "sparkle"}}</span>
-      <span class="app-brand-text">unifix</span>
-    </a>
-    <div class="app-header-actions">
-      <span class="icon-btn relative" aria-label="Ungelesene Klingeln" title="Ungelesene Klingeln">
-        {{icon "bell"}}
-        <span id="unread-badge" class="badge-count {{if eq .UnreadCount 0}}hidden{{end}}">
-          {{.UnreadCount}}
-        </span>
-      </span>
-      <span id="status" class="status-pill offline" style="margin: 0 6px;"><span id="status-label">verbinde...</span></span>
-      {{template "theme_toggle" .}}
-    </div>
-  </div>
-</header>
-
-<main class="page mieter">
-  <section>
-    <h1 class="text-display-lg">Willkommen</h1>
-    <p class="text-body text-secondary mt-2">
-      Wenn jemand an der Tuer klingelt, erhaeltst du sofort eine Benachrichtigung.
-    </p>
-  </section>
-
-  <section class="app-card">
-    <div class="app-card-header">
-      <div class="app-card-icon-wrap green">{{icon "home"}}</div>
-      <div class="app-card-titles">
-        <h3 class="app-card-title">{{.MockName}}</h3>
-        <div class="app-card-status">
-          <span class="status-pill">aktiv</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="app-card">
-    <div class="history-head">
-      <h2 class="text-title-2">Klingel-Verlauf</h2>
-      <span class="text-caption text-tertiary">
-        Letzte {{len .History}} Eintraege
-      </span>
-    </div>
-    <ul id="history-list" class="history-list">
-      {{if not .History}}
-      <li class="history-empty">Noch keine Klingeln aufgezeichnet.</li>
-      {{end}}
-      {{range .History}}
-      <li id="history-row-{{.ID}}" class="history-item">
-        <div class="history-item-icon
-          {{if eq .Status "abgebrochen"}}cancelled
-          {{else if eq .Status "beantwortet"}}answered{{end}}">
-          {{icon "bell"}}
-        </div>
-        <div>
-          <div class="history-item-title">Hauseingang</div>
-          <div class="history-item-meta">
-            <span>{{.OccurredAt}}</span>
-            <span class="text-tertiary">{{.Status}}</span>
-            {{if .IntercomMAC}}<span class="text-tertiary text-mono">{{.IntercomMAC}}</span>{{end}}
-            {{if .Unread}}<span class="badge-new">neu</span>{{end}}
-          </div>
-        </div>
-        <div class="history-item-action">{{icon "chevron-right"}}</div>
-      </li>
-      {{end}}
-    </ul>
-  </section>
-</main>
-
-<!--
-  Saison 13-02-FIX1c: bell overlay 1:1 from briefing. Inline SVG
-  for the four icons because the Phosphor webfont did not always
-  hit the size targets in FIX1b. Markup and CSS values are NOT
-  to be tweaked here; the layout is the result of Sascha's chat
-  iteration and is contracted spec.
--->
-<div class="bell-overlay" id="bell-overlay">
-  <div class="bell-bg"></div>
-
-  <div class="bell-hero">
-    <div class="bell-wrap">
-      <span class="bell-ring"></span>
-      <span class="bell-ring bell-ring-2"></span>
-      <span class="bell-ring bell-ring-3"></span>
-      <div class="bell-circle">
-        <svg class="bell-icon-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M221.8,175.94c-5.55-9.56-13.8-36.61-13.8-71.94a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/>
-        </svg>
-      </div>
-    </div>
-
-    <div class="bell-texts">
-      <h1 class="bell-title">Klingelt</h1>
-      <p class="bell-sub">{{.MockName}}</p>
-    </div>
+  <div class="stage">
+    {{template "intercom-idle.html" .}}
+    {{template "intercom-history.html" .}}
+    {{template "intercom-ringing.html" .}}
   </div>
 
-  <div class="bell-actions">
-    <div class="bell-col">
-      <button class="bell-btn bell-btn-decline" id="bell-decline" aria-label="Ignorieren">
-        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M53.92,34.62A8,8,0,1,0,42.08,45.38L65.66,71.32A79.65,79.65,0,0,0,48,104c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0h26.41l8.4,9.24a8,8,0,1,0,11.84-10.76ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a63.7,63.7,0,0,1,13-38.62L177.61,184ZM82.46,48.0a64,64,0,0,1,109.45,52c0,29,5.74,52.55,10.59,65.45L82.46,48.0Z"/>
-        </svg>
-      </button>
-      <span class="bell-label">Ignorieren</span>
-    </div>
-
-    <div class="bell-col">
-      <button class="bell-btn bell-btn-unlock bell-btn-off" id="bell-unlock" aria-label="Tuer auf" disabled>
-        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M160,16A80.07,80.07,0,0,0,83.91,120.78L26.34,178.34A8,8,0,0,0,24,184v40a8,8,0,0,0,8,8H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A80,80,0,1,0,160,16Zm0,144a64.1,64.1,0,0,1-15.74-2,8,8,0,0,0-7.66,2.08L116.69,180.69H96a8,8,0,0,0-8,8v8H72a8,8,0,0,0-8,8v8H40V187.31l58.59-58.59a8,8,0,0,0,2.08-7.66A64,64,0,1,1,160,160Zm12-88a12,12,0,1,1-12-12A12,12,0,0,1,172,72Z"/>
-        </svg>
-      </button>
-      <span class="bell-label">Tuer auf</span>
-    </div>
-
-    <div class="bell-col">
-      <button class="bell-btn bell-btn-accept bell-btn-off" id="bell-accept" aria-label="Annehmen" disabled>
-        <svg class="bell-btn-svg" viewBox="0 0 256 256" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path d="M222.37,158.46l-47.11-21.11-.13-.06a16,16,0,0,0-15.17,1.4,8.12,8.12,0,0,0-.75.56L134.87,160c-15.42-7.49-31.34-23.29-38.83-38.51l20.78-24.71c.2-.25.39-.5.57-.77a16,16,0,0,0,1.32-15.06l0-.12L97.54,33.64a16,16,0,0,0-16.62-9.52A56.26,56.26,0,0,0,32,80c0,79.4,64.6,144,144,144a56.26,56.26,0,0,0,55.88-48.92A16,16,0,0,0,222.37,158.46ZM176,208A128.14,128.14,0,0,1,48,80,40.2,40.2,0,0,1,82.87,40a.61.61,0,0,0,0,.12l21,47L83.2,111.86a6.13,6.13,0,0,0-.57.77,16,16,0,0,0-1,15.7c9.06,18.53,27.73,37.06,46.46,46.11a16,16,0,0,0,15.75-1.14,8.44,8.44,0,0,0,.74-.56L168.89,152l47,21.05h.13A40.21,40.21,0,0,1,176,208Z"/>
-        </svg>
-      </button>
-      <span class="bell-label">Annehmen</span>
-    </div>
-  </div>
-</div>
-
-<script>
-(function() {
-  var evtSource    = new EventSource('/m/events');
-  var statusEl     = document.getElementById('status');
-  var statusLabel  = document.getElementById('status-label');
-  var overlay      = document.getElementById('bell-overlay');
-  var bellSub      = overlay ? overlay.querySelector('.bell-sub') : null;
-  var declineBtn   = document.getElementById('bell-decline');
-  var unreadBadge  = document.getElementById('unread-badge');
-  var historyList  = document.getElementById('history-list');
-  var mockName     = {{.MockName | printf "%q"}};
-
-  function setStatus(state) {
-    if (!statusEl || !statusLabel) return;
-    statusEl.className = 'status-pill ' + (state === 'live' ? '' : 'warning');
-    statusEl.style.margin = '0 6px';
-    statusLabel.textContent = state === 'live' ? 'live' : 'verbinde wieder...';
-  }
-
-  function bumpUnread(delta) {
-    if (!unreadBadge) return;
-    var current = parseInt(unreadBadge.textContent || '0', 10) || 0;
-    var next = Math.max(0, current + delta);
-    unreadBadge.textContent = next.toString();
-    if (next > 0) {
-      unreadBadge.classList.remove('hidden');
-    } else {
-      unreadBadge.classList.add('hidden');
-    }
-  }
-
-  function formatLocal(unixMillis) {
-    var d = new Date(unixMillis);
-    var pad = function(n) { return n.toString().padStart(2, '0'); };
-    return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
-      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-  function prependHistory(data) {
-    if (!historyList || !data.event_id) return;
-    var empty = historyList.querySelector('.history-empty');
-    if (empty) empty.remove();
-    var li = document.createElement('li');
-    li.id = 'history-row-' + data.event_id;
-    li.className = 'history-item';
-    var occurred = data.created_at ? formatLocal(data.created_at) : '-';
-    var intercom = data.device_id
-      ? '<span class="text-tertiary text-mono">' + data.device_id + '</span>'
-      : '';
-    li.innerHTML =
-      '<div class="history-item-icon"><i class="ph ph-bell" aria-hidden="true"></i></div>' +
-      '<div>' +
-        '<div class="history-item-title">Hauseingang</div>' +
-        '<div class="history-item-meta">' +
-          '<span>' + occurred + '</span>' +
-          '<span class="text-tertiary">laeuft</span>' +
-          intercom +
-          '<span class="badge-new">neu</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="history-item-action"><i class="ph ph-caret-right" aria-hidden="true"></i></div>';
-    historyList.insertBefore(li, historyList.firstChild);
-  }
-
-  function showRing(data) {
-    if (!overlay) return;
-    if (bellSub && data && data.intercom_name) {
-      bellSub.textContent = data.intercom_name;
-    }
-    overlay.classList.add('is-open');
-  }
-
-  function hideRing() {
-    if (!overlay) return;
-    overlay.classList.remove('is-open');
-  }
-
-  evtSource.addEventListener('doorbell_start', function(e) {
-    try {
-      var data = JSON.parse(e.data);
-      showRing(data);
-      prependHistory(data);
-      bumpUnread(1);
-    } catch (_) {}
-  });
-  evtSource.addEventListener('doorbell_cancel', function() { hideRing(); });
-  evtSource.onopen  = function() { setStatus('live'); };
-  evtSource.onerror = function() { setStatus('disconnected'); };
-
-  if (declineBtn) declineBtn.addEventListener('click', hideRing);
-})();
-</script>
+  <script>
+    // The library snippets include `is-open` for standalone demo
+    // browsing; strip it on first paint so sheets, overlays and
+    // modals start hidden in the integrated app.
+    (function () {
+      var sels = [
+        '[data-overlay]',
+        '[data-sheet]',
+        '[data-sheet-scrim]',
+        '[data-modal]'
+      ];
+      var nodes = document.querySelectorAll(sels.join(','));
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].classList.remove('is-open');
+      }
+    })();
+  </script>
+  <script src="/static/interactions.js"></script>
+  <script>
+    unifix.connectSSE("/m/events", {
+      onDoorbellStart:  function () { unifix.openOverlay("ringing"); },
+      onDoorbellCancel: function () { unifix.closeOverlay("ringing"); },
+      onHistoryUpdate:  function () { location.reload(); }
+    });
+  </script>
 
 </body>
-</html>{{end}}
+</html>
