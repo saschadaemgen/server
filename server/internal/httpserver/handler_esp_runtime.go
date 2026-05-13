@@ -24,7 +24,21 @@ import (
 
 	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
+	"unifix.local/server/internal/uaapi"
 )
+
+// uaapiUnlockReq builds the actor block UA-API sees for an
+// ESP-driven unlock. The ESP's MAC is the stable identifier;
+// the viewer name is the human-readable display label.
+func uaapiUnlockReq(info *mockmanager.ViewerInfo) uaapi.UnlockDoorRequest {
+	if info == nil {
+		return uaapi.UnlockDoorRequest{}
+	}
+	return uaapi.UnlockDoorRequest{
+		ActorID:   info.MAC,
+		ActorName: info.Name,
+	}
+}
 
 // espHeartbeatInterval is how often the SSE stream emits a
 // "heartbeat" event when there is no real traffic. Most home
@@ -261,6 +275,63 @@ func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
 		"ok":                true,
 		"siblings_notified": len(siblings),
 	})
+}
+
+// espUnlockRequest is the JSON body of POST /esp/unlock.
+type espUnlockRequest struct {
+	DoorID  string `json:"door_id"`
+	EventID string `json:"event_id"` // optional - manual unlock has no event
+}
+
+// handleESPUnlock relays an unlock request to the UA-API on
+// behalf of the calling ESP. The ESP's MAC is included in the
+// uaapi audit fields so the UA-side log shows which display
+// triggered the unlock.
+//
+// Returns 503 if no UA-API client is configured yet (admin still
+// needs to enter the base URL + token in /a/settings).
+func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	var body espUnlockRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.DoorID == "" {
+		http.Error(w, "door_id required", http.StatusBadRequest)
+		return
+	}
+	if s.ua == nil {
+		http.Error(w, "ua-api not configured", http.StatusServiceUnavailable)
+		return
+	}
+	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	if err != nil {
+		s.log.Error("esp unlock viewer info", "err", err, "mac_prefix", mac[:8])
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.ua.UnlockDoor(r.Context(), body.DoorID, uaapiUnlockReq(info)); err != nil {
+		s.log.Warn("esp unlock failed", "err", err, "door_id", body.DoorID, "mac_prefix", mac[:8])
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	s.log.Info("esp unlock",
+		"mac_prefix", mac[:8],
+		"door_id", body.DoorID,
+		"event_id", body.EventID,
+	)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // handleESPHeartbeat is the polling fallback for environments

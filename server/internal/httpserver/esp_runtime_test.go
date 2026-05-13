@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"unifix.local/server/internal/eventbus"
+	"unifix.local/server/internal/uaapi"
 )
 
 // eventbusEvent is a tiny test-only helper so the test file
@@ -393,6 +394,54 @@ func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("sibling never received cancel event")
+	}
+}
+
+func TestESPUnlock_CallsUAAPIUnlock(t *testing.T) {
+	var gotDoorID, gotActorID string
+	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// PUT /api/v1/developer/doors/{id}/unlock
+		gotDoorID = strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/")
+		gotDoorID = strings.TrimSuffix(gotDoorID, "/unlock")
+		var body struct {
+			ActorID   string `json:"actor_id"`
+			ActorName string `json:"actor_name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotActorID = body.ActorID
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
+	}))
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	// UA-Client auf den Stub umlenken.
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "test-token"}))
+
+	body, _ := json.Marshal(map[string]any{
+		"door_id":  "door-hub-1",
+		"event_id": "evt_abc",
+	})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/unlock", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/unlock: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := readBodyBytes(resp)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+	}
+	if gotDoorID != "door-hub-1" {
+		t.Errorf("UA-API saw door_id = %q, want door-hub-1", gotDoorID)
+	}
+	if gotActorID != espTestMAC {
+		t.Errorf("UA-API saw actor_id = %q, want %q", gotActorID, espTestMAC)
 	}
 }
 
