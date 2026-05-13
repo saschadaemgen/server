@@ -27,6 +27,108 @@
     background-color: var(--color-surface-1);
     color: var(--color-text);
   }
+
+  /* Saison 13-02-FIX4-a-HOTFIX5: Custom-Dropdown.
+     Native <select> ist auf manchen OS (Safari macOS, Firefox
+     Linux) nicht zuverlaessig dunkel zwingbar. Wir nutzen
+     Progressive-Enhancement: das echte <select> bleibt hidden
+     fuer Form-Submit + Server-Defaults; ein eigener div-basierter
+     Trigger + Panel rendert dariber. */
+
+  .dropdown { position: relative; width: 100%; }
+  .dropdown > select[data-dropdown-target] {
+    /* visually hidden, aber form-relevant */
+    position: absolute;
+    width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+    margin: -1px; padding: 0; border: 0; pointer-events: none;
+  }
+  .dropdown-trigger {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 10px var(--space-3);
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-hairline-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: var(--fw-medium) var(--fs-base) / 1.4 var(--font-sans);
+    text-align: left;
+  }
+  .dropdown-trigger:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .dropdown-trigger[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .dropdown-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dropdown-label.is-placeholder { color: var(--color-text-tertiary); }
+  .dropdown-caret { flex: none; opacity: 0.7; }
+
+  .dropdown-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow: hidden;
+    background-color: var(--color-surface-1);
+    border: 1px solid var(--color-hairline-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+  }
+  .dropdown.is-open > .dropdown-panel { display: flex; }
+  .dropdown-search {
+    margin: 8px;
+    padding: 6px 8px;
+    background-color: var(--color-surface-2);
+    color: var(--color-text);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-sm);
+  }
+  .dropdown-search:focus-visible {
+    outline: 2px solid var(--color-accent);
+  }
+  .dropdown-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .dropdown-option {
+    padding: 8px var(--space-3);
+    cursor: pointer;
+    color: var(--color-text);
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+  }
+  .dropdown-option:hover,
+  .dropdown-option.is-active {
+    background-color: var(--color-surface-2);
+  }
+  .dropdown-option[aria-selected="true"] {
+    background-color: var(--color-accent);
+    color: white;
+  }
+  .dropdown-empty, .dropdown-loading {
+    padding: 12px;
+    color: var(--color-text-tertiary);
+    text-align: center;
+    font-style: italic;
+  }
 </style>
 <nav class="admin-nav" aria-label="Hauptnavigation">
   <a class="admin-nav-brand" href="/a/">
@@ -61,4 +163,322 @@
     </form>
   </div>
 </nav>
+<script>
+  // Saison 13-02-FIX4-a-HOTFIX5: Custom-Dropdown-Component.
+  //
+  // Markup-Vertrag:
+  //   <div class="dropdown" data-dropdown
+  //        data-dropdown-source="inline" or "fetch:/a/users.json"
+  //        data-dropdown-label-key="DisplayName"           (fuer fetch)
+  //        data-dropdown-value-key="ID"                    (fuer fetch)
+  //        data-dropdown-extra-key="Email"                 (optional)
+  //        data-dropdown-placeholder="-- keine Auswahl --"
+  //        data-dropdown-value="<vorausgewaehlter wert>">
+  //     <select name="linked_ua_user_id" data-dropdown-target>
+  //       <option value="">-- keine Auswahl --</option>
+  //       <!-- bei inline: alle weiteren options -->
+  //     </select>
+  //   </div>
+  //
+  // Das hidden <select> bleibt fuer Form-Submit; der Custom-Trigger
+  // legt sich darueber. fetch-Modus laed beim ersten Open.
+  (function () {
+    window.unifix = window.unifix || {};
+    if (window.unifix.dropdownInit) return; // doppelt-Init verhindern
+
+    var openInstance = null;
+    function closeOpen() {
+      if (!openInstance) return;
+      openInstance.el.classList.remove('is-open');
+      openInstance.trigger.setAttribute('aria-expanded', 'false');
+      openInstance = null;
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+
+    function render(el) {
+      var sel = el.querySelector('select[data-dropdown-target]');
+      if (!sel) return null;
+      var placeholder = el.getAttribute('data-dropdown-placeholder') || '-- bitte waehlen --';
+      var current = el.getAttribute('data-dropdown-value') || sel.value || '';
+
+      var trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'dropdown-trigger';
+      trigger.setAttribute('role', 'combobox');
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+
+      var label = document.createElement('span');
+      label.className = 'dropdown-label is-placeholder';
+      label.textContent = placeholder;
+      trigger.appendChild(label);
+
+      var caret = document.createElement('span');
+      caret.className = 'dropdown-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '▾';
+      trigger.appendChild(caret);
+
+      var panel = document.createElement('div');
+      panel.className = 'dropdown-panel';
+
+      var search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'dropdown-search';
+      search.placeholder = 'Suchen...';
+      search.setAttribute('aria-label', 'Liste filtern');
+      search.style.display = 'none'; // nur bei >10 Optionen sichtbar
+
+      var list = document.createElement('ul');
+      list.className = 'dropdown-list';
+      list.setAttribute('role', 'listbox');
+
+      panel.appendChild(search);
+      panel.appendChild(list);
+
+      el.appendChild(trigger);
+      el.appendChild(panel);
+
+      var instance = {
+        el: el, sel: sel, trigger: trigger, label: label,
+        panel: panel, search: search, list: list,
+        options: [], filtered: [], active: 0,
+        loaded: false, loading: false, placeholder: placeholder,
+      };
+      bindEvents(instance);
+      // Optionen sofort populieren (inline) oder beim ersten Open (fetch)
+      if ((el.getAttribute('data-dropdown-source') || 'inline') === 'inline') {
+        instance.options = optionsFromSelect(sel);
+        instance.loaded = true;
+        applyValue(instance, current);
+      } else {
+        applyValue(instance, current);
+      }
+      return instance;
+    }
+
+    function optionsFromSelect(sel) {
+      var opts = [];
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        opts.push({ value: o.value, label: o.textContent, extra: '' });
+      }
+      return opts;
+    }
+
+    function applyValue(inst, value) {
+      var found = null;
+      for (var i = 0; i < inst.options.length; i++) {
+        if (inst.options[i].value === value) { found = inst.options[i]; break; }
+      }
+      inst.sel.value = value;
+      if (found) {
+        inst.label.textContent = found.label;
+        inst.label.classList.toggle('is-placeholder', value === '');
+      } else if (value === '') {
+        inst.label.textContent = inst.placeholder;
+        inst.label.classList.add('is-placeholder');
+      }
+    }
+
+    function fetchOptions(inst) {
+      var source = inst.el.getAttribute('data-dropdown-source') || 'inline';
+      if (source === 'inline' || inst.loaded || inst.loading) return Promise.resolve();
+      var url = source.replace(/^fetch:/, '');
+      var labelKey = inst.el.getAttribute('data-dropdown-label-key') || 'label';
+      var valueKey = inst.el.getAttribute('data-dropdown-value-key') || 'value';
+      var extraKey = inst.el.getAttribute('data-dropdown-extra-key') || '';
+      var rootKey  = inst.el.getAttribute('data-dropdown-root-key') || '';
+      inst.loading = true;
+      inst.list.innerHTML = '<li class="dropdown-loading">Laedt...</li>';
+      return fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          inst.loading = false;
+          inst.loaded = true;
+          var arr = j;
+          if (rootKey && j && j[rootKey] !== undefined) arr = j[rootKey];
+          if (!arr || !arr.length) {
+            inst.options = [];
+            return;
+          }
+          // Placeholder-Option aus dem hidden select uebernehmen.
+          var placeholder = inst.options.length ? inst.options.slice(0, 1) : [];
+          if (!placeholder.length && inst.sel.options.length) {
+            placeholder = [{ value: inst.sel.options[0].value, label: inst.sel.options[0].textContent, extra: '' }];
+          }
+          var rest = arr.map(function (raw) {
+            var lab = raw[labelKey];
+            var extra = extraKey ? raw[extraKey] : '';
+            return { value: String(raw[valueKey] || ''), label: lab, extra: extra };
+          });
+          inst.options = placeholder.concat(rest);
+          // hidden select syncen
+          while (inst.sel.options.length > placeholder.length) {
+            inst.sel.remove(placeholder.length);
+          }
+          rest.forEach(function (o) {
+            var opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label + (o.extra ? ' (' + o.extra + ')' : '');
+            inst.sel.appendChild(opt);
+          });
+          applyValue(inst, inst.el.getAttribute('data-dropdown-value') || inst.sel.value || '');
+        })
+        .catch(function () { inst.loading = false; });
+    }
+
+    function renderList(inst) {
+      var q = inst.search.value.toLowerCase().trim();
+      inst.filtered = inst.options.filter(function (o) {
+        if (!q) return true;
+        return (o.label + ' ' + (o.extra || '')).toLowerCase().indexOf(q) >= 0;
+      });
+      inst.search.style.display = inst.options.length > 10 ? '' : 'none';
+      if (!inst.filtered.length) {
+        inst.list.innerHTML = '<li class="dropdown-empty">Keine Treffer</li>';
+        return;
+      }
+      var html = '';
+      inst.filtered.forEach(function (o, idx) {
+        var isSelected = o.value === inst.sel.value;
+        var isActive = idx === inst.active;
+        html += '<li class="dropdown-option' + (isActive ? ' is-active' : '') + '"'
+          + ' role="option"'
+          + ' aria-selected="' + (isSelected ? 'true' : 'false') + '"'
+          + ' data-value="' + escapeHtml(o.value) + '">'
+          + escapeHtml(o.label)
+          + (o.extra ? ' <span style="opacity:0.7;">(' + escapeHtml(o.extra) + ')</span>' : '')
+          + '</li>';
+      });
+      inst.list.innerHTML = html;
+    }
+
+    function open(inst) {
+      if (inst.trigger.getAttribute('aria-disabled') === 'true') return;
+      closeOpen();
+      openInstance = inst;
+      inst.el.classList.add('is-open');
+      inst.trigger.setAttribute('aria-expanded', 'true');
+      inst.search.value = '';
+      inst.active = 0;
+      Promise.resolve(fetchOptions(inst)).then(function () {
+        renderList(inst);
+        // Focus auf Search bei vielen Optionen, sonst Trigger.
+        if (inst.options.length > 10) inst.search.focus();
+      });
+    }
+
+    function close(inst) {
+      inst.el.classList.remove('is-open');
+      inst.trigger.setAttribute('aria-expanded', 'false');
+      if (openInstance === inst) openInstance = null;
+    }
+
+    function select(inst, value, label) {
+      applyValue(inst, value);
+      inst.sel.dispatchEvent(new Event('change', { bubbles: true }));
+      close(inst);
+      inst.trigger.focus();
+    }
+
+    function bindEvents(inst) {
+      inst.trigger.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (inst.el.classList.contains('is-open')) close(inst); else open(inst);
+      });
+      inst.trigger.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open(inst);
+        }
+      });
+      inst.search.addEventListener('input', function () {
+        inst.active = 0;
+        renderList(inst);
+      });
+      inst.list.addEventListener('click', function (e) {
+        var li = e.target.closest('.dropdown-option');
+        if (!li) return;
+        select(inst, li.getAttribute('data-value'), li.textContent);
+      });
+      inst.el.addEventListener('keydown', function (e) {
+        if (!inst.el.classList.contains('is-open')) return;
+        if (e.key === 'Escape') { e.preventDefault(); close(inst); inst.trigger.focus(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (inst.filtered.length === 0) return;
+          inst.active = Math.min(inst.active + 1, inst.filtered.length - 1);
+          renderList(inst);
+          scrollActiveIntoView(inst);
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (inst.filtered.length === 0) return;
+          inst.active = Math.max(inst.active - 1, 0);
+          renderList(inst);
+          scrollActiveIntoView(inst);
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var opt = inst.filtered[inst.active];
+          if (opt) select(inst, opt.value, opt.label);
+        }
+      });
+    }
+
+    function scrollActiveIntoView(inst) {
+      var li = inst.list.querySelector('.dropdown-option.is-active');
+      if (li && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' });
+    }
+
+    // Globaler Klick-Outside-Handler.
+    document.addEventListener('click', function (e) {
+      if (!openInstance) return;
+      if (!openInstance.el.contains(e.target)) closeOpen();
+    });
+
+    function initAll(root) {
+      var nodes = (root || document).querySelectorAll('[data-dropdown]');
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].dataset.dropdownInited === '1') continue;
+        nodes[i].dataset.dropdownInited = '1';
+        render(nodes[i]);
+      }
+    }
+
+    window.unifix.dropdownInit = initAll;
+    window.unifix.dropdownRender = render;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { initAll(document); });
+    } else {
+      initAll(document);
+    }
+    // Re-Init nach dynamischem DOM-Insert via MutationObserver.
+    var mo = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          if (added[j].nodeType !== 1) continue;
+          if (added[j].matches && added[j].matches('[data-dropdown]')) {
+            if (added[j].dataset.dropdownInited !== '1') {
+              added[j].dataset.dropdownInited = '1';
+              render(added[j]);
+            }
+          }
+          if (added[j].querySelectorAll) initAll(added[j]);
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  })();
+</script>
 {{end}}
