@@ -808,6 +808,199 @@ func TestSetPassword_UpdatesAndInvalidatesSessions(t *testing.T) {
 	}
 }
 
+// ---------- Edit + Generate-PW (Saison 13-02-FIX4-a-HOTFIX5) ----------
+
+func TestWebViewerEdit_RenamesAndChangesLink(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+		access.User{ID: "u2", FirstName: "Anna", LastName: "Schmidt", Status: access.StatusActive},
+	)
+	env.seedViewerAs(t, "0c:ea:14:ee:ee:01", "Wohnung Alt", "TestPw-1234567X")
+	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:ee:ee:01", "u1"); err != nil {
+		t.Fatalf("seed link: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Wohnung Neu")
+	form.Set("password", "") // unveraendert
+	form.Set("linked_ua_user_id", "u2")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/0c:ea:14:ee:ee:01/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("edit POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["name_changed"] != true {
+		t.Errorf("name_changed = %v, want true", got["name_changed"])
+	}
+	if got["pw_changed"] != false {
+		t.Errorf("pw_changed = %v, want false", got["pw_changed"])
+	}
+	if got["link_changed"] != true {
+		t.Errorf("link_changed = %v, want true", got["link_changed"])
+	}
+
+	info, err := env.mockMgr.GetViewerInfo(context.Background(), "0c:ea:14:ee:ee:01")
+	if err != nil {
+		t.Fatalf("get info: %v", err)
+	}
+	if info.Name != "Wohnung Neu" {
+		t.Errorf("name = %q, want Wohnung Neu", info.Name)
+	}
+	if info.LinkedUAUserID != "u2" {
+		t.Errorf("LinkedUAUserID = %q, want u2", info.LinkedUAUserID)
+	}
+}
+
+func TestWebViewerEdit_ChangesPasswordAndInvalidatesSessions(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	loginResp := env.loginViewer(t, testViewerLogin, testViewerPassword)
+	loginResp.Body.Close()
+	var sessionsBefore int
+	env.d.QueryRow(`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC).Scan(&sessionsBefore)
+	if sessionsBefore == 0 {
+		t.Fatal("seed login did not create a session")
+	}
+
+	form := url.Values{}
+	form.Set("name", testViewerName)
+	form.Set("password", "neu-1234-Abc")
+	form.Set("linked_ua_user_id", "")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("edit POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["pw_changed"] != true {
+		t.Errorf("pw_changed = %v, want true", got["pw_changed"])
+	}
+	if got["password"] != "neu-1234-Abc" {
+		t.Errorf("password = %v, want neu-1234-Abc", got["password"])
+	}
+
+	var sessionsAfter int
+	env.d.QueryRow(`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC).Scan(&sessionsAfter)
+	if sessionsAfter != 0 {
+		t.Errorf("sessions after edit pw = %d, want 0", sessionsAfter)
+	}
+}
+
+func TestWebViewerEdit_RejectsDuplicateName(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewerAs(t, "0c:ea:14:11:11:01", "Wohnung A", "TestPw-1234567X")
+	env.seedViewerAs(t, "0c:ea:14:11:11:02", "Wohnung B", "TestPw-1234567X")
+
+	form := url.Values{}
+	form.Set("name", "wohnung b") // case-insensitive duplicate
+	form.Set("password", "")
+	form.Set("linked_ua_user_id", "")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/0c:ea:14:11:11:01/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("edit POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	// Original-Hash holen; nach Generate-PW darf der sich nicht aendern.
+	infoBefore, err := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("get viewer info: %v", err)
+	}
+	pwSetBefore := infoBefore.PasswordSetAt
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/generate-pw", nil)
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("generate-pw POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["password"] == "" {
+		t.Errorf("password empty")
+	}
+	if len(got["password"]) < 12 {
+		t.Errorf("password too short: %q", got["password"])
+	}
+
+	// Hash-Stempel ist unveraendert -> nichts wurde gespeichert.
+	infoAfter, err := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("get viewer info after: %v", err)
+	}
+	if pwSetBefore != nil && infoAfter.PasswordSetAt != nil &&
+		!pwSetBefore.Equal(*infoAfter.PasswordSetAt) {
+		t.Errorf("generate-pw saved silently (timestamp changed)")
+	}
+
+	// Mieter-Login mit dem altem Passwort muss noch funktionieren.
+	jar2, _ := cookiejar.New(nil)
+	fresh := &http.Client{
+		Jar: jar2,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	form := url.Values{}
+	form.Set("username", testViewerLogin)
+	form.Set("password", testViewerPassword)
+	loginReq, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginResp, err := fresh.Do(loginReq)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusSeeOther {
+		t.Errorf("login with original pw status = %d, want 303 (generate-pw should NOT have changed it)", loginResp.StatusCode)
+	}
+}
+
 // ---------- Magic-Link routes are gone ----------
 
 func TestMagicLinkRoutes_AreGone(t *testing.T) {
