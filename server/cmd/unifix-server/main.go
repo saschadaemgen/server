@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"unifix.local/server/internal/access/ua"
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/loginaudit"
@@ -115,6 +116,12 @@ func main() {
 		log.Info("ua api not yet configured; admin must set base URL + token under /a/settings")
 	}
 
+	// access.UserStore-Adapter um den uaapi-Client. Nil-Client ist
+	// erlaubt; der Adapter liefert dann access.ErrNotConfigured und
+	// das Admin-UI zeigt einen Hinweis-Karten statt einer leeren
+	// Liste.
+	userStore := ua.New(uaClient)
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
 		Sessions:       sessionSvc,
@@ -126,6 +133,7 @@ func main() {
 		ViewerLimiter:  viewerLimiter,
 		AdminLimiter:   adminLimiter,
 		UA:             uaClient,
+		UserStore:      userStore,
 		Hub:            hub,
 		History:        historyStore,
 		Log:            log,

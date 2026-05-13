@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"unifix.local/server/internal/access"
 	"unifix.local/server/internal/doorhistory"
 )
 
@@ -465,6 +466,246 @@ func TestAdminPlaceholders_Render(t *testing.T) {
 				t.Errorf("body missing %q", c.want)
 			}
 		})
+	}
+}
+
+// ---------- Benutzer-Tab (FIX4-b) ----------
+
+func seedAccessUsers(env *testEnv, users ...access.User) {
+	env.userStore.users = append(env.userStore.users, users...)
+}
+
+func TestUsersList_RendersTable(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen",
+			Email: "s@d.com", Status: access.StatusActive},
+		access.User{ID: "u2", FirstName: "Anna", LastName: "Mueller",
+			Email: "a@m.com", Status: access.StatusDeactivated},
+	)
+	resp, err := env.client.Get(env.ts.URL + "/a/users")
+	if err != nil {
+		t.Fatalf("GET /a/users: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	body := readBody(t, resp)
+	for _, want := range []string{"Sascha Daemgen", "Anna Mueller", "Aktiv", "Inaktiv"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+func TestUsersList_EmptyConfiguredShowsCreateHint(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/users")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "Noch keine Benutzer angelegt") {
+		t.Errorf("empty-state hint missing")
+	}
+}
+
+func TestUsersList_NotConfiguredShowsHint(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.userStore.configured = false
+	resp, err := env.client.Get(env.ts.URL + "/a/users")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "noch nicht konfiguriert") {
+		t.Errorf("not-configured hint missing")
+	}
+}
+
+func TestUsersList_Pagination(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	for i := 0; i < 5; i++ {
+		env.userStore.users = append(env.userStore.users, access.User{
+			ID: "u" + string(rune('a'+i)), FirstName: "First", LastName: "Last" + string(rune('A'+i)),
+			Status: access.StatusActive,
+		})
+	}
+	resp, err := env.client.Get(env.ts.URL + "/a/users?page=2&size=2")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "Seite 2 von 3") {
+		t.Errorf("expected 'Seite 2 von 3' in body")
+	}
+}
+
+func TestUsersList_SearchFilter(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+		access.User{ID: "u2", FirstName: "Anna", LastName: "Mueller", Status: access.StatusActive},
+	)
+	resp, err := env.client.Get(env.ts.URL + "/a/users?q=mueller")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if strings.Contains(body, "Sascha Daemgen") {
+		t.Errorf("search filter leaked non-matching row")
+	}
+	if !strings.Contains(body, "Anna Mueller") {
+		t.Errorf("search filter dropped matching row")
+	}
+}
+
+func TestUsersJSON_ReturnsValidJSON(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+	)
+	resp, err := env.client.Get(env.ts.URL + "/a/users.json")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	var payload struct {
+		Configured bool `json:"configured"`
+		Total      int  `json:"total"`
+		Users      []struct {
+			ID          string `json:"ID"`
+			DisplayName string `json:"DisplayName"`
+		} `json:"users"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !payload.Configured {
+		t.Error("Configured = false, want true")
+	}
+	if payload.Total != 1 || len(payload.Users) != 1 || payload.Users[0].ID != "u1" {
+		t.Errorf("payload wrong: %+v", payload)
+	}
+}
+
+func TestUsersCreate_StoresAndRedirects(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	form := url.Values{}
+	form.Set("first_name", "Otto")
+	form.Set("last_name", "Neumann")
+	form.Set("email", "otto@n.com")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/users", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303", resp.StatusCode)
+	}
+	if len(env.userStore.users) != 1 {
+		t.Fatalf("userStore has %d users, want 1", len(env.userStore.users))
+	}
+	got := env.userStore.users[0]
+	if got.FirstName != "Otto" || got.LastName != "Neumann" || got.Email != "otto@n.com" {
+		t.Errorf("created user wrong: %+v", got)
+	}
+}
+
+func TestUsersStatus_ActivateDeactivate(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+	)
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/users/u1/deactivate", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	resp.Body.Close()
+	if env.userStore.users[0].Status != access.StatusDeactivated {
+		t.Errorf("after deactivate status = %q", env.userStore.users[0].Status)
+	}
+	req2, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/users/u1/activate", nil)
+	resp2, err := env.client.Do(req2)
+	if err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	resp2.Body.Close()
+	if env.userStore.users[0].Status != access.StatusActive {
+		t.Errorf("after activate status = %q", env.userStore.users[0].Status)
+	}
+}
+
+func TestUsersDetail_RendersLinkedViewers(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+	)
+	// Viewer mit linked_ua_user_id = "u1" seeden
+	env.seedViewerAs(t, "0c:ea:14:dd:ee:01", "Wohnung A", "wohnung-a", "TestPw-1234567X")
+	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:dd:ee:01", "u1"); err != nil {
+		t.Fatalf("SetLinkedUAUserID: %v", err)
+	}
+	resp, err := env.client.Get(env.ts.URL + "/a/users/u1")
+	if err != nil {
+		t.Fatalf("GET detail: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "Wohnung A") {
+		t.Errorf("detail page missing linked viewer 'Wohnung A'")
+	}
+}
+
+func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+	)
+	form := url.Values{}
+	form.Set("name", "Familie Mueller")
+	form.Set("mac", "0c:ea:14:de:ad:c0")
+	form.Set("linked_ua_user_id", "u1")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	info, err := env.mockMgr.GetViewerInfo(context.Background(), "0c:ea:14:de:ad:c0")
+	if err != nil {
+		t.Fatalf("get viewer: %v", err)
+	}
+	if info.LinkedUAUserID != "u1" {
+		t.Errorf("LinkedUAUserID = %q, want u1", info.LinkedUAUserID)
 	}
 }
 

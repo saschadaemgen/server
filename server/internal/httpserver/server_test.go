@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"unifix.local/mock"
+	"unifix.local/server/internal/access"
 	"unifix.local/server/internal/auth/admin"
 	"unifix.local/server/internal/auth/adminsession"
 	"unifix.local/server/internal/auth/argon2id"
@@ -79,8 +81,121 @@ type testEnv struct {
 	hub         *doorbellhub.Hub
 	history     *doorhistory.SQLStore
 	audit       *loginaudit.Service
+	userStore   *fakeUserStore
 	d           *db.DB
 	clock       *testClock
+}
+
+// fakeUserStore is a deterministic in-memory access.UserStore for
+// the httpserver tests. Saison 13-02-FIX4-b: the real UA backend
+// is replaced with this fake so handler tests can seed users
+// without a network call.
+type fakeUserStore struct {
+	configured bool
+	users      []access.User
+	createErr  error
+}
+
+func newFakeUserStore() *fakeUserStore {
+	return &fakeUserStore{configured: true}
+}
+
+func (f *fakeUserStore) IsConfigured() bool { return f.configured }
+
+func (f *fakeUserStore) List(ctx context.Context, params access.ListParams) (access.ListResult, error) {
+	if !f.configured {
+		return access.ListResult{}, access.ErrNotConfigured
+	}
+	q := strings.ToLower(strings.TrimSpace(params.Query))
+	filtered := make([]access.User, 0, len(f.users))
+	for _, u := range f.users {
+		if params.StatusFilter != "" && u.Status != params.StatusFilter {
+			continue
+		}
+		if q != "" &&
+			!strings.Contains(strings.ToLower(u.FirstName), q) &&
+			!strings.Contains(strings.ToLower(u.LastName), q) &&
+			!strings.Contains(strings.ToLower(u.Email), q) {
+			continue
+		}
+		filtered = append(filtered, u)
+	}
+	total := len(filtered)
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	size := params.Size
+	if size <= 0 {
+		size = 20
+	}
+	start := (page - 1) * size
+	end := start + size
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+	return access.ListResult{Users: filtered[start:end], Total: total}, nil
+}
+
+func (f *fakeUserStore) Get(ctx context.Context, id string) (access.User, error) {
+	for _, u := range f.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return access.User{}, access.ErrNotFound
+}
+
+func (f *fakeUserStore) Create(ctx context.Context, params access.CreateUserParams) (access.User, error) {
+	if f.createErr != nil {
+		return access.User{}, f.createErr
+	}
+	u := access.User{
+		ID:             fmt.Sprintf("user-%d", len(f.users)+1),
+		FirstName:      params.FirstName,
+		LastName:       params.LastName,
+		Email:          params.Email,
+		EmployeeNumber: params.EmployeeNumber,
+		Status:         access.StatusActive,
+	}
+	f.users = append(f.users, u)
+	return u, nil
+}
+
+func (f *fakeUserStore) Update(ctx context.Context, id string, params access.UpdateUserParams) (access.User, error) {
+	for i := range f.users {
+		if f.users[i].ID == id {
+			f.users[i].FirstName = params.FirstName
+			f.users[i].LastName = params.LastName
+			f.users[i].Email = params.Email
+			f.users[i].EmployeeNumber = params.EmployeeNumber
+			return f.users[i], nil
+		}
+	}
+	return access.User{}, access.ErrNotFound
+}
+
+func (f *fakeUserStore) Delete(ctx context.Context, id string) error {
+	for i := range f.users {
+		if f.users[i].ID == id {
+			f.users = append(f.users[:i], f.users[i+1:]...)
+			return nil
+		}
+	}
+	return access.ErrNotFound
+}
+
+func (f *fakeUserStore) SetStatus(ctx context.Context, id string, status access.Status) error {
+	for i := range f.users {
+		if f.users[i].ID == id {
+			f.users[i].Status = status
+			return nil
+		}
+	}
+	return access.ErrNotFound
 }
 
 func newTestServer(t *testing.T) *testEnv {
@@ -121,6 +236,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	go func() { _ = hub.Run(hubCtx) }()
 
+	userStore := newFakeUserStore()
+
 	cfg := config.Config{
 		ListenAddr: ":0",
 		DBPath:     dbPath,
@@ -140,6 +257,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		AdminLimiter:    ratelimit.NewWithClock(clock.Now),
 		Hub:             hub,
 		History:         historyStore,
+		UserStore:       userStore,
 		EventsHeartbeat: 50 * time.Millisecond,
 		Log:             quietLogger(),
 	})
@@ -169,10 +287,11 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		srv: srv, ts: ts, client: client,
 		sess: sess, adminSess: adminSess, adminSvc: adminSvc,
 		platformCfg: platformCfg, mockMgr: mockMgr,
-		hub:     hub,
-		history: historyStore,
-		audit:   auditSvc,
-		d:       d, clock: clock,
+		hub:       hub,
+		history:   historyStore,
+		audit:     auditSvc,
+		userStore: userStore,
+		d:         d, clock: clock,
 	}
 }
 
