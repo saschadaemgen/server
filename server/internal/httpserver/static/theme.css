@@ -105,6 +105,23 @@ html, body {
 a { color: inherit; text-decoration: none; }
 
 /* ------------------------------------------------------------------
+   Icon font (Phosphor regular). Size and color are inherited from
+   the parent via font-size and currentColor; every selector below
+   that previously sized an inline <svg> now sizes an <i class="ph">
+   element. Vertical alignment defaults to baseline which puts the
+   bell glyph too low next to text, so we nudge it with inline-grid
+   centering on the icon container and rely on font-size for size.
+   ------------------------------------------------------------------ */
+.ph {
+  font-style: normal !important;
+  font-weight: normal !important;
+  line-height: 1;
+  speak: never;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------
    Typography scale (Apple HIG-inspired).
    ------------------------------------------------------------------ */
 
@@ -174,7 +191,7 @@ a { color: inherit; text-decoration: none; }
   place-items: center;
   box-shadow: 0 4px 12px var(--accent-blue-tint);
 }
-.app-brand-mark svg { width: 16px; height: 16px; }
+.app-brand-mark .ph { font-size: 16px; }
 .app-brand-text {
   font-size: 17px;
   font-weight: 700;
@@ -204,7 +221,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent-blue-tint);
   color: var(--accent-blue);
 }
-.nav-item svg { width: 16px; height: 16px; }
+.nav-item .ph { font-size: 16px; }
 
 .app-header-actions {
   display: flex;
@@ -226,7 +243,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 .icon-btn:hover { background: var(--hover-tint); color: var(--text-primary); }
-.icon-btn svg { width: 18px; height: 18px; }
+.icon-btn .ph { font-size: 18px; }
 
 .icon-btn .icon-sun  { display: none; }
 .icon-btn .icon-moon { display: inline-flex; }
@@ -333,7 +350,7 @@ a.app-card:hover {
   place-items: center;
   color: var(--accent-blue);
 }
-.app-card-icon-wrap svg { width: 22px; height: 22px; }
+.app-card-icon-wrap .ph { font-size: 22px; }
 .app-card-icon-wrap.amber { background: rgba(255, 159, 10, 0.14); color: var(--accent-amber); }
 .app-card-icon-wrap.green { background: rgba(52, 199, 89, 0.14);  color: var(--accent-green); }
 .app-card-icon-wrap.red   { background: var(--accent-red-tint);   color: var(--accent-red); }
@@ -465,7 +482,7 @@ a.app-card:hover {
   transition: background 120ms ease;
 }
 .row-action:hover { background: var(--accent-blue-tint); }
-.row-action svg { width: 14px; height: 14px; }
+.row-action .ph { font-size: 14px; }
 .row-action.destructive { color: var(--accent-red); }
 .row-action.destructive:hover { background: var(--accent-red-tint); }
 
@@ -496,12 +513,12 @@ a.app-card:hover {
   cursor: not-allowed;
   transform: none !important;
 }
-.btn svg { width: 16px; height: 16px; }
+.btn .ph { font-size: 16px; }
 .btn-small {
   padding: 7px 14px;
   font-size: 13px;
 }
-.btn-small svg { width: 14px; height: 14px; }
+.btn-small .ph { font-size: 14px; }
 .btn-icon-only {
   padding: 8px;
 }
@@ -613,7 +630,7 @@ a.app-card:hover {
   place-items: center;
   color: var(--accent-blue);
 }
-.history-item-icon svg { width: 18px; height: 18px; }
+.history-item-icon .ph { font-size: 18px; }
 .history-item-icon.cancelled {
   background: var(--hover-tint);
   color: var(--text-tertiary);
@@ -640,7 +657,7 @@ a.app-card:hover {
   color: var(--text-tertiary);
   display: inline-flex;
 }
-.history-item-action svg { width: 16px; height: 16px; }
+.history-item-action .ph { font-size: 16px; }
 .badge-new {
   display: inline-flex;
   padding: 2px 8px;
@@ -732,10 +749,13 @@ a.app-card:hover {
   animation: bell-wobble 2400ms ease-in-out infinite;
   position: relative;
   z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  font-size: 140px;
 }
-.bell-icon svg { width: 100%; height: 100%; }
+.bell-icon .ph { font-size: inherit; }
 @media (max-width: 640px) {
-  .bell-icon { width: 120px; height: 120px; }
+  .bell-icon { width: 120px; height: 120px; font-size: 104px; }
   .bell-glow-ring { width: 160px; height: 160px; }
   .bell-overlay { padding: 56px 24px 40px; }
 }
@@ -769,11 +789,12 @@ a.app-card:hover {
 .bell-actions {
   display: flex;
   justify-content: center;
-  gap: 96px;
+  align-items: flex-start;
+  gap: 56px;
   margin-bottom: 0;
 }
 @media (max-width: 480px) {
-  .bell-actions { gap: 56px; }
+  .bell-actions { gap: 28px; }
 }
 .bell-action {
   display: flex;
@@ -795,10 +816,14 @@ a.app-card:hover {
 .bell-btn:hover:not(:disabled) { transform: scale(1.06); }
 .bell-btn:active:not(:disabled) { transform: scale(0.94); }
 .bell-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.bell-btn svg { width: 32px; height: 32px; }
+.bell-btn .ph { font-size: 32px; }
 .bell-btn-decline {
   background: var(--accent-red);
   box-shadow: 0 8px 24px rgba(255, 59, 48, 0.5);
+}
+.bell-btn-door {
+  background: var(--accent-amber);
+  box-shadow: 0 8px 24px rgba(255, 159, 10, 0.5);
 }
 .bell-btn-accept {
   background: var(--accent-green);
@@ -902,7 +927,7 @@ a.app-card:hover {
   flex-shrink: 0;
 }
 .modal-close:hover { background: var(--hover-tint); color: var(--text-primary); }
-.modal-close svg { width: 18px; height: 18px; }
+.modal-close .ph { font-size: 18px; }
 .link-display {
   margin: 16px 0 12px;
   padding: 14px 16px;
