@@ -238,8 +238,13 @@ func TestAdminWebViewers_CreateReturnsCredentials(t *testing.T) {
 	if c.Username == "" || c.Password == "" {
 		t.Errorf("response missing credentials: %+v", c)
 	}
-	if !strings.Contains(c.LoginURL, "/m?u=") || !strings.Contains(c.LoginURL, "&p=") {
-		t.Errorf("login_url shape unexpected: %q", c.LoginURL)
+	// S13-02-FIX4-a-HOTFIX1: Login-URL ist jetzt nackt (kein
+	// ?u= / ?p= mehr); das war ein Sicherheits-Anti-Pattern.
+	if !strings.HasSuffix(c.LoginURL, "/m") {
+		t.Errorf("login_url should be plain /m, got: %q", c.LoginURL)
+	}
+	if strings.Contains(c.LoginURL, "?u=") || strings.Contains(c.LoginURL, "&p=") {
+		t.Errorf("login_url leaks credentials: %q", c.LoginURL)
 	}
 	if !strings.HasPrefix(c.QRSVG, "<svg") {
 		t.Errorf("qr_svg missing svg root")

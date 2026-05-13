@@ -328,13 +328,19 @@ func (s *Server) generateAndStorePassword(ctx context.Context, mac, name, userna
 	}, nil
 }
 
-func (s *Server) buildLoginURL(r *http.Request, username, pw string) string {
+// buildLoginURL liefert nur die nackte Login-URL fuer den QR-Code.
+//
+// Saison 13-02-FIX4-a-HOTFIX1: Pre-Fill via ?u= und ?p= ist raus
+// (Sicherheits-Anti-Pattern; Passwoerter im Query-String landen
+// in Server-Logs, Browser-History und Referer-Headern). Mieter
+// scannt den QR, kommt zur Login-Seite und tippt Username plus
+// Passwort vom Zettel ab.
+func (s *Server) buildLoginURL(r *http.Request, _ string, _ string) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/m?u=%s&p=%s",
-		scheme, r.Host, urlEscape(username), urlEscape(pw))
+	return fmt.Sprintf("%s://%s/m", scheme, r.Host)
 }
 
 func (s *Server) respondCredentials(w http.ResponseWriter, r *http.Request, c credentialsResponse) {
@@ -431,10 +437,18 @@ func generateUbiquitiMAC() (string, error) {
 // sanitizeUsername macht einen Default-Username aus einem
 // Anzeigenamen, damit der Admin nicht zweimal tippen muss.
 //
-//	"Familie Mueller 2OG" -> "familie-mueller-2og"
+//	"Familie Mueller 2OG"  -> "familie-mueller-2og"
+//	"Familie Müller"       -> "familie-mueller"
+//	"Daemgen"              -> "daemgen"
+//	"Dämgen"               -> "daemgen"
+//
+// Saison 13-02-FIX4-a-HOTFIX1: Umlaute werden zu ae/oe/ue/ss
+// aufgeloest BEVOR der Sanitize-Filter greift, damit der Username
+// stabil bleibt egal ob der Admin "Mueller" oder "Müller" tippt.
 func sanitizeUsername(name string) string {
+	expanded := expandGermanUmlauts(name)
 	var b strings.Builder
-	for _, c := range strings.ToLower(name) {
+	for _, c := range strings.ToLower(expanded) {
 		switch {
 		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
 			b.WriteRune(c)
@@ -453,19 +467,4 @@ func sanitizeUsername(name string) string {
 	return out
 }
 
-// urlEscape ist ein minimaler URL-Escape fuer username/password
-// im QR-Pre-Fill-Link.
-func urlEscape(s string) string {
-	const safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if strings.IndexByte(safe, c) >= 0 {
-			b.WriteByte(c)
-		} else {
-			fmt.Fprintf(&b, "%%%02X", c)
-		}
-	}
-	return b.String()
-}
 
