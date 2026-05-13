@@ -12,12 +12,6 @@
   {{template "admin-dashboard.html" .}}
   {{template "modal-magic-link.html" .}}
 
-  <script>
-    (function () {
-      var nodes = document.querySelectorAll('[data-modal], [data-sheet], [data-overlay], [data-sheet-scrim]');
-      for (var i = 0; i < nodes.length; i++) nodes[i].classList.remove('is-open');
-    })();
-  </script>
   <script src="/static/interactions.js"></script>
 </body>
 </html>

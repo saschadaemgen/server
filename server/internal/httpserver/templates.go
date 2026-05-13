@@ -18,6 +18,16 @@ import (
 // reference). Production rendering does not need the comments.
 var htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
 
+// libraryDemoOpenRE strips the `is-open` class from the modal,
+// sheet, scrim and overlay elements where the library bakes it
+// in as a standalone-demo convenience. The class name is the
+// runtime trigger for `display: flex` / `visibility: visible`,
+// so leaving it in causes a flash-of-open-modal on first paint
+// (S13-02-FIX3b live-test bug). interactions.js still adds the
+// class back when the user opens a modal/sheet/overlay, so the
+// runtime behaviour is unchanged.
+var libraryDemoOpenRE = regexp.MustCompile(`\bis-open\b`)
+
 //go:embed templates/admin/*.html templates/mieter/*.html
 var templatesFS embed.FS
 
@@ -105,6 +115,7 @@ func addLibrarySnippets(tmpl *template.Template, names []string) error {
 			return fmt.Errorf("read %s: %w", s, err)
 		}
 		clean := htmlCommentRE.ReplaceAllString(string(body), "")
+		clean = libraryDemoOpenRE.ReplaceAllString(clean, "")
 		if _, err := tmpl.New(s).Parse(clean); err != nil {
 			return fmt.Errorf("parse %s: %w", s, err)
 		}
