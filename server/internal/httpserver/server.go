@@ -28,6 +28,7 @@ import (
 	"unifix.local/server/internal/auth/ratelimit"
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/eventbus"
@@ -81,7 +82,11 @@ type Deps struct {
 	// fresh bus created in New, so callers that don't need to
 	// share the bus across packages can leave this empty.
 	EventBus *eventbus.Bus
-	Log      *slog.Logger
+	// DoorbellCalls is the lifecycle service the mieter and ESP
+	// answer/reject/end-call endpoints arbitrate against. Nil
+	// disables the lifecycle path entirely (calls return 503).
+	DoorbellCalls *doorbellcalls.Service
+	Log           *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -101,6 +106,7 @@ type Server struct {
 	history         doorhistory.Store
 	eventsHeartbeat time.Duration
 	eventBus        *eventbus.Bus
+	calls           *doorbellcalls.Service
 	log             *slog.Logger
 	mux             *http.ServeMux
 	tpl             *adminTemplates
@@ -147,6 +153,7 @@ func New(deps Deps) (*Server, error) {
 		history:         deps.History,
 		eventsHeartbeat: deps.EventsHeartbeat,
 		eventBus:        deps.EventBus,
+		calls:           deps.DoorbellCalls,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -174,6 +181,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /einloggen", s.handleViewerLoginPost)
 	s.mux.HandleFunc("POST /einloggen/logout", s.handleViewerLogout)
 	s.mux.Handle("GET /einloggen/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
+	// Saison 13-03: Klingel-Lifecycle.
+	s.mux.Handle("POST /einloggen/doors/{door_id}/unlock", s.requireSession(http.HandlerFunc(s.handleMieterUnlock)))
+	s.mux.Handle("POST /einloggen/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
+	s.mux.Handle("POST /einloggen/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
+	s.mux.Handle("POST /einloggen/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
 	s.mux.Handle("GET /einloggen/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
 	// Old /m-Routen liefern 301 nach /einloggen. Bookmark-/QR-

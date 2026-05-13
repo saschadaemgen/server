@@ -25,8 +25,10 @@ import (
 	"unifix.local/server/internal/auth/session"
 	"unifix.local/server/internal/config"
 	"unifix.local/server/internal/db"
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/doorbellhub"
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
@@ -232,7 +234,12 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	})
 
 	historyStore := doorhistory.NewSQLStore(d.DB)
-	hub := doorbellhub.New(mockMgr, historyStore, quietLogger())
+	callsSvc := doorbellcalls.NewWithClock(d.DB, clock.Now)
+	hubBus := eventbus.New()
+	hub := doorbellhub.NewWithOptions(mockMgr, historyStore, quietLogger(), doorbellhub.Options{
+		Bus:   hubBus,
+		Calls: callsSvc,
+	})
 	hubCtx, hubCancel := context.WithCancel(context.Background())
 	go func() { _ = hub.Run(hubCtx) }()
 
@@ -258,6 +265,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Hub:             hub,
 		History:         historyStore,
 		UserStore:       userStore,
+		EventBus:        hubBus,
+		DoorbellCalls:   callsSvc,
 		EventsHeartbeat: 50 * time.Millisecond,
 		Log:             quietLogger(),
 	})
