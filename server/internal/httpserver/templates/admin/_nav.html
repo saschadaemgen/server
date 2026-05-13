@@ -586,11 +586,20 @@
     // wandern nicht mit). Wir schliessen daher lieber. capture:true
     // beim scroll damit auch Scrolls in beliebigen Containern
     // greifen, nicht nur window.
-    function closeOnScrollOrResize() {
+    //
+    // Saison 13-02-FIX4-a-HOTFIX8: das hat aber zu frueh
+    // geschlossen wenn der Mieter in der Optionen-Liste selbst
+    // scrollte. Filter: Scrolls innerhalb des Panels ignorieren.
+    function closeOnScroll(e) {
+      if (!openInstance) return;
+      if (openInstance.panel.contains(e.target)) return;
+      closeOpen();
+    }
+    function closeOnResize() {
       if (openInstance) closeOpen();
     }
-    window.addEventListener('scroll', closeOnScrollOrResize, true);
-    window.addEventListener('resize', closeOnScrollOrResize);
+    window.addEventListener('scroll', closeOnScroll, true);
+    window.addEventListener('resize', closeOnResize);
 
     // Esc schliesst auch dann zuverlaessig wenn der Fokus
     // ausserhalb des Panels gelandet ist (z.B. nach Maus-Klick
