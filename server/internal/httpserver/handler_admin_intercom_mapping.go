@@ -75,7 +75,21 @@ func (s *Server) handleAdminIntercomMappingGet(w http.ResponseWriter, r *http.Re
 		s.renderAdminPage(w, "intercom-mapping", data)
 		return
 	}
-	for _, d := range intercoms {
+	// Saison 13-05-HOTFIX2: surface what came back so the next
+	// live-test can see immediately whether the filter is too
+	// narrow (intercoms list shorter than expected) or whether
+	// the API returned nothing at all.
+	s.log.Info("intercom-mapping: list intercoms ok", "count", len(intercoms))
+	for i, d := range intercoms {
+		if i < 5 {
+			s.log.Info("intercom-mapping: intercom row",
+				"index", i,
+				"id", d.ID,
+				"name", d.Name,
+				"device_type", d.DeviceType,
+				"mac", d.DisplayMAC(),
+			)
+		}
 		data.Intercoms = append(data.Intercoms, intercomRow{
 			ID:         d.ID,
 			Name:       d.Name,

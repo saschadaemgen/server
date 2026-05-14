@@ -14,6 +14,7 @@ package uaapi
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -92,11 +93,25 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 // several intercom variants (UA-Intercom, UA-Intercom-Pro,
 // UA-Int-Viewer); the prefix match catches all of them while
 // still excluding hubs and readers.
+//
+// Saison 13-05-HOTFIX2: emits two diagnose logs so the next
+// live-test reveals the real device_type strings UA returns
+// when the page renders empty. The "scanning" log carries a
+// histogram of every device_type seen; the "filtered" log
+// shows how many survived the filter.
 func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 	devices, err := c.ListDevices(ctx)
 	if err != nil {
 		return nil, err
 	}
+	seenTypes := make(map[string]int, len(devices))
+	for _, d := range devices {
+		seenTypes[d.DeviceType]++
+	}
+	slog.Info("uaapi: ListIntercoms scanning devices",
+		"total", len(devices),
+		"types", seenTypes,
+	)
 	out := make([]Device, 0, len(devices))
 	for _, d := range devices {
 		if strings.HasPrefix(strings.ToLower(d.DeviceType), "ua-intercom") ||
@@ -104,5 +119,9 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 			out = append(out, d)
 		}
 	}
+	slog.Info("uaapi: ListIntercoms filtered",
+		"matched", len(out),
+		"filtered_out", len(devices)-len(out),
+	)
 	return out, nil
 }
