@@ -19,13 +19,19 @@ const ViewerHistoryLimit = 20
 // flat struct; we mirror their names exactly so the snippets
 // can be reused unchanged.
 type viewerHomeData struct {
-	UnitName     string
-	DoorName     string
-	Now          string             // "HH:MM:SS"
-	NowDate      string             // "Di, 13. Mai"
-	DND          bool
-	HasUnread    bool
-	HistoryItems []viewerHistoryRow // {Where, When, Unread}
+	UnitName  string
+	DoorName  string
+	Now       string // "HH:MM:SS"
+	NowDate   string // "Di, 13. Mai"
+	DND       bool
+	HasUnread bool
+	// StandbyDoorID is the viewer's configured default door
+	// (Saison 13-06). Empty when no viewer-to-door mapping
+	// exists for this MAC; the home template's standby unlock
+	// handler logs a console warning instead of POSTing in
+	// that case.
+	StandbyDoorID string
+	HistoryItems  []viewerHistoryRow // {Where, When, Unread}
 }
 
 // viewerHistoryRow matches the design-library shape for one
@@ -78,15 +84,23 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	standbyDoorID, err := s.platformCfg.LookupDoorForViewer(r.Context(), mac)
+	if err != nil {
+		s.log.Warn("viewer_to_door lookup failed",
+			"mac_prefix", safePrefix(mac), "err", err)
+		standbyDoorID = ""
+	}
+
 	now := time.Now()
 	data := viewerHomeData{
-		UnitName:     info.Name,
-		DoorName:     "Hauseingang",
-		Now:          now.Format("15:04:05"),
-		NowDate:      formatGermanDate(now),
-		DND:          false,
-		HasUnread:    unread > 0,
-		HistoryItems: rows,
+		UnitName:      info.Name,
+		DoorName:      "Hauseingang",
+		Now:           now.Format("15:04:05"),
+		NowDate:       formatGermanDate(now),
+		DND:           false,
+		HasUnread:     unread > 0,
+		StandbyDoorID: standbyDoorID,
+		HistoryItems:  rows,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderViewer(w, "home", data); err != nil {
