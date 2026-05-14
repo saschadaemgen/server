@@ -176,6 +176,53 @@ func TestListDevices_UnknownShapeIncludesPayloadInError(t *testing.T) {
 	}
 }
 
+// Saison 13-05-HOTFIX2: filter rules are now broad enough to
+// catch every observed UA device_type spelling for intercoms.
+// The matrix below is the load-bearing contract; whenever live
+// surfaces a new spelling, add a row here.
+func TestIsIntercomType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+		why  string
+	}{
+		// Match: known hardware
+		{"UA-Intercom", true, "canonical hyphen-form"},
+		{"ua-intercom", true, "lowercase"},
+		{"  UA-Intercom  ", true, "trim whitespace"},
+		{"UA Intercom", true, "space-separated form"},
+		{"ua intercom", true, "space lowercase"},
+		// Match: prefix variants
+		{"UA-Intercom-Pro", true, "prefix Pro"},
+		{"UA-Intercom-G2", true, "prefix G2"},
+		{"UA Intercom Pro", true, "space prefix Pro"},
+		// Match: viewer family
+		{"UA-Int-Viewer", true, "legacy viewer name"},
+		{"ua-int-viewer", true, "viewer lowercase"},
+		{"UA Int Viewer", true, "space viewer"},
+		{"UA Intercom Viewer", true, "composite intercom+viewer"},
+		{"UA-Intercom-Viewer", true, "composite hyphen"},
+		{"UA-Intercom-Viewer-G2", true, "composite with suffix"},
+		// No match: other UA devices
+		{"UAH-DOOR", false, "hub door"},
+		{"UA-G2-Reader", false, "reader"},
+		{"UA-Hub-Door", false, "hub variant"},
+		{"UA-Card-Reader", false, "card reader"},
+		// No match: weird input
+		{"", false, "empty"},
+		{"   ", false, "blank whitespace"},
+		{"random-device", false, "unrelated"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			got := isIntercomType(c.in)
+			if got != c.want {
+				t.Errorf("isIntercomType(%q) = %v, want %v (%s)", c.in, got, c.want, c.why)
+			}
+		})
+	}
+}
+
 func TestDevice_DisplayMACFormatsBareID(t *testing.T) {
 	d := Device{ID: "28704e31e29c"}
 	if got := d.DisplayMAC(); got != "28:70:4e:31:e2:9c" {

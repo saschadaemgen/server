@@ -114,8 +114,7 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 	)
 	out := make([]Device, 0, len(devices))
 	for _, d := range devices {
-		if strings.HasPrefix(strings.ToLower(d.DeviceType), "ua-intercom") ||
-			strings.EqualFold(d.DeviceType, "UA-Int-Viewer") {
+		if isIntercomType(d.DeviceType) {
 			out = append(out, d)
 		}
 	}
@@ -124,4 +123,39 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 		"filtered_out", len(devices)-len(out),
 	)
 	return out, nil
+}
+
+// isIntercomType decides whether a UA device_type string belongs
+// to the intercom family. Saison 13-05-HOTFIX2 broadened the
+// match because the original prefix-only logic missed
+// space-separated names ("UA Intercom") and viewer-style
+// composites ("UA Intercom Viewer", "UA-Intercom-Viewer-G2").
+//
+// Match rules (all case-insensitive, whitespace-trimmed):
+//
+//   - exact "ua-intercom" / "ua intercom"           hardware intercom
+//   - exact "ua-int-viewer"                          legacy viewer name
+//   - prefix "ua-intercom" or "ua intercom"          variants/Pro/G2
+//   - both "intercom" and "viewer" present anywhere  composite names
+//
+// Hubs ("UAH-DOOR"), readers ("UA-G2-Reader") and other devices
+// stay out by construction.
+func isIntercomType(deviceType string) bool {
+	t := strings.ToLower(strings.TrimSpace(deviceType))
+	if t == "" {
+		return false
+	}
+	if t == "ua-intercom" || t == "ua intercom" {
+		return true
+	}
+	if t == "ua-int-viewer" || t == "ua int viewer" {
+		return true
+	}
+	if strings.HasPrefix(t, "ua-intercom") || strings.HasPrefix(t, "ua intercom") {
+		return true
+	}
+	if strings.Contains(t, "intercom") && strings.Contains(t, "viewer") {
+		return true
+	}
+	return false
 }
