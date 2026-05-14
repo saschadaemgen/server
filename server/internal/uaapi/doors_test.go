@@ -107,6 +107,56 @@ func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
 	}
 }
 
+// Saison 13-07: extras.door_thumbnail carries the intercom MAC.
+// IntercomMAC parses it back out so unifix can auto-resolve a
+// door by its calling intercom without admin-curated mapping.
+func TestDoorIntercomMAC(t *testing.T) {
+	cases := []struct {
+		name      string
+		thumbnail string
+		want      string
+	}{
+		{
+			name:      "live capture",
+			thumbnail: "/preview/reader_28704e31e29c_321e5134-b189-4de1-b973-8c4999e05790_1747.jpg",
+			want:      "28:70:4e:31:e2:9c",
+		},
+		{
+			name:      "uppercase hex normalised to lowercase",
+			thumbnail: "/preview/reader_28704E31E29C_321e5134-b189-4de1-b973-8c4999e05790_1747.jpg",
+			want:      "28:70:4e:31:e2:9c",
+		},
+		{
+			name:      "different intercom",
+			thumbnail: "/preview/reader_0cea14476781_door-uuid-x_1234.jpg",
+			want:      "0c:ea:14:47:67:81",
+		},
+		{
+			name:      "no thumbnail",
+			thumbnail: "",
+			want:      "",
+		},
+		{
+			name:      "thumbnail without reader prefix (key-only door)",
+			thumbnail: "/preview/snapshot_321e5134_1234.jpg",
+			want:      "",
+		},
+		{
+			name:      "wrong shape",
+			thumbnail: "/somewhere/else.jpg",
+			want:      "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d := Door{Extras: DoorExtras{DoorThumbnail: c.thumbnail}}
+			if got := d.IntercomMAC(); got != c.want {
+				t.Errorf("IntercomMAC = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestListDoors_NullDataReturnsEmptySlice(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 )
 
 // UnlockDoorRequest carries the optional audit fields. Both
@@ -27,17 +29,61 @@ type UnlockDoorRequest struct {
 	ActorName string `json:"actor_name,omitempty"`
 }
 
-// Door mirrors the read-side fields the admin
-// /a/intercom-mapping page cares about. ID is the UUID the
-// PUT /doors/{id}/unlock path expects; Name is the human label
-// from the UA Console; HubID/Type are surfaced when present so
-// the UI can disambiguate doors that share a name across hubs.
+// Door mirrors the read-side fields unifix consumes. ID is the
+// UUID the PUT /doors/{id}/unlock path expects; Name is the
+// human label from the UA Console; HubID/Type help disambiguate
+// across hubs.
+//
+// Saison 13-07: extras.door_thumbnail carries the path of the
+// camera snapshot UA renders for the door. The path embeds the
+// intercom MAC that calls this door:
+//
+//	/preview/reader_28704e31e29c_321e5134-..._<ts>.jpg
+//
+// IntercomMAC parses that out so unifix can auto-resolve "which
+// door does THIS intercom open" without operator-curated mapping.
 type Door struct {
-	ID       string `json:"id"`                 // UUID
-	Name     string `json:"name"`
-	FullName string `json:"full_name,omitempty"`
-	HubID    string `json:"hub_id,omitempty"`
-	Type     string `json:"type,omitempty"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	FullName string    `json:"full_name,omitempty"`
+	HubID    string    `json:"hub_id,omitempty"`
+	Type     string    `json:"type,omitempty"`
+	Extras   DoorExtras `json:"extras,omitempty"`
+}
+
+// DoorExtras isolates the nested extras object so the
+// thumbnail-path parser in IntercomMAC has somewhere to live.
+type DoorExtras struct {
+	DoorThumbnail string `json:"door_thumbnail,omitempty"`
+}
+
+// thumbnailIntercomMAC matches the 12-hex intercom MAC embedded
+// in extras.door_thumbnail (saison-13-07 reverse-engineered).
+var thumbnailIntercomMAC = regexp.MustCompile(`/preview/reader_([0-9a-f]{12})_`)
+
+// IntercomMAC parses extras.door_thumbnail to find which
+// intercom belongs to this door. Returns a colon-form lowercase
+// MAC (e.g. "28:70:4e:31:e2:9c") or "" if the thumbnail is
+// missing or the path doesn't match the expected shape (e.g.
+// doors that have no intercom and only open via key/PIN).
+func (d Door) IntercomMAC() string {
+	if d.Extras.DoorThumbnail == "" {
+		return ""
+	}
+	m := thumbnailIntercomMAC.FindStringSubmatch(strings.ToLower(d.Extras.DoorThumbnail))
+	if len(m) < 2 {
+		return ""
+	}
+	raw := m[1]
+	var b strings.Builder
+	b.Grow(17)
+	for i := 0; i < 12; i += 2 {
+		if i > 0 {
+			b.WriteByte(':')
+		}
+		b.WriteString(raw[i : i+2])
+	}
+	return b.String()
 }
 
 // DisplayName picks the best human label: full_name when present,
