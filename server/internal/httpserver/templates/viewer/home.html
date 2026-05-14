@@ -105,8 +105,14 @@
       es.addEventListener('doorbell_start', function (e) {
         var data = {};
         try { data = JSON.parse(e.data) || {}; } catch (_) {}
-        var eventID = data.cancel_token || data.request_id || '';
-        var intercomMAC = data.device_id || '';
+        // Saison 13-03-HOTFIX2: writeSSEEvent in handler_events.go
+        // wickelt das doorbellhub.Event in einen Envelope mit
+        // {door, ts, raw: <hub event>} ein. cancel_token und
+        // device_id liegen daher unter data.raw.*. HOTFIX1 hat das
+        // uebersehen; deshalb war das dataset auf den Buttons leer.
+        var raw = data.raw || {};
+        var eventID = raw.cancel_token || raw.request_id || '';
+        var intercomMAC = raw.device_id || data.door || '';
         enableRingButtons(eventID, intercomMAC);
         if (window.unifix && unifix.openOverlay) {
           unifix.openOverlay('ringing');
