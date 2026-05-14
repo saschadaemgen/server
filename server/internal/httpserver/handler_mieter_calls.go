@@ -27,27 +27,31 @@ import (
 	"unifix.local/server/internal/uaapi"
 )
 
-// handleMieterUnlock relays a door unlock to the UA-API.
-// {door_id} comes from the URL path; the actor in the audit
-// row is the viewer's MAC from the session context.
+// handleMieterUnlock relays a door unlock to the UA-API. Two
+// path parameters are accepted:
 //
-// Saison 13-03-HOTFIX1: the path parameter the bell-overlay JS
-// sends is the INTERCOM MAC (from doorbell_start.device_id),
-// not the UA-Access door UUID. We sniff the format: if the
-// param matches the MAC regex, look it up via
-// platformconfig.LookupDoorForIntercom and use the resolved
-// UUID; otherwise treat the param as a real door UUID
-// (preserves the test path that calls /einloggen/doors/door-x/unlock
-// with a synthetic id and the future admin path that may use
-// the UUID directly).
+//   - "standby": the literal string. Reads the viewer's
+//     paired_intercom_mac (set by the admin) and uses that as
+//     the intercom. The standby button on the home screen
+//     POSTs to /einloggen/doors/standby/unlock.
+//
+//   - <intercom-mac>: a MAC address in either colon-form or
+//     bare 12-hex. The bell-overlay POSTs to
+//     /einloggen/doors/{device_id}/unlock with the intercom
+//     MAC carried in the SSE doorbell_start.device_id frame.
+//
+// In both branches the door UUID is auto-resolved via
+// uaapi.LookupDoorForIntercom (saison-13-07): the UA-API's
+// extras.door_thumbnail field embeds the calling intercom MAC.
+// No more admin-curated platform_config mapping needed.
 func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	viewerMAC := ViewerMACFromContext(r.Context())
 	if viewerMAC == "" {
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
-	pathDoorID := r.PathValue("door_id")
-	if pathDoorID == "" {
+	pathParam := r.PathValue("door_id")
+	if pathParam == "" {
 		http.Error(w, "door_id required", http.StatusBadRequest)
 		return
 	}
@@ -56,46 +60,56 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doorID := pathDoorID
-	// Saison 13-05-HOTFIX5: accept both colon-form and bare
-	// 12-hex MACs from the browser (the SSE doorbell_start frame
-	// carries device_id as bare 12-hex) and normalise to the
-	// colon-form the mapping is stored under.
-	if macAnyForm.MatchString(pathDoorID) {
-		normalized := normalizeMACToColonForm(pathDoorID)
-		resolved, err := s.platformCfg.LookupDoorForIntercom(r.Context(), normalized)
-		if err != nil {
-			s.log.Error("intercom_to_door lookup", "err", err, "intercom", normalized)
-			http.Error(w, "intercom-to-door mapping read failed", http.StatusInternalServerError)
-			return
-		}
-		if resolved == "" {
-			s.log.Warn("intercom not in intercom_to_door mapping",
-				"intercom", normalized,
-				"raw_path", pathDoorID,
-			)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok":    false,
-				"error": "intercom MAC not mapped to a door; admin must set platform_config.intercom_to_door",
-			})
-			return
-		}
-		doorID = resolved
-	}
-
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), viewerMAC)
 	if err != nil {
 		s.log.Error("mieter unlock viewer info", "err", err, "mac_prefix", viewerMAC[:8])
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	intercomMAC, badReq := resolveIntercomMAC(pathParam, info.PairedIntercomMAC)
+	if badReq != "" {
+		http.Error(w, badReq, http.StatusBadRequest)
+		return
+	}
+	if intercomMAC == "" {
+		// Standby route, but the viewer has no paired intercom.
+		s.log.Warn("standby unlock without paired intercom",
+			"mac_prefix", viewerMAC[:8])
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "viewer is not paired with an intercom; admin must set 'Verknuepfte Klingel'",
+		})
+		return
+	}
+
+	doorID, err := s.ua.LookupDoorForIntercom(r.Context(), intercomMAC)
+	if err != nil {
+		s.log.Error("ua-api door lookup failed",
+			"err", err, "intercom", intercomMAC)
+		http.Error(w, "ua-api door lookup failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	if doorID == "" {
+		s.log.Warn("intercom not bound to any door (UA-Console misconfiguration)",
+			"intercom", intercomMAC)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "intercom is not bound to any door (check UA-Console)",
+		})
+		return
+	}
+
 	if err := s.ua.UnlockDoor(r.Context(), doorID, uaapi.UnlockDoorRequest{
 		ActorID:   info.MAC,
 		ActorName: info.Name,
 	}); err != nil {
-		s.log.Warn("mieter unlock failed", "err", err, "door_id", doorID, "mac_prefix", viewerMAC[:8])
+		s.log.Warn("mieter unlock failed",
+			"err", err, "door_id", doorID, "mac_prefix", viewerMAC[:8])
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -111,9 +125,30 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 			OccurredAt: time.Now(),
 		}, nil)
 	}
-	s.log.Info("mieter unlock", "mac_prefix", viewerMAC[:8], "door_id", doorID)
+	s.log.Info("mieter unlock",
+		"mac_prefix", viewerMAC[:8],
+		"door_id", doorID,
+		"intercom", intercomMAC,
+	)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// resolveIntercomMAC normalises the {door_id} path param into
+// a colon-form lowercase intercom MAC. Returns:
+//   - intercomMAC, "" on success
+//   - "", badRequestText if the param is neither "standby" nor
+//     a recognised MAC form
+//   - "", "" for the "standby" branch when the viewer has no
+//     paired intercom yet (caller emits a 404)
+func resolveIntercomMAC(pathParam, paired string) (intercomMAC string, badRequest string) {
+	if pathParam == "standby" {
+		return paired, ""
+	}
+	if macAnyForm.MatchString(pathParam) {
+		return normalizeMACToColonForm(pathParam), ""
+	}
+	return "", "door_id must be 'standby' or an intercom MAC"
 }
 
 // callLifecycleRequest is the shared body shape for /answer,

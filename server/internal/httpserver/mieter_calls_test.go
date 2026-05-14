@@ -11,9 +11,53 @@ import (
 
 	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/uaapi"
 )
+
+// uaDoorStubConfig drives the test-side UA-API stub used by all
+// the saison-13-07 mieter-unlock tests. Each entry maps a door
+// UUID to the intercom MAC its extras.door_thumbnail encodes.
+type uaDoorStubConfig struct {
+	doors map[string]string // door-uuid -> intercom-mac (lowercase, no colons in path)
+}
+
+// newUADoorsStub returns an httptest.Server that satisfies both
+//
+//	GET /api/v1/developer/doors            (LookupDoorForIntercom)
+//	PUT /api/v1/developer/doors/{id}/unlock (UnlockDoor)
+//
+// gotDoorID is captured by the unlock branch so the test can
+// assert which door we actually attempted to open.
+func newUADoorsStub(t *testing.T, cfg uaDoorStubConfig, gotDoorID *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/developer/doors":
+			rows := make([]map[string]any, 0, len(cfg.doors))
+			for doorID, intercomBare := range cfg.doors {
+				rows = append(rows, map[string]any{
+					"id":   doorID,
+					"name": "Door " + doorID,
+					"extras": map[string]any{
+						"door_thumbnail": "/preview/reader_" + intercomBare + "_" + doorID + "_1.jpg",
+					},
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": "SUCCESS", "msg": "ok", "data": rows,
+			})
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/unlock"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
+			if gotDoorID != nil {
+				*gotDoorID = id
+			}
+			_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
+		default:
+			http.Error(w, "ua stub: unhandled "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+}
 
 // loginMieterForTest seeds a viewer and signs the test client
 // into a viewer session by posting username + password.
@@ -24,13 +68,17 @@ func loginMieterForTest(t *testing.T, env *testEnv) {
 	resp.Body.Close()
 }
 
-func TestMieterUnlock_CallsUAAPIAndAudits(t *testing.T) {
+// Saison 13-07: bell-overlay path. The browser POSTs the
+// intercom MAC (colon-form, from doorbell_start.device_id) and
+// the handler auto-resolves the door via uaapi.LookupDoorForIntercom.
+func TestMieterUnlock_BellOverlayResolvesViaThumbnail(t *testing.T) {
 	var gotDoorID string
-	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotDoorID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
-	}))
+	uaStub := newUADoorsStub(t, uaDoorStubConfig{
+		doors: map[string]string{
+			"door-uuid-front": "28704e31e29c",
+			"door-uuid-back":  "aabbccddeeff",
+		},
+	}, &gotDoorID)
 	defer uaStub.Close()
 
 	env := newTestServer(t)
@@ -39,20 +87,20 @@ func TestMieterUnlock_CallsUAAPIAndAudits(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/door-mieter-1/unlock", nil)
+		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/doors/.../unlock: %v", err)
+		t.Fatalf("POST: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		raw := readBody(t, resp)
-		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	if gotDoorID != "door-mieter-1" {
-		t.Errorf("UA-API saw door = %q, want door-mieter-1", gotDoorID)
+	if gotDoorID != "door-uuid-front" {
+		t.Errorf("UA-API saw door = %q, want door-uuid-front", gotDoorID)
 	}
-	// Audit row in door_events.
+
+	// Audit row written.
 	var n int
 	if err := env.d.QueryRow(
 		`SELECT COUNT(*) FROM door_events WHERE event_type = 'door_unlocked' AND viewer_mac = ?`,
@@ -65,67 +113,21 @@ func TestMieterUnlock_CallsUAAPIAndAudits(t *testing.T) {
 	}
 }
 
-func TestMieterUnlock_ResolvesIntercomMACToDoorUUID(t *testing.T) {
+// Saison 13-07: bell-overlay path with bare 12-hex from the SSE
+// frame (saison-13-05-HOTFIX5 verified the SSE device_id format).
+func TestMieterUnlock_BareMACPathResolvesViaThumbnail(t *testing.T) {
 	var gotDoorID string
-	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotDoorID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
-	}))
+	uaStub := newUADoorsStub(t, uaDoorStubConfig{
+		doors: map[string]string{
+			"door-uuid-front": "28704e31e29c",
+		},
+	}, &gotDoorID)
 	defer uaStub.Close()
 
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	loginMieterForTest(t, env)
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
-
-	// Mapping setzen: Intercom-MAC -> Door-UUID.
-	if err := env.platformCfg.Set(context.Background(),
-		platformconfig.KeyIntercomToDoor,
-		`{"28:70:4e:31:e2:9c": "door-uuid-real-1"}`,
-	); err != nil {
-		t.Fatalf("Set intercom_to_door: %v", err)
-	}
-
-	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if gotDoorID != "door-uuid-real-1" {
-		t.Errorf("UA-API saw door = %q, want door-uuid-real-1", gotDoorID)
-	}
-}
-
-// Saison 13-05-HOTFIX5: SSE doorbell_start.device_id reaches the
-// browser as bare 12-hex (no colons). The browser POSTs that path
-// segment as-is. Mapping is keyed in colon-form. The handler must
-// normalise both sides to colon-form before lookup.
-func TestMieterUnlock_BareMACPathParamResolvesViaMapping(t *testing.T) {
-	var gotDoorID string
-	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotDoorID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
-	}))
-	defer uaStub.Close()
-
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	loginMieterForTest(t, env)
-	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
-
-	if err := env.platformCfg.Set(context.Background(),
-		platformconfig.KeyIntercomToDoor,
-		`{"28:70:4e:31:e2:9c": "door-uuid-real-1"}`,
-	); err != nil {
-		t.Fatalf("Set intercom_to_door: %v", err)
-	}
 
 	req, _ := http.NewRequest(http.MethodPost,
 		env.ts.URL+"/einloggen/doors/28704e31e29c/unlock", nil)
@@ -135,19 +137,82 @@ func TestMieterUnlock_BareMACPathParamResolvesViaMapping(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		raw := readBody(t, resp)
-		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	if gotDoorID != "door-uuid-real-1" {
-		t.Errorf("UA-API saw door = %q, want door-uuid-real-1 (the mapping target)", gotDoorID)
+	if gotDoorID != "door-uuid-front" {
+		t.Errorf("UA-API saw door = %q, want door-uuid-front", gotDoorID)
 	}
 }
 
-func TestMieterUnlock_UnmappedIntercomReturns404(t *testing.T) {
+// Saison 13-07: standby path. The home screen POSTs to the
+// literal /einloggen/doors/standby/unlock; the handler reads the
+// viewer's paired_intercom_mac and resolves from there.
+func TestMieterUnlock_StandbyUsesPairedIntercom(t *testing.T) {
+	var gotDoorID string
+	uaStub := newUADoorsStub(t, uaDoorStubConfig{
+		doors: map[string]string{
+			"door-uuid-front": "28704e31e29c",
+		},
+	}, &gotDoorID)
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
+
+	if err := env.mockMgr.SetPairedIntercomMAC(context.Background(),
+		testViewerMAC, "28:70:4e:31:e2:9c"); err != nil {
+		t.Fatalf("SetPairedIntercomMAC: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/standby/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	if gotDoorID != "door-uuid-front" {
+		t.Errorf("UA-API saw door = %q, want door-uuid-front", gotDoorID)
+	}
+}
+
+func TestMieterUnlock_StandbyWithoutPairingReturns404(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	loginMieterForTest(t, env)
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: "http://invalid", Token: "t"}))
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/standby/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (no paired intercom)", resp.StatusCode)
+	}
+}
+
+func TestMieterUnlock_IntercomNotBoundReturns404(t *testing.T) {
+	// Stub returns a door whose thumbnail points at SOMEONE ELSE's
+	// intercom; the lookup must come back empty for the requested MAC.
+	uaStub := newUADoorsStub(t, uaDoorStubConfig{
+		doors: map[string]string{
+			"door-uuid-back": "aabbccddeeff",
+		},
+	}, nil)
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
 		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
@@ -157,7 +222,25 @@ func TestMieterUnlock_UnmappedIntercomReturns404(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (unmapped intercom)", resp.StatusCode)
+		t.Errorf("status = %d, want 404 (intercom not bound to a door)", resp.StatusCode)
+	}
+}
+
+func TestMieterUnlock_BadPathParamReturns400(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: "http://invalid", Token: "t"}))
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/garbage/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
@@ -297,13 +380,9 @@ func TestMieterEndCall_PushesUserEnded(t *testing.T) {
 	}
 }
 
-// Forces a reference to eventbus + platformconfig at package
-// level so unused-import lints stay quiet if the file gets
-// trimmed.
-var (
-	_ = eventbus.New
-	_ = platformconfig.KeyIntercomToDoor
-)
+// Forces a reference to eventbus at package level so
+// unused-import lints stay quiet if the file gets trimmed.
+var _ = eventbus.New
 
 // findRunningViewer locates the noopViewer instance the test env
 // spawned for the seedViewer test MAC. Used by Saison-13-04.5-B
