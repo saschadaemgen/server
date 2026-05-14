@@ -15,8 +15,8 @@ func TestListDevices_ParsesResponse(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
-			{"id": "28704e31e29c", "name": "UA Intercom e29c", "device_type": "UA-Intercom", "mac": "28:70:4e:31:e2:9c"},
-			{"id": "0cea14476781", "name": "UA Hub Door", "device_type": "UAH-DOOR", "mac": "0c:ea:14:47:67:81"},
+			{"id": "28704e31e29c", "alias": "UA Intercom e29c", "type": "UA-Intercom", "is_online": true, "is_adopted": true},
+			{"id": "0cea14476781", "alias": "UA Hub Door", "type": "UAH-DOOR", "is_online": true, "is_adopted": true},
 		})
 	}))
 	defer ts.Close()
@@ -29,8 +29,14 @@ func TestListDevices_ParsesResponse(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
-	if got[0].DeviceType != "UA-Intercom" {
-		t.Errorf("[0].DeviceType = %q", got[0].DeviceType)
+	if got[0].Type != "UA-Intercom" {
+		t.Errorf("[0].Type = %q", got[0].Type)
+	}
+	if got[0].Alias != "UA Intercom e29c" {
+		t.Errorf("[0].Alias = %q", got[0].Alias)
+	}
+	if !got[0].IsOnline {
+		t.Errorf("[0].IsOnline = false, want true")
 	}
 }
 
@@ -58,11 +64,11 @@ func TestListDevices_EmptyDataReturnsEmptySlice(t *testing.T) {
 func TestListIntercoms_FiltersByType(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
-			{"id": "a", "name": "Door Hub", "device_type": "UAH-DOOR"},
-			{"id": "b", "name": "Intercom 1", "device_type": "UA-Intercom"},
-			{"id": "c", "name": "Intercom Pro", "device_type": "UA-Intercom-Pro"},
-			{"id": "d", "name": "Reader", "device_type": "UA-G2-Reader"},
-			{"id": "e", "name": "Viewer", "device_type": "UA-Int-Viewer"},
+			{"id": "a", "alias": "Door Hub", "type": "UAH-DOOR"},
+			{"id": "b", "alias": "Intercom 1", "type": "UA-Intercom"},
+			{"id": "c", "alias": "Intercom Pro", "type": "UA-Intercom-Pro"},
+			{"id": "d", "alias": "Reader", "type": "UA-G2-Reader"},
+			{"id": "e", "alias": "Viewer", "type": "UA-Int-Viewer"},
 		})
 	}))
 	defer ts.Close()
@@ -75,9 +81,8 @@ func TestListIntercoms_FiltersByType(t *testing.T) {
 		t.Errorf("got %d intercoms, want 3 (Intercom + Pro + Viewer)", len(got))
 	}
 	for _, d := range got {
-		typ := strings.ToLower(d.DeviceType)
-		if !strings.HasPrefix(typ, "ua-intercom") && typ != "ua-int-viewer" {
-			t.Errorf("unexpected type passed filter: %q", d.DeviceType)
+		if !isIntercomType(d.Type) {
+			t.Errorf("unexpected type passed filter: %q", d.Type)
 		}
 	}
 }
@@ -105,11 +110,11 @@ func TestListDevices_TolerantToArrayOfArrays(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"code":"SUCCESS","msg":"ok","data":[
 				[
-					{"id":"28704e31e29c","name":"UA Intercom","device_type":"UA-Intercom","mac":"28:70:4e:31:e2:9c"},
-					{"id":"0cea14476781","name":"UA Hub Door","device_type":"UAH-DOOR","mac":"0c:ea:14:47:67:81"}
+					{"id":"28704e31e29c","alias":"UA Intercom","type":"UA-Intercom"},
+					{"id":"0cea14476781","alias":"UA Hub Door","type":"UAH-DOOR"}
 				],
 				[
-					{"id":"0cea1458f1c6","name":"UA Intercom Viewer","device_type":"UA-Int-Viewer","mac":"0c:ea:14:58:f1:c6"}
+					{"id":"0cea1458f1c6","alias":"UA Intercom Viewer","type":"UA-Int-Viewer"}
 				]
 			]
 		}`))
@@ -138,7 +143,7 @@ func TestListDevices_TolerantToWrapperObject(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"code":"SUCCESS","msg":"ok","data":{
 				"list":[
-					{"id":"a","name":"A","device_type":"UA-Intercom"}
+					{"id":"a","alias":"A","type":"UA-Intercom"}
 				]
 			}
 		}`))
@@ -230,9 +235,28 @@ func TestDevice_DisplayMACFormatsBareID(t *testing.T) {
 	}
 }
 
-func TestDevice_DisplayMACPassesThroughColonForm(t *testing.T) {
-	d := Device{MAC: "0c:EA:14:42:42:42"}
-	if got := d.DisplayMAC(); got != "0c:ea:14:42:42:42" {
+func TestDevice_DisplayMACLowercasesColonForm(t *testing.T) {
+	d := Device{ID: "0CEA1442:42:42"}
+	got := d.DisplayMAC()
+	if got != "0cea1442:42:42" {
 		t.Errorf("DisplayMAC = %q", got)
+	}
+}
+
+func TestDevice_DisplayNamePrefersAlias(t *testing.T) {
+	cases := []struct {
+		in   Device
+		want string
+	}{
+		{Device{ID: "0cea140a7806", Alias: "leerstand"}, "leerstand"},
+		{Device{ID: "0cea140a7806", Alias: "  Mueller 2OG  "}, "Mueller 2OG"},
+		{Device{ID: "0cea140a7806"}, "0cea140a7806"},
+		{Device{ID: "0cea140a7806", Alias: "   "}, "0cea140a7806"},
+	}
+	for _, c := range cases {
+		got := c.in.DisplayName()
+		if got != c.want {
+			t.Errorf("DisplayName(%+v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

@@ -85,17 +85,17 @@ func (s *Server) handleAdminIntercomMappingGet(w http.ResponseWriter, r *http.Re
 			s.log.Info("intercom-mapping: intercom row",
 				"index", i,
 				"id", d.ID,
-				"name", d.Name,
-				"device_type", d.DeviceType,
+				"alias", d.Alias,
+				"type", d.Type,
 				"mac", d.DisplayMAC(),
 			)
 		}
 		data.Intercoms = append(data.Intercoms, intercomRow{
 			ID:         d.ID,
-			Name:       d.Name,
+			Name:       d.DisplayName(),
 			MAC:        d.DisplayMAC(),
-			DeviceType: d.DeviceType,
-			Online:     d.Online,
+			DeviceType: d.Type,
+			Online:     d.IsOnline,
 		})
 	}
 

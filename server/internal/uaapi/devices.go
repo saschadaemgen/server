@@ -20,29 +20,42 @@ import (
 )
 
 // Device mirrors the read-side fields the admin UI cares about
-// from a UA-API device record. The full payload carries more
-// (firmware version, online flag, last seen, ...); fields are
-// added here only when a consumer needs them. Unknown JSON keys
-// are ignored by encoding/json so missing fields stay tolerant.
+// from a UA-API device record. Field names match what the live
+// UDM returns (verified by the HOTFIX3 raw-dump on 14 May
+// 12:20): "type" (not "device_type"), "alias" (not "name"),
+// "is_online" (not "online"). The id is the bare 12-hex-char
+// MAC; the colon-form is reconstituted by DisplayMAC.
+//
+// Unknown JSON keys are ignored by encoding/json so missing or
+// new fields don't break the decode.
 type Device struct {
-	ID         string `json:"id"`          // device id (often the MAC sans colons)
-	Name       string `json:"name"`        // display name from UA Console
-	DeviceType string `json:"device_type"` // e.g. "UA-Intercom", "UAH-DOOR"
-	MAC        string `json:"mac"`         // formatted MAC, may include colons
-	IP         string `json:"ip,omitempty"`
-	Firmware   string `json:"firmware,omitempty"`
-	Online     bool   `json:"online,omitempty"`
+	ID             string   `json:"id"`               // 12-hex-char MAC, no colons
+	Alias          string   `json:"alias"`            // display name set in UA Console
+	Type           string   `json:"type"`             // e.g. "UA-Intercom", "UA-Int-Viewer", "UAH-DOOR"
+	IsOnline       bool     `json:"is_online"`
+	IsAdopted      bool     `json:"is_adopted"`
+	IsManaged      bool     `json:"is_managed"`
+	IsConnected    bool     `json:"is_connected"`
+	LocationID     string   `json:"location_id,omitempty"`
+	ConnectedUAHID string   `json:"connected_uah_id,omitempty"`
+	Capabilities   []string `json:"capabilities,omitempty"`
+}
+
+// DisplayName picks the best human label: alias when present,
+// otherwise the bare id as a last resort.
+func (d Device) DisplayName() string {
+	if alias := strings.TrimSpace(d.Alias); alias != "" {
+		return alias
+	}
+	return d.ID
 }
 
 // DisplayMAC returns the device's MAC in canonical lowercase
-// colon form, derived from MAC if present or from ID otherwise.
-// Used by the admin template to render a stable string AND by
-// the LookupDoorForIntercom path to match the same key.
+// colon form, derived from the bare-12-hex id. Used by the
+// admin template to render a stable string AND by the
+// LookupDoorForIntercom path to match the same key.
 func (d Device) DisplayMAC() string {
-	raw := strings.ToLower(strings.TrimSpace(d.MAC))
-	if raw == "" {
-		raw = strings.ToLower(strings.TrimSpace(d.ID))
-	}
+	raw := strings.ToLower(strings.TrimSpace(d.ID))
 	if raw == "" {
 		return ""
 	}
@@ -81,20 +94,6 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Saison 13-05-HOTFIX3: dump the raw envelope.Data once per
-	// call so the next live-test reveals the actual UA-API field
-	// names. HOTFIX2's seenTypes histogram showed {"":6} - all
-	// six device_type values were the empty string, meaning our
-	// Device struct's `json:"device_type"` tag does not match
-	// what UA actually emits. Truncate at 800 bytes to keep the
-	// log line scannable; the real keys live in the first ~200.
-	if len(env.Data) > 0 {
-		raw := string(env.Data)
-		if len(raw) > 800 {
-			raw = raw[:800] + "...[truncated]"
-		}
-		slog.Info("uaapi: ListDevices raw data", "json", raw)
-	}
 	devices, err := decodeList[Device](env.Data)
 	if err != nil {
 		return nil, fmt.Errorf("uaapi: unmarshal devices: %w", err)
@@ -103,16 +102,15 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 }
 
 // ListIntercoms is a thin filter on top of ListDevices that
-// keeps only device_type starting with "UA-Intercom". UA ships
-// several intercom variants (UA-Intercom, UA-Intercom-Pro,
-// UA-Int-Viewer); the prefix match catches all of them while
-// still excluding hubs and readers.
+// keeps only intercom-family devices (UA-Intercom, UA-Int-Viewer
+// and the various Pro/G2/composite spellings) - hubs, readers
+// and other devices stay out. See isIntercomType for the rules.
 //
-// Saison 13-05-HOTFIX2: emits two diagnose logs so the next
-// live-test reveals the real device_type strings UA returns
-// when the page renders empty. The "scanning" log carries a
-// histogram of every device_type seen; the "filtered" log
-// shows how many survived the filter.
+// Saison 13-05-HOTFIX2: emits two diagnose logs so any live
+// surprise (new spelling, empty list, schema drift) is
+// debuggable from the log alone. The "scanning" log carries a
+// histogram of every type seen; the "filtered" log shows how
+// many survived the filter.
 func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 	devices, err := c.ListDevices(ctx)
 	if err != nil {
@@ -120,7 +118,7 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 	}
 	seenTypes := make(map[string]int, len(devices))
 	for _, d := range devices {
-		seenTypes[d.DeviceType]++
+		seenTypes[d.Type]++
 	}
 	slog.Info("uaapi: ListIntercoms scanning devices",
 		"total", len(devices),
@@ -128,7 +126,7 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 	)
 	out := make([]Device, 0, len(devices))
 	for _, d := range devices {
-		if isIntercomType(d.DeviceType) {
+		if isIntercomType(d.Type) {
 			out = append(out, d)
 		}
 	}
