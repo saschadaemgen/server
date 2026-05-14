@@ -1,6 +1,6 @@
 # unifix Architecture
 
-**Status:** Saison 12 abgeschlossen 12. Mai 2026 (S12-DOC-02).
+**Status:** Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -145,6 +145,29 @@ Cancel-Token gegen den persistierten Eintrag und feuert den
 `OnDoorbellCancel`-Callback. Der Hub schickt einen
 `doorbell_cancel`-Frame zur gleichen Mieter-Session.
 
+Reject- und End-Call-Pfad (Saison 13-04.5):
+
+Wenn der Mieter "Ignorieren" oder "Anruf beenden" klickt
+(/einloggen/reject bzw. /einloggen/end-call; /esp/reject
+analog), passiert beim Server:
+
+1. `doorbellcalls.MarkRejected` setzt `cancel_reason` in der
+   doorbell_calls-Zeile (CAS, idempotenter Stale-Pfad).
+2. Lokaler Cancel-Push via `eventBus.Publish(viewerMAC, ...)` -
+   Geschwister-Sessions auf derselben MAC sehen den Cancel
+   sofort und schliessen ihr Bell-Overlay.
+3. `notifyUDMReject` -> `mockmanager.RejectDoorbellOnMock` ->
+   `mock.Viewer.RejectDoorbell` -> Mock-Stage-6 publisht den
+   89-Byte `/call_admin_result`-MQTT-RPC (Saison-13-04.5
+   reverse-engineered).
+4. UDM antwortet mit dem ueblichen
+   `/cancel_doorbell_notification`-Broadcast an alle Receiver.
+5. Die UA-Hardware-Intercom hoert SOFORT auf zu klingeln statt
+   30 Sekunden auf den Hardware-Timeout zu warten.
+
+Wire-Format-Details fuer `/call_admin_result` siehe
+docs/wire-format.md Sektion "/call_admin_result body schema".
+
 ## 7. Saisons-Roadmap (Go-Aera)
 
 Siehe CLAUDE.md Sektion 15 fuer die volle Detail-Tabelle. Kurz:
@@ -272,37 +295,70 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             espstore-Paket wie urspruenglich im Briefing
             entworfen.
 
-Saison 13b: Stream-Integration (verschoben aus dem urspruenglichen
-            S13-05-Slot, sobald die S13-04-Spike-Captures vom
-            RPi vorliegen). Live-View im Bell-Overlay, Video
-            plus Audio, eigener WebRTC-Teardown im Mieter-
-            Browser (track.stop, pc.close, Inaktivitaets-
-            Cleanup).
+   S13-DOC: Saison-13-Abschluss-Doku-Synchronisation.
+            ABGESCHLOSSEN 14. Mai 2026. Bringt die fuenf Repo-
+            Doks (CLAUDE.md, architecture, wire-format, security,
+            feature-backlog) auf den Saison-13-Endstand. Kein
+            Code, nur Konsolidierung. Loest gleichzeitig die
+            Saison-14ff-Roadmap am 3-Stufen-Produktmodell aus
+            (Stufe 1 self-hosted LAN, Stufe 2 Cloud-Bridge,
+            Stufe 3 Premium UA-Stream).
 
-Saison 14:  Webhook-Endpoint.
+Saison 14:  Live-View Video + Audio + Hybrid-Type + Stumm-Button.
+            Verschoben aus dem urspruenglichen S13-05-Slot,
+            greift auf S13-04-Spike-Befunde zurueck (Pfad 3c
+            go2rtc-WebRTC). Liefert: WebRTC-Player im Bell-
+            Overlay + /esp/stream.mjpeg-Backend integriert +
+            eigener WebRTC-Teardown im Mieter-Browser
+            (track.stop, pc.close, Inaktivitaets-Cleanup). Plus
+            Hybrid-Type-Loesung damit ein Mock-Viewer
+            gleichzeitig type='web'-Goroutine UND ein Bearer-
+            Token bedienen kann (loest die S13-08-Notiz). Plus
+            Stumm-Button: schliesst Browser-Overlay ohne
+            /call_admin_result, Anrufer merkt nichts.
+
+Saison 15:  Webhook-Endpoint + ESP-Phase-B Plug-and-Play.
             POST /webhook/access fuer access.doorbell.* und
             access.door.unlock-Events. Schreibt in die in S13-01
             angelegte door_events-Tabelle. Event-Type-Dispatch-
-            Pattern als Vorbereitung fuer S16+ Plugins.
+            Pattern als Vorbereitung fuer S16+ Plugins. HMAC-
+            Signed-Body-Verifikation pro Webhook-Registration.
+            Plus ESP-Phase-B: UDP-Discovery-Listener auf dem
+            Server, der unbekannte ESPs in esp_pending_devices
+            eintraegt; ESP haelt einen Long-Poll an
+            /esp/wait-for-adoption offen, bekommt nach Admin-
+            Klick auf /a/esp-viewers seinen Token zurueck. Plus
+            optional: /input/state-Konsum fuer Tuer-Audit-Trail
+            (door_opened/door_closed auch bei Schluessel-
+            Oeffnung).
 
-Saison 15:  Open-Source-Strategie-Tag + Plattform-Politur.
-            Final-Entscheidung ESP-Firmware-Release MIT-Lizenz.
-            Live-Grid-Demo-Feature ("Live-Grid oeffnen"
-            Auto-Layout-Grid).
-
-Saison 16:  Stempelkarten-Plugin (Digital Loyalty Card / Time-Clock).
+Saison 16:  Stempelkarten-Plugin + Stumm-Button-Variationen.
             time_clock_entries-Tabelle, UA-Standard-NFC-Hardware
             (Reader G2 / Pro / G3, Touch-Pass). Append-Only mit
-            Hash-Chain. Plugin-Storage plugin_data (Migration 006+).
-            Eine NFC-Karte deckt Tuer plus Stempel plus Visitor ab.
+            Hash-Chain. Plugin-Storage plugin_data. Eine
+            NFC-Karte deckt Tuer plus Stempel plus Visitor ab.
 
-Saison 17+: ESP-Hardware-Spur (eigene parallele Linie).
-            ESP32-basiertes Intercom 200-300 EUR, eigene Adapter-
-            Schicht (internal/access/unifix/*). Wird parallel zur
-            Plattform entwickelt. Lizenz-Server-Fleisch,
-            Production-Hardening und erste Pilot-Anlage bleiben
-            zeitlich offen und werden in einem eigenen
-            Saison-Briefing geplant.
+Saison 17:  Production-Hardening + Lizenz-Server-Fleisch.
+            Lizenz-Server-Schluessel-Generierung, Online-
+            Validation, Update-Pakete-Verteilung. Hardware-
+            Bindung Stufe A (RPi-Seriennummer-Pinning). TLS-
+            Cert-Strategie (Self-Signed-Pinning -> Eigene CA
+            via Lizenz-Server). Erst-Pilot-Anlagen-Setup.
+
+Saison 18:  Eigene ESP32-Intercom-Hardware. ESP32-basiertes
+            Intercom 200-300 EUR, eigene Adapter-Schicht unter
+            internal/access/unifix/*. Nutzt die /esp/-API aus
+            S13-08 als Wire-Format-Basis.
+
+Saison 19:  Cloud-Bridge (3-Stufen-Modell Stufe 2). unifix-VPS,
+            Authenticated Stream-Tunnel pro Klingel-Event,
+            Mobile-App holt Stream via VPS. Skalierbar fuer
+            viele Hausverwalter.
+
+Saison 20:  Premium UA-Stream-Qualitaet (Stufe 3). Direkter
+            Zugriff auf den ms-Mediaserver-Pfad (RTSPS 7441 /
+            LiveFLV 7550), HD-Video plus Two-Way-Audio mit
+            Echo-Cancellation.
 ```
 
 ## 8. Was unifix NICHT ist
@@ -361,6 +417,13 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
 ```
 
 ### 9.3 Tabellen-Inventar (Stand Migration 004)
+
+> **Saison-13-Hinweis:** Migrations 005-011 haben das Schema
+> deutlich erweitert (door_events, viewers-Rename + ESP-Felder,
+> esp_pending_devices, doorbell_calls, paired_intercom_mac).
+> Eine kompakte Delta-Uebersicht steht in Sektion 9.6 unten;
+> der Vollinventar-Eintrag bleibt auf Saison-12-Endstand bis
+> die naechste Schema-Saison ihn ueberarbeitet.
 
 ```
 schema_version       Migrations-Tracking. PK version, applied_at.
@@ -472,6 +535,65 @@ Tabellen door_events und time_clock_entries wieder vor, dort
 als optionale Annotations-Referenz auf die UA-Welt (kein
 echter FK weil UA der Source-of-Truth ist).
 ```
+
+### 9.6 Schema-Delta seit Saison 12 (Migrations 005-011)
+
+```
+Migration 005 (S13-01)  door_events-Tabelle.
+                        id PK AUTOINCREMENT,
+                        viewer_mac TEXT FK CASCADE auf viewers,
+                        intercom_mac TEXT,
+                        event_type TEXT (z.B. "doorbell_received",
+                                          "door_unlocked"),
+                        occurred_at INTEGER (Unix-Millisekunden),
+                        read_at INTEGER NULL (ungelesen wenn NULL).
+                        Index nach (viewer_mac, occurred_at DESC)
+                        plus partieller Index auf ungelesene Reihen.
+
+Migration 006 (S13-02-FIX4-a)
+                        mock_viewers -> viewers UMBENANNT.
+                        viewers.type TEXT NOT NULL DEFAULT 'web'
+                        (CHECK in 'web'|'esp').
+                        viewers.password_hash + password_set_at +
+                        esp_token_hash + esp_device_id +
+                        esp_pending + esp_model + esp_fw_version +
+                        linked_ua_user_id.
+                        mieter_sessions -> viewer_sessions
+                        UMBENANNT (Spalte mock_mac -> viewer_mac).
+                        door_events.mock_mac -> viewer_mac.
+                        magic_link_tokens DROP (kein Magic-Link
+                        mehr - Username+Passwort statt).
+                        login_audit-Tabelle NEU.
+
+Migration 007 (S13-02)  viewer-username-Normalisierung.
+
+Migration 008 (S13-02-FIX4-a-HOTFIX4)
+                        viewers.username DROP - der Wohnungs-Name
+                        IST der Login (case-insensitive Match).
+
+Migration 009 (S13-02-FIX4-c)
+                        esp_pending_devices NEU. PK mac, plus
+                        model, fw_version, capabilities,
+                        discovered_at, last_poll_at, rejected_at,
+                        adopted_token_cleartext (einmalige
+                        Klartext-Token-Auslieferung beim ersten
+                        ESP-Status-Poll nach Adoption).
+
+Migration 010 (S13-04.5-B)
+                        doorbell_calls-Tabelle (Lifecycle-State
+                        fuer den CAS-Style Answer/Reject-Arbiter).
+
+Migration 011 (S13-07)  viewers.paired_intercom_mac TEXT NOT NULL
+                        DEFAULT ''. Pro Viewer EINE Klingel als
+                        Pairing fuer den Standby-"Tuer auf"-
+                        Knopf (siehe Sektion 14 Auto-Door-
+                        Resolution).
+
+NICHT MEHR im Schema (S13-07 entfernt):
+   platform_config.intercom_to_door
+   platform_config.viewer_to_door
+```
+
 
 ---
 
@@ -803,3 +925,143 @@ Hinweis:         Die Mieter-/Users-Page ist seit S12-06 rein
                  den Mock-Viewern verkoppelt; ein Mock-Viewer
                  hat keine UA-User-Annotation in der DB.
 ```
+
+
+---
+
+## 14. Auto-Door-Resolution (Saison 13-07)
+
+Vor S13-07 hatte unifix ein admin-kuratiertes Mapping von
+intercom-MAC zu door-UUID in der `platform_config`-Tabelle. Bei
+jeder neuen Klingel im Hauseingang musste der Admin manuell den
+Eintrag pflegen.
+
+S13-07 hat die Beobachtung umgesetzt: die UA-Door-Antwort enthaelt
+das Feld `extras.door_thumbnail` mit einem URL-Pfad der Form
+
+```
+/preview/reader_<intercom-mac-12hex>_<door-uuid>_<ts>.jpg
+```
+
+Das ist die Verknuepfung intercom-zu-tuer in der UA-Antwort selbst.
+unifix iteriert ueber `ListDoors()`, parst die Thumbnail-URL und
+laesst das admin-kuratierte Mapping komplett weg.
+
+```
+uaapi.Door.IntercomMAC()         Parser fuer den Thumbnail-Pfad,
+                                  liefert die colon-form lowercase
+                                  intercom-MAC oder leeren String
+                                  bei kein-Mapping.
+
+uaapi.LookupDoorForIntercom(mac) ListDoors() iterieren, erste Door
+                                  zurueckliefern deren IntercomMAC()
+                                  matcht. Leerer String und nil
+                                  Error bei kein-Match.
+```
+
+Konsequenz fuer den Admin: KEINE manuelle Mapping-Eingabe noetig.
+Pro Viewer wird im Admin-UI nur `paired_intercom_mac` gesetzt
+(welche Klingel ist mit diesem Viewer verknuepft); die Tuer kommt
+automatisch aus der UA-Antwort.
+
+Geloescht in S13-07: `/a/intercom-mapping`-Page + Handler,
+`platformconfig.intercom_to_door` + `viewer_to_door`,
+`KeyIntercomToDoor` + `KeyViewerToDoor`-Konstanten, Klingel-
+Tuer-Nav-Link.
+
+---
+
+## 15. ESP-API (Saison 13-08)
+
+### 15.1 Zweck
+
+Eigener API-Pfad fuer ESP-Endgeraete getrennt vom Mieter-Web-API.
+Ein ESP-Endgeraet wird vom unifix-Server adoptiert wie ein
+Mock-Viewer (eigene Zeile in `viewers` mit `type=esp`). Bearer-
+Token-Auth, eigene Middleware (`requireESPBearer`), eigene
+Endpoint-Familie unter `/esp/`.
+
+Strategische Klaerung Saison 13-08: ein ESP ist KEIN Mieter,
+sondern ein Endgeraet eines Mieters. Es lebt im /esp/-Tree mit
+geraete-skoptem Bearer-Token, NICHT im /einloggen/-Tree mit
+Magic-Link-Session-Cookie.
+
+### 15.2 Adoptions-Modell
+
+```
+Phase A (Saison 13-08, fertig):
+  Workflow 1 (Discover-First):
+    - ESP sendet POST /esp/discover (im LAN, ohne Auth)
+    - unifix-Server traegt in esp_pending_devices ein
+    - Admin klickt im /a/esp-viewers auf "Adoptieren"
+    - Server generiert frischen 32-Byte-Bearer-Token
+    - ESP holt den Token via GET /esp/discover/status
+      (Long-Poll, einmalige Klartext-Auslieferung)
+  Workflow 2 (CLI-First, headless):
+    - Operator: unifix-cli esp adopt --mac ... --name ...
+                                     [--intercom <mac>]
+                                     [--mieter <ua-user-id>]
+    - CLI generiert Bearer-Token + INSERT in viewers
+    - Klartext-Token einmal auf stdout
+    - Token wird per esptool / Setup-UI im NVS des ESPs
+      gespeichert
+
+Phase B (Saison 15 geplant):
+  - UDP-Discovery-Listener auf dem Server (analog zu UDM
+    selbst)
+  - ESP haelt HTTP-Long-Poll an /esp/wait-for-adoption offen
+  - Bei Admin-Klick: Token wird via Long-Poll geliefert
+  - Vollstaendig zero-touch fuer den Operator
+```
+
+### 15.3 Endpoint-Inventar
+
+```
+GET  /esp/heartbeat        Liveness-Check (saison 13-02-FIX4-d)
+GET  /esp/config           Mieter-Name, Stream, UI-Hints
+GET  /esp/events           SSE-Stream mit doorbell.ring/cancel
+POST /esp/answer           Anruf annehmen + Sibling-Cancel
+POST /esp/reject           Anruf ablehnen (S13-08, dedicated)
+POST /esp/unlock           Tuer auf via paired_intercom_mac
+POST /esp/state            ESP-side status report (UI-Snapshot)
+GET  /esp/stream.mjpeg     MJPEG-Reverse-Proxy (S13-08)
+
+AUTH
+  Authorization: Bearer <token>
+  Server-Lookup via SHA-256-Hash in viewers.esp_token_hash
+  (type=esp-Filter; revoked Tokens = 401).
+```
+
+Wire-Format-Details fuer alle Endpoints siehe
+`docs/wire-format.md` Sektion "ESP-API Wire-Format".
+
+### 15.4 Admin-UI / CLI-Tools
+
+```
+/a/esp-viewers       Pending-Liste (Phase A Discover-First)
+                     plus adoptierte ESPs.
+                     Adopt-Modal mit Name, paired-intercom-
+                     dropdown, optionale UA-User-Verknuepfung.
+                     "Token erneuern" + "Loeschen"-Aktionen.
+
+unifix-cli           Headless-Tool fuer CLI-First-Adoption.
+   esp adopt         Generiert Token + INSERT viewers + stdout.
+   --mac <MAC>       Pflicht.
+   --name <NAME>     Pflicht (max 64 chars).
+   --intercom <MAC>  Optional - wird in paired_intercom_mac
+                     gesetzt; ohne wird /esp/unlock 404 geben.
+   --mieter <UA-ID>  Optional - in linked_ua_user_id; rein
+                     Annotation, kein Routing-Effekt.
+   --db <PATH>       Optional - default ./state/unifix.db.
+```
+
+### 15.5 Stream-Backend-Reverse-Proxy
+
+`/esp/stream.mjpeg` ist ein simpler Reverse-Proxy auf
+`UNIFIX_STREAM_BACKEND_URL`. Der Authorization-Header wird vor
+dem Forward gestrippt (das Backend ist typisch ein lokaler
+go2rtc-Daemon ohne Auth; ESP-Token darf nie ueber den unifix-
+Prozess hinaus). Wenn die Env-Variable nicht gesetzt ist:
+HTTP 503 "stream backend not configured". Das echte Stream-
+Backend kommt in Saison 14 (S13-04-Spike-Decision: go2rtc-
+WebRTC).
