@@ -60,6 +60,8 @@
     // zwischen Listener-Registrierung und SSE-Event, jeder Button
     // hat seinen Kontext aus eigener Hand.
     (function () {
+      var ringEl = document.querySelector('.ringing');
+
       function ringButtons() {
         return document.querySelectorAll('.ring-btn');
       }
@@ -92,18 +94,31 @@
         disableRingButtons();
       }
 
-      unifix.connectSSE('/einloggen/events', {
-        onDoorbellStart: function (ev) {
-          ev = ev || {};
-          var eventID = ev.cancel_token || ev.request_id || '';
-          var intercomMAC = ev.device_id || '';
-          enableRingButtons(eventID, intercomMAC);
+      // Saison 13-03-HOTFIX2: explizite EventSource statt
+      // unifix.connectSSE-Wrapper. DevTools-Mitschnitt nach
+      // HOTFIX1 zeigte mehrere parallele eventsource-Verbindungen
+      // im Netzwerk-Tab; ein einzelner expliziter EventSource +
+      // addEventListener-Aufrufe machen den Lifecycle
+      // beobachtbar (eine Zeile im Network-Tab) und
+      // Reconnect-Loops sofort sichtbar.
+      var es = new EventSource('/einloggen/events');
+      es.addEventListener('doorbell_start', function (e) {
+        var data = {};
+        try { data = JSON.parse(e.data) || {}; } catch (_) {}
+        var eventID = data.cancel_token || data.request_id || '';
+        var intercomMAC = data.device_id || '';
+        enableRingButtons(eventID, intercomMAC);
+        if (window.unifix && unifix.openOverlay) {
           unifix.openOverlay('ringing');
-        },
-        onDoorbellCancel: function () {
-          closeRing();
-        },
-        onHistoryUpdate: function () { location.reload(); }
+        } else if (ringEl) {
+          ringEl.classList.add('is-open');
+        }
+      });
+      es.addEventListener('doorbell_cancel', function () {
+        closeRing();
+      });
+      es.addEventListener('history_update', function () {
+        location.reload();
       });
 
       function jsonPost(url, body) {
