@@ -183,16 +183,21 @@ func (m *Manager) Events() <-chan mock.DoorbellEvent { return m.eventCh }
 // Cancels returns the multiplexed channel of doorbell cancels.
 func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh }
 
-// LoadFromDB reads every web-type row from viewers and starts a
-// goroutine per row. ESP rows are skipped (handled separately).
-// Called once at server boot.
+// LoadFromDB reads every web- and esp-type row from viewers and
+// starts a Mock-Goroutine per row. Called once at server boot.
+//
+// Saison 13-09: ESP-type rows are no longer skipped. Their
+// goroutine handles the UDM-side adoption + Stage 1+4+5+6 stack
+// the same way web-type rows do; the type distinction matters
+// only at the auth surface. See AddViewer for the matching
+// runtime spawn path.
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type,
 		        COALESCE(linked_ua_user_id, '')
 		   FROM viewers
-		  WHERE type = ?
-		  ORDER BY mac`, TypeWeb)
+		  WHERE type IN (?, ?)
+		  ORDER BY mac`, TypeWeb, TypeESP)
 	if err != nil {
 		return fmt.Errorf("mockmanager: load: %w", err)
 	}
@@ -214,14 +219,20 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var web, esp int
 	for _, spec := range specs {
 		if err := m.startViewerLocked(spec); err != nil {
 			m.log.Error("start viewer failed during load",
-				"mac", spec.MAC, "err", err)
+				"mac", spec.MAC, "type", spec.Type, "err", err)
 			continue
 		}
+		if spec.Type == TypeESP {
+			esp++
+		} else {
+			web++
+		}
 	}
-	m.log.Info("loaded web viewers", "count", len(specs))
+	m.log.Info("loaded viewers", "web", web, "esp", esp)
 	return nil
 }
 
