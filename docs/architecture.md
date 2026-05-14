@@ -295,6 +295,22 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             espstore-Paket wie urspruenglich im Briefing
             entworfen.
 
+   S13-09:  Hybrid-Type-Fix fuer ESP-Klingel-Events.
+            ABGESCHLOSSEN 14. Mai 2026. mockmanager.AddViewer
+            spawnt jetzt die Mock-Goroutine fuer beide Typen
+            ('web' und 'esp'); LoadFromDB liest type IN ('web',
+            'esp') statt nur 'web'. Folge: ein adoptierter
+            ESP-Eintrag wird im UDM als regulaerer UA-Int-Viewer
+            adoptiert, /remote_view-RPCs landen am Mock-
+            Goroutine, doorbellhub published auf eventbus mit
+            ESP-MAC als Topic, /esp/events SSE liefert echte
+            doorbell.ring-Frames an die ESP-Hardware. Plus:
+            notifyUDMReject erreicht jetzt eine LAUFENDE Mock-
+            Goroutine - Hardware-Klingel hoert via
+            /call_admin_result-MQTT-RPC sofort auf. Hebt die
+            S13-08-Notiz "Mock + ESP same-MAC nicht moeglich"
+            auf.
+
    S13-DOC: Saison-13-Abschluss-Doku-Synchronisation.
             ABGESCHLOSSEN 14. Mai 2026. Bringt die fuenf Repo-
             Doks (CLAUDE.md, architecture, wire-format, security,
@@ -304,18 +320,18 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             (Stufe 1 self-hosted LAN, Stufe 2 Cloud-Bridge,
             Stufe 3 Premium UA-Stream).
 
-Saison 14:  Live-View Video + Audio + Hybrid-Type + Stumm-Button.
+Saison 14:  Live-View Video + Audio + Stumm-Button.
             Verschoben aus dem urspruenglichen S13-05-Slot,
             greift auf S13-04-Spike-Befunde zurueck (Pfad 3c
             go2rtc-WebRTC). Liefert: WebRTC-Player im Bell-
             Overlay + /esp/stream.mjpeg-Backend integriert +
             eigener WebRTC-Teardown im Mieter-Browser
             (track.stop, pc.close, Inaktivitaets-Cleanup). Plus
-            Hybrid-Type-Loesung damit ein Mock-Viewer
-            gleichzeitig type='web'-Goroutine UND ein Bearer-
-            Token bedienen kann (loest die S13-08-Notiz). Plus
             Stumm-Button: schliesst Browser-Overlay ohne
             /call_admin_result, Anrufer merkt nichts.
+            (Hybrid-Goroutine-Spawn fuer ESP-Eintraege ist seit
+            S13-09 erledigt - Saison 14 muss sich darum nicht
+            mehr kuemmern.)
 
 Saison 15:  Webhook-Endpoint + ESP-Phase-B Plug-and-Play.
             POST /webhook/access fuer access.doorbell.* und
