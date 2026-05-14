@@ -119,11 +119,24 @@ Ansicht der UA-User aus der Developer-API. Sie ist seit Saison
 8. `handler_events.go` SSE-Loop schreibt
    `event: doorbell_start\ndata: <json>\n\n` zum Mieter-Browser
 9. Browser-JavaScript zeigt das Bell-Overlay mit dem Mock-Namen
-10. Mieter klickt "Tuer auf" (Button kommt in Saison 13-03)
-11. Browser sendet POST `/m/doors/<id>/unlock` an unifix-server
+10. Mieter klickt "Tuer auf" - zwei Pfade (Saison 13-07):
+    a. Bell-Overlay (waehrend einer aktiven Klingel): JS POSTet
+       `POST /einloggen/doors/<intercom-mac>/unlock`. Die
+       Intercom-MAC kommt aus dem SSE-doorbell_start.device_id-
+       Frame. Server normalisiert auf colon-form.
+    b. Standby (Schluessel-Knopf vom Idle-Screen): JS POSTet
+       die literale URL `POST /einloggen/doors/standby/unlock`.
+       Server liest `viewers.paired_intercom_mac` (Admin-Setting
+       per "Verknuepfte Klingel"-Dropdown).
+11. unifix-server resolved die Door-UUID via
+    `uaapi.LookupDoorForIntercom(intercom-mac)`: iteriert ueber
+    `GET /api/v1/developer/doors` und matched die MAC gegen
+    `extras.door_thumbnail` (Pfad-Form
+    `/preview/reader_<intercom-mac>_<door-uuid>_<ts>.jpg`).
 12. unifix-server proxied via
-    `PUT /api/v1/developer/doors/<id>/unlock` gegen die UniFi
-    Access Developer-API mit Auth `Authorization: Bearer <token>`
+    `PUT /api/v1/developer/doors/<door-uuid>/unlock` gegen die
+    UniFi Access Developer-API mit Auth
+    `Authorization: Bearer <token>`
 13. UDM oeffnet via UA Hub Door die echte Tuer
 
 Der Klingel-Cancel-Pfad ist analog: UDM publisht
@@ -196,11 +209,58 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             tcpdump plus Wireshark plus offizielle Doku, Pcap
             einer echten Klingel-Annahme. Resultat: Architektur-
             Briefing fuer S13-05.
-   S13-05:  Stream-Integration.
-            Live-View im Bell-Overlay basierend auf S13-04.
-            Video plus Audio. "Annehmen"-Button startet Stream.
-            Eigener WebRTC-Teardown im Mieter-Browser
-            (track.stop, pc.close, Inaktivitaets-Cleanup).
+   S13-04.5-A/B: /call_admin_result + /input/state Wire-Format-
+            Doku + Implementation. Mieter-Reject/EndCall pusht
+            jetzt einen MQTT-RPC, sodass der Intercom sofort
+            aufhoert zu klingeln statt 30s Hardware-Timeout
+            abzuwarten.
+
+   S13-05:  Door-Mapping-UI im Admin (SUPERSEDED durch S13-07).
+            Admin-Page /a/intercom-mapping mit dropdown-basiertem
+            intercom_to_door-Mapping in platform_config. Mieter-
+            Unlock loeste die Intercom-MAC aus dem SSE-doorbell_
+            start ueber dieses Mapping zur Door-UUID auf. Vier
+            HOTFIX-Saisons fuer JSON-Schema-Drift, Intercom-Filter,
+            Field-Names und MAC-Form-Normalisierung. Komplett
+            geloescht in S13-07.
+
+   S13-06:  Viewer-zu-Door Default-Mapping (SUPERSEDED durch
+            S13-07). Zweite Tabelle in /a/intercom-mapping
+            ("Viewer-Standby-Tuer") mit eigenem viewer_to_door-
+            Key. Standby-Tuer-Knopf vom Mieter-Idle-Screen nutzte
+            diesen Mapping.
+
+   S13-07:  Aufraeumen - Auto-Door-Resolution. ABGESCHLOSSEN
+            14. Mai 2026. UA-API liefert im /doors-Response ein
+            extras.door_thumbnail-Feld dessen URL-Pfad
+            "/preview/reader_<intercom-mac-hex>_<door-uuid>_
+            <ts>.jpg" das intercom-zu-tuer-Mapping schon
+            enthaelt; der admin-kuratierte Mapping-Aufwand aus
+            S13-05/06 war ueberfluessig.
+            Liefert:
+              - uaapi.Door.IntercomMAC parst die Thumbnail-URL.
+              - uaapi.LookupDoorForIntercom liefert die Door-
+                UUID fuer eine Intercom-MAC.
+              - Migration 011 fuegt viewers.paired_intercom_mac
+                hinzu (eine MAC pro Viewer).
+              - Web-Viewer Anlegen+Bearbeiten und ESP-Viewer
+                Adoption bekommen ein "Verknuepfte Klingel"-
+                Dropdown im Modal, gespeist via
+                /a/intercoms.json.
+              - handler_mieter_calls hat zwei Pfade: Bell-
+                Overlay (intercom-MAC aus URL) und Standby
+                (literal /einloggen/doors/standby/unlock,
+                liest viewer.paired_intercom_mac).
+            Geloescht: /a/intercom-mapping-Page, Klingel-Tuer-
+            Nav-Link, platformconfig.intercom_to_door /
+            viewer_to_door / KeyIntercomToDoor / KeyViewerToDoor.
+
+Saison 13b: Stream-Integration (verschoben aus dem urspruenglichen
+            S13-05-Slot, sobald die S13-04-Spike-Captures vom
+            RPi vorliegen). Live-View im Bell-Overlay, Video
+            plus Audio, eigener WebRTC-Teardown im Mieter-
+            Browser (track.stop, pc.close, Inaktivitaets-
+            Cleanup).
 
 Saison 14:  Webhook-Endpoint.
             POST /webhook/access fuer access.doorbell.* und
