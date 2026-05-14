@@ -1,6 +1,6 @@
 # unifix Security Plan
 
-**Status:** Saison 12 abgeschlossen 12. Mai 2026 (S12-DOC-02).
+**Status:** Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Stand:** Strategische Eckpunkte gesetzt. Saison 12 hat den
 Auth-Backbone (Magic-Link plus Mieter- und Admin-Session), die
@@ -411,6 +411,114 @@ Klartext-Logs:  Master-Key NIEMALS loggen, auch nicht im
                 Bei der Operation auf dem Plaintext (z.B.
                 Outgoing UA-API-Call) gilt die 8-Zeichen-Praefix-
                 Regel wie fuer alle Tokens.
+```
+
+### 7.5 ESP-Bearer-Token (Saison 13-08)
+
+Im Gegensatz zur Mieter-Auth (Magic-Link + Cookie-Session) und
+zur Admin-Auth (Username + bcrypt + Cookie-Session) laueft die
+ESP-Endgeraete-Authentifikation ueber einen geraete-skopten
+Bearer-Token, der pro adoptiertem ESP einmalig generiert und im
+NVS des Geraets persistiert wird.
+
+```
+Generierung:    32 Bytes von crypto/rand. base64url-encoded
+                ergibt 43 ASCII-Zeichen ohne Padding,
+                ~256 Bit Entropie. Code:
+                  server/internal/auth/esptoken.Generate
+                Maschine-zu-Maschine-Auth, kein User-Eingabe-
+                Material - SHA-256 als Storage-Hash reicht
+                (Argon2id waere Overkill, der Token ist nicht
+                offline brute-force-anfaellig).
+
+Speicherung:    NUR der SHA-256-Hash in
+                viewers.esp_token_hash (hex-encoded). Klartext
+                wird NIEMALS persistent gespeichert.
+                Beim Adoption-Flow:
+                  - Workflow Discover-First: Klartext wird
+                    voruebergehend in
+                    esp_pending_devices.adopted_token_cleartext
+                    geparkt, beim ersten /esp/discover/status
+                    Long-Poll an das ESP ausgeliefert und die
+                    pending-Zeile sofort GELOESCHT (single-
+                    delivery).
+                  - Workflow CLI-First: Klartext wird einmalig
+                    auf stdout des unifix-cli ausgegeben; gar
+                    nicht erst in einer DB-Spalte gespeichert.
+                In beiden Faellen ist der Klartext nach der
+                ersten Auslieferung WEG. Verlorene Tokens =
+                Token-Regenerate-Workflow.
+
+Wire-Format:    Authorization: Bearer <token>
+                Server-seitige Verifikation in
+                  server/internal/auth/esptoken.Verify
+                via crypto/subtle.ConstantTimeCompare gegen
+                Timing-Leaks.
+
+Lookup:         Linear-Scan ueber alle
+                viewers WHERE type='esp' AND esp_token_hash
+                IS NOT NULL. Bei <100 ESPs pro Server (realistisch
+                fuer eine Wohnanlage) billig genug; spaetere
+                Saison kann auf indizierten Hash-Lookup umstellen
+                wenn Multi-Tenant-Server gewachsen sind.
+
+Revocation:     "Token erneuern" im /a/esp-viewers-Modal oder
+                CLI-Re-Adopt schreibt einen neuen Hash ueber den
+                alten - der alte Token ist ab dann inaktiv (Hash-
+                Lookup matcht nicht mehr). Es gibt keine separate
+                Revocations-Liste; der ueberschriebene Hash ist
+                der Revocation.
+                Komplettes Loeschen des ESP-Eintrags (DELETE-
+                Button im Admin-Modal) entfernt die Zeile aus
+                viewers; die Sibling-FK-CASCADE-Loescht
+                assoziierte ungelesene door_events nicht (die
+                bleiben mit der MAC referenziell erhalten -
+                gewollt, sonst geht der Audit-Trail verloren).
+
+Klartext-Logs:  Bearer-Tokens NIEMALS im Klartext loggen, auch
+                nicht im Debug-Mode. Hashes koennen geloggt
+                werden (sie sind ja gerade Hashes); fuer
+                Klartext gilt die 8-Zeichen-Praefix-Regel wie
+                fuer alle Tokens.
+```
+
+### 7.6 Stream-Reverse-Proxy (Saison 13-08)
+
+`/esp/stream.mjpeg` ist ein dummer Reverse-Proxy auf
+`UNIFIX_STREAM_BACKEND_URL` (typisch ein lokaler go2rtc-Daemon).
+Sicherheits-relevante Eigenschaften:
+
+```
+Bearer-Filter:  Der Endpoint sitzt hinter requireESPBearer.
+                Nur adoptierte ESPs koennen ihn aufrufen.
+
+Token-Stripping: Vor dem Forward an das Backend wird der
+                Authorization-Header GESTRIPPT. Das ESP-Token
+                darf den unifix-Process-Boundary nicht
+                ueberschreiten - das Backend ist typisch ein
+                unauthenticated Localhost-Daemon, der den
+                Token weder kennt noch braucht. Wuerde der
+                Token weitergeleitet, koennte er in den
+                Backend-Logs landen oder bei einem Backend-
+                Kompromiss extrahiert werden.
+
+Konfiguration:  UNIFIX_STREAM_BACKEND_URL als Env-Variable
+                (server/internal/config: StreamBackendURL).
+                Wenn nicht gesetzt: HTTP 503 "stream backend
+                not configured". Bewusst ein 503 + nicht ein
+                404, damit der ESP-Klient zwischen "Endpoint
+                existiert nicht" und "Endpoint existiert,
+                Backend gerade aus" unterscheiden kann.
+
+Backend-       Bei Backend-Unreachable (Connection refused,
+Unreachable:    Timeout, etc.): HTTP 502 "stream backend
+                unreachable" plus Warn-Log mit der konkreten
+                Backend-URL. Kein Token in der Logmessage
+                (gibts ja nicht mehr - wurde gestrippt).
+
+Spaeter:        S14 Live-View bringt das echte go2rtc-WebRTC-
+                Backend; der Reverse-Proxy bleibt das
+                primaere Verbindungs-Pfad zur ESP-Hardware.
 ```
 
 ---
