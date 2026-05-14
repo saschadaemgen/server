@@ -255,6 +255,23 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             Nav-Link, platformconfig.intercom_to_door /
             viewer_to_door / KeyIntercomToDoor / KeyViewerToDoor.
 
+   S13-08:  ESP-API Phase A. ABGESCHLOSSEN 14. Mai 2026.
+            Liefert das Minimum damit der parallele ESP-Chat
+            an der ESP32-P4-Firmware bauen kann:
+              - POST /esp/reject - dedizierter Reject-Endpoint
+                (doorbellcalls + sibling-cancel + UDM-Ring-Stop)
+              - GET /esp/stream.mjpeg - Reverse-Proxy auf
+                UNIFIX_STREAM_BACKEND_URL (503 wenn unkonfiguriert,
+                Authorization-Header wird vor Forward gestrippt)
+              - cmd/unifix-cli mit "esp adopt"-Subcommand:
+                schreibt eine ESP-Viewer-Reihe mit frischem Bearer-
+                Token, Klartext einmalig auf stdout
+            Nutzt die existierende viewers-Tabelle (type='esp')
+            + requireESPBearer-Middleware aus S12-S13; KEINE
+            parallele esp_viewers-Tabelle und kein eigenes
+            espstore-Paket wie urspruenglich im Briefing
+            entworfen.
+
 Saison 13b: Stream-Integration (verschoben aus dem urspruenglichen
             S13-05-Slot, sobald die S13-04-Spike-Captures vom
             RPi vorliegen). Live-View im Bell-Overlay, Video
