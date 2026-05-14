@@ -263,3 +263,86 @@ var (
 	_ = eventbus.New
 	_ = platformconfig.KeyIntercomToDoor
 )
+
+// findRunningViewer locates the noopViewer instance the test env
+// spawned for the seedViewer test MAC. Used by Saison-13-04.5-B
+// tests that need to inspect the recorded RejectDoorbell calls.
+func findRunningViewer(t *testing.T, env *testEnv, mac string) *noopViewer {
+	t.Helper()
+	v, err := env.mockMgr.LookupForReject(mac)
+	if err != nil {
+		t.Fatalf("LookupForReject(%s): %v", mac, err)
+	}
+	nv, ok := v.(*noopViewer)
+	if !ok {
+		t.Fatalf("viewer for %s is %T, want *noopViewer", mac, v)
+	}
+	return nv
+}
+
+func TestMieterReject_PublishesCallAdminResultToUDM(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+
+	const intercomMAC = "28704e31e29c"
+	if err := env.srv.calls.Start(context.Background(), "tok-call-admin", testViewerMAC, intercomMAC); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{"event_id": "tok-call-admin"})
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/reject", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /einloggen/reject: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	nv := findRunningViewer(t, env, testViewerMAC)
+	nv.rejectMu.Lock()
+	defer nv.rejectMu.Unlock()
+	if len(nv.rejectCalls) != 1 {
+		t.Fatalf("RejectDoorbell calls = %d, want 1", len(nv.rejectCalls))
+	}
+	if nv.rejectCalls[0].IntercomMAC != intercomMAC {
+		t.Errorf("intercom = %q, want %q", nv.rejectCalls[0].IntercomMAC, intercomMAC)
+	}
+}
+
+func TestMieterEndCall_PublishesCallAdminResultToUDM(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+
+	const intercomMAC = "28704e31e29c"
+	_ = env.srv.calls.Start(context.Background(), "tok-end-admin", testViewerMAC, intercomMAC)
+	_, _ = env.srv.calls.MarkAnswered(context.Background(), "tok-end-admin", testViewerMAC)
+
+	body, _ := json.Marshal(map[string]any{"event_id": "tok-end-admin"})
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/end-call", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /einloggen/end-call: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	nv := findRunningViewer(t, env, testViewerMAC)
+	nv.rejectMu.Lock()
+	defer nv.rejectMu.Unlock()
+	if len(nv.rejectCalls) != 1 {
+		t.Fatalf("RejectDoorbell calls = %d, want 1", len(nv.rejectCalls))
+	}
+	if nv.rejectCalls[0].IntercomMAC != intercomMAC {
+		t.Errorf("intercom = %q, want %q", nv.rejectCalls[0].IntercomMAC, intercomMAC)
+	}
+}

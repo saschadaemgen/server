@@ -46,6 +46,7 @@ func (f *fakeViewer) Run(ctx context.Context) error {
 func (f *fakeViewer) Events() <-chan mock.DoorbellEvent        { return f.events }
 func (f *fakeViewer) Cancels() <-chan mock.DoorbellCancelEvent { return f.cancels }
 func (f *fakeViewer) MAC() string                              { return f.mac }
+func (f *fakeViewer) RejectDoorbell(intercomMAC string) error  { return nil }
 
 // fakeFactory records every viewer it creates so tests can
 // assert on goroutine start counts and reach into the fakes.

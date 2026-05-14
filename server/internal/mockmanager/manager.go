@@ -337,6 +337,20 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	return nil
 }
 
+// LookupForReject returns the running Viewer instance for the given
+// MAC. Test-only seam so test code can verify what RejectDoorbell
+// has been asked to publish without going through the manager's
+// own publish path. Production callers must use RejectDoorbellOnMock.
+func (m *Manager) LookupForReject(mac string) (Viewer, error) {
+	m.mu.Lock()
+	entry, ok := m.viewers[mac]
+	m.mu.Unlock()
+	if !ok {
+		return nil, ErrViewerNotFound
+	}
+	return entry.viewer, nil
+}
+
 // RejectDoorbellOnMock looks up the running viewer by mock-MAC and
 // asks it to publish a /call_admin_result RPC that ends the active
 // doorbell call from intercomMAC. Returns ErrViewerNotFound if the

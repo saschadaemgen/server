@@ -14,6 +14,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -198,6 +199,7 @@ func (s *Server) handleMieterReject(w http.ResponseWriter, r *http.Request) {
 				body.EventID, doorbellcalls.ReasonRejected),
 		})
 	}
+	s.notifyUDMReject(r.Context(), body.EventID, viewerMAC)
 	s.log.Info("mieter reject", "mac_prefix", viewerMAC[:8], "event_id", body.EventID)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
@@ -236,6 +238,7 @@ func (s *Server) handleMieterEndCall(w http.ResponseWriter, r *http.Request) {
 				body.EventID, doorbellcalls.ReasonUserEnded),
 		})
 	}
+	s.notifyUDMReject(r.Context(), body.EventID, viewerMAC)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
@@ -250,4 +253,49 @@ func decodeCallBody(r *http.Request) (callLifecycleRequest, error) {
 	}
 	return body, nil
 }
+
+// notifyUDMReject asks the mock viewer for viewerMAC to publish a
+// /call_admin_result RPC to UDM so the intercom stops ringing
+// immediately rather than waiting for the 30-second hardware
+// timeout. Best-effort: any failure is logged but never bubbled
+// up to the browser - the local lifecycle is already correct and
+// the intercom will time out on its own as fallback.
+//
+// Saison 13-04.5-B. The intercom MAC comes from the doorbell_calls
+// row's device_id (populated by doorbellhub.startCall when the
+// /remote_view RPC arrived).
+func (s *Server) notifyUDMReject(ctx context.Context, eventID, viewerMAC string) {
+	if s.calls == nil || s.mockMgr == nil {
+		return
+	}
+	call, err := s.calls.Get(ctx, eventID)
+	if err != nil {
+		s.log.Warn("call_admin_result lookup failed",
+			"event_id", eventID,
+			"err", err,
+		)
+		return
+	}
+	if call.DeviceID == "" {
+		s.log.Info("call_admin_result skipped: call has no device_id",
+			"event_id", eventID,
+		)
+		return
+	}
+	if err := s.mockMgr.RejectDoorbellOnMock(viewerMAC, call.DeviceID); err != nil {
+		s.log.Warn("call_admin_result publish failed",
+			"viewer_mac_prefix", safePrefix(viewerMAC),
+			"intercom", call.DeviceID,
+			"event_id", eventID,
+			"err", err,
+		)
+		return
+	}
+	s.log.Info("call_admin_result sent to UDM",
+		"viewer_mac_prefix", safePrefix(viewerMAC),
+		"intercom", call.DeviceID,
+		"event_id", eventID,
+	)
+}
+
 
