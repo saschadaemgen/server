@@ -193,15 +193,14 @@
       });
     })();
 
-    // Saison 13-06: Standby-Unlock vom idle-screen-Schluessel-
+    // Saison 13-07: Standby-Unlock vom idle-screen-Schluessel-
     // Knopf. design-library/intercom-idle.html liefert
     // <button class="action is-primary" data-action="unlock-door">
     // ohne .ring-btn-Klasse (das ist der Bell-Overlay-Knopf).
     // Dieser Standby-Knopf hat keine intercom-mac im Kontext und
-    // verwendet stattdessen die fuer diesen Viewer im Admin
-    // hinterlegte Default-Tuer (StandbyDoorID).
+    // POSTet auf /einloggen/doors/standby/unlock; der Server liest
+    // viewer.paired_intercom_mac und resolved Tuer via UA-API.
     (function () {
-      var standbyDoorID = "{{ .StandbyDoorID }}";
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action="unlock-door"]');
         if (!btn) return;
@@ -209,12 +208,8 @@
         // Handler oben, der ueber dataset.intercomMac aufloest.
         if (btn.classList.contains('ring-btn')) return;
         e.preventDefault();
-        if (!standbyDoorID) {
-          if (window.console) console.warn('[unifix] standby unlock: no door mapped for this viewer');
-          return;
-        }
-        if (window.console) console.log('[unifix] standby unlock', { doorID: standbyDoorID });
-        fetch('/einloggen/doors/' + encodeURIComponent(standbyDoorID) + '/unlock', {
+        if (window.console) console.log('[unifix] standby unlock');
+        fetch('/einloggen/doors/standby/unlock', {
           method: 'POST',
           headers: { 'Accept': 'application/json' },
           credentials: 'same-origin'
