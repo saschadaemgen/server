@@ -397,6 +397,104 @@ func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
 	}
 }
 
+// Saison 13-08: dedicated /esp/reject endpoint - mirrors
+// /einloggen/reject (doorbellcalls.MarkRejected + sibling
+// cancel + UDM ring-stop via call_admin_result).
+
+func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	const intercomMAC = "28704e31e29c"
+	if err := env.srv.calls.Start(context.Background(), "tok-esp-rej", espTestMAC, intercomMAC); err != nil {
+		t.Fatalf("calls.Start: %v", err)
+	}
+
+	bus := env.srv.EventBus()
+	sub := bus.Subscribe(espTestMAC)
+	defer bus.Unsubscribe(espTestMAC, sub)
+
+	body, _ := json.Marshal(map[string]any{"event_id": "tok-esp-rej"})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/reject", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/reject: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := readBodyBytes(resp)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+	}
+
+	// Own MAC sees the cancel via the bus.
+	select {
+	case ev := <-sub:
+		if ev.Type != "doorbell.cancel" {
+			t.Errorf("ev.Type = %q, want doorbell.cancel", ev.Type)
+		}
+		if !strings.Contains(ev.JSON, "rejected") {
+			t.Errorf("ev.JSON = %q, want reason rejected", ev.JSON)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("rejecter did not receive its own cancel")
+	}
+
+	// doorbellcalls row updated.
+	got, err := env.srv.calls.Get(context.Background(), "tok-esp-rej")
+	if err != nil {
+		t.Fatalf("calls.Get: %v", err)
+	}
+	if got.CancelReason != "rejected" {
+		t.Errorf("CancelReason = %q, want rejected", got.CancelReason)
+	}
+	// notifyUDMReject silently logs when the viewer goroutine is
+	// not running (ESP-type rows don't spawn one in S13-08; that
+	// flips on once the hybrid mock+esp scenario lands in S14+).
+}
+
+func TestESPReject_StaleCallReturnsOK(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	body, _ := json.Marshal(map[string]any{"event_id": "tok-not-active"})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/reject", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/reject: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (stale = ok)", resp.StatusCode)
+	}
+	var payload map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+	if payload["note"] != "stale" {
+		t.Errorf("note = %v, want 'stale'", payload["note"])
+	}
+}
+
+func TestESPReject_RequiresBearer(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	body, _ := json.Marshal(map[string]any{"event_id": "tok-x"})
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/reject", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /esp/reject: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
 func TestESPUnlock_CallsUAAPIUnlock(t *testing.T) {
 	var gotDoorID, gotActorID string
 	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

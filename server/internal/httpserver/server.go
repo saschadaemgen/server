@@ -241,6 +241,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /esp/events", s.requireESPBearer(http.HandlerFunc(s.handleESPEvents)))
 	s.mux.Handle("GET /esp/heartbeat", s.requireESPBearer(http.HandlerFunc(s.handleESPHeartbeat)))
 	s.mux.Handle("POST /esp/answer", s.requireESPBearer(http.HandlerFunc(s.handleESPAnswer)))
+	s.mux.Handle("POST /esp/reject", s.requireESPBearer(http.HandlerFunc(s.handleESPReject)))
 	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
 	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
 

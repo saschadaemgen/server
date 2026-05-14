@@ -11,6 +11,8 @@
 //	GET  /esp/events        SSE long-stream
 //	GET  /esp/heartbeat     fallback when SSE is blocked
 //	POST /esp/answer        accept / reject the active doorbell
+//	POST /esp/reject        dedicated reject (saison-13-08; calls
+//	                        doorbellcalls service + UDM ring-stop)
 //	POST /esp/unlock        relay an UA-API door unlock
 //	POST /esp/state         ESP-side status report
 package httpserver
@@ -22,6 +24,7 @@ import (
 	"net/http"
 	"time"
 
+	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/uaapi"
@@ -267,6 +270,73 @@ func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
 		"mac_prefix", mac[:8],
 		"event_id", body.EventID,
 		"action", body.Action,
+		"siblings_notified", len(siblings),
+	)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":                true,
+		"siblings_notified": len(siblings),
+	})
+}
+
+// handleESPReject is the saison-13-08 dedicated reject endpoint.
+// It mirrors handleMieterReject:
+//   - doorbellcalls.MarkRejected (CAS, idempotent stale path)
+//   - publishes a doorbell.cancel on the ESP's MAC (own SSE +
+//     mieter sessions on the same MAC see it through the bus)
+//   - notifyUDMReject pushes /call_admin_result to the intercom
+//     so it stops ringing immediately rather than waiting on the
+//     30-second hardware timeout
+//
+// /esp/answer with action="reject" remains available as a legacy
+// shorthand; new firmware should prefer /esp/reject because it
+// stops the intercom immediately.
+func (s *Server) handleESPReject(w http.ResponseWriter, r *http.Request) {
+	mac := ESPMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no esp identity", http.StatusUnauthorized)
+		return
+	}
+	if s.calls == nil {
+		http.Error(w, "doorbell calls not configured", http.StatusServiceUnavailable)
+		return
+	}
+	body, err := decodeCallBody(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.calls.MarkRejected(r.Context(), body.EventID, mac); err != nil {
+		if errors.Is(err, doorbellcalls.ErrCallNotFound) {
+			// Already cancelled / timed out; treat as no-op success
+			// so the ESP UI doesn't paint an error toast.
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "note": "stale"})
+			return
+		}
+		s.log.Error("esp reject mark", "err", err, "event_id", body.EventID, "mac_prefix", mac[:8])
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	cancelEvent := eventbus.Event{
+		Type: "doorbell.cancel",
+		JSON: fmt.Sprintf(`{"event_id":%q,"reason":%q}`,
+			body.EventID, doorbellcalls.ReasonRejected),
+	}
+	s.publishToESP(mac, cancelEvent)
+	siblings, err := s.mockMgr.SiblingESPMACs(r.Context(), mac)
+	if err != nil {
+		s.log.Warn("esp reject siblings", "err", err, "mac_prefix", mac[:8])
+	}
+	if s.eventBus != nil && len(siblings) > 0 {
+		s.eventBus.PublishAll(siblings, cancelEvent)
+	}
+	s.notifyUDMReject(r.Context(), body.EventID, mac)
+	s.log.Info("esp reject",
+		"mac_prefix", mac[:8],
+		"event_id", body.EventID,
 		"siblings_notified", len(siblings),
 	)
 
