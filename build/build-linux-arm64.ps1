@@ -24,6 +24,10 @@ go build @buildFlags -o bin\mqtt-spy-linux-arm64 .\mock\cmd\mqtt-spy
 
 Write-Host "Building genkey..."
 go build @buildFlags -o bin\genkey-linux-arm64 .\server\cmd\genkey
+
+Write-Host "Building unifix-cli..."
+go build @buildFlags -o bin\unifix-cli-linux-arm64 .\server\cmd\unifix-cli
+
 Write-Host "Building license-server..."
 go build @buildFlags -o bin\license-server-linux-arm64 .\license-server\cmd\license-server
 
