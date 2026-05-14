@@ -26,6 +26,53 @@ type UnlockDoorRequest struct {
 	ActorName string `json:"actor_name,omitempty"`
 }
 
+// Door mirrors the read-side fields the admin
+// /a/intercom-mapping page cares about. ID is the UUID the
+// PUT /doors/{id}/unlock path expects; Name is the human label
+// from the UA Console; HubID/Type are surfaced when present so
+// the UI can disambiguate doors that share a name across hubs.
+type Door struct {
+	ID       string `json:"id"`                 // UUID
+	Name     string `json:"name"`
+	FullName string `json:"full_name,omitempty"`
+	HubID    string `json:"hub_id,omitempty"`
+	Type     string `json:"type,omitempty"`
+}
+
+// DisplayName picks the best human label: full_name when present,
+// otherwise name, otherwise the id as a last resort.
+func (d Door) DisplayName() string {
+	if d.FullName != "" {
+		return d.FullName
+	}
+	if d.Name != "" {
+		return d.Name
+	}
+	return d.ID
+}
+
+// ListDoors returns every door the UA Console reports. Empty
+// list and nil-error means "API succeeded, no doors configured".
+func (c *Client) ListDoors(ctx context.Context) ([]Door, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.baseURL+"/api/v1/developer/doors", nil)
+	if err != nil {
+		return nil, err
+	}
+	env, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	if len(env.Data) == 0 || string(env.Data) == "null" {
+		return []Door{}, nil
+	}
+	var doors []Door
+	if err := json.Unmarshal(env.Data, &doors); err != nil {
+		return nil, fmt.Errorf("uaapi: unmarshal doors: %w", err)
+	}
+	return doors, nil
+}
+
 // UnlockDoor relays the call to PUT /doors/{id}/unlock. Returns
 // ErrUnauthorized or ErrNotFound on the canonical failure paths,
 // or a wrapped error with the API message for anything else.

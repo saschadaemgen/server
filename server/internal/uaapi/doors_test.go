@@ -46,3 +46,48 @@ func TestUnlockDoor_RejectsEmptyDoorID(t *testing.T) {
 		t.Error("UnlockDoor with empty door id returned nil")
 	}
 }
+
+func TestListDoors_ParsesResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertBearerAuth(t, r, "tok")
+		if !strings.HasSuffix(r.URL.Path, "/api/v1/developer/doors") {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
+			{"id": "uuid-1", "name": "Hauseingang", "full_name": "Hauseingang Erdgeschoss", "hub_id": "hub-1"},
+			{"id": "uuid-2", "name": "Kellertuer"},
+		})
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.ListDoors(context.Background())
+	if err != nil {
+		t.Fatalf("ListDoors: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].DisplayName() != "Hauseingang Erdgeschoss" {
+		t.Errorf("DisplayName = %q, want Hauseingang Erdgeschoss", got[0].DisplayName())
+	}
+	if got[1].DisplayName() != "Kellertuer" {
+		t.Errorf("fallback DisplayName = %q", got[1].DisplayName())
+	}
+}
+
+func TestListDoors_NullDataReturnsEmptySlice(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.ListDoors(context.Background())
+	if err != nil {
+		t.Fatalf("ListDoors: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
