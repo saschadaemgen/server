@@ -16,6 +16,7 @@ scp bin\unifix-server-linux-arm64 $rpiTarget
 scp bin\mock-linux-arm64 $rpiTarget
 scp bin\mqtt-spy-linux-arm64 $rpiTarget
 scp bin\genkey-linux-arm64 $rpiTarget
+scp bin\unifix-cli-linux-arm64 $rpiTarget
 scp bin\license-server-linux-arm64 $rpiTarget
 
 Write-Host "Setting executable permissions..."
