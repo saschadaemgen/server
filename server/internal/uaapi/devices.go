@@ -81,6 +81,20 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Saison 13-05-HOTFIX3: dump the raw envelope.Data once per
+	// call so the next live-test reveals the actual UA-API field
+	// names. HOTFIX2's seenTypes histogram showed {"":6} - all
+	// six device_type values were the empty string, meaning our
+	// Device struct's `json:"device_type"` tag does not match
+	// what UA actually emits. Truncate at 800 bytes to keep the
+	// log line scannable; the real keys live in the first ~200.
+	if len(env.Data) > 0 {
+		raw := string(env.Data)
+		if len(raw) > 800 {
+			raw = raw[:800] + "...[truncated]"
+		}
+		slog.Info("uaapi: ListDevices raw data", "json", raw)
+	}
 	devices, err := decodeList[Device](env.Data)
 	if err != nil {
 		return nil, fmt.Errorf("uaapi: unmarshal devices: %w", err)
