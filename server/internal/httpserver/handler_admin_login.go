@@ -179,6 +179,8 @@ func navSlotFor(name string) string {
 		return "users"
 	case "esp-pager":
 		return "esp-pager"
+	case "intercom-mapping":
+		return "intercom-mapping"
 	case "settings":
 		return "settings"
 	default:
@@ -203,6 +205,8 @@ func extractUser(data any) adminUser {
 	case adminUserDetailData:
 		return v.User
 	case adminESPViewersData:
+		return v.User
+	case adminIntercomMappingData:
 		return v.User
 	case placeholderData:
 		return v.User

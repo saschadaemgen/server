@@ -222,6 +222,14 @@ func (s *Server) routes() {
 	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
 
+	// Saison 13-05: Klingel-zu-Tuer Verknuepfung. Liest Intercoms
+	// und Doors aus der UA-API, speichert das Mapping in
+	// platform_config.intercom_to_door. Der mieter-seitige
+	// /einloggen/doors/{intercom-mac}/unlock-Pfad nutzt den selben
+	// Mapping zur Aufloesung.
+	s.mux.Handle("GET /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingGet)))
+	s.mux.Handle("POST /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingPost)))
+
 	// ESP-Discovery (Saison 13-02-FIX4-c). Oeffentliche Endpoints
 	// ohne Auth-Header - der Token kommt erst nach erfolgreicher
 	// Adoption durch den Admin.

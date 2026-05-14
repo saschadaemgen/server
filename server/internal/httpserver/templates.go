@@ -51,14 +51,15 @@ func macIDFromMAC(mac string) string {
 // Templates (Vokabular- und Nav-Wechsel passt nicht 1:1 in die
 // Library-Snippets, und die Library bleibt heilig).
 var adminLibraryFor = map[string][]string{
-	"login":       {"admin-login.html"},
-	"dashboard":   {},
-	"settings":    {},
-	"web-viewers": {},
-	"esp-viewers": {},
-	"users":       {},
-	"user-detail": {},
-	"esp-pager":   {},
+	"login":             {"admin-login.html"},
+	"dashboard":         {},
+	"settings":          {},
+	"web-viewers":       {},
+	"esp-viewers":       {},
+	"users":             {},
+	"user-detail":       {},
+	"esp-pager":         {},
+	"intercom-mapping":  {},
 }
 
 func newAdminTemplates() (*adminTemplates, error) {
