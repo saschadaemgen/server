@@ -53,6 +53,10 @@ func (d Door) DisplayName() string {
 
 // ListDoors returns every door the UA Console reports. Empty
 // list and nil-error means "API succeeded, no doors configured".
+//
+// Saison 13-05-HOTFIX: same array-of-arrays tolerance as
+// ListDevices; UA appears to group doors per hub on at least
+// the firmware on Sascha's UDM.
 func (c *Client) ListDoors(ctx context.Context) ([]Door, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/api/v1/developer/doors", nil)
@@ -63,11 +67,8 @@ func (c *Client) ListDoors(ctx context.Context) ([]Door, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(env.Data) == 0 || string(env.Data) == "null" {
-		return []Door{}, nil
-	}
-	var doors []Door
-	if err := json.Unmarshal(env.Data, &doors); err != nil {
+	doors, err := decodeList[Door](env.Data)
+	if err != nil {
 		return nil, fmt.Errorf("uaapi: unmarshal doors: %w", err)
 	}
 	return doors, nil

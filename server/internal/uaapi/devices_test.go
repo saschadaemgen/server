@@ -93,6 +93,89 @@ func TestListDevices_PropagatesUnauthorized(t *testing.T) {
 	}
 }
 
+// Saison 13-05-HOTFIX live regression: UDM on Sascha's anlage
+// returns devices grouped as data: [[d, d], [d]] (one array per
+// hub topology). Prior code unmarshalled directly into []Device
+// and failed with "cannot unmarshal array into Go value of type
+// uaapi.Device". decodeList now flattens.
+func TestListDevices_TolerantToArrayOfArrays(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{
+			"code":"SUCCESS","msg":"ok","data":[
+				[
+					{"id":"28704e31e29c","name":"UA Intercom","device_type":"UA-Intercom","mac":"28:70:4e:31:e2:9c"},
+					{"id":"0cea14476781","name":"UA Hub Door","device_type":"UAH-DOOR","mac":"0c:ea:14:47:67:81"}
+				],
+				[
+					{"id":"0cea1458f1c6","name":"UA Intercom Viewer","device_type":"UA-Int-Viewer","mac":"0c:ea:14:58:f1:c6"}
+				]
+			]
+		}`))
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.ListDevices(context.Background())
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("flattened len = %d, want 3", len(got))
+	}
+	wantIDs := []string{"28704e31e29c", "0cea14476781", "0cea1458f1c6"}
+	for i, w := range wantIDs {
+		if got[i].ID != w {
+			t.Errorf("[%d].ID = %q, want %q", i, got[i].ID, w)
+		}
+	}
+}
+
+func TestListDevices_TolerantToWrapperObject(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{
+			"code":"SUCCESS","msg":"ok","data":{
+				"list":[
+					{"id":"a","name":"A","device_type":"UA-Intercom"}
+				]
+			}
+		}`))
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.ListDevices(context.Background())
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "a" {
+		t.Errorf("wrapper-list parse failed: %+v", got)
+	}
+}
+
+func TestListDevices_UnknownShapeIncludesPayloadInError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{
+			"code":"SUCCESS","msg":"ok","data":42
+		}`))
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	_, err := c.ListDevices(context.Background())
+	if err == nil {
+		t.Fatal("expected error for unknown shape")
+	}
+	if !strings.Contains(err.Error(), "unknown list response shape") {
+		t.Errorf("err = %v, want unknown-shape message", err)
+	}
+	if !strings.Contains(err.Error(), "42") {
+		t.Errorf("err = %v, want payload in error", err)
+	}
+}
+
 func TestDevice_DisplayMACFormatsBareID(t *testing.T) {
 	d := Device{ID: "28704e31e29c"}
 	if got := d.DisplayMAC(); got != "28:70:4e:31:e2:9c" {

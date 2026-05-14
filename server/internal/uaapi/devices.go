@@ -13,7 +13,6 @@ package uaapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -64,6 +63,13 @@ func (d Device) DisplayMAC() string {
 
 // ListDevices returns every device the UA Console reports. Empty
 // list and nil-error means "API succeeded, no devices adopted".
+//
+// Saison 13-05-HOTFIX: UA's /devices payload on the live
+// Sascha-UDM came as array-of-arrays (one inner array per
+// hub-topology group), not the flat array the saison-12-04
+// ListUsers endpoint returns. decodeList tolerates flat,
+// hub-grouped and wrapper-object shapes so future firmware
+// revisions don't need another code change.
 func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/api/v1/developer/devices", nil)
@@ -74,11 +80,8 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(env.Data) == 0 || string(env.Data) == "null" {
-		return []Device{}, nil
-	}
-	var devices []Device
-	if err := json.Unmarshal(env.Data, &devices); err != nil {
+	devices, err := decodeList[Device](env.Data)
+	if err != nil {
 		return nil, fmt.Errorf("uaapi: unmarshal devices: %w", err)
 	}
 	return devices, nil

@@ -75,6 +75,38 @@ func TestListDoors_ParsesResponse(t *testing.T) {
 	}
 }
 
+// Saison 13-05-HOTFIX: doors grouped per hub, same tolerance as
+// devices.
+func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{
+			"code":"SUCCESS","msg":"ok","data":[
+				[
+					{"id":"uuid-1","name":"Hauseingang","hub_id":"hub-1"},
+					{"id":"uuid-2","name":"Hintertuer","hub_id":"hub-1"}
+				],
+				[
+					{"id":"uuid-3","name":"Kellertuer","hub_id":"hub-2"}
+				]
+			]
+		}`))
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.ListDoors(context.Background())
+	if err != nil {
+		t.Fatalf("ListDoors: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("flattened len = %d, want 3", len(got))
+	}
+	if got[0].ID != "uuid-1" || got[2].HubID != "hub-2" {
+		t.Errorf("flatten order wrong: %+v", got)
+	}
+}
+
 func TestListDoors_NullDataReturnsEmptySlice(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
