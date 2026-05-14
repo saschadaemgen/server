@@ -543,6 +543,74 @@ func TestESPUnlock_CallsUAAPIUnlock(t *testing.T) {
 	}
 }
 
+// Saison 13-08 Phase A: /esp/stream.mjpeg reverse-proxy stub.
+
+func TestESPStream_RequiresBearer(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/esp/stream.mjpeg")
+	if err != nil {
+		t.Fatalf("GET /esp/stream.mjpeg: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestESPStream_503WhenBackendUnconfigured(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /esp/stream.mjpeg: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 (backend unconfigured)", resp.StatusCode)
+	}
+}
+
+func TestESPStream_ForwardsToBackendWithoutAuthHeader(t *testing.T) {
+	var sawAuth string
+	var sawPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		sawPath = r.URL.Path + "?" + r.URL.RawQuery
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace;boundary=frame")
+		_, _ = w.Write([]byte("frame-bytes"))
+	}))
+	defer backend.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+
+	// Inject the backend URL via the running server's config.
+	env.srv.cfg.StreamBackendURL = backend.URL + "/api/stream.mjpeg?src=front"
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /esp/stream.mjpeg: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if sawAuth != "" {
+		t.Errorf("backend saw Authorization header %q; should be stripped", sawAuth)
+	}
+	if sawPath != "/api/stream.mjpeg?src=front" {
+		t.Errorf("backend saw path %q, want /api/stream.mjpeg?src=front", sawPath)
+	}
+}
+
 func TestESPState_StoresLatestReport(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

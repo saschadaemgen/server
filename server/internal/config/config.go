@@ -51,6 +51,13 @@ type Config struct {
 	// secrets package; Config only carries the boolean so
 	// Validate can warn (not fail) when the operator forgot it.
 	SecretsKeySet bool
+
+	// StreamBackendURL is the upstream URL the /esp/stream.mjpeg
+	// reverse-proxy forwards to (saison-13-08). Empty means the
+	// endpoint returns 503 - useful while the go2rtc / Protect
+	// integration is still being plumbed.
+	// Example: "http://127.0.0.1:1984/api/stream.mjpeg?src=front-door"
+	StreamBackendURL string
 }
 
 const (
@@ -68,6 +75,7 @@ const (
 	envServerIPv4       = "UNIFIX_SERVER_IPV4"
 	envMockStateDir     = "UNIFIX_MOCK_STATE_DIR"
 	envSecretsKey       = "UNIFIX_SECRETS_KEY"
+	envStreamBackendURL = "UNIFIX_STREAM_BACKEND_URL"
 )
 
 // FromEnv reads the unifix environment variables and fills in
@@ -81,8 +89,9 @@ func FromEnv() Config {
 		DevMode:       parseBool(os.Getenv(envDevMode)),
 		BaseURL:       os.Getenv(envBaseURL),
 		ServerIPv4:    os.Getenv(envServerIPv4),
-		MockStateDir:  os.Getenv(envMockStateDir),
-		SecretsKeySet: os.Getenv(envSecretsKey) != "",
+		MockStateDir:     os.Getenv(envMockStateDir),
+		SecretsKeySet:    os.Getenv(envSecretsKey) != "",
+		StreamBackendURL: os.Getenv(envStreamBackendURL),
 	}
 	if cfg.ListenAddr == "" {
 		if cfg.DevMode {

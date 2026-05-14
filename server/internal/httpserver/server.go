@@ -244,6 +244,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /esp/reject", s.requireESPBearer(http.HandlerFunc(s.handleESPReject)))
 	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
 	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
+	s.mux.Handle("GET /esp/stream.mjpeg", s.requireESPBearer(http.HandlerFunc(s.handleESPStream)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
