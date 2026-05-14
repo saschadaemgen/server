@@ -110,6 +110,85 @@ func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
 // Saison 13-07: extras.door_thumbnail carries the intercom MAC.
 // IntercomMAC parses it back out so unifix can auto-resolve a
 // door by its calling intercom without admin-curated mapping.
+func TestLookupDoorForIntercom_Found(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
+			{
+				"id":   "door-uuid-front",
+				"name": "Hauseingang",
+				"extras": map[string]any{
+					"door_thumbnail": "/preview/reader_28704e31e29c_door-uuid-front_1747.jpg",
+				},
+			},
+			{
+				"id":   "door-uuid-back",
+				"name": "Hintertuer",
+				"extras": map[string]any{
+					"door_thumbnail": "/preview/reader_aabbccddeeff_door-uuid-back_1748.jpg",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.LookupDoorForIntercom(context.Background(), "28:70:4e:31:e2:9c")
+	if err != nil {
+		t.Fatalf("LookupDoorForIntercom: %v", err)
+	}
+	if got != "door-uuid-front" {
+		t.Errorf("got = %q, want door-uuid-front", got)
+	}
+}
+
+func TestLookupDoorForIntercom_CaseInsensitive(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
+			{"id": "door-x", "extras": map[string]any{
+				"door_thumbnail": "/preview/reader_28704e31e29c_door-x_1.jpg",
+			}},
+		})
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.LookupDoorForIntercom(context.Background(), "28:70:4E:31:E2:9C")
+	if err != nil {
+		t.Fatalf("LookupDoorForIntercom: %v", err)
+	}
+	if got != "door-x" {
+		t.Errorf("got = %q, want door-x", got)
+	}
+}
+
+func TestLookupDoorForIntercom_NotBound(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{
+			{"id": "door-x", "extras": map[string]any{
+				"door_thumbnail": "/preview/reader_aabbccddeeff_door-x_1.jpg",
+			}},
+		})
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	got, err := c.LookupDoorForIntercom(context.Background(), "00:00:00:00:00:00")
+	if err != nil {
+		t.Errorf("err = %v, want nil for not-found", err)
+	}
+	if got != "" {
+		t.Errorf("got = %q, want empty for not-bound", got)
+	}
+}
+
+func TestLookupDoorForIntercom_PropagatesUnauthorized(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 401, CodeUnauthorized, "no", nil)
+	}))
+	defer ts.Close()
+	c := New(Options{BaseURL: ts.URL, Token: "tok"})
+	if _, err := c.LookupDoorForIntercom(context.Background(), "28:70:4e:31:e2:9c"); err != ErrUnauthorized {
+		t.Errorf("err = %v, want ErrUnauthorized", err)
+	}
+}
+
 func TestDoorIntercomMAC(t *testing.T) {
 	cases := []struct {
 		name      string

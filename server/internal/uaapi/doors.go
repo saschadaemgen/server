@@ -98,6 +98,33 @@ func (d Door) DisplayName() string {
 	return d.ID
 }
 
+// LookupDoorForIntercom resolves an intercom MAC to the door
+// UUID that intercom calls. Reads the live UA-API door list and
+// matches via Door.IntercomMAC (parses extras.door_thumbnail).
+//
+// Returns "" with nil error when the intercom is not bound to
+// any door (UA-Console misconfiguration; the mieter-unlock
+// handler maps this to a 404 with a clear error). Errors from
+// ListDoors are propagated.
+//
+// No cache: typical UA installations have <10 doors and the
+// admin-side intercom-mapping flow already accepts a 200ms
+// extra latency for the live look-up. A cache can land in a
+// later season if a customer with 50+ doors complains.
+func (c *Client) LookupDoorForIntercom(ctx context.Context, intercomMAC string) (string, error) {
+	doors, err := c.ListDoors(ctx)
+	if err != nil {
+		return "", err
+	}
+	target := strings.ToLower(strings.TrimSpace(intercomMAC))
+	for _, d := range doors {
+		if d.IntercomMAC() == target {
+			return d.ID, nil
+		}
+	}
+	return "", nil
+}
+
 // ListDoors returns every door the UA Console reports. Empty
 // list and nil-error means "API succeeded, no doors configured".
 //
