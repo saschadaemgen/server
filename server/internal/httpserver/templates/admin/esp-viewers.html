@@ -164,6 +164,21 @@
                 </select>
               </div>
             </div>
+            <div class="field">
+              <label class="field-label" for="adopt-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --">
+                <select id="adopt-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
+            </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
@@ -215,10 +230,17 @@
         var mac = modal ? modal.dataset.mac : '';
         var name = form.querySelector('#adopt-name').value;
         var linked = form.querySelector('#adopt-link').value;
+        var pairedSel = form.querySelector('#adopt-paired');
+        var paired = pairedSel ? pairedSel.value : '';
         fetch('/a/esp-viewers/adopt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ mac: mac, name: name, linked_ua_user_id: linked }),
+          body: JSON.stringify({
+            mac: mac,
+            name: name,
+            linked_ua_user_id: linked,
+            paired_intercom_mac: paired
+          }),
           credentials: 'same-origin'
         })
           .then(function (r) {

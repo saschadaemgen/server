@@ -230,6 +230,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingGet)))
 	s.mux.Handle("POST /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingPost)))
 
+	// Saison 13-07: kleiner JSON-Endpoint fuer das Custom-Dropdown
+	// in den Viewer-Modalen ("Verknuepfte Klingel"). Lebt unabhaengig
+	// von der intercom-mapping-Seite und ueberlebt deren Loeschung
+	// im S13-07-Aufraeum-Commit.
+	s.mux.Handle("GET /a/intercoms.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomsJSON)))
+
 	// ESP-Discovery (Saison 13-02-FIX4-c). Oeffentliche Endpoints
 	// ohne Auth-Header - der Token kommt erst nach erfolgreicher
 	// Adoption durch den Admin.

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,30 +79,36 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 // werden nur bei Type='esp' beachtet. Bei TypeWeb bleiben sie
 // leer.
 type ViewerSpec struct {
-	MAC            string
-	Name           string
-	ServicePort    uint16
-	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	LinkedUAUserID string // optional UA-Access-User-Verknuepfung
-	ESPModel       string
-	ESPFwVersion   string
-	ESPTokenHash   string
+	MAC               string
+	Name              string
+	ServicePort       uint16
+	Type              string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	LinkedUAUserID    string // optional UA-Access-User-Verknuepfung
+	ESPModel          string
+	ESPFwVersion      string
+	ESPTokenHash      string
+	// PairedIntercomMAC is the UA-API intercom this viewer is
+	// paired with for the standby "Tuer auf"-Knopf (saison-13-07).
+	// Empty string = no pairing, standby button is inert. Stored
+	// colon-form lowercase ("28:70:4e:31:e2:9c").
+	PairedIntercomMAC string
 }
 
 // ViewerInfo is the public view of one running viewer for the
 // admin UI.
 type ViewerInfo struct {
-	MAC            string
-	Name           string
-	ServicePort    uint16
-	Type           string
-	HasPassword    bool
-	PasswordSetAt  *time.Time
-	LinkedUAUserID string
-	ESPModel       string
-	ESPFwVersion   string
-	HasESPToken    bool
-	Running        bool
+	MAC               string
+	Name              string
+	ServicePort       uint16
+	Type              string
+	HasPassword       bool
+	PasswordSetAt     *time.Time
+	LinkedUAUserID    string
+	ESPModel          string
+	ESPFwVersion      string
+	HasESPToken       bool
+	Running           bool
+	PairedIntercomMAC string // saison-13-07 standby pairing
 }
 
 // Options configures Manager construction.
@@ -408,7 +415,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 	}
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(paired_intercom_mac, '')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -428,7 +436,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
-			&espModel, &espFW, &espHash); err != nil {
+			&espModel, &espFW, &espHash, &info.PairedIntercomMAC); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if NormalizeName(info.Name) != target {
@@ -516,10 +524,11 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 	)
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(paired_intercom_mac, '')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
-			&info.LinkedUAUserID, &espModel, &espFW, &espHash)
+			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -552,7 +561,8 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(paired_intercom_mac, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -571,7 +581,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
-			&espModel, &espFW, &espHash); err != nil {
+			&espModel, &espFW, &espHash, &info.PairedIntercomMAC); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		info.ServicePort = uint16(port)
@@ -642,19 +652,48 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		`INSERT INTO viewers
 		   (mac, name, service_port, type, linked_ua_user_id,
 		    esp_model, esp_fw_version, esp_token_hash,
+		    paired_intercom_mac,
 		    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
 		spec.Type,
 		nullable(spec.LinkedUAUserID),
 		nullable(spec.ESPModel),
 		nullable(spec.ESPFwVersion),
 		nullable(spec.ESPTokenHash),
+		strings.ToLower(strings.TrimSpace(spec.PairedIntercomMAC)),
 		now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("mockmanager: insert: %w", err)
 	}
+	return nil
+}
+
+// SetPairedIntercomMAC updates a viewer's paired intercom (the
+// standby "Tuer auf"-Knopf source). Empty string clears the
+// pairing - standby button becomes inert until set again.
+//
+// Saison 13-07. Pair value is normalised to lowercase + trimmed
+// before write so future LookupDoorForIntercom calls match
+// regardless of how the admin typed the MAC.
+func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC string) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET paired_intercom_mac = ?, updated_at = ? WHERE mac = ?`,
+		strings.ToLower(strings.TrimSpace(intercomMAC)), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set paired intercom: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if entry, ok := m.viewers[mac]; ok {
+		entry.spec.PairedIntercomMAC = strings.ToLower(strings.TrimSpace(intercomMAC))
+	}
+	m.mu.Unlock()
 	return nil
 }
 

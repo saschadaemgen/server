@@ -36,15 +36,16 @@ type adminWebViewersData struct {
 }
 
 type webViewerRow struct {
-	MAC            string
-	Name           string
-	HasPassword    bool
-	PasswordSetAt  string
-	LockedNow      bool
-	OnlineNow      bool
-	LinkedUserID   string
-	LinkedUserName string
-	LoginURL       string
+	MAC               string
+	Name              string
+	HasPassword       bool
+	PasswordSetAt     string
+	LockedNow         bool
+	OnlineNow         bool
+	LinkedUserID      string
+	LinkedUserName    string
+	PairedIntercomMAC string
+	LoginURL          string
 }
 
 func (s *Server) handleAdminWebViewersList(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +102,14 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 		}
 		nameKey := mockmanager.NormalizeName(info.Name)
 		row := webViewerRow{
-			MAC:          info.MAC,
-			Name:         info.Name,
-			HasPassword:  info.HasPassword,
-			OnlineNow:    info.Running,
-			LockedNow:    locked[nameKey],
-			LinkedUserID: info.LinkedUAUserID,
-			LoginURL:     loginURL,
+			MAC:               info.MAC,
+			Name:              info.Name,
+			HasPassword:       info.HasPassword,
+			OnlineNow:         info.Running,
+			LockedNow:         locked[nameKey],
+			LinkedUserID:      info.LinkedUAUserID,
+			PairedIntercomMAC: info.PairedIntercomMAC,
+			LoginURL:          loginURL,
 		}
 		if info.PasswordSetAt != nil {
 			row.PasswordSetAt = info.PasswordSetAt.Format("02.01.2006 15:04")
@@ -143,9 +145,14 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 	name := strings.TrimSpace(r.PostForm.Get("name"))
 	manualPW := r.PostForm.Get("password")
 	linkedUser := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
+	pairedIntercom := strings.ToLower(strings.TrimSpace(r.PostForm.Get("paired_intercom_mac")))
 
 	if name == "" || len(name) > 64 {
 		http.Error(w, "Wohnungs-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
+		return
+	}
+	if pairedIntercom != "" && !macFormat.MatchString(pairedIntercom) {
+		http.Error(w, "Klingel-MAC muss lowercase xx:xx:xx:xx:xx:xx sein.", http.StatusBadRequest)
 		return
 	}
 
@@ -164,11 +171,12 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 	}
 
 	spec := mockmanager.ViewerSpec{
-		MAC:            mac,
-		Name:           name,
-		ServicePort:    port,
-		Type:           mockmanager.TypeWeb,
-		LinkedUAUserID: linkedUser,
+		MAC:               mac,
+		Name:              name,
+		ServicePort:       port,
+		Type:              mockmanager.TypeWeb,
+		LinkedUAUserID:    linkedUser,
+		PairedIntercomMAC: pairedIntercom,
 	}
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
@@ -343,12 +351,13 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var newName, newPW, newLink string
+	var newName, newPW, newLink, newPaired string
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body struct {
-			Name           string `json:"name"`
-			Password       string `json:"password"`
-			LinkedUAUserID string `json:"linked_ua_user_id"`
+			Name              string `json:"name"`
+			Password          string `json:"password"`
+			LinkedUAUserID    string `json:"linked_ua_user_id"`
+			PairedIntercomMAC string `json:"paired_intercom_mac"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
@@ -357,6 +366,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		newName = strings.TrimSpace(body.Name)
 		newPW = body.Password
 		newLink = strings.TrimSpace(body.LinkedUAUserID)
+		newPaired = strings.ToLower(strings.TrimSpace(body.PairedIntercomMAC))
 	} else {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
@@ -365,10 +375,15 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		newName = strings.TrimSpace(r.PostForm.Get("name"))
 		newPW = r.PostForm.Get("password")
 		newLink = strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
+		newPaired = strings.ToLower(strings.TrimSpace(r.PostForm.Get("paired_intercom_mac")))
 	}
 
 	if newName == "" || len(newName) > 64 {
 		http.Error(w, "Wohnungs-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
+		return
+	}
+	if newPaired != "" && !macFormat.MatchString(newPaired) {
+		http.Error(w, "Klingel-MAC muss lowercase xx:xx:xx:xx:xx:xx sein.", http.StatusBadRequest)
 		return
 	}
 
@@ -386,6 +401,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	nameChanged := mockmanager.NormalizeName(info.Name) != mockmanager.NormalizeName(newName)
 	pwChanged := newPW != ""
 	linkChanged := info.LinkedUAUserID != newLink
+	pairedChanged := info.PairedIntercomMAC != newPaired
 
 	if nameChanged {
 		if err := s.mockMgr.Rename(r.Context(), mac, newName); err != nil {
@@ -412,6 +428,14 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if pairedChanged {
+		if err := s.mockMgr.SetPairedIntercomMAC(r.Context(), mac, newPaired); err != nil {
+			s.log.Error("edit set paired intercom", "err", err, "mac_prefix", mac[:8])
+			http.Error(w, "Klingel-Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// Passwort als letztes, damit ein Hash-Fehler die schon
 	// gespeicherten Name- und Link-Aenderungen nicht zurueckwirft
 	// (wir muessen sowieso roll-forward operieren, weil SQLite
@@ -434,17 +458,20 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		"name_changed", nameChanged,
 		"pw_changed", pwChanged,
 		"link_changed", linkChanged,
+		"paired_changed", pairedChanged,
 	)
 
 	if wantsJSON(r) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		payload := map[string]any{
-			"mac":               info.MAC,
-			"name":              newName,
-			"linked_ua_user_id": newLink,
-			"name_changed":      nameChanged,
-			"pw_changed":        pwChanged,
-			"link_changed":      linkChanged,
+			"mac":                 info.MAC,
+			"name":                newName,
+			"linked_ua_user_id":   newLink,
+			"paired_intercom_mac": newPaired,
+			"name_changed":        nameChanged,
+			"pw_changed":          pwChanged,
+			"link_changed":        linkChanged,
+			"paired_changed":      pairedChanged,
 		}
 		if pwChanged {
 			payload["password"] = resp.Password

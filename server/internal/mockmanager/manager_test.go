@@ -368,6 +368,64 @@ func TestListViewers_ReturnsAll(t *testing.T) {
 
 // ---------- Shutdown ----------
 
+// ---------- SetPairedIntercomMAC (saison-13-07) ----------
+
+func TestSetPairedIntercomMAC_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetPairedIntercomMAC(context.Background(), spec.MAC, "28:70:4E:31:E2:9C"); err != nil {
+		t.Fatalf("SetPairedIntercomMAC: %v", err)
+	}
+	info, err := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if err != nil {
+		t.Fatalf("GetViewerInfo: %v", err)
+	}
+	if info.PairedIntercomMAC != "28:70:4e:31:e2:9c" {
+		t.Errorf("PairedIntercomMAC = %q, want %q (lowercase)",
+			info.PairedIntercomMAC, "28:70:4e:31:e2:9c")
+	}
+}
+
+func TestSetPairedIntercomMAC_ClearWithEmptyString(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	spec.PairedIntercomMAC = "28:70:4e:31:e2:9c"
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetPairedIntercomMAC(context.Background(), spec.MAC, ""); err != nil {
+		t.Fatalf("SetPairedIntercomMAC clear: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.PairedIntercomMAC != "" {
+		t.Errorf("PairedIntercomMAC after clear = %q, want empty", info.PairedIntercomMAC)
+	}
+}
+
+func TestSetPairedIntercomMAC_UnknownViewer(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	err := mgr.SetPairedIntercomMAC(context.Background(), "0c:ea:14:00:00:00", "28:70:4e:31:e2:9c")
+	if !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("err = %v, want ErrViewerNotFound", err)
+	}
+}
+
+func TestAddViewer_PersistsPairedIntercomMAC(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	spec.PairedIntercomMAC = "28:70:4E:31:E2:9C"
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.PairedIntercomMAC != "28:70:4e:31:e2:9c" {
+		t.Errorf("PairedIntercomMAC = %q, want lowercase", info.PairedIntercomMAC)
+	}
+}
+
 func TestShutdown_StopsAllViewers(t *testing.T) {
 	mgr, factory := newTestManager(t)
 	for _, s := range []ViewerSpec{

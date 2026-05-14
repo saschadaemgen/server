@@ -314,9 +314,10 @@ func (s *Server) lookupUANames(r *http.Request, ids []string) map[string]string 
 
 // adoptRequest ist der JSON-Body fuer POST /a/esp-viewers/adopt.
 type espAdoptRequest struct {
-	MAC            string `json:"mac"`
-	Name           string `json:"name"`
-	LinkedUAUserID string `json:"linked_ua_user_id"`
+	MAC               string `json:"mac"`
+	Name              string `json:"name"`
+	LinkedUAUserID    string `json:"linked_ua_user_id"`
+	PairedIntercomMAC string `json:"paired_intercom_mac"`
 }
 
 type espAdoptResponse struct {
@@ -346,16 +347,22 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		body.MAC = r.PostForm.Get("mac")
 		body.Name = r.PostForm.Get("name")
 		body.LinkedUAUserID = r.PostForm.Get("linked_ua_user_id")
+		body.PairedIntercomMAC = r.PostForm.Get("paired_intercom_mac")
 	}
 
 	mac := strings.ToLower(strings.TrimSpace(body.MAC))
 	name := strings.TrimSpace(body.Name)
+	pairedIntercom := strings.ToLower(strings.TrimSpace(body.PairedIntercomMAC))
 	if !macFormat.MatchString(mac) {
 		http.Error(w, "MAC muss lowercase xx:xx:xx:xx:xx:xx sein.", http.StatusBadRequest)
 		return
 	}
 	if name == "" || len(name) > 64 {
 		http.Error(w, "Name fehlt oder zu lang.", http.StatusBadRequest)
+		return
+	}
+	if pairedIntercom != "" && !macFormat.MatchString(pairedIntercom) {
+		http.Error(w, "Klingel-MAC muss lowercase xx:xx:xx:xx:xx:xx sein.", http.StatusBadRequest)
 		return
 	}
 
@@ -388,14 +395,15 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 	}
 
 	spec := mockmanager.ViewerSpec{
-		MAC:            mac,
-		Name:           name,
-		ServicePort:    port,
-		Type:           mockmanager.TypeESP,
-		LinkedUAUserID: strings.TrimSpace(body.LinkedUAUserID),
-		ESPModel:       model.String,
-		ESPFwVersion:   fwVersion.String,
-		ESPTokenHash:   hash,
+		MAC:               mac,
+		Name:              name,
+		ServicePort:       port,
+		Type:              mockmanager.TypeESP,
+		LinkedUAUserID:    strings.TrimSpace(body.LinkedUAUserID),
+		PairedIntercomMAC: pairedIntercom,
+		ESPModel:          model.String,
+		ESPFwVersion:      fwVersion.String,
+		ESPTokenHash:      hash,
 	}
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {

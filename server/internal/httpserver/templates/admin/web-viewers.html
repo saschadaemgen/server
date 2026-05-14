@@ -86,7 +86,8 @@
                         data-action="open-edit"
                         data-mac="{{.MAC}}"
                         data-name="{{.Name}}"
-                        data-link="{{.LinkedUserID}}">Bearbeiten</button>
+                        data-link="{{.LinkedUserID}}"
+                        data-paired="{{.PairedIntercomMAC}}">Bearbeiten</button>
                 {{if .LockedNow}}
                   <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
                     <button class="btn btn-secondary btn-sm" type="submit">Sperre aufheben</button>
@@ -146,6 +147,21 @@
               </div>
               <span class="field-hint">UA-User; laedt beim Oeffnen des Dropdowns.</span>
             </div>
+            <div class="field">
+              <label class="field-label" for="new-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --">
+                <select id="new-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">UA-Intercoms; Tuer wird automatisch ueber die UA-API aufgeloest.</span>
+            </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
@@ -200,6 +216,22 @@
                   <option value="">-- keine Verknuepfung --</option>
                 </select>
               </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --"
+                   data-edit-paired-dropdown>
+                <select id="edit-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
             </div>
 
             <hr style="border:none; border-top:1px solid rgba(255,255,255,0.10); margin:8px 0;" />
@@ -281,6 +313,7 @@
         var mac = btn.getAttribute('data-mac');
         var name = btn.getAttribute('data-name') || '';
         var link = btn.getAttribute('data-link') || '';
+        var paired = btn.getAttribute('data-paired') || '';
         var modal = document.querySelector('[data-modal="edit-viewer"]');
         if (!modal) return;
         modal.setAttribute('data-mac', mac);
@@ -306,6 +339,15 @@
           // dafuer keinen Public-Hook, also setzen wir das Label
           // konservativ via change-Event.
           if (sel) sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        var dp = modal.querySelector('[data-edit-paired-dropdown]');
+        if (dp) {
+          dp.setAttribute('data-dropdown-value', paired);
+          var psel = dp.querySelector('select[data-dropdown-target]');
+          if (psel) {
+            psel.value = paired;
+            psel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
         }
         // Saison 13-02-FIX4-a-HOTFIX8: Login-Link + QR lazy nachladen.
         var urlInput = modal.querySelector('#edit-login-url');
