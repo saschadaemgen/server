@@ -102,6 +102,47 @@ func TestMieterUnlock_ResolvesIntercomMACToDoorUUID(t *testing.T) {
 	}
 }
 
+// Saison 13-05-HOTFIX5: SSE doorbell_start.device_id reaches the
+// browser as bare 12-hex (no colons). The browser POSTs that path
+// segment as-is. Mapping is keyed in colon-form. The handler must
+// normalise both sides to colon-form before lookup.
+func TestMieterUnlock_BareMACPathParamResolvesViaMapping(t *testing.T) {
+	var gotDoorID string
+	uaStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotDoorID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/developer/doors/"), "/unlock")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"SUCCESS","msg":"ok","data":null}`))
+	}))
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
+
+	if err := env.platformCfg.Set(context.Background(),
+		platformconfig.KeyIntercomToDoor,
+		`{"28:70:4e:31:e2:9c": "door-uuid-real-1"}`,
+	); err != nil {
+		t.Fatalf("Set intercom_to_door: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/einloggen/doors/28704e31e29c/unlock", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw := readBody(t, resp)
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, raw)
+	}
+	if gotDoorID != "door-uuid-real-1" {
+		t.Errorf("UA-API saw door = %q, want door-uuid-real-1 (the mapping target)", gotDoorID)
+	}
+}
+
 func TestMieterUnlock_UnmappedIntercomReturns404(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

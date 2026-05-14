@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"unifix.local/server/internal/doorbellcalls"
@@ -58,15 +57,23 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doorID := pathDoorID
-	if macFormat.MatchString(strings.ToLower(pathDoorID)) {
-		resolved, err := s.platformCfg.LookupDoorForIntercom(r.Context(), pathDoorID)
+	// Saison 13-05-HOTFIX5: accept both colon-form and bare
+	// 12-hex MACs from the browser (the SSE doorbell_start frame
+	// carries device_id as bare 12-hex) and normalise to the
+	// colon-form the mapping is stored under.
+	if macAnyForm.MatchString(pathDoorID) {
+		normalized := normalizeMACToColonForm(pathDoorID)
+		resolved, err := s.platformCfg.LookupDoorForIntercom(r.Context(), normalized)
 		if err != nil {
-			s.log.Error("intercom_to_door lookup", "err", err, "intercom", pathDoorID)
+			s.log.Error("intercom_to_door lookup", "err", err, "intercom", normalized)
 			http.Error(w, "intercom-to-door mapping read failed", http.StatusInternalServerError)
 			return
 		}
 		if resolved == "" {
-			s.log.Warn("intercom not in intercom_to_door mapping", "intercom", pathDoorID)
+			s.log.Warn("intercom not in intercom_to_door mapping",
+				"intercom", normalized,
+				"raw_path", pathDoorID,
+			)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{
