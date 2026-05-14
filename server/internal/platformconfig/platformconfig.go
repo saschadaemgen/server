@@ -18,23 +18,9 @@ import (
 
 // Well-known keys. Add new constants here as the platform grows.
 const (
-	KeyUAAPIBaseURL    = "ua_api_base_url"
-	KeyUAAPIToken      = "ua_api_token"
-	KeyViewerPwPepper  = "viewer_pw_pepper"
-	// KeyIntercomToDoor is the JSON-encoded mapping from intercom
-	// MAC (with colons, lowercase) to UA-Access door id used by
-	// the Saison 13-03 unlock flow. Saison 13 keeps the mapping
-	// admin-curated; a later season can fetch it from UA-API.
-	// Example value: {"28:70:4e:31:e2:9c": "<hub-uuid>"}.
-	KeyIntercomToDoor = "intercom_to_door"
-	// KeyViewerToDoor is the JSON-encoded mapping from viewer
-	// MAC (with colons, lowercase) to UA-Access door id used by
-	// the Saison 13-06 standby-unlock flow. Independent of
-	// intercom_to_door: the bell-overlay still resolves via the
-	// klingelnde Intercom, the standby button on the idle-screen
-	// resolves via the viewer's own configured default door.
-	// Example value: {"0c:ea:14:79:95:75": "<hub-uuid>"}.
-	KeyViewerToDoor = "viewer_to_door"
+	KeyUAAPIBaseURL   = "ua_api_base_url"
+	KeyUAAPIToken     = "ua_api_token"
+	KeyViewerPwPepper = "viewer_pw_pepper"
 )
 
 // Service combines the DB and the secrets service.

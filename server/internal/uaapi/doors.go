@@ -108,9 +108,9 @@ func (d Door) DisplayName() string {
 // ListDoors are propagated.
 //
 // No cache: typical UA installations have <10 doors and the
-// admin-side intercom-mapping flow already accepts a 200ms
-// extra latency for the live look-up. A cache can land in a
-// later season if a customer with 50+ doors complains.
+// mieter-unlock path already accepts a 200ms extra latency for
+// the live look-up. A cache can land in a later season if a
+// customer with 50+ doors complains.
 func (c *Client) LookupDoorForIntercom(ctx context.Context, intercomMAC string) (string, error) {
 	doors, err := c.ListDoors(ctx)
 	if err != nil {

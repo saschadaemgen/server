@@ -222,18 +222,10 @@ func (s *Server) routes() {
 	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
 
-	// Saison 13-05: Klingel-zu-Tuer Verknuepfung. Liest Intercoms
-	// und Doors aus der UA-API, speichert das Mapping in
-	// platform_config.intercom_to_door. Der mieter-seitige
-	// /einloggen/doors/{intercom-mac}/unlock-Pfad nutzt den selben
-	// Mapping zur Aufloesung.
-	s.mux.Handle("GET /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingGet)))
-	s.mux.Handle("POST /a/intercom-mapping", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomMappingPost)))
-
-	// Saison 13-07: kleiner JSON-Endpoint fuer das Custom-Dropdown
-	// in den Viewer-Modalen ("Verknuepfte Klingel"). Lebt unabhaengig
-	// von der intercom-mapping-Seite und ueberlebt deren Loeschung
-	// im S13-07-Aufraeum-Commit.
+	// Saison 13-07: JSON-Endpoint fuer das Custom-Dropdown in
+	// den Viewer-Modalen ("Verknuepfte Klingel"). Liefert die
+	// UA-API-Intercoms; die Tuer wird im Klingel-Moment
+	// automatisch via uaapi.LookupDoorForIntercom resolved.
 	s.mux.Handle("GET /a/intercoms.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomsJSON)))
 
 	// ESP-Discovery (Saison 13-02-FIX4-c). Oeffentliche Endpoints

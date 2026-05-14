@@ -1,9 +1,9 @@
-// Saison 13-05: minimal Devices-Subset of the UA-API. Used by the
-// admin /a/intercom-mapping page so the operator can pick a door
-// per intercom from a UA-supplied dropdown instead of typing
-// MACs and UUIDs by hand. Intercom selection by the mieter side
-// goes through ListIntercoms; mapping itself lives in
-// platform_config.intercom_to_door.
+// Saison 13-05: minimal Devices-Subset of the UA-API. Used by
+// the saison-13-07 viewer-modal "Verknuepfte Klingel"-Dropdown
+// (via /a/intercoms.json -> ListIntercoms) so the operator can
+// pair each viewer with one UA-Access intercom. The matching
+// door is then auto-resolved at unlock-time via Door.IntercomMAC
+// (extras.door_thumbnail), no explicit mapping needed.
 //
 // Endpoint per the official reference (section 7.1 / 7.2):
 //
