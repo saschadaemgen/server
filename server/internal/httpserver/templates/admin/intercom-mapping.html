@@ -150,13 +150,21 @@
       if (!saveBtn) return;
 
       saveBtn.addEventListener('click', function () {
-        var mapping = {};
+        var intercomMapping = {};
         document.querySelectorAll('.dropdown[data-mapping-key]').forEach(function (dd) {
           var key = dd.getAttribute('data-mapping-key');
           var sel = dd.querySelector('select[data-dropdown-target]');
           if (!key || !sel) return;
           var val = sel.value || '';
-          if (val) mapping[key] = val;
+          if (val) intercomMapping[key] = val;
+        });
+        var viewerMapping = {};
+        document.querySelectorAll('.dropdown[data-viewer-mapping-key]').forEach(function (dd) {
+          var key = dd.getAttribute('data-viewer-mapping-key');
+          var sel = dd.querySelector('select[data-dropdown-target]');
+          if (!key || !sel) return;
+          var val = sel.value || '';
+          if (val) viewerMapping[key] = val;
         });
         if (status) {
           status.textContent = 'Speichere...';
@@ -167,7 +175,10 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ mapping: mapping })
+          body: JSON.stringify({
+            intercom_mapping: intercomMapping,
+            viewer_mapping: viewerMapping
+          })
         })
           .then(function (r) {
             if (!r.ok) {
@@ -177,7 +188,9 @@
           })
           .then(function (j) {
             if (status) {
-              status.textContent = 'Gespeichert (' + j.count + ' Eintraege)';
+              var ic = (j.intercom_count != null) ? j.intercom_count : (j.count || 0);
+              var vc = (j.viewer_count != null) ? j.viewer_count : 0;
+              status.textContent = 'Gespeichert (' + ic + ' Klingeln, ' + vc + ' Viewer)';
               status.style.color = 'rgb(34, 197, 94)';
               setTimeout(function () {
                 status.textContent = '';

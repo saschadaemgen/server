@@ -12,7 +12,6 @@ package httpserver
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 )
 
 // adminIntercomMappingData is the page payload for
@@ -162,41 +161,71 @@ func (s *Server) handleAdminIntercomMappingGet(w http.ResponseWriter, r *http.Re
 	s.renderAdminPage(w, "intercom-mapping", data)
 }
 
-// handleAdminIntercomMappingPost stores the mapping. Body shape:
-// {"mapping": {"<intercom-mac>": "<door-uuid>", ...}}. Empty
-// values clear the entry; an empty map clears the whole mapping.
+// handleAdminIntercomMappingPost stores both mappings.
+//
+// Saison 13-05 body shape (still accepted as back-compat):
+//   {"mapping": {"<intercom-mac>": "<door-uuid>", ...}}
+//
+// Saison 13-06 body shape (preferred):
+//   {
+//     "intercom_mapping": {"<intercom-mac>": "<door-uuid>", ...},
+//     "viewer_mapping":   {"<viewer-mac>":  "<door-uuid>", ...}
+//   }
+//
+// Either or both maps may be omitted. Omitting a map leaves the
+// stored value untouched (per-section partial save); pass an
+// empty {} to clear that side explicitly.
 func (s *Server) handleAdminIntercomMappingPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Mapping map[string]string `json:"mapping"`
+		Mapping         map[string]string `json:"mapping"`
+		IntercomMapping map[string]string `json:"intercom_mapping"`
+		ViewerMapping   map[string]string `json:"viewer_mapping"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	// SetIntercomToDoor already trims + lowercases keys and drops
-	// empty values; pass-through is fine. Defensive copy below
-	// just guards against nil so the saved JSON is "{}" instead
-	// of "null" which would round-trip differently.
-	mapping := body.Mapping
-	if mapping == nil {
-		mapping = map[string]string{}
+
+	// Back-compat: legacy "mapping" key is the intercom mapping.
+	intercom := body.IntercomMapping
+	if intercom == nil {
+		intercom = body.Mapping
 	}
-	if err := s.platformCfg.SetIntercomToDoor(r.Context(), mapping); err != nil {
-		s.log.Error("intercom-mapping save", "err", err)
-		http.Error(w, "save failed", http.StatusInternalServerError)
-		return
+
+	intercomTouched := body.IntercomMapping != nil || body.Mapping != nil
+	viewerTouched := body.ViewerMapping != nil
+
+	if intercomTouched {
+		if intercom == nil {
+			intercom = map[string]string{}
+		}
+		if err := s.platformCfg.SetIntercomToDoor(r.Context(), intercom); err != nil {
+			s.log.Error("intercom-mapping save", "err", err)
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
 	}
-	// Logging without the full map - just the count + a single
-	// representative key so the audit trail isn't a mac dump.
-	first := ""
-	for k := range mapping {
-		first = k
-		break
+	if viewerTouched {
+		if err := s.platformCfg.SetViewerToDoor(r.Context(), body.ViewerMapping); err != nil {
+			s.log.Error("viewer-mapping save", "err", err)
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
 	}
-	s.log.Info("intercom mapping saved",
-		"count", len(mapping),
-		"first_intercom", strings.ToLower(first),
+
+	intercomCount := len(intercom)
+	viewerCount := len(body.ViewerMapping)
+	s.log.Info("admin mapping saved",
+		"intercom_count", intercomCount,
+		"intercom_touched", intercomTouched,
+		"viewer_count", viewerCount,
+		"viewer_touched", viewerTouched,
 	)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "count": len(mapping)})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":             true,
+		"count":          intercomCount, // back-compat for saison-13-05 JS
+		"intercom_count": intercomCount,
+		"viewer_count":   viewerCount,
+	})
 }
