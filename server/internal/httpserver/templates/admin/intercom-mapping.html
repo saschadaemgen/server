@@ -95,6 +95,51 @@
         </p>
       {{end}}
     {{end}}
+
+    {{if .Page.Viewers}}
+      <section class="app-card" style="margin-top: var(--space-6);">
+        <div class="app-card-head">
+          <h2 class="app-card-title">Viewer-Standby-Tuer</h2>
+        </div>
+        <div class="app-card-body" style="padding: 0 var(--space-4) var(--space-3); color: var(--color-text-tertiary); font-size: var(--fs-sm);">
+          Welche Tuer geht auf, wenn der Mieter im Standby (ohne aktive Klingel) auf den Schluessel-Knopf klickt? Unabhaengig vom Klingel-zu-Tuer-Mapping oben.
+        </div>
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>Viewer</th>
+              <th>Typ</th>
+              <th>MAC</th>
+              <th style="width: 45%;">Standby-Tuer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Page.Viewers}}
+              {{$current := index $.Page.ViewerMapping .MAC}}
+              <tr>
+                <td><strong>{{.Name}}</strong></td>
+                <td>{{.Type}}</td>
+                <td><code>{{.MAC}}</code></td>
+                <td>
+                  <div class="dropdown" data-dropdown
+                       data-dropdown-source="inline"
+                       data-dropdown-value="{{$current}}"
+                       data-dropdown-placeholder="-- keine Verknuepfung --"
+                       data-viewer-mapping-key="{{.MAC}}">
+                    <select name="viewer-mapping[{{.MAC}}]" data-dropdown-target>
+                      <option value="">-- keine Verknuepfung --</option>
+                      {{range $.Page.Doors}}
+                        <option value="{{.ID}}" {{if eq .ID $current}}selected{{end}}>{{.Name}}</option>
+                      {{end}}
+                    </select>
+                  </div>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </section>
+    {{end}}
   </main>
 
   <script src="/static/interactions.js"></script>

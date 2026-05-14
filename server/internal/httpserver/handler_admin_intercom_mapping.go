@@ -21,11 +21,20 @@ import (
 // banner in that case. CurrentMapping is keyed by intercom-mac in
 // lowercase colon form, matching what the dropdown options write
 // via data-dropdown-value.
+//
+// Saison 13-06: a second table "Viewer-Standby-Tuer" reads the
+// viewer rows from the local mockmanager (no UA-API call) and
+// the per-viewer default door from platformconfig.viewer_to_door.
+// The two tables are independent: an intercom can ring different
+// viewers, and each viewer can pick its own standby door
+// regardless of the intercom mapping.
 type adminIntercomMappingData struct {
 	User           adminUser
 	Intercoms      []intercomRow
 	Doors          []doorRow
 	CurrentMapping map[string]string
+	Viewers        []viewerMappingRow
+	ViewerMapping  map[string]string
 	APIConfigured  bool
 	APIError       string
 	Flash          string
@@ -46,6 +55,16 @@ type doorRow struct {
 	HubID string
 }
 
+// viewerMappingRow is the second-table source. Pulled from
+// mockmanager.ListViewers (local, no UA call). Type is "web"
+// or "esp" and matches the type-column on the admin
+// /a/web-viewers and /a/esp-viewers pages.
+type viewerMappingRow struct {
+	MAC  string
+	Name string
+	Type string
+}
+
 func (s *Server) handleAdminIntercomMappingGet(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := adminIntercomMappingData{
@@ -60,6 +79,32 @@ func (s *Server) handleAdminIntercomMappingGet(w http.ResponseWriter, r *http.Re
 		currentMapping = map[string]string{}
 	}
 	data.CurrentMapping = currentMapping
+
+	// Saison 13-06: Viewer-Standby-Mapping. Kommt aus
+	// platformconfig (gespeichert) plus mockmanager (Liste aller
+	// adoptierten Viewer). Beide Quellen sind lokal, kein UA-Call -
+	// die Tabelle rendert auch wenn UA offline ist.
+	viewerMapping, err := s.platformCfg.ViewerToDoor(r.Context())
+	if err != nil {
+		s.log.Warn("intercom-mapping: read viewer mapping", "err", err)
+	}
+	if viewerMapping == nil {
+		viewerMapping = map[string]string{}
+	}
+	data.ViewerMapping = viewerMapping
+	if s.mockMgr != nil {
+		viewers, err := s.mockMgr.ListViewers(r.Context())
+		if err != nil {
+			s.log.Warn("intercom-mapping: list viewers", "err", err)
+		}
+		for _, v := range viewers {
+			data.Viewers = append(data.Viewers, viewerMappingRow{
+				MAC:  v.MAC,
+				Name: v.Name,
+				Type: v.Type,
+			})
+		}
+	}
 
 	if s.ua == nil {
 		data.APIError = "UA-API nicht konfiguriert. Bitte zuerst unter Einstellungen Base-URL und Token eintragen."
