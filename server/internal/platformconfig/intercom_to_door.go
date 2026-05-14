@@ -45,3 +45,27 @@ func (s *Service) LookupDoorForIntercom(ctx context.Context, intercomMAC string)
 	}
 	return m[strings.ToLower(strings.TrimSpace(intercomMAC))], nil
 }
+
+// SetIntercomToDoor persists the full mapping under
+// KeyIntercomToDoor. Keys are normalised to lowercase + trimmed;
+// empty values are dropped so the saved JSON only carries active
+// entries. Pass an empty / nil map to clear the mapping.
+//
+// Saison 13-05: backs the admin /a/intercom-mapping page so the
+// operator no longer has to write the JSON via sqlite.
+func (s *Service) SetIntercomToDoor(ctx context.Context, mapping map[string]string) error {
+	cleaned := make(map[string]string, len(mapping))
+	for intercom, door := range mapping {
+		intercom = strings.ToLower(strings.TrimSpace(intercom))
+		door = strings.TrimSpace(door)
+		if intercom == "" || door == "" {
+			continue
+		}
+		cleaned[intercom] = door
+	}
+	encoded, err := json.Marshal(cleaned)
+	if err != nil {
+		return fmt.Errorf("platformconfig: intercom_to_door marshal: %w", err)
+	}
+	return s.Set(ctx, KeyIntercomToDoor, string(encoded))
+}

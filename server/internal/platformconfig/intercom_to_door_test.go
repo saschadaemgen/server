@@ -57,6 +57,47 @@ func TestIntercomToDoor_BadJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestSetIntercomToDoor_RoundTripWithLookup(t *testing.T) {
+	s := newTestServiceForMapping(t)
+	in := map[string]string{
+		"28:70:4E:31:E2:9C": "door-uuid-1",
+		"  0c:ea:14:11:11:11 ": "door-uuid-2",
+		"":            "ignored",
+		"badkey":      "",
+	}
+	if err := s.SetIntercomToDoor(context.Background(), in); err != nil {
+		t.Fatalf("SetIntercomToDoor: %v", err)
+	}
+	got, err := s.IntercomToDoor(context.Background())
+	if err != nil {
+		t.Fatalf("IntercomToDoor: %v", err)
+	}
+	if got["28:70:4e:31:e2:9c"] != "door-uuid-1" {
+		t.Errorf("normalized key roundtrip failed: %+v", got)
+	}
+	if got["0c:ea:14:11:11:11"] != "door-uuid-2" {
+		t.Errorf("trimmed key roundtrip failed: %+v", got)
+	}
+	if _, exists := got[""]; exists {
+		t.Error("empty key survived save")
+	}
+	if _, exists := got["badkey"]; exists {
+		t.Error("empty value survived save")
+	}
+}
+
+func TestSetIntercomToDoor_EmptyClearsMapping(t *testing.T) {
+	s := newTestServiceForMapping(t)
+	_ = s.Set(context.Background(), KeyIntercomToDoor, `{"28:70:4e:31:e2:9c":"old"}`)
+	if err := s.SetIntercomToDoor(context.Background(), nil); err != nil {
+		t.Fatalf("SetIntercomToDoor(nil): %v", err)
+	}
+	got, _ := s.IntercomToDoor(context.Background())
+	if len(got) != 0 {
+		t.Errorf("expected empty mapping, got %+v", got)
+	}
+}
+
 func TestLookupDoorForIntercom_CaseInsensitive(t *testing.T) {
 	s := newTestServiceForMapping(t)
 	_ = s.Set(context.Background(), KeyIntercomToDoor,
