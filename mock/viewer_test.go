@@ -178,3 +178,17 @@ func TestGenerateJWT_PropagatesValidateError(t *testing.T) {
 		t.Fatal("GenerateJWT with invalid config returned nil error")
 	}
 }
+
+// Saison 13-04.5-B: RejectDoorbell returns ErrRejectNotReady when
+// stage 6 has not wired the publisher yet (Viewer.New / pre-Run
+// state). Live integration is covered by the mockmanager bridge
+// tests on the server side.
+func TestRejectDoorbell_NotReadyBeforeRun(t *testing.T) {
+	v, err := New(validConfig(t), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := v.RejectDoorbell("28704e31e29c"); err != ErrRejectNotReady {
+		t.Errorf("err = %v, want ErrRejectNotReady", err)
+	}
+}

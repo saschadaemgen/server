@@ -125,6 +125,13 @@ type Viewer struct {
 	events  chan DoorbellEvent
 	cancels chan DoorbellCancelEvent
 
+	// rejectMu guards rejectPublisher across the goroutine that
+	// writes it (runStages56) and the goroutines that read it
+	// (RejectDoorbell). Plain sync.Mutex; the read path is cold
+	// enough that an RWMutex would be overkill.
+	rejectMu        sync.Mutex
+	rejectPublisher *outgoing.CallAdminResultPublisher
+
 	startOnce sync.Once
 	startErr  error
 }
@@ -298,9 +305,53 @@ func (v *Viewer) runStages56(
 	adoptSrv.SetUnlocker(relay)
 	v.log.Info("unlock relay wired", "udm", bundle.ControllerID)
 
+	// Saison 13-04.5-B: /call_admin_result publisher for the
+	// "Ignorieren" / "Anruf beenden" buttons in the mieter UI.
+	// Stash on the Viewer so RejectDoorbell can find it; cleared
+	// when stage 6 returns (Run drops the reference).
+	rejectPub := outgoing.NewCallAdminResultPublisher(mqttClient, bundle.ControllerID, lg)
+	v.rejectMu.Lock()
+	v.rejectPublisher = rejectPub
+	v.rejectMu.Unlock()
+	defer func() {
+		v.rejectMu.Lock()
+		v.rejectPublisher = nil
+		v.rejectMu.Unlock()
+	}()
+	v.log.Info("call_admin_result publisher wired", "udm", bundle.ControllerID)
+
 	v.log.Info("starting stage 6 mqtt client")
 	errCh <- mqttClient.Run(ctx)
 }
+
+// RejectDoorbell publishes a /call_admin_result RPC to UDM
+// signalling the doorbell call from intercomMAC has been
+// rejected/ended by this viewer. UDM then broadcasts
+// /cancel_doorbell_notification to silence the intercom and close
+// the call UI on every other receiver - including the hardware
+// UA Intercom Viewer if one is sharing the same doorbell route.
+//
+// Returns ErrRejectNotReady if the MQTT stage has not been
+// brought up yet (pre-adoption or post-shutdown). Otherwise
+// returns the encoder/publish error chain unchanged.
+func (v *Viewer) RejectDoorbell(intercomMAC string) error {
+	v.rejectMu.Lock()
+	pub := v.rejectPublisher
+	v.rejectMu.Unlock()
+	if pub == nil {
+		return ErrRejectNotReady
+	}
+	if _, err := pub.PublishReject(intercomMAC); err != nil {
+		return fmt.Errorf("mock: reject doorbell: %w", err)
+	}
+	return nil
+}
+
+// ErrRejectNotReady is returned by RejectDoorbell when stage 6 has
+// not started yet (the MQTT publisher is not wired) or has already
+// stopped. Callers can treat it as a transient skip; the doorbell
+// will time out on UDM's own clock.
+var ErrRejectNotReady = errors.New("mock: reject publisher not ready")
 
 // publishDoorbell pushes a DoorbellEvent on the events channel,
 // dropping with a warn if the consumer is too slow. Called from
