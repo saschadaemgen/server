@@ -426,6 +426,142 @@ func TestAddViewer_PersistsPairedIntercomMAC(t *testing.T) {
 	}
 }
 
+// ---------- Hybrid web+esp goroutine spawn (saison-13-09) ----------
+
+// espSpec helpers an ESP-Spec with a token-hash placeholder so the
+// row passes the discovery + AddViewer pipeline shape.
+func espSpec(mac string, port uint16) ViewerSpec {
+	return ViewerSpec{
+		MAC:          mac,
+		Name:         "esp-" + mac,
+		ServicePort:  port,
+		Type:         TypeESP,
+		ESPTokenHash: "deadbeefdeadbeefdeadbeefdeadbeef" +
+			"deadbeefdeadbeefdeadbeefdeadbeef",
+	}
+}
+
+func TestAddViewer_TypeESP_SpawnsGoroutine(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	spec := espSpec("0c:ea:14:aa:bb:cc", 8200)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if got := factory.starts.Load(); got != 1 {
+		t.Fatalf("factory.starts = %d, want 1 (S13-09 hybrid spawn)", got)
+	}
+	v := factory.viewer(spec.MAC)
+	if v == nil {
+		t.Fatal("factory did not record an ESP viewer")
+	}
+	for i := 0; i < 100 && v.runs.Load() != 1; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if v.runs.Load() != 1 {
+		t.Errorf("ESP viewer Run not invoked within 500ms")
+	}
+}
+
+func TestRemoveViewer_TypeESP_StopsGoroutine(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	spec := espSpec("0c:ea:14:aa:bb:cc", 8200)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	v := factory.viewer(spec.MAC)
+	for i := 0; i < 100 && v.runs.Load() != 1; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := mgr.RemoveViewer(ctx, spec.MAC); err != nil {
+		t.Fatalf("RemoveViewer: %v", err)
+	}
+	select {
+	case <-v.stopped:
+	case <-time.After(2 * time.Second):
+		t.Errorf("ESP viewer Run did not stop after RemoveViewer")
+	}
+}
+
+func TestSetESPTokenHash_KeepsGoroutineRunning(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	spec := espSpec("0c:ea:14:aa:bb:cc", 8200)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	v := factory.viewer(spec.MAC)
+	for i := 0; i < 100 && v.runs.Load() != 1; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Token rotation: the admin "Token erneuern"-Button or the
+	// /esp/discover/status handoff path. The viewer goroutine
+	// MUST keep running - rotating only the DB-persisted hash
+	// must not cancel the live UDM-Mock.
+	const newHash = "0123456789abcdef0123456789abcdef" +
+		"0123456789abcdef0123456789abcdef"
+	if err := mgr.SetESPTokenHash(context.Background(), spec.MAC, newHash); err != nil {
+		t.Fatalf("SetESPTokenHash: %v", err)
+	}
+
+	// Goroutine still running.
+	if v.runs.Load() != 1 {
+		t.Errorf("Run-count = %d after token rotation, want 1 still", v.runs.Load())
+	}
+	select {
+	case <-v.stopped:
+		t.Fatal("viewer.stopped fired - goroutine was killed by token rotation")
+	default:
+	}
+
+	// And the new hash actually landed in the DB.
+	got, err := mgr.LookupESPTokenHash(context.Background(), spec.MAC)
+	if err != nil {
+		t.Fatalf("LookupESPTokenHash: %v", err)
+	}
+	if got != newHash {
+		t.Errorf("stored hash = %q, want %q", got, newHash)
+	}
+}
+
+func TestLoadFromDB_StartsBothWebAndESPViewers(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	now := mgr.opts.Now().UnixMilli()
+	rows := []struct {
+		mac, kind string
+		port      int64
+	}{
+		{"0c:ea:14:42:42:42", "web", 8080},
+		{"0c:ea:14:aa:bb:cc", "esp", 8200},
+	}
+	for _, r := range rows {
+		if _, err := mgr.db.Exec(
+			`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			r.mac, "viewer-"+r.mac, r.port, r.kind, now, now,
+		); err != nil {
+			t.Fatalf("seed %s: %v", r.kind, err)
+		}
+	}
+	if err := mgr.LoadFromDB(context.Background()); err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	if got := factory.starts.Load(); got != 2 {
+		t.Fatalf("factory.starts = %d, want 2 (web + esp)", got)
+	}
+	infos, _ := mgr.ListViewers(context.Background())
+	if len(infos) != 2 {
+		t.Errorf("ListViewers len = %d, want 2", len(infos))
+	}
+	// And each one shows Running=true (came from the in-memory map).
+	for _, info := range infos {
+		if !info.Running {
+			t.Errorf("viewer %s (%s) Running=false, want true", info.MAC, info.Type)
+		}
+	}
+}
+
 func TestShutdown_StopsAllViewers(t *testing.T) {
 	mgr, factory := newTestManager(t)
 	for _, s := range []ViewerSpec{
