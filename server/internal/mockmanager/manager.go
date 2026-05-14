@@ -255,9 +255,10 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 			return ErrNameInUse
 		}
 	}
-	// In-Memory hat nur die laufenden web-type-Viewer. ESP-Eintraege
-	// und vor LoadFromDB persistierte Reihen muessen direkt aus der
-	// DB geprueft werden.
+	// In-Memory hat seit S13-09 die laufenden web- UND esp-type-
+	// Viewer. Vor LoadFromDB persistierte Reihen muessen trotzdem
+	// direkt aus der DB geprueft werden (weil der Map vor dem
+	// Boot-Reload leer ist).
 	if exists, err := m.nameExistsLocked(ctx, specKey, spec.MAC); err != nil {
 		return err
 	} else if exists {
@@ -268,7 +269,15 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 		return err
 	}
 
-	if spec.Type == TypeWeb {
+	// Saison 13-09: spawn the mock-goroutine for both web- and
+	// esp-type viewers. The type distinction matters for the
+	// browser-vs-bearer auth surface (web has cookie sessions
+	// from /einloggen, esp has bearer tokens at /esp/), but on
+	// the UDM-facing side both run the same Stage 1+4+5+6 stack
+	// so that the ESP-Hardware can subscribe to /esp/events and
+	// receive doorbell.ring frames the same way the web-Mieter
+	// does on /einloggen/events.
+	if spec.Type == TypeWeb || spec.Type == TypeESP {
 		if err := m.startViewerLocked(spec); err != nil {
 			// Best-effort rollback: drop the row so the next call
 			// is not blocked by a phantom entry.

@@ -450,9 +450,26 @@ func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
 	if got.CancelReason != "rejected" {
 		t.Errorf("CancelReason = %q, want rejected", got.CancelReason)
 	}
-	// notifyUDMReject silently logs when the viewer goroutine is
-	// not running (ESP-type rows don't spawn one in S13-08; that
-	// flips on once the hybrid mock+esp scenario lands in S14+).
+	// Saison 13-09: ESP-type viewers spawn the same Mock-Goroutine
+	// stack as web-type viewers, so notifyUDMReject reaches the
+	// running viewer's RejectDoorbell hook and the test fake
+	// captures it. Pre-S13-09 this assertion would have been
+	// impossible because the goroutine never started.
+	v, err := env.mockMgr.LookupForReject(espTestMAC)
+	if err != nil {
+		t.Fatalf("LookupForReject: %v", err)
+	}
+	nv := v.(*noopViewer)
+	nv.rejectMu.Lock()
+	defer nv.rejectMu.Unlock()
+	if len(nv.rejectCalls) != 1 {
+		t.Fatalf("RejectDoorbell calls = %d, want 1 (S13-09 hybrid spawn)",
+			len(nv.rejectCalls))
+	}
+	if nv.rejectCalls[0].IntercomMAC != intercomMAC {
+		t.Errorf("intercom = %q, want %q",
+			nv.rejectCalls[0].IntercomMAC, intercomMAC)
+	}
 }
 
 func TestESPReject_StaleCallReturnsOK(t *testing.T) {
