@@ -56,6 +56,9 @@ type Viewer interface {
 	Events() <-chan mock.DoorbellEvent
 	Cancels() <-chan mock.DoorbellCancelEvent
 	MAC() string
+	// RejectDoorbell publishes a /call_admin_result RPC to UDM so
+	// the intercom stops ringing immediately. Saison 13-04.5-B.
+	RejectDoorbell(intercomMAC string) error
 }
 
 // ViewerFactory constructs a Viewer for the given config.
@@ -332,6 +335,26 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 		entry.spec.Name = newName
 	}
 	return nil
+}
+
+// RejectDoorbellOnMock looks up the running viewer by mock-MAC and
+// asks it to publish a /call_admin_result RPC that ends the active
+// doorbell call from intercomMAC. Returns ErrViewerNotFound if the
+// MAC is not currently running; callers are expected to log + drop
+// (the lifecycle row was already updated in doorbellcalls before
+// this gets called).
+//
+// Saison 13-04.5-B: lets the mieter "Ignorieren" / "Anruf beenden"
+// endpoints silence the intercom hardware immediately instead of
+// waiting for the 30-second UDM-side timeout.
+func (m *Manager) RejectDoorbellOnMock(mac, intercomMAC string) error {
+	m.mu.Lock()
+	entry, ok := m.viewers[mac]
+	m.mu.Unlock()
+	if !ok {
+		return ErrViewerNotFound
+	}
+	return entry.viewer.RejectDoorbell(intercomMAC)
 }
 
 // SetPasswordHash stores the Argon2id PHC string and stamps

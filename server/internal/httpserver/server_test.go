@@ -373,6 +373,17 @@ type noopViewer struct {
 	cancels chan mock.DoorbellCancelEvent
 	done    chan struct{}
 	once    sync.Once
+
+	// rejectMu guards the test-recorded reject calls so the
+	// mieter-endpoint tests can assert that /einloggen/reject
+	// reached the right viewer with the right intercom MAC.
+	rejectMu      sync.Mutex
+	rejectCalls   []rejectCall
+	rejectErr     error
+}
+
+type rejectCall struct {
+	IntercomMAC string
 }
 
 func (v *noopViewer) Run(ctx context.Context) error {
@@ -383,6 +394,12 @@ func (v *noopViewer) Run(ctx context.Context) error {
 func (v *noopViewer) Events() <-chan mock.DoorbellEvent        { return v.events }
 func (v *noopViewer) Cancels() <-chan mock.DoorbellCancelEvent { return v.cancels }
 func (v *noopViewer) MAC() string                              { return v.mac }
+func (v *noopViewer) RejectDoorbell(intercomMAC string) error {
+	v.rejectMu.Lock()
+	defer v.rejectMu.Unlock()
+	v.rejectCalls = append(v.rejectCalls, rejectCall{IntercomMAC: intercomMAC})
+	return v.rejectErr
+}
 
 func readBody(t *testing.T, resp *http.Response) string {
 	t.Helper()
