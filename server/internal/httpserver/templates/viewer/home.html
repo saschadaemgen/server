@@ -113,6 +113,7 @@
         var raw = data.raw || {};
         var eventID = raw.cancel_token || raw.request_id || '';
         var intercomMAC = raw.device_id || data.door || '';
+        if (window.console) console.log('[unifix] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
         enableRingButtons(eventID, intercomMAC);
         if (window.unifix && unifix.openOverlay) {
           unifix.openOverlay('ringing');
@@ -121,10 +122,14 @@
         }
       });
       es.addEventListener('doorbell_cancel', function () {
+        if (window.console) console.log('[unifix] doorbell_cancel');
         closeRing();
       });
       es.addEventListener('history_update', function () {
         location.reload();
+      });
+      es.addEventListener('error', function () {
+        if (window.console) console.warn('[unifix] sse error (browser will reconnect)');
       });
 
       function jsonPost(url, body) {
@@ -145,6 +150,7 @@
         var action = btn.dataset.action;
         var eventID = btn.dataset.eventId || '';
         var intercomMAC = btn.dataset.intercomMac || '';
+        if (window.console) console.log('[unifix] ring-btn click', { action: action, eventID: eventID, intercomMAC: intercomMAC });
 
         if (action === 'ignore-call') {
           if (eventID) {
