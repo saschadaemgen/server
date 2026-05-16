@@ -1,8 +1,8 @@
 # unifix Architecture
 
-**Status:** Saison 14-01 abgeschlossen 16. Mai 2026 (Stream-Backend
-go2rtc produktiv, Mieter- + ESP-Live-MJPEG, Admin-Profile-CRUD).
-Vorheriger Stand: S13 (Auto-Door-Resolution + ESP-API Phase A).
+**Status:** Saison 14-01b abgeschlossen 16. Mai 2026 (Idle-View-
+Modus mit Bildschirmschoner, open-meteo-Wetter, Mieter-Settings).
+Vorheriger Stand: S14-01 (Stream-Backend go2rtc).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -313,6 +313,22 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint.
               - WebRTC-Signaling (S14-02 oder spaeter)
               - Original-UA-Stream-Pfad (Premium, S20+)
 
+   S14-01b: Idle-View-Modus mit Bildschirmschoner.
+            ABGESCHLOSSEN 16. Mai 2026. Migration 013 fuegt
+            viewers.idle_view_mode (NULL/'screensaver'/
+            'livestream') hinzu plus station_lat/lon-Defaults
+            in platform_config. Neues Paket internal/weather
+            mit open-meteo-Client, 15-Min-Cache und
+            24h-Stale-Serving. Mieter-Routes /einloggen/settings
+            (idle-Default persistieren), /einloggen/weather
+            (JSON fuer idle.js). Admin bekommt einen
+            "Standort"-Block in /a/settings plus /a/weather
+            als Preview. Mieter-home.html ist auf das
+            screensaver/livestream-Container-Layout umgebaut;
+            idle.js tickt die Uhr, refresht Wetter und
+            toggelt per Tap. /esp/config bekommt
+            idle_view_mode + weather als optionale Felder.
+
    S14-02:  Webhook-Endpoint.
             POST /webhook/access fuer access.doorbell.* und
             access.door.unlock-Events. Schreibt in die in
@@ -395,12 +411,13 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
                 gibt einen Fehler zurueck, Server startet nicht.
 ```
 
-### 9.3 Tabellen-Inventar (Stand Migration 012)
+### 9.3 Tabellen-Inventar (Stand Migration 013)
 
 ```
 schema_version       Migrations-Tracking. PK version, applied_at.
-                     Aktueller MAX(version) = 12 (Saison 14-01:
-                     viewers.stream_profile hinzu).
+                     Aktueller MAX(version) = 13 (Saison 14-01b:
+                     viewers.idle_view_mode +
+                     platform_config.station_lat/lon).
                      Migration 001.
 
 magic_link_tokens    Magic-Link-Auth-Tokens.
@@ -934,3 +951,120 @@ Die `streams.Client`-Instanz wird in `main.go` einmalig beim Boot
 gebaut. Hot-Reload bei Env-Var-Aenderung gibt es bewusst nicht;
 Operator startet `unifix-server` neu wenn er die go2rtc-Adresse
 aendert (Production: `systemctl restart unifix-server`).
+
+## 15. Idle-View-Modus + Wetter-Backend (Saison 14-01b)
+
+Der Mieter waehlt seinen Default-Idle-Modus zwischen
+Bildschirmschoner (Uhrzeit + Datum + Wetter) und Live-Ansicht
+(direkter MJPEG-Stream). Tap auf den Container toggelt
+temporaer; Reload kehrt zum User-Default zurueck.
+
+### 15.1 Container-Architektur
+
+```
+GET /einloggen/                    (requireSession)
+  -> handler_home.handleHome
+     -> mockmanager.GetViewerInfo(mac)
+     -> info.ResolveIdleViewMode()      ("screensaver"|"livestream")
+     -> server.fetchHomeWeather(r)      (*weather.Snapshot or nil)
+     -> renderViewer("home", viewerHomeData{...})
+
+home.html rendert:
+  <div id="idle-container" data-default-mode="{{.IdleViewMode}}">
+     <div id="screensaver" class="idle-view ...">    clock+date+weather
+     <div id="livestream" class="idle-view ...">     <img src="..stream..">
+  </div>
+  {{template "intercom-ringing.html" .}}             klingel-overlay
+```
+
+Initial-Sichtbarkeit kommt vom Server: `idle-hidden`-Klasse haengt
+am Container der NICHT dem Default-Mode entspricht, damit kein
+Flash beim Render. Browser-Side macht `idle.js` Clock-Tick,
+Weather-Refresh und Tap-Toggle.
+
+### 15.2 Open-Meteo-Backend
+
+```
+internal/weather/openmeteo.go   Client mit Get(ctx, lat, lon)
+internal/weather/cache.go        15-Min-Fresh + 24h-Stale-Serving
+internal/weather/wmo_codes.go    WMO-Code -> Lucide-Icon + Beschreibung
+
+API:   https://api.open-meteo.com/v1/forecast
+         ?latitude=<lat>&longitude=<lon>
+         &current=temperature_2m,weather_code
+         &timezone=Europe/Berlin
+
+Auth:  keine (kein API-Key, kein Rate-Limit)
+```
+
+Cache-Verhalten:
+
+- `Get` -> `fresh()`: wenn juenger als 15 Min, sofort zurueck.
+- Sonst Live-Call. Erfolg -> in Cache schreiben + zurueck.
+- Live-Call-Fehler -> `stale()`: wenn juenger als 24h, stale
+  Snapshot zurueck (Browser merkt nichts).
+- Sonst `ErrUnavailable`. Mieter-UI blendet den Wetter-Bereich
+  aus, ESP-Config laesst das `weather`-Feld weg.
+
+Eine Anlage = ein Standort = ein Cache-Slot. Mehrere Mieter
+desselben Mock-Viewers teilen sich den gecachten Wert.
+
+### 15.3 Standort-Konfiguration
+
+```
+platform_config:
+   station_lat   "51.6144"    Default Recklinghausen (Migration 013)
+   station_lon   "7.1959"     Default Recklinghausen (Migration 013)
+
+Admin-UI:        /a/settings, Section "Standort fuer Wetter-Anzeige"
+Validierung:     Float-Parse plus Range-Check (lat in [-90,90],
+                 lon in [-180,180]). Komma wird zu Punkt
+                 normalisiert.
+Wirkung:         beim naechsten 15-Min-Cache-Tick (existing
+                 entry bleibt bis dahin gueltig).
+Preview:         /a/weather liefert das aktuelle JSON live.
+```
+
+### 15.4 Mieter-Routen
+
+```
+GET  /einloggen/settings     Settings-Form (radio idle_view_mode +
+                              Logout-Knopf)
+POST /einloggen/settings     mockmanager.SetIdleViewMode +
+                              Redirect /einloggen/
+GET  /einloggen/weather      JSON-Snapshot fuer idle.js-Refresh
+GET  /einloggen/             Home-Page mit idle-container
+```
+
+Settings-Link rendert als kleines Zahnrad-Icon oben rechts in der
+home-Page (z-index 50, blur-Backdrop).
+
+### 15.5 ESP-Integration
+
+Der `/esp/config`-Response bekommt zwei neue Felder:
+
+```json
+{
+  "idle_view_mode": "screensaver",
+  "weather": {
+    "temp_c": 11.4,
+    "weather_code": 3,
+    "description": "Bewoelkt",
+    "icon": "cloud",
+    "fetched_at": "2026-05-16T13:42:18Z"
+  }
+}
+```
+
+`weather` ist `omitempty`: wenn der open-meteo-Cache leer und
+das Backend nicht erreichbar ist, fehlt das Feld komplett. ESP-
+Saison-3 entscheidet selbst ob er den Snapshot aus `/esp/config`
+verwendet oder eigene Polls macht.
+
+### 15.6 Konfigurations-Vertrag
+
+Keine neuen Env-Vars. `weather.Client` wird unbedingt in
+`main.go` instanziiert; bei Internet-Outage liefert das Backend
+einfach `ErrUnavailable` und die UI degradiert sauber. Operator
+muss nichts setzen, kein API-Key, keine Konfiguration ausserhalb
+des Admin-UI.
