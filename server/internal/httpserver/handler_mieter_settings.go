@@ -1,20 +1,33 @@
 // Saison 14-01b: tenant-facing settings page.
 // Saison 14-02 renamed the URL tree from /einloggen/* to
-// /webviewer/*; the handler and form are unchanged.
+// /webviewer/*.
+// Saison 14-03 extends POST with the auto-screensaver field
+// and switches the success path to JSON when the request asks
+// for it (the inline-settings mode in the home page consumes
+// JSON; the stand-alone /webviewer/settings page keeps the
+// 303 redirect).
 //
 // Routes:
-//   GET  /webviewer/settings    HTML form with idle-view-mode +
-//                               info section + logout link
-//   POST /webviewer/settings    persist idle_view_mode, redirect
-//                               back to /webviewer/
+//
+//	GET  /webviewer/settings    HTML form with idle-view-mode +
+//	                            auto-screensaver + info + logout
+//	POST /webviewer/settings    persist idle_view_mode +
+//	                            auto_screensaver_seconds; on
+//	                            Accept: application/json returns
+//	                            {"ok":true,"idle_view_mode":...,
+//	                             "auto_screensaver_seconds":...},
+//	                            otherwise 303 to /webviewer/
 //
 // Auth: requireSession (cookie-based). The viewer MAC comes from
 // the context value the middleware sets.
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"unifix.local/server/internal/mockmanager"
@@ -22,10 +35,11 @@ import (
 
 // mieterSettingsData is the payload for templates/viewer/settings.html.
 type mieterSettingsData struct {
-	UnitName     string
-	IdleViewMode string // "screensaver" or "livestream"
-	Flash        string
-	FlashType    string
+	UnitName               string
+	IdleViewMode           string // "screensaver" or "livestream"
+	AutoScreensaverSeconds int    // 0 = off, otherwise one of AutoScreensaverSecondsAllowed
+	Flash                  string
+	FlashType              string
 }
 
 func (s *Server) handleMieterSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +65,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+
 	mode := strings.TrimSpace(r.PostForm.Get("idle_view_mode"))
 	switch mode {
 	case "", mockmanager.IdleViewModeScreensaver, mockmanager.IdleViewModeLivestream:
@@ -58,13 +73,65 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		http.Error(w, "idle_view_mode muss 'screensaver' oder 'livestream' sein", http.StatusBadRequest)
 		return
 	}
+
+	// Saison 14-03: auto-screensaver. Empty / missing form field
+	// keeps the previous value untouched; a present field always
+	// overwrites (and 0 disables the timer).
+	var autoSecondsApplied *int
+	if raw, present := r.PostForm["auto_screensaver"]; present && len(raw) > 0 {
+		val, perr := strconv.Atoi(strings.TrimSpace(raw[0]))
+		if perr != nil {
+			http.Error(w, "auto_screensaver muss eine ganze Zahl sein", http.StatusBadRequest)
+			return
+		}
+		allowed := false
+		for _, v := range mockmanager.AutoScreensaverSecondsAllowed {
+			if v == val {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w,
+				fmt.Sprintf("auto_screensaver muss einer von %v sein",
+					mockmanager.AutoScreensaverSecondsAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		autoSecondsApplied = &val
+	}
+
 	if err := s.mockMgr.SetIdleViewMode(r.Context(), mac, mode); err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
-		s.log.Error("mieter settings save", "err", err, "mac_prefix", safePrefix(mac))
+		s.log.Error("mieter settings save idle", "err", err, "mac_prefix", safePrefix(mac))
 		http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	if autoSecondsApplied != nil {
+		if err := s.mockMgr.SetAutoScreensaverSeconds(r.Context(), mac, *autoSecondsApplied); err != nil {
+			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+				return
+			}
+			s.log.Error("mieter settings save auto", "err", err, "mac_prefix", safePrefix(mac))
+			http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if wantsJSON(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		out := map[string]any{
+			"ok":             true,
+			"idle_view_mode": mode,
+		}
+		if autoSecondsApplied != nil {
+			out["auto_screensaver_seconds"] = *autoSecondsApplied
+		}
+		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
 	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
@@ -77,7 +144,8 @@ func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, e
 		return mieterSettingsData{}, err
 	}
 	return mieterSettingsData{
-		UnitName:     info.Name,
-		IdleViewMode: info.ResolveIdleViewMode(),
+		UnitName:               info.Name,
+		IdleViewMode:           info.ResolveIdleViewMode(),
+		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
 	}, nil
 }
