@@ -31,6 +31,7 @@ import (
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
+	"unifix.local/server/internal/streams"
 	"unifix.local/server/internal/uaapi"
 )
 
@@ -137,6 +138,24 @@ func main() {
 	// Liste.
 	userStore := ua.New(uaClient)
 
+	// Streams-Client zeigt auf das go2rtc-REST-API. Saison 14-01
+	// schaltet UNIFIX_STREAM_BACKEND_URL produktiv; ohne diese Var
+	// bleibt der Client nil und die /a/streams-Seite rendert den
+	// "go2rtc nicht konfiguriert"-Hinweis, ohne den Server am Start
+	// zu hindern.
+	var streamsClient *streams.Client
+	if cfg.StreamBackendURL != "" {
+		c, err := streams.New(cfg.StreamBackendURL)
+		if err != nil {
+			log.Error("streams client init failed", "err", err)
+			os.Exit(1)
+		}
+		streamsClient = c
+		log.Info("streams backend configured", "url", cfg.StreamBackendURL)
+	} else {
+		log.Warn("UNIFIX_STREAM_BACKEND_URL not set; /esp/stream.mjpeg and /einloggen/stream.mjpeg will return 503")
+	}
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
 		Sessions:       sessionSvc,
@@ -153,6 +172,7 @@ func main() {
 		History:        historyStore,
 		EventBus:       eventBus,
 		DoorbellCalls:  callsSvc,
+		Streams:        streamsClient,
 		Log:            log,
 	})
 	if err != nil {
