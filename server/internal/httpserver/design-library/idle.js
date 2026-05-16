@@ -1,17 +1,26 @@
-// Saison 14-03: mieter mode-switcher runtime.
+// Saison 14-03 + 14-03-FIX01: mieter mode-switcher runtime.
 //
-// The .stream slot in intercom-idle.html now hosts four
-// .mode-layer children:
+// The .stream slot in intercom-idle.html hosts four .mode-layer
+// children:
 //
 //   data-mode="screensaver" - clock + date + weather, default
 //   data-mode="livestream"  - MJPEG <img>
 //   data-mode="settings"    - inline form mirroring /webviewer/settings
 //   data-mode="history"     - inline list backed by /webviewer/history.json
 //
-// All four sit absolute inside #idle-container. Only one carries
-// .mode-active at a time; the others wait at translateY(100%)
-// below the visible slot. switchMode() applies the slide-up
-// transition (CSS in templates/viewer/home.html).
+// All four sit absolute inside #idle-container. Their visible
+// position comes from four modifier classes managed by setMode:
+//
+//   .below   parked under the slot   (translateY 100%)
+//   .above   parked over the slot    (translateY -100%)
+//   .active  showing                  (translateY 0)
+//   .hidden  removed from interaction (visibility hidden)
+//
+// On every transition setMode flips the source from .active to
+// .above (or .below for return-to-home) while flipping the target
+// from .below (or .above) to .active, both in the same frame.
+// Because each layer has its own transition on transform, the two
+// slide in parallel - the source pushes the target through.
 //
 // Trigger surface:
 //
@@ -123,38 +132,77 @@
   setInterval(refreshWeather, 15 * 60 * 1000);
 
   // -------------------------------------------------------------
-  // Mode switcher. switchMode applies .mode-active to the target
-  // layer and removes it from every other layer. CSS handles the
-  // slide-up transform; we just toggle the class.
-  var currentMode = defaultMode;
-  function switchMode(target) {
+  // Mode switcher (S14-03-FIX01 push animation). Both layers travel
+  // parallel via a CSS transition on transform: the source moves
+  // from .active to .above (or .below for the return path), and
+  // the target moves from .below (or .above) to .active in the
+  // same frame. After the 400ms transition we mark the now-hidden
+  // source with .hidden so it cannot intercept clicks.
+  //
+  // Direction rule: the screensaver is the conceptual "home" and
+  // sits above the parked modes. Returning to it slides DOWN
+  // (source leaves through the bottom, screensaver enters from
+  // above); opening anything else slides UP (source leaves
+  // through the top, target enters from below).
+  //
+  // An animation lock (`animating`) coalesces double-clicks so a
+  // second trigger before the transition finishes is dropped.
+  var activeMode = defaultMode;
+  var animating = false;
+  var ANIM_MS = 420; // 400ms transition + 20ms safety margin
+  function setMode(target) {
+    if (animating) return;
     if (!layers[target]) return;
-    if (target === currentMode) {
-      // Already on this mode; clicking the trigger again is a
-      // user-intent to leave, so flip back to default if we're
-      // looking at the settings or history mode.
+    if (target === activeMode) {
+      // Same-mode trigger: settings / history close back to the
+      // user's default; screensaver / livestream are toggled by
+      // the dedicated tap handler, so re-triggering them here is
+      // a no-op.
       if (target === 'settings' || target === 'history') {
         target = defaultMode;
+        if (target === activeMode) return;
       } else {
-        // Screensaver/livestream toggle stays on the explicit
-        // tap-toggle path; calling switchMode with the same id is
-        // a no-op here.
         return;
       }
     }
-    Object.keys(layers).forEach(function (name) {
-      if (name === target) {
-        layers[name].classList.add('mode-active');
-      } else {
-        layers[name].classList.remove('mode-active');
-      }
+    var currentEl = layers[activeMode];
+    var targetEl = layers[target];
+    if (!currentEl || !targetEl) return;
+    animating = true;
+
+    var isReturnToHome = (target === 'screensaver');
+
+    // Park the target on the opposite side of the slot and make it
+    // visible BEFORE the transition kicks in. The void offsetHeight
+    // expression forces the browser to flush the "parked" position
+    // so the next frame's class swap actually animates instead of
+    // teleporting.
+    targetEl.classList.remove('above', 'below', 'active', 'hidden');
+    targetEl.classList.add(isReturnToHome ? 'above' : 'below');
+    void targetEl.offsetHeight;
+
+    requestAnimationFrame(function () {
+      currentEl.classList.remove('active');
+      currentEl.classList.add(isReturnToHome ? 'below' : 'above');
+      targetEl.classList.remove('above', 'below');
+      targetEl.classList.add('active');
     });
-    currentMode = target;
+
+    // Kick off the history fetch in parallel with the slide so the
+    // payload is on its way before the layer is visible.
     if (target === 'history') {
       loadHistory();
     }
-    resetAutoTimer();
+
+    setTimeout(function () {
+      currentEl.classList.add('hidden');
+      activeMode = target;
+      animating = false;
+      resetAutoTimer();
+    }, ANIM_MS);
   }
+  // Back-compat alias: earlier S14-03 code called switchMode.
+  var switchMode = setMode;
 
   // -------------------------------------------------------------
   // Auto-screensaver timer. Resets on any interaction inside the
@@ -169,9 +217,9 @@
     }
     if (autoSeconds <= 0) return;
     if (defaultMode !== 'screensaver') return;
-    if (currentMode === 'screensaver') return;
+    if (activeMode === 'screensaver') return;
     autoTimerHandle = setTimeout(function () {
-      switchMode('screensaver');
+      setMode('screensaver');
     }, autoSeconds * 1000);
   }
 
@@ -188,10 +236,10 @@
       resetAutoTimer();
       return;
     }
-    if (currentMode === 'screensaver' && layers.livestream) {
-      switchMode('livestream');
-    } else if (currentMode === 'livestream' && layers.screensaver) {
-      switchMode('screensaver');
+    if (activeMode === 'screensaver' && layers.livestream) {
+      setMode('livestream');
+    } else if (activeMode === 'livestream' && layers.screensaver) {
+      setMode('screensaver');
     }
   });
 

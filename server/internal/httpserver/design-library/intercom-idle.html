@@ -80,13 +80,22 @@
 
     <!-- Stream slot: where the camera feed renders. Always-dark.
          Saison 14-03: four mode-layers stacked inside the existing
-         .stream slot. idle.js slides them up/down from below using
-         CSS transforms (400ms cubic-bezier). The .mode-active layer
-         sits at translateY(0); inactive layers wait at
-         translateY(100%) just below the visible area. No fullscreen
-         overlay, no body-level positioning - everything is scoped
-         to the slot so the topbar, action-bar, and bell-overlay
-         stay clickable. -->
+         .stream slot. idle.js slides them up/down using CSS
+         transforms (400ms cubic-bezier).
+         S14-03-FIX01: the four state-classes drive the push
+         animation. At any time exactly one layer is .active
+         (translateY 0); the others sit at .below
+         (translateY 100%) or .above (translateY -100%) plus
+         .hidden so they cannot intercept clicks. setMode flips
+         the source from .active to .above/.below and the target
+         from .below/.above to .active in the SAME frame, so both
+         layers travel parallel - one pushes the other out. The
+         direction is fixed: screensaver is always the home
+         "above" the parked modes; returning to it slides down,
+         opening anything else slides up. No fullscreen overlay,
+         no body-level positioning - everything is scoped to the
+         slot so the topbar, action-bar, and bell-overlay stay
+         clickable. -->
     <div class="stream" role="region" aria-label="Kamerastream {{.DoorName}}">
       <div id="idle-container"
            data-default-mode="{{.IdleViewMode}}"
@@ -94,7 +103,7 @@
 
         <!-- 1. Screensaver: clock + date + weather. Default unless
              the operator persisted livestream as their default. -->
-        <div class="mode-layer{{if ne .IdleViewMode "livestream"}} mode-active{{end}}" data-mode="screensaver">
+        <div class="mode-layer {{if eq .IdleViewMode "livestream"}}below hidden{{else}}active{{end}}" data-mode="screensaver">
           <div class="screensaver-clock">{{.Now}}</div>
           <div class="screensaver-date">{{.NowDate}}</div>
           {{if .Weather}}
@@ -116,7 +125,7 @@
              EMPTY at render-time; idle.js fills it from
              data-stream-src on DOMContentLoaded, so the multipart
              response never blocks page paint. -->
-        <div class="mode-layer{{if eq .IdleViewMode "livestream"}} mode-active{{end}}" data-mode="livestream">
+        <div class="mode-layer {{if eq .IdleViewMode "livestream"}}active{{else}}below hidden{{end}}" data-mode="livestream">
           <img alt="Live-Bild"
                class="mieter-stream-img"
                data-stream-src="/webviewer/stream.mjpeg"
@@ -128,7 +137,7 @@
              JS-off browsers; the inline form POSTs the same
              endpoint with Accept: application/json and patches
              the runtime without a reload. -->
-        <div class="mode-layer" data-mode="settings">
+        <div class="mode-layer below hidden" data-mode="settings">
           <form class="mode-settings" data-form="settings"
                 action="/webviewer/settings" method="post">
             <header class="mode-header">
@@ -168,7 +177,7 @@
              idle.js fetches /webviewer/history.json on first open
              and renders the list. Subsequent opens re-fetch so the
              list stays current without an SSE history-channel. -->
-        <div class="mode-layer" data-mode="history">
+        <div class="mode-layer below hidden" data-mode="history">
           <header class="mode-header">
             <h2>Verlauf</h2>
             <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>

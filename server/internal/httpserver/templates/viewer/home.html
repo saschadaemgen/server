@@ -30,14 +30,20 @@
       }
     }
 
-    /* Saison 14-01b-FIX01 + saison 14-03: idle-container lebt
-       INNERHALB des .stream-Slots aus intercom-idle.html. Keine
-       fixed/viewport-Regeln, nichts auf body oder html. Vier
-       .mode-layer-Geschwister sind absolut gestapelt; die aktive
-       Schicht traegt .mode-active und sitzt bei translateY(0),
-       die inaktiven warten bei translateY(100%) (unterhalb des
-       Slots) und schieben sich beim Umschalten ueber den 400ms
-       cubic-bezier nach oben. */
+    /* Saison 14-01b-FIX01 + saison 14-03 + 14-03-FIX01: idle-
+       container lebt INNERHALB des .stream-Slots aus
+       intercom-idle.html. Keine fixed/viewport-Regeln, nichts auf
+       body oder html. Vier .mode-layer-Geschwister sind absolut
+       gestapelt; ihre Position kommt aus den Modifier-Klassen:
+         .below   - geparkt unter dem Slot (translateY 100%)
+         .above   - geparkt ueber dem Slot (translateY -100%)
+         .active  - sichtbar (translateY 0)
+         .hidden  - visibility hidden + pointer-events none, damit
+                    geparkte Layer keine Klicks abfangen
+       Bei jedem Mode-Wechsel transitionieren BEIDE Layer parallel
+       (der Source verlaesst, der Target kommt rein) - das ergibt
+       die Push-Animation. Der Bildschirmschoner ist konzeptionell
+       das Zuhause "oben"; andere Modi sind unterhalb geparkt. */
     #idle-container {
       position: absolute;
       inset: 0;
@@ -54,13 +60,16 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      transform: translateY(100%);
-      transition: transform 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
-      background: var(--color-bg, #0b1220);
+      transition: transform 400ms cubic-bezier(0.22, 1, 0.36, 1);
+      background: var(--color-bg-stream-slot, #0a0e16);
       will-change: transform;
     }
-    .mode-layer.mode-active {
-      transform: translateY(0);
+    .mode-layer.below  { transform: translateY(100%); }
+    .mode-layer.above  { transform: translateY(-100%); }
+    .mode-layer.active { transform: translateY(0); }
+    .mode-layer.hidden {
+      visibility: hidden;
+      pointer-events: none;
     }
     .screensaver-clock {
       font-size: clamp(48px, 14vw, 120px);
