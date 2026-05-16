@@ -79,14 +79,14 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 // werden nur bei Type='esp' beachtet. Bei TypeWeb bleiben sie
 // leer.
 type ViewerSpec struct {
-	MAC               string
-	Name              string
-	ServicePort       uint16
-	Type              string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	LinkedUAUserID    string // optional UA-Access-User-Verknuepfung
-	ESPModel          string
-	ESPFwVersion      string
-	ESPTokenHash      string
+	MAC            string
+	Name           string
+	ServicePort    uint16
+	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	LinkedUAUserID string // optional UA-Access-User-Verknuepfung
+	ESPModel       string
+	ESPFwVersion   string
+	ESPTokenHash   string
 	// PairedIntercomMAC is the UA-API intercom this viewer is
 	// paired with for the standby "Tuer auf"-Knopf (saison-13-07).
 	// Empty string = no pairing, standby button is inert. Stored
@@ -105,25 +105,34 @@ type ViewerSpec struct {
 	// MJPEG img directly. Tap toggles temporarily, reload goes
 	// back to the persisted default.
 	IdleViewMode string
+	// AutoScreensaverSeconds enables the saison-14-03 auto-
+	// fallback timer: if the mieter has switched to livestream /
+	// settings / history mode and stays idle for this many
+	// seconds, the runtime slides back to the screensaver.
+	// nil = disabled. Only effective when IdleViewMode is
+	// "screensaver" (otherwise there is nothing to fall back
+	// to). Stored as INTEGER NULL in the DB.
+	AutoScreensaverSeconds *int
 }
 
 // ViewerInfo is the public view of one running viewer for the
 // admin UI.
 type ViewerInfo struct {
-	MAC               string
-	Name              string
-	ServicePort       uint16
-	Type              string
-	HasPassword       bool
-	PasswordSetAt     *time.Time
-	LinkedUAUserID    string
-	ESPModel          string
-	ESPFwVersion      string
-	HasESPToken       bool
-	Running           bool
-	PairedIntercomMAC string // saison-13-07 standby pairing
-	StreamProfile     string // saison-14-01 go2rtc profile override
-	IdleViewMode      string // saison-14-01b "screensaver" or "livestream"; "" = default screensaver
+	MAC                    string
+	Name                   string
+	ServicePort            uint16
+	Type                   string
+	HasPassword            bool
+	PasswordSetAt          *time.Time
+	LinkedUAUserID         string
+	ESPModel               string
+	ESPFwVersion           string
+	HasESPToken            bool
+	Running                bool
+	PairedIntercomMAC      string // saison-13-07 standby pairing
+	StreamProfile          string // saison-14-01 go2rtc profile override
+	IdleViewMode           string // saison-14-01b "screensaver" or "livestream"; "" = default screensaver
+	AutoScreensaverSeconds *int   // saison-14-03 auto-fallback timer; nil/0 = disabled
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -146,6 +155,20 @@ func (v *ViewerInfo) ResolveIdleViewMode() string {
 	default:
 		return IdleViewModeScreensaver
 	}
+}
+
+// ResolveAutoScreensaverSeconds returns the persisted timer
+// value, or 0 when the column is NULL (= feature off). The
+// browser runtime treats 0 as "no auto-fallback"; the same is
+// true when the viewer's idle_view_mode is "livestream"
+// (handled client-side, not in the DB).
+//
+// Saison 14-03.
+func (v *ViewerInfo) ResolveAutoScreensaverSeconds() int {
+	if v == nil || v.AutoScreensaverSeconds == nil {
+		return 0
+	}
+	return *v.AutoScreensaverSeconds
 }
 
 // ResolveStreamProfile picks the go2rtc stream profile name for
@@ -503,7 +526,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
-		        COALESCE(idle_view_mode, '')
+		        COALESCE(idle_view_mode, ''),
+		        auto_screensaver_seconds
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -520,12 +544,17 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			espModel sql.NullString
 			espFW    sql.NullString
 			espHash  sql.NullString
+			autoSec  sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode); err != nil {
+			&info.StreamProfile, &info.IdleViewMode, &autoSec); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
+		}
+		if autoSec.Valid {
+			v := int(autoSec.Int64)
+			info.AutoScreensaverSeconds = &v
 		}
 		if NormalizeName(info.Name) != target {
 			continue
@@ -610,15 +639,17 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		espFW    sql.NullString
 		espHash  sql.NullString
 	)
+	var autoSec sql.NullInt64
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
-		        COALESCE(idle_view_mode, '')
+		        COALESCE(idle_view_mode, ''),
+		        auto_screensaver_seconds
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode)
+			&info.StreamProfile, &info.IdleViewMode, &autoSec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -642,6 +673,10 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 	if espHash.Valid && espHash.String != "" {
 		info.HasESPToken = true
 	}
+	if autoSec.Valid {
+		v := int(autoSec.Int64)
+		info.AutoScreensaverSeconds = &v
+	}
 	return &info, nil
 }
 
@@ -653,7 +688,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
-		        COALESCE(idle_view_mode, '')
+		        COALESCE(idle_view_mode, ''),
+		        auto_screensaver_seconds
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -669,12 +705,17 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			espModel sql.NullString
 			espFW    sql.NullString
 			espHash  sql.NullString
+			autoSec  sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode); err != nil {
+			&info.StreamProfile, &info.IdleViewMode, &autoSec); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
+		}
+		if autoSec.Valid {
+			v := int(autoSec.Int64)
+			info.AutoScreensaverSeconds = &v
 		}
 		info.ServicePort = uint16(port)
 		if hash.Valid {
@@ -745,8 +786,9 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		   (mac, name, service_port, type, linked_ua_user_id,
 		    esp_model, esp_fw_version, esp_token_hash,
 		    paired_intercom_mac, stream_profile, idle_view_mode,
+		    auto_screensaver_seconds,
 		    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
 		spec.Type,
 		nullable(spec.LinkedUAUserID),
@@ -756,6 +798,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		strings.ToLower(strings.TrimSpace(spec.PairedIntercomMAC)),
 		nullable(strings.TrimSpace(spec.StreamProfile)),
 		nullable(strings.TrimSpace(spec.IdleViewMode)),
+		nullableInt(spec.AutoScreensaverSeconds),
 		now, now,
 	)
 	if err != nil {
@@ -849,6 +892,59 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 	m.mu.Lock()
 	if entry, ok := m.viewers[mac]; ok {
 		entry.spec.IdleViewMode = trimmed
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// AutoScreensaverSecondsAllowed is the closed set of values the
+// saison-14-03 inline-settings form may persist. 0 means "off"
+// and is stored as SQL NULL; the others are seconds.
+var AutoScreensaverSecondsAllowed = []int{0, 30, 60, 300, 600}
+
+// SetAutoScreensaverSeconds updates the auto-fallback timer for
+// the given viewer. Pass 0 to disable the timer (the column
+// becomes NULL); pass any of {30, 60, 300, 600} to enable it.
+// Other values are rejected up-front so a future regression on
+// the POST handler does not let arbitrary integers reach the
+// browser runtime.
+//
+// Saison 14-03.
+func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, seconds int) error {
+	allowed := false
+	for _, v := range AutoScreensaverSecondsAllowed {
+		if v == seconds {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("mockmanager: auto_screensaver_seconds %d not in %v",
+			seconds, AutoScreensaverSecondsAllowed)
+	}
+	var stored any
+	if seconds > 0 {
+		stored = int64(seconds)
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET auto_screensaver_seconds = ?, updated_at = ? WHERE mac = ?`,
+		stored, now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set auto screensaver: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if entry, ok := m.viewers[mac]; ok {
+		if seconds > 0 {
+			v := seconds
+			entry.spec.AutoScreensaverSeconds = &v
+		} else {
+			entry.spec.AutoScreensaverSeconds = nil
+		}
 	}
 	m.mu.Unlock()
 	return nil
@@ -1113,6 +1209,17 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableInt mirrors nullable for pointer-to-int spec fields:
+// nil and 0 both become SQL NULL, anything else stores the int.
+// Saison 14-03 uses this for AutoScreensaverSeconds where 0 is
+// the same as "feature off".
+func nullableInt(p *int) any {
+	if p == nil || *p == 0 {
+		return nil
+	}
+	return int64(*p)
 }
 
 func hashOrEmpty(h sql.NullString) string {
