@@ -33,6 +33,7 @@ import (
 	"unifix.local/server/internal/secrets"
 	"unifix.local/server/internal/streams"
 	"unifix.local/server/internal/uaapi"
+	"unifix.local/server/internal/weather"
 )
 
 func main() {
@@ -156,6 +157,13 @@ func main() {
 		log.Warn("UNIFIX_STREAM_BACKEND_URL not set; /esp/stream.mjpeg and /einloggen/stream.mjpeg will return 503")
 	}
 
+	// Saison 14-01b: weather-Backend (open-meteo) ist immer aktiv;
+	// braucht keinen API-Key. Bei Internet-Ausfall liefert der
+	// Cache stale snapshots bis zu 24h; danach blendet die UI den
+	// Wetter-Bereich aus.
+	weatherClient := weather.New()
+	log.Info("weather backend configured", "provider", "open-meteo")
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
 		Sessions:       sessionSvc,
@@ -173,6 +181,7 @@ func main() {
 		EventBus:       eventBus,
 		DoorbellCalls:  callsSvc,
 		Streams:        streamsClient,
+		Weather:        weatherClient,
 		Log:            log,
 	})
 	if err != nil {
