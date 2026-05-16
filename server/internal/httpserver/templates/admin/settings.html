@@ -59,6 +59,37 @@
     </section>
 
     <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Standort fuer Wetter-Anzeige</div>
+      <form class="set-card" method="post" action="/a/settings/station">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Breitengrad (Latitude)</span>
+            <span class="set-row-sub">Dezimal-Grad, z.B. 51.6144 fuer Recklinghausen.</span>
+          </div>
+          <input class="input" name="station_lat" type="text" inputmode="decimal" value="{{.Page.Station.Lat}}" placeholder="51.6144" required style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Laengengrad (Longitude)</span>
+            <span class="set-row-sub">Dezimal-Grad, z.B. 7.1959 fuer Recklinghausen.</span>
+          </div>
+          <input class="input" name="station_lon" type="text" inputmode="decimal" value="{{.Page.Station.Lon}}" placeholder="7.1959" required style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Quelle</span>
+            <span class="set-row-sub">Open-Meteo (kein API-Key noetig). Wert wirkt beim naechsten 15-Minuten-Refresh.</span>
+          </div>
+          <a class="btn btn-secondary btn-sm" href="/a/weather" target="_blank" rel="noopener">Vorschau (JSON)</a>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main"></div>
+          <button class="btn btn-primary" type="submit">Standort speichern</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
       <div class="set-section-title">Admin-Passwort</div>
       <form class="set-card" method="post" action="/a/settings/admin-password">
         <div class="set-row">
