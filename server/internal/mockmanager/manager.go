@@ -99,6 +99,12 @@ type ViewerSpec struct {
 	// manages the actual go2rtc YAML side; here we only remember
 	// which profile each viewer requested.
 	StreamProfile string
+	// IdleViewMode chooses which idle UI the mieter browser
+	// renders by default (saison-14-01b). "" or "screensaver"
+	// render clock + date + weather; "livestream" puts the
+	// MJPEG img directly. Tap toggles temporarily, reload goes
+	// back to the persisted default.
+	IdleViewMode string
 }
 
 // ViewerInfo is the public view of one running viewer for the
@@ -117,6 +123,29 @@ type ViewerInfo struct {
 	Running           bool
 	PairedIntercomMAC string // saison-13-07 standby pairing
 	StreamProfile     string // saison-14-01 go2rtc profile override
+	IdleViewMode      string // saison-14-01b "screensaver" or "livestream"; "" = default screensaver
+}
+
+// IdleViewMode constants. Storage tolerates NULL (= default
+// screensaver); the helper below picks the right string for the
+// template and the /esp/config JSON.
+const (
+	IdleViewModeScreensaver = "screensaver"
+	IdleViewModeLivestream  = "livestream"
+)
+
+// ResolveIdleViewMode picks the rendered mode for the calling
+// viewer. NULL / empty falls back to the screensaver default.
+func (v *ViewerInfo) ResolveIdleViewMode() string {
+	if v == nil {
+		return IdleViewModeScreensaver
+	}
+	switch v.IdleViewMode {
+	case IdleViewModeLivestream:
+		return IdleViewModeLivestream
+	default:
+		return IdleViewModeScreensaver
+	}
 }
 
 // ResolveStreamProfile picks the go2rtc stream profile name for
@@ -473,7 +502,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
-		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, '')
+		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
+		        COALESCE(idle_view_mode, '')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -494,7 +524,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile); err != nil {
+			&info.StreamProfile, &info.IdleViewMode); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if NormalizeName(info.Name) != target {
@@ -583,11 +613,12 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
-		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, '')
+		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
+		        COALESCE(idle_view_mode, '')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile)
+			&info.StreamProfile, &info.IdleViewMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -621,7 +652,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
-		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, '')
+		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
+		        COALESCE(idle_view_mode, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -641,7 +673,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile); err != nil {
+			&info.StreamProfile, &info.IdleViewMode); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		info.ServicePort = uint16(port)
@@ -712,9 +744,9 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		`INSERT INTO viewers
 		   (mac, name, service_port, type, linked_ua_user_id,
 		    esp_model, esp_fw_version, esp_token_hash,
-		    paired_intercom_mac, stream_profile,
+		    paired_intercom_mac, stream_profile, idle_view_mode,
 		    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
 		spec.Type,
 		nullable(spec.LinkedUAUserID),
@@ -723,6 +755,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		nullable(spec.ESPTokenHash),
 		strings.ToLower(strings.TrimSpace(spec.PairedIntercomMAC)),
 		nullable(strings.TrimSpace(spec.StreamProfile)),
+		nullable(strings.TrimSpace(spec.IdleViewMode)),
 		now, now,
 	)
 	if err != nil {
@@ -782,6 +815,40 @@ func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) err
 	m.mu.Lock()
 	if entry, ok := m.viewers[mac]; ok {
 		entry.spec.StreamProfile = trimmed
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// SetIdleViewMode updates a viewer's idle-view-mode preference.
+// Empty string clears it (next render falls back to "screensaver").
+// Any non-empty value other than IdleViewModeScreensaver /
+// IdleViewModeLivestream is rejected so we never persist garbage
+// that a future template lookup would not recognise.
+//
+// Saison 14-01b.
+func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
+	trimmed := strings.TrimSpace(mode)
+	switch trimmed {
+	case "", IdleViewModeScreensaver, IdleViewModeLivestream:
+	default:
+		return fmt.Errorf("mockmanager: idle view mode %q must be %q or %q",
+			trimmed, IdleViewModeScreensaver, IdleViewModeLivestream)
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET idle_view_mode = ?, updated_at = ? WHERE mac = ?`,
+		nullable(trimmed), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set idle view mode: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if entry, ok := m.viewers[mac]; ok {
+		entry.spec.IdleViewMode = trimmed
 	}
 	m.mu.Unlock()
 	return nil
