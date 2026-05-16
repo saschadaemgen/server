@@ -286,6 +286,43 @@
       border-radius: 6px;
       letter-spacing: 0.04em;
     }
+
+    /* Saison 14-03-FIX01 Sub-1c: dark scrollbar for the inline
+       modes that can overflow (settings form, history list). The
+       default browser scrollbar is light and clashes with the
+       pro-tool aesthetic of the rest of the slot. Firefox uses
+       the standard scrollbar-* properties; Chromium / Safari need
+       the ::-webkit-scrollbar pseudo-elements. Both are scoped to
+       the affected containers so the body / topbar default
+       scrollbar (if a future layout ever needs it) stays alone. */
+    .mode-layer,
+    .mode-settings,
+    .mode-history {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+    }
+    .mode-layer::-webkit-scrollbar,
+    .mode-settings::-webkit-scrollbar,
+    .mode-history::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .mode-layer::-webkit-scrollbar-track,
+    .mode-settings::-webkit-scrollbar-track,
+    .mode-history::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .mode-layer::-webkit-scrollbar-thumb,
+    .mode-settings::-webkit-scrollbar-thumb,
+    .mode-history::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+    }
+    .mode-layer::-webkit-scrollbar-thumb:hover,
+    .mode-settings::-webkit-scrollbar-thumb:hover,
+    .mode-history::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
   </style>
 </head>
 <body class="stage-room">
