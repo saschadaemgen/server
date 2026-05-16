@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,12 +16,21 @@ import (
 // Template (kein Library-Snippet mehr; das Library-Template hat
 // Fake-Sektionen die wir bewusst weglassen).
 type adminSettingsData struct {
-	User     adminUser
-	UA       uaSettingsBlock
-	Audit    []auditRow
-	Locks    []lockRow
-	Flash    string
+	User      adminUser
+	UA        uaSettingsBlock
+	Station   stationSettingsBlock
+	Audit     []auditRow
+	Locks     []lockRow
+	Flash     string
 	FlashType string
+}
+
+// stationSettingsBlock holds the Open-Meteo coordinates the
+// mieter screensaver and the ESP weather card pull from
+// (saison-14-01b). Defaults seed Recklinghausen on a fresh DB.
+type stationSettingsBlock struct {
+	Lat string
+	Lon string
 }
 
 type uaSettingsBlock struct {
@@ -174,12 +185,19 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 		status = "connected"
 	}
 
+	stationLat, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLat)
+	stationLon, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLon)
+
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 		UA: uaSettingsBlock{
 			BaseURL:  baseURL,
 			Status:   status,
 			HasToken: tokenEnc != "",
+		},
+		Station: stationSettingsBlock{
+			Lat: stationLat,
+			Lon: stationLon,
 		},
 	}
 
@@ -245,4 +263,69 @@ func secondsLabel(n int) string {
 }
 func minutesLabel(n int) string {
 	return itoa(n) + " min"
+}
+
+// handleAdminStationPost saves the operator's site coordinates
+// for the weather backend (saison-14-01b). Values are validated
+// as floats in the standard geographic ranges; on parse error
+// the existing values stay and the settings page renders a red
+// flash.
+func (s *Server) handleAdminStationPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	latStr := strings.TrimSpace(r.PostForm.Get("station_lat"))
+	lonStr := strings.TrimSpace(r.PostForm.Get("station_lon"))
+
+	data := s.buildSettingsData(r)
+	lat, err := parseLatLon(latStr, -90, 90)
+	if err != nil {
+		data.Flash = "Breitengrad: " + err.Error()
+		data.FlashType = "red"
+		s.renderAdminPage(w, "settings", data)
+		return
+	}
+	lon, err := parseLatLon(lonStr, -180, 180)
+	if err != nil {
+		data.Flash = "Laengengrad: " + err.Error()
+		data.FlashType = "red"
+		s.renderAdminPage(w, "settings", data)
+		return
+	}
+	// Persist as canonical 4-decimal strings so the saved value
+	// matches what open-meteo will round to anyway (~11 m).
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyStationLat,
+		strconv.FormatFloat(lat, 'f', 4, 64)); err != nil {
+		s.log.Error("save station_lat", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyStationLon,
+		strconv.FormatFloat(lon, 'f', 4, 64)); err != nil {
+		s.log.Error("save station_lon", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	data = s.buildSettingsData(r)
+	data.Flash = "Standort gespeichert. Wirkt beim naechsten Wetter-Refresh (max 15 Minuten)."
+	data.FlashType = "green"
+	s.renderAdminPage(w, "settings", data)
+}
+
+// parseLatLon parses a float and bounds it. The bounds catch
+// typos like a swapped lat/lon pair or an extra digit; everything
+// else (locale-comma vs dot, whitespace) is the caller's problem.
+func parseLatLon(s string, low, high float64) (float64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("darf nicht leer sein")
+	}
+	v, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
+	if err != nil {
+		return 0, fmt.Errorf("keine gueltige Zahl (%s)", s)
+	}
+	if v < low || v > high {
+		return 0, fmt.Errorf("muss zwischen %.0f und %.0f liegen", low, high)
+	}
+	return v, nil
 }

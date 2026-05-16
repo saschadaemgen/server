@@ -31,7 +31,9 @@ import (
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
 	"unifix.local/server/internal/secrets"
+	"unifix.local/server/internal/streams"
 	"unifix.local/server/internal/uaapi"
+	"unifix.local/server/internal/weather"
 )
 
 func main() {
@@ -137,6 +139,34 @@ func main() {
 	// Liste.
 	userStore := ua.New(uaClient)
 
+	// Streams-Client zeigt auf das go2rtc-REST-API. Saison 14-01
+	// schaltet UNIFIX_STREAM_BACKEND_URL produktiv; ohne diese Var
+	// bleibt der Client nil und die /a/streams-Seite rendert den
+	// "go2rtc nicht konfiguriert"-Hinweis, ohne den Server am Start
+	// zu hindern.
+	var streamsClient *streams.Client
+	if cfg.StreamBackendURL != "" {
+		c, err := streams.New(cfg.StreamBackendURL)
+		if err != nil {
+			log.Error("stream backend init failed", "err", err)
+			os.Exit(1)
+		}
+		streamsClient = c
+		// Boot-Log mit der vom Briefing geforderten Wortlaut, damit
+		// der Operator nach jedem systemctl restart sofort sieht ob
+		// /esp/stream.mjpeg und /einloggen/stream.mjpeg funktionieren.
+		log.Info("stream backend configured", "url", cfg.StreamBackendURL)
+	} else {
+		log.Warn("stream backend not configured: /esp/stream.mjpeg and /einloggen/stream.mjpeg return 503")
+	}
+
+	// Saison 14-01b: weather-Backend (open-meteo) ist immer aktiv;
+	// braucht keinen API-Key. Bei Internet-Ausfall liefert der
+	// Cache stale snapshots bis zu 24h; danach blendet die UI den
+	// Wetter-Bereich aus.
+	weatherClient := weather.New()
+	log.Info("weather backend configured", "provider", "open-meteo")
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
 		Sessions:       sessionSvc,
@@ -153,6 +183,8 @@ func main() {
 		History:        historyStore,
 		EventBus:       eventBus,
 		DoorbellCalls:  callsSvc,
+		Streams:        streamsClient,
+		Weather:        weatherClient,
 		Log:            log,
 	})
 	if err != nil {

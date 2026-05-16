@@ -87,7 +87,8 @@
                         data-mac="{{.MAC}}"
                         data-name="{{.Name}}"
                         data-link="{{.LinkedUserID}}"
-                        data-paired="{{.PairedIntercomMAC}}">Bearbeiten</button>
+                        data-paired="{{.PairedIntercomMAC}}"
+                        data-stream-profile="{{.StreamProfile}}">Bearbeiten</button>
                 {{if .LockedNow}}
                   <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
                     <button class="btn btn-secondary btn-sm" type="submit">Sperre aufheben</button>
@@ -162,6 +163,20 @@
               </div>
               <span class="field-hint">UA-Intercoms; Tuer wird automatisch ueber die UA-API aufgeloest.</span>
             </div>
+            <div class="field">
+              <label class="field-label" for="new-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_browser) --">
+                <select id="new-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_browser) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
+            </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
@@ -232,6 +247,21 @@
                 </select>
               </div>
               <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_browser) --"
+                   data-edit-stream-profile-dropdown>
+                <select id="edit-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_browser) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
             </div>
 
             <hr style="border:none; border-top:1px solid rgba(255,255,255,0.10); margin:8px 0;" />
@@ -314,6 +344,7 @@
         var name = btn.getAttribute('data-name') || '';
         var link = btn.getAttribute('data-link') || '';
         var paired = btn.getAttribute('data-paired') || '';
+        var streamProfile = btn.getAttribute('data-stream-profile') || '';
         var modal = document.querySelector('[data-modal="edit-viewer"]');
         if (!modal) return;
         modal.setAttribute('data-mac', mac);
@@ -347,6 +378,15 @@
           if (psel) {
             psel.value = paired;
             psel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        var ds = modal.querySelector('[data-edit-stream-profile-dropdown]');
+        if (ds) {
+          ds.setAttribute('data-dropdown-value', streamProfile);
+          var ssel = ds.querySelector('select[data-dropdown-target]');
+          if (ssel) {
+            ssel.value = streamProfile;
+            ssel.dispatchEvent(new Event('change', { bubbles: true }));
           }
         }
         // Saison 13-02-FIX4-a-HOTFIX8: Login-Link + QR lazy nachladen.

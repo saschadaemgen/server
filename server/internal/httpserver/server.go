@@ -34,7 +34,9 @@ import (
 	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/platformconfig"
+	"unifix.local/server/internal/streams"
 	"unifix.local/server/internal/uaapi"
+	"unifix.local/server/internal/weather"
 )
 
 // UserStoreLike ist die schmale Sicht auf access.UserStore die
@@ -86,7 +88,16 @@ type Deps struct {
 	// answer/reject/end-call endpoints arbitrate against. Nil
 	// disables the lifecycle path entirely (calls return 503).
 	DoorbellCalls *doorbellcalls.Service
-	Log           *slog.Logger
+	// Streams is the go2rtc admin client (saison-14-01). Nil when
+	// UNIFIX_STREAM_BACKEND_URL is empty; the /a/streams page
+	// then renders a "go2rtc nicht konfiguriert"-Hinweis.
+	Streams *streams.Client
+	// Weather is the open-meteo client used by the mieter
+	// screensaver (saison-14-01b). Nil disables /einloggen/weather
+	// and /a/weather with 503; the screensaver hides its weather
+	// block in that case.
+	Weather *weather.Client
+	Log     *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -107,6 +118,8 @@ type Server struct {
 	eventsHeartbeat time.Duration
 	eventBus        *eventbus.Bus
 	calls           *doorbellcalls.Service
+	streams         *streams.Client
+	weather         *weather.Client
 	log             *slog.Logger
 	mux             *http.ServeMux
 	tpl             *adminTemplates
@@ -154,6 +167,8 @@ func New(deps Deps) (*Server, error) {
 		eventsHeartbeat: deps.EventsHeartbeat,
 		eventBus:        deps.EventBus,
 		calls:           deps.DoorbellCalls,
+		streams:         deps.Streams,
+		weather:         deps.Weather,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -186,6 +201,14 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /einloggen/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
 	s.mux.Handle("POST /einloggen/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
 	s.mux.Handle("POST /einloggen/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
+	// Saison 14-01: live MJPEG passthrough for the ringing overlay
+	// (and optionally the idle stream slot).
+	s.mux.Handle("GET /einloggen/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
+	// Saison 14-01b: tenant settings (idle-view-mode) and weather
+	// pull for the screensaver.
+	s.mux.Handle("GET /einloggen/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
+	s.mux.Handle("POST /einloggen/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
+	s.mux.Handle("GET /einloggen/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
 	s.mux.Handle("GET /einloggen/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
 	// Old /m-Routen liefern 301 nach /einloggen. Bookmark-/QR-
@@ -204,6 +227,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsPost)))
 	s.mux.Handle("POST /a/settings/admin-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminPasswordPost)))
 	s.mux.Handle("POST /a/settings/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminUnlockLock)))
+	// Saison 14-01b: admin-side weather preview for the station-
+	// coordinates form in /a/settings.
+	s.mux.Handle("POST /a/settings/station", s.requireAdminSession(http.HandlerFunc(s.handleAdminStationPost)))
+	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))
 
 	// Web-Viewer-CRUD (ersetzt das alte /a/mocks).
 	s.mux.Handle("GET /a/web-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersList)))
@@ -218,6 +245,18 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetLink)))
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
+
+	// Stream-Profile-CRUD (Saison 14-01). Proxyt die go2rtc-REST-
+	// API hinter Admin-Session. Profile-Wahl pro Viewer geschieht
+	// im Web-/ESP-Viewer-Edit-Modal; die Profile-Definition (FFmpeg-
+	// Kette etc.) lebt hier.
+	s.mux.Handle("GET /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsList)))
+	s.mux.Handle("GET /a/streams.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsListJSON)))
+	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsCreate)))
+	s.mux.Handle("GET /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsEdit)))
+	s.mux.Handle("POST /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsUpdate)))
+	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
+	s.mux.Handle("DELETE /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
 
 	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))

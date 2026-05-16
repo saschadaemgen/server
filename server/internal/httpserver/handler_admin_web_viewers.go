@@ -45,6 +45,7 @@ type webViewerRow struct {
 	LinkedUserID      string
 	LinkedUserName    string
 	PairedIntercomMAC string
+	StreamProfile     string
 	LoginURL          string
 }
 
@@ -109,6 +110,7 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 			LockedNow:         locked[nameKey],
 			LinkedUserID:      info.LinkedUAUserID,
 			PairedIntercomMAC: info.PairedIntercomMAC,
+			StreamProfile:     info.StreamProfile,
 			LoginURL:          loginURL,
 		}
 		if info.PasswordSetAt != nil {
@@ -146,6 +148,7 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 	manualPW := r.PostForm.Get("password")
 	linkedUser := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
 	pairedIntercom := strings.ToLower(strings.TrimSpace(r.PostForm.Get("paired_intercom_mac")))
+	streamProfile := strings.TrimSpace(r.PostForm.Get("stream_profile"))
 
 	if name == "" || len(name) > 64 {
 		http.Error(w, "Wohnungs-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
@@ -177,6 +180,7 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 		Type:              mockmanager.TypeWeb,
 		LinkedUAUserID:    linkedUser,
 		PairedIntercomMAC: pairedIntercom,
+		StreamProfile:     streamProfile,
 	}
 	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
@@ -351,13 +355,14 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var newName, newPW, newLink, newPaired string
+	var newName, newPW, newLink, newPaired, newStreamProfile string
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body struct {
 			Name              string `json:"name"`
 			Password          string `json:"password"`
 			LinkedUAUserID    string `json:"linked_ua_user_id"`
 			PairedIntercomMAC string `json:"paired_intercom_mac"`
+			StreamProfile     string `json:"stream_profile"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
@@ -367,6 +372,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		newPW = body.Password
 		newLink = strings.TrimSpace(body.LinkedUAUserID)
 		newPaired = strings.ToLower(strings.TrimSpace(body.PairedIntercomMAC))
+		newStreamProfile = strings.TrimSpace(body.StreamProfile)
 	} else {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
@@ -376,6 +382,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		newPW = r.PostForm.Get("password")
 		newLink = strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
 		newPaired = strings.ToLower(strings.TrimSpace(r.PostForm.Get("paired_intercom_mac")))
+		newStreamProfile = strings.TrimSpace(r.PostForm.Get("stream_profile"))
 	}
 
 	if newName == "" || len(newName) > 64 {
@@ -402,6 +409,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	pwChanged := newPW != ""
 	linkChanged := info.LinkedUAUserID != newLink
 	pairedChanged := info.PairedIntercomMAC != newPaired
+	streamProfileChanged := info.StreamProfile != newStreamProfile
 
 	if nameChanged {
 		if err := s.mockMgr.Rename(r.Context(), mac, newName); err != nil {
@@ -436,6 +444,14 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if streamProfileChanged {
+		if err := s.mockMgr.SetStreamProfile(r.Context(), mac, newStreamProfile); err != nil {
+			s.log.Error("edit set stream profile", "err", err, "mac_prefix", mac[:8])
+			http.Error(w, "Stream-Profil-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// Passwort als letztes, damit ein Hash-Fehler die schon
 	// gespeicherten Name- und Link-Aenderungen nicht zurueckwirft
 	// (wir muessen sowieso roll-forward operieren, weil SQLite
@@ -459,19 +475,22 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		"pw_changed", pwChanged,
 		"link_changed", linkChanged,
 		"paired_changed", pairedChanged,
+		"stream_profile_changed", streamProfileChanged,
 	)
 
 	if wantsJSON(r) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		payload := map[string]any{
-			"mac":                 info.MAC,
-			"name":                newName,
-			"linked_ua_user_id":   newLink,
-			"paired_intercom_mac": newPaired,
-			"name_changed":        nameChanged,
-			"pw_changed":          pwChanged,
-			"link_changed":        linkChanged,
-			"paired_changed":      pairedChanged,
+			"mac":                    info.MAC,
+			"name":                   newName,
+			"linked_ua_user_id":      newLink,
+			"paired_intercom_mac":    newPaired,
+			"stream_profile":         newStreamProfile,
+			"name_changed":           nameChanged,
+			"pw_changed":             pwChanged,
+			"link_changed":           linkChanged,
+			"paired_changed":         pairedChanged,
+			"stream_profile_changed": streamProfileChanged,
 		}
 		if pwChanged {
 			payload["password"] = resp.Password

@@ -59,6 +59,8 @@ var adminLibraryFor = map[string][]string{
 	"users":       {},
 	"user-detail": {},
 	"esp-pager":   {},
+	"streams":     {},
+	"stream-edit": {},
 }
 
 func newAdminTemplates() (*adminTemplates, error) {
@@ -109,6 +111,15 @@ func newAdminTemplates() (*adminTemplates, error) {
 		return nil, fmt.Errorf("parse viewer login shell: %w", err)
 	}
 	viewer["login"] = loginShell
+
+	settingsShell, err := template.New("settings").Funcs(funcMap).ParseFS(
+		templatesFS,
+		"templates/viewer/settings.html",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("parse viewer settings shell: %w", err)
+	}
+	viewer["settings"] = settingsShell
 
 	return &adminTemplates{pages: pages, viewer: viewer}, nil
 }

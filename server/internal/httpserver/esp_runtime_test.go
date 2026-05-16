@@ -607,8 +607,11 @@ func TestESPStream_ForwardsToBackendWithoutAuthHeader(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
 
-	// Inject the backend URL via the running server's config.
-	env.srv.cfg.StreamBackendURL = backend.URL + "/api/stream.mjpeg?src=front"
+	// Saison 14-01: StreamBackendURL is the go2rtc BASE URL; the
+	// proxy appends /api/stream.mjpeg?src=<resolved-profile>. For
+	// an esp-type viewer without an explicit StreamProfile the
+	// convention default is "intercom_esp".
+	env.srv.cfg.StreamBackendURL = backend.URL
 
 	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
@@ -623,8 +626,9 @@ func TestESPStream_ForwardsToBackendWithoutAuthHeader(t *testing.T) {
 	if sawAuth != "" {
 		t.Errorf("backend saw Authorization header %q; should be stripped", sawAuth)
 	}
-	if sawPath != "/api/stream.mjpeg?src=front" {
-		t.Errorf("backend saw path %q, want /api/stream.mjpeg?src=front", sawPath)
+	wantPath := "/api/stream.mjpeg?src=intercom_esp"
+	if sawPath != wantPath {
+		t.Errorf("backend saw path %q, want %q", sawPath, wantPath)
 	}
 }
 

@@ -1,6 +1,11 @@
 # unifix Architecture
 
-**Status:** Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
+**Status:** Saison 14 laufend, 16. Mai 2026. S14-01 (Stream-
+Backend go2rtc), S14-01b (Idle-View-Modus mit Bildschirmschoner,
+open-meteo-Wetter, Mieter-Settings), S14-01-FIX01 (Stream-Proxy
+URL-Hardening) und S14-01-FIX02 (ESP-Unlock-Auto-Resolution)
+abgeschlossen. Vorheriger Stand: Saison 13 abgeschlossen
+14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -320,33 +325,105 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             (Stufe 1 self-hosted LAN, Stufe 2 Cloud-Bridge,
             Stufe 3 Premium UA-Stream).
 
-Saison 14:  Live-View Video + Audio + Stumm-Button.
-            Verschoben aus dem urspruenglichen S13-05-Slot,
-            greift auf S13-04-Spike-Befunde zurueck (Pfad 3c
-            go2rtc-WebRTC). Liefert: WebRTC-Player im Bell-
-            Overlay + /esp/stream.mjpeg-Backend integriert +
-            eigener WebRTC-Teardown im Mieter-Browser
-            (track.stop, pc.close, Inaktivitaets-Cleanup). Plus
-            Stumm-Button: schliesst Browser-Overlay ohne
-            /call_admin_result, Anrufer merkt nichts.
-            (Hybrid-Goroutine-Spawn fuer ESP-Eintraege ist seit
-            S13-09 erledigt - Saison 14 muss sich darum nicht
-            mehr kuemmern.)
+Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
+            Video / Audio / Stumm-Button (urspruenglicher S13-05-
+            Slot) wandern in S14-02+; S14-01-Block lieferte
+            stattdessen den fest verkabelten MJPEG-Pfad.
 
-Saison 15:  Webhook-Endpoint + ESP-Phase-B Plug-and-Play.
+   S14-01:  Stream-Backend go2rtc produktiv (16. Mai 2026,
+            ABGESCHLOSSEN).
+              - Migration 012 fuegt viewers.stream_profile
+                hinzu (nullable TEXT, Convention-Fallback bei
+                NULL: TypeWeb -> "intercom_browser",
+                TypeESP -> "intercom_esp").
+              - server/internal/streams kapselt den go2rtc-
+                REST-API-Client (List, Get, Put, Delete).
+              - /esp/stream.mjpeg und /einloggen/stream.mjpeg
+                resolven das Profil ueber GetViewerInfo +
+                ResolveStreamProfile, bauen die URL
+                <UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg
+                ?src=<profile> und proxen Body mit Flush
+                pro Read. Authorization-Header wird vor
+                Forward gestrippt.
+              - Admin-Page /a/streams mit Liste / Edit /
+                Loeschen. POST-Save wirkt live ueber die
+                go2rtc-REST-API; bestehende Konsumenten
+                reconnecten beim naechsten Frame.
+              - Web-Viewer- und ESP-Viewer-Modal bekommen
+                ein Stream-Profil-Dropdown, gespeist via
+                /a/streams.json.
+              - Mieter-Klingel-Overlay rendert
+                <img src="/einloggen/stream.mjpeg"> hinter
+                dem Bell-Hero (object-fit: cover, opacity
+                0.45). onerror blendet das Bild aus damit
+                die Buttons bei Backend-Ausfall sichtbar
+                bleiben.
+              - go2rtc.yaml.example liegt im Repo-Root mit
+                drei Default-Profilen (intercom_high als
+                Source, intercom_esp und intercom_browser
+                als FFmpeg-Derivate).
+            Out-of-Scope (kommt in S14-02+):
+              - Audio (Up- und Down-Stream)
+              - WebRTC-Signaling (S14-02 oder spaeter)
+              - Original-UA-Stream-Pfad (Premium, S20+)
+
+   S14-01b: Idle-View-Modus mit Bildschirmschoner.
+            ABGESCHLOSSEN 16. Mai 2026. Migration 013 fuegt
+            viewers.idle_view_mode (NULL/'screensaver'/
+            'livestream') hinzu plus station_lat/lon-Defaults
+            in platform_config. Neues Paket internal/weather
+            mit open-meteo-Client, 15-Min-Cache und
+            24h-Stale-Serving. Mieter-Routes /einloggen/settings
+            (idle-Default persistieren), /einloggen/weather
+            (JSON fuer idle.js). Admin bekommt einen
+            "Standort"-Block in /a/settings plus /a/weather
+            als Preview. Mieter-home.html ist auf das
+            screensaver/livestream-Container-Layout umgebaut;
+            idle.js tickt die Uhr, refresht Wetter und
+            toggelt per Tap. /esp/config bekommt
+            idle_view_mode + weather als optionale Felder.
+
+   S14-01-FIX01: Stream-Proxy URL-Hardening.
+            ABGESCHLOSSEN 16. Mai 2026. Die String-
+            Konkatenation aus S14-01-Block-A weicht einem
+            dedizierten buildBackendStreamURL-Helper, der
+            ueber net/url parsed, Path und Query explizit
+            setzt, Trailing-Slashes + Fragments wegnimmt
+            und einen Path-Prefix erhaelt. Plus strukturierte
+            Per-Request-Logs (INFO stream proxy mit route,
+            label, profile, backend, viewer_mac VOR dem
+            Backend-Call) und WARN/ERROR/DEBUG fuer alle
+            Fehler- + Disconnect-Pfade. main.go-Boot-Log
+            liefert jetzt eine explizite "stream backend
+            configured"-Zeile.
+
+   S14-01-FIX02: ESP-Unlock-Auto-Door-Resolution.
+            ABGESCHLOSSEN 16. Mai 2026. handleESPUnlock ist
+            jetzt auf der Briefing-Spec: door_id und event_id
+            sind beide optional; bei leerem door_id resolvt
+            der Server ueber viewers.paired_intercom_mac +
+            uaapi.LookupDoorForIntercom (S13-07-Pfad, gleich
+            wie Mieter-Standby). Response-Envelope kriegt
+            door_source=body|auto. Vier neue Tests in
+            handler_esp_unlock_test.go decken die Pfade ab.
+
+   S14-02:  Webhook-Endpoint.
             POST /webhook/access fuer access.doorbell.* und
-            access.door.unlock-Events. Schreibt in die in S13-01
-            angelegte door_events-Tabelle. Event-Type-Dispatch-
-            Pattern als Vorbereitung fuer S16+ Plugins. HMAC-
-            Signed-Body-Verifikation pro Webhook-Registration.
-            Plus ESP-Phase-B: UDP-Discovery-Listener auf dem
-            Server, der unbekannte ESPs in esp_pending_devices
-            eintraegt; ESP haelt einen Long-Poll an
+            access.door.unlock-Events. Schreibt in die in
+            S13-01 angelegte door_events-Tabelle. Event-Type-
+            Dispatch-Pattern als Vorbereitung fuer S16+
+            Plugins. HMAC-Signed-Body-Verifikation pro
+            Webhook-Registration.
+
+Saison 15:  ESP-Phase-B Plug-and-Play + /input/state-Audit.
+            UDP-Discovery-Listener auf dem Server, der
+            unbekannte ESPs in esp_pending_devices eintraegt;
+            ESP haelt einen Long-Poll an
             /esp/wait-for-adoption offen, bekommt nach Admin-
-            Klick auf /a/esp-viewers seinen Token zurueck. Plus
-            optional: /input/state-Konsum fuer Tuer-Audit-Trail
-            (door_opened/door_closed auch bei Schluessel-
-            Oeffnung).
+            Klick auf /a/esp-viewers seinen Token zurueck.
+            Plus optional: /input/state-Konsum fuer Tuer-
+            Audit-Trail (door_opened/door_closed auch bei
+            Schluessel-Oeffnung).
 
 Saison 16:  Stempelkarten-Plugin + Stumm-Button-Variationen.
             time_clock_entries-Tabelle, UA-Standard-NFC-Hardware
@@ -432,7 +509,7 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
                 gibt einen Fehler zurueck, Server startet nicht.
 ```
 
-### 9.3 Tabellen-Inventar (Stand Migration 004)
+### 9.3 Tabellen-Inventar (Stand Migration 013)
 
 > **Saison-13-Hinweis:** Migrations 005-011 haben das Schema
 > deutlich erweitert (door_events, viewers-Rename + ESP-Felder,
@@ -443,7 +520,9 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
 
 ```
 schema_version       Migrations-Tracking. PK version, applied_at.
-                     Aktueller MAX(version) = 4.
+                     Aktueller MAX(version) = 13 (Saison 14-01b:
+                     viewers.idle_view_mode +
+                     platform_config.station_lat/lon).
                      Migration 001.
 
 magic_link_tokens    Magic-Link-Auth-Tokens.
@@ -1065,7 +1144,10 @@ unifix-cli           Headless-Tool fuer CLI-First-Adoption.
    --mac <MAC>       Pflicht.
    --name <NAME>     Pflicht (max 64 chars).
    --intercom <MAC>  Optional - wird in paired_intercom_mac
-                     gesetzt; ohne wird /esp/unlock 404 geben.
+                     gesetzt. Ohne diesen Wert liefert
+                     /esp/unlock 400 "no paired intercom
+                     configured" (Saison-14-01-FIX02-Spec,
+                     loesste die buggy 404-Notiz aus S13-08 ab).
    --mieter <UA-ID>  Optional - in linked_ua_user_id; rein
                      Annotation, kein Routing-Effekt.
    --db <PATH>       Optional - default ./state/unifix.db.
@@ -1073,11 +1155,235 @@ unifix-cli           Headless-Tool fuer CLI-First-Adoption.
 
 ### 15.5 Stream-Backend-Reverse-Proxy
 
-`/esp/stream.mjpeg` ist ein simpler Reverse-Proxy auf
+`/esp/stream.mjpeg` ist ein Profile-bewusster MJPEG-Proxy auf
 `UNIFIX_STREAM_BACKEND_URL`. Der Authorization-Header wird vor
 dem Forward gestrippt (das Backend ist typisch ein lokaler
 go2rtc-Daemon ohne Auth; ESP-Token darf nie ueber den unifix-
 Prozess hinaus). Wenn die Env-Variable nicht gesetzt ist:
-HTTP 503 "stream backend not configured". Das echte Stream-
-Backend kommt in Saison 14 (S13-04-Spike-Decision: go2rtc-
-WebRTC).
+HTTP 503 "stream backend not configured". Volle Spezifikation
+in Sektion 16 weiter unten (Saison 14-01: go2rtc-Profile +
+S14-01-FIX01-URL-Hardening).
+
+---
+
+## 16. Stream-Backend (Saison 14-01, go2rtc)
+
+unifix nutzt go2rtc als Stream-Bridge. UDM (UniFi Protect) liefert
+RTSPS auf Port 7441, go2rtc transmuxt das fuer alle weiteren
+Klienten in beliebigen Formaten (MJPEG fuer ESP und Browser; HLS
+und WebRTC sind fuer spaetere Saisons vorbereitet aber noch nicht
+verkabelt). Saison 14-01-FIX01 hat den URL-Bau gehaertet (siehe
+16.4) und strukturiertes Logging eingefuehrt.
+
+### 16.1 Daten-Pfad
+
+```
+UA Intercom Hardware
+    | RTSPS:7441
+    v
+go2rtc-Daemon (RPi, localhost:1984)
+    +-- intercom_high     (Source-Profil, RTSPS)
+    +-- intercom_esp      (ffmpeg:intercom_high#video=mjpeg, 9 FPS)
+    +-- intercom_browser  (ffmpeg:intercom_high#video=mjpeg, 12 FPS)
+    | HTTP MJPEG
+    v
+unifix-server (Pass-through-Proxy mit Flush pro Read)
+    +-- /esp/stream.mjpeg          (Bearer-Auth, ESP-Tier)
+    +-- /einloggen/stream.mjpeg    (Session-Auth, Mieter-Tier)
+    | HTTPS multipart/x-mixed-replace
+    v
+Endgeraet (ESP32-P4-Display, Mieter-Browser-img)
+```
+
+### 16.2 Profile-Resolution
+
+Jeder Viewer hat eine `stream_profile`-Spalte (Migration 012,
+nullable TEXT). Resolution-Order in `ViewerInfo.ResolveStreamProfile`:
+
+1. Explizit gesetztes `stream_profile`
+2. `type='esp'` -> `intercom_esp`
+3. `type='web'` -> `intercom_browser`
+4. Defensive Fallback `intercom_default`
+
+Die Convention-Defaults sind in lock-step mit der
+`go2rtc.yaml.example`-Vorlage. Wird ein Convention-Profil in go2rtc
+umbenannt OHNE den unifix-Code mitzubewegen, zeigen neue Viewer auf
+ein nicht existentes Source - die Admin-UI raeumt das auf, sobald
+ein konkretes Profil per Dropdown gewaehlt wird.
+
+### 16.3 Admin-Profile-CRUD
+
+```
+Route                                Wirkung
+GET    /a/streams                    HTML-Liste plus Create-Modal
+GET    /a/streams.json               Profile-Array fuer Viewer-Dropdown
+POST   /a/streams                    Create (form: name, source)
+GET    /a/streams/{name}             Edit-View (Source bearbeiten)
+POST   /a/streams/{name}             Update (form: source)
+POST   /a/streams/{name}/delete      Loeschen (form)
+DELETE /a/streams/{name}             Loeschen (JSON / REST)
+```
+
+Vorlage-Buttons im Create-Modal fuellen Name und Source mit den
+drei Convention-Profilen. Beim Speichern wirkt die Aenderung live
+ueber den go2rtc-PUT-Call; bestehende Konsumenten reconnecten beim
+naechsten Frame (1-3 Sek Aussetzer).
+
+### 16.4 Stream-Proxy-Mechanik
+
+`proxyMJPEGStream` (httpserver/handler_esp_stream.go) ist der
+gemeinsame Kern fuer ESP- und Mieter-Pfad. Wesentliche Punkte:
+
+- Same-Context GET gegen
+  `<UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg?src=<profile>`.
+- Saison 14-01-FIX01: URL-Bau via `buildBackendStreamURL`-Helper
+  ueber `net/url` (Path und Query explizit, keine String-
+  Konkatenation). Tolerant gegenueber Trailing-Slashes und
+  Fragments; ein konfigurierter Path-Prefix bleibt erhalten.
+- Authorization-Header wird NICHT geforwarded (vermeidet, dass
+  der ESP-Bearer den unifix-Prozess verlaesst).
+- Response-Header werden 1:1 durchgereicht (Content-Type ist
+  typisch `multipart/x-mixed-replace;boundary=frame`).
+- Body wird mit 32-KB-Buffer gelesen, jeder Chunk sofort via
+  `http.Flusher.Flush` rausgeschoben. KEIN `io.Copy`, KEIN bufio.
+- Client-Disconnect terminiert die Goroutine ueber `r.Context()`.
+- Pro Request schreibt der Proxy eine strukturierte INFO-Zeile
+  (route + label + profile + backend + viewer_mac) VOR dem
+  Backend-Call; Fehler-Pfade liefern eigene WARN/ERROR-Zeilen
+  mit gleichen Schluesseln plus `bytes_streamed`-Counter bei
+  Client- oder Backend-Disconnect.
+
+### 16.5 Konfigurations-Vertrag
+
+```
+UNIFIX_STREAM_BACKEND_URL  go2rtc Base-URL ohne Pfad-Suffix.
+                            Beispiel: http://127.0.0.1:1984
+                            Empty: Server startet weiter, Stream-
+                            Endpoints liefern 503, /a/streams
+                            rendert "go2rtc nicht konfiguriert".
+                            Production sollte das Env-Var setzen;
+                            in S17+ wandert die Pruefung in
+                            config.Validate().
+```
+
+Die `streams.Client`-Instanz wird in `main.go` einmalig beim Boot
+gebaut. Hot-Reload bei Env-Var-Aenderung gibt es bewusst nicht;
+Operator startet `unifix-server` neu wenn er die go2rtc-Adresse
+aendert (Production: `systemctl restart unifix-server`).
+
+## 17. Idle-View-Modus + Wetter-Backend (Saison 14-01b)
+
+Der Mieter waehlt seinen Default-Idle-Modus zwischen
+Bildschirmschoner (Uhrzeit + Datum + Wetter) und Live-Ansicht
+(direkter MJPEG-Stream). Tap auf den Container toggelt
+temporaer; Reload kehrt zum User-Default zurueck.
+
+### 17.1 Container-Architektur
+
+```
+GET /einloggen/                    (requireSession)
+  -> handler_home.handleHome
+     -> mockmanager.GetViewerInfo(mac)
+     -> info.ResolveIdleViewMode()      ("screensaver"|"livestream")
+     -> server.fetchHomeWeather(r)      (*weather.Snapshot or nil)
+     -> renderViewer("home", viewerHomeData{...})
+
+home.html rendert:
+  <div id="idle-container" data-default-mode="{{.IdleViewMode}}">
+     <div id="screensaver" class="idle-view ...">    clock+date+weather
+     <div id="livestream" class="idle-view ...">     <img src="..stream..">
+  </div>
+  {{template "intercom-ringing.html" .}}             klingel-overlay
+```
+
+Initial-Sichtbarkeit kommt vom Server: `idle-hidden`-Klasse haengt
+am Container der NICHT dem Default-Mode entspricht, damit kein
+Flash beim Render. Browser-Side macht `idle.js` Clock-Tick,
+Weather-Refresh und Tap-Toggle.
+
+### 17.2 Open-Meteo-Backend
+
+```
+internal/weather/openmeteo.go   Client mit Get(ctx, lat, lon)
+internal/weather/cache.go        15-Min-Fresh + 24h-Stale-Serving
+internal/weather/wmo_codes.go    WMO-Code -> Lucide-Icon + Beschreibung
+
+API:   https://api.open-meteo.com/v1/forecast
+         ?latitude=<lat>&longitude=<lon>
+         &current=temperature_2m,weather_code
+         &timezone=Europe/Berlin
+
+Auth:  keine (kein API-Key, kein Rate-Limit)
+```
+
+Cache-Verhalten:
+
+- `Get` -> `fresh()`: wenn juenger als 15 Min, sofort zurueck.
+- Sonst Live-Call. Erfolg -> in Cache schreiben + zurueck.
+- Live-Call-Fehler -> `stale()`: wenn juenger als 24h, stale
+  Snapshot zurueck (Browser merkt nichts).
+- Sonst `ErrUnavailable`. Mieter-UI blendet den Wetter-Bereich
+  aus, ESP-Config laesst das `weather`-Feld weg.
+
+Eine Anlage = ein Standort = ein Cache-Slot. Mehrere Mieter
+desselben Mock-Viewers teilen sich den gecachten Wert.
+
+### 17.3 Standort-Konfiguration
+
+```
+platform_config:
+   station_lat   "51.6144"    Default Recklinghausen (Migration 013)
+   station_lon   "7.1959"     Default Recklinghausen (Migration 013)
+
+Admin-UI:        /a/settings, Section "Standort fuer Wetter-Anzeige"
+Validierung:     Float-Parse plus Range-Check (lat in [-90,90],
+                 lon in [-180,180]). Komma wird zu Punkt
+                 normalisiert.
+Wirkung:         beim naechsten 15-Min-Cache-Tick (existing
+                 entry bleibt bis dahin gueltig).
+Preview:         /a/weather liefert das aktuelle JSON live.
+```
+
+### 17.4 Mieter-Routen
+
+```
+GET  /einloggen/settings     Settings-Form (radio idle_view_mode +
+                              Logout-Knopf)
+POST /einloggen/settings     mockmanager.SetIdleViewMode +
+                              Redirect /einloggen/
+GET  /einloggen/weather      JSON-Snapshot fuer idle.js-Refresh
+GET  /einloggen/             Home-Page mit idle-container
+```
+
+Settings-Link rendert als kleines Zahnrad-Icon oben rechts in der
+home-Page (z-index 50, blur-Backdrop).
+
+### 17.5 ESP-Integration
+
+Der `/esp/config`-Response bekommt zwei neue Felder:
+
+```json
+{
+  "idle_view_mode": "screensaver",
+  "weather": {
+    "temp_c": 11.4,
+    "weather_code": 3,
+    "description": "Bewoelkt",
+    "icon": "cloud",
+    "fetched_at": "2026-05-16T13:42:18Z"
+  }
+}
+```
+
+`weather` ist `omitempty`: wenn der open-meteo-Cache leer und
+das Backend nicht erreichbar ist, fehlt das Feld komplett. ESP-
+Saison-3 entscheidet selbst ob er den Snapshot aus `/esp/config`
+verwendet oder eigene Polls macht.
+
+### 17.6 Konfigurations-Vertrag
+
+Keine neuen Env-Vars. `weather.Client` wird unbedingt in
+`main.go` instanziiert; bei Internet-Outage liefert das Backend
+einfach `ErrUnavailable` und die UI degradiert sauber. Operator
+muss nichts setzen, kein API-Key, keine Konfiguration ausserhalb
+des Admin-UI.

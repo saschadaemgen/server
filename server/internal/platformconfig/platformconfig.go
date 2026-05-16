@@ -21,6 +21,10 @@ const (
 	KeyUAAPIBaseURL   = "ua_api_base_url"
 	KeyUAAPIToken     = "ua_api_token"
 	KeyViewerPwPepper = "viewer_pw_pepper"
+	// Saison 14-01b: physical site coordinates for the open-meteo
+	// weather snapshot rendered on the mieter screensaver.
+	KeyStationLat = "station_lat"
+	KeyStationLon = "station_lon"
 )
 
 // Service combines the DB and the secrets service.

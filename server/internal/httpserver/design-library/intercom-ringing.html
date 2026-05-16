@@ -17,6 +17,19 @@
 
 <div class="ringing is-open" data-overlay="ringing" data-screen="ringing">
 
+  <!-- Saison 14-01: live MJPEG slot. The src lazy-loads when the
+       overlay markup is rendered; the browser tears the stream
+       down automatically when the element is hidden via
+       .ringing:not(.is-open) display:none. If the backend is
+       unreachable (503 or network failure) the onerror handler
+       removes the element so the bell hero + buttons stay
+       usable. -->
+  <img class="ring-stream"
+       src="/einloggen/stream.mjpeg"
+       alt="Live-Bild"
+       onerror="this.style.display='none'"
+       style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:-1; opacity:0.45;"/>
+
   <!-- Bell hero with three concentric pulse rings -->
   <div class="bell-hero-wrap" aria-hidden="true">
     <span class="bell-pulse p1"></span>

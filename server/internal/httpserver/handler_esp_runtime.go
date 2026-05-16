@@ -21,13 +21,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"unifix.local/server/internal/doorbellcalls"
 	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/uaapi"
+	"unifix.local/server/internal/weather"
 )
 
 // uaapiUnlockReq builds the actor block UA-API sees for an
@@ -58,12 +61,19 @@ const espHeartbeatInterval = 30 * time.Second
 // wired yet. Defaults match the constants the ESP-side mock
 // firmware is being written against in the parallel ESP-Saison-2.
 type espConfigResponse struct {
-	MieterName   string         `json:"mieter_name"`
-	LocationName string         `json:"location_name"`
-	Stream       espStream      `json:"stream"`
-	Doors        []espDoor      `json:"doors"`
-	Cameras      []espCamera    `json:"cameras"`
-	UI           espUISettings  `json:"ui"`
+	MieterName   string            `json:"mieter_name"`
+	LocationName string            `json:"location_name"`
+	Stream       espStream         `json:"stream"`
+	Doors        []espDoor         `json:"doors"`
+	Cameras      []espCamera       `json:"cameras"`
+	UI           espUISettings     `json:"ui"`
+	// Saison 14-01b additions. IdleViewMode tells the firmware
+	// which start screen to draw; Weather is a snapshot the ESP
+	// can use to render its own weather card without an extra
+	// /esp/weather round-trip. Both fields are safe to ignore
+	// for older firmware that does not know about them.
+	IdleViewMode string            `json:"idle_view_mode"`
+	Weather      *weather.Snapshot `json:"weather,omitempty"`
 }
 
 type espStream struct {
@@ -128,6 +138,8 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 			ScreensaverAfterSec: 60,
 			BrightnessIdle:      30,
 		},
+		IdleViewMode: info.ResolveIdleViewMode(),
+		Weather:      s.fetchHomeWeather(r),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -348,9 +360,25 @@ func (s *Server) handleESPReject(w http.ResponseWriter, r *http.Request) {
 }
 
 // espUnlockRequest is the JSON body of POST /esp/unlock.
+//
+// Both fields are optional. The ESP firmware has three usable
+// shapes:
+//
+//	{}                            auto-resolve door via the
+//	                              viewer's paired_intercom_mac
+//	{"event_id":"<cancel_token>"} same, plus the active doorbell
+//	                              call's cancel_token for audit
+//	{"door_id":"<uuid>"}          explicit override (e.g. when
+//	                              the firmware later supports
+//	                              picking a non-paired door)
+//
+// Saison 14-01-FIX02: door_id is no longer required. The
+// server resolves the active door via uaapi.LookupDoorForIntercom
+// using the viewer's paired_intercom_mac column (the same
+// auto-resolution the mieter standby path uses, S13-07).
 type espUnlockRequest struct {
-	DoorID  string `json:"door_id"`
-	EventID string `json:"event_id"` // optional - manual unlock has no event
+	DoorID  string `json:"door_id,omitempty"`
+	EventID string `json:"event_id,omitempty"`
 }
 
 // handleESPUnlock relays an unlock request to the UA-API on
@@ -360,33 +388,88 @@ type espUnlockRequest struct {
 //
 // Returns 503 if no UA-API client is configured yet (admin still
 // needs to enter the base URL + token in /a/settings).
+//
+// Saison 14-01-FIX02: door_id auto-resolution.
+//   - door_id explicit in body          -> use it (door_source=body)
+//   - door_id empty + paired_intercom   -> uaapi lookup (door_source=auto)
+//   - door_id empty + no paired_intercom -> 400 "no paired intercom configured"
+//   - door_id empty + intercom unbound   -> 400 "paired intercom not assigned..."
 func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
 	mac := ESPMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
 	}
+	// Tolerant body decode: empty body, "{}" and partial JSON all
+	// land on the auto-resolution branch via DoorID == "". Only a
+	// completely garbled body shape (an array, a string, etc.)
+	// short-circuits with 400 so we never silently ignore a
+	// malformed request.
 	var body espUnlockRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
+	if r.ContentLength != 0 {
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&body); err != nil {
+			// io.EOF on empty bodies is fine; everything else is
+			// a real syntax error worth reporting.
+			if !errors.Is(err, io.EOF) {
+				s.log.Warn("esp unlock: invalid json",
+					"viewer_mac", mac, "err", err)
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+		}
 	}
-	if body.DoorID == "" {
-		http.Error(w, "door_id required", http.StatusBadRequest)
-		return
-	}
+
 	if s.ua == nil {
 		http.Error(w, "ua-api not configured", http.StatusServiceUnavailable)
 		return
 	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		s.log.Error("esp unlock viewer info", "err", err, "mac_prefix", mac[:8])
+		s.log.Error("esp unlock: get viewer failed",
+			"viewer_mac", mac, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := s.ua.UnlockDoor(r.Context(), body.DoorID, uaapiUnlockReq(info)); err != nil {
-		s.log.Warn("esp unlock failed", "err", err, "door_id", body.DoorID, "mac_prefix", mac[:8])
+
+	doorID := strings.TrimSpace(body.DoorID)
+	doorSource := "body"
+	if doorID == "" {
+		doorSource = "auto"
+		paired := strings.TrimSpace(info.PairedIntercomMAC)
+		if paired == "" {
+			s.log.Warn("esp unlock: no paired intercom",
+				"viewer_mac", mac, "event_id", body.EventID)
+			http.Error(w, "no paired intercom configured", http.StatusBadRequest)
+			return
+		}
+		resolved, err := s.ua.LookupDoorForIntercom(r.Context(), paired)
+		if err != nil {
+			s.log.Error("esp unlock: uaapi error",
+				"viewer_mac", mac, "paired_intercom", paired,
+				"event_id", body.EventID, "err", err)
+			http.Error(w, "ua-api door lookup failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		if resolved == "" {
+			s.log.Warn("esp unlock: paired intercom not assigned",
+				"viewer_mac", mac, "paired_intercom", paired,
+				"event_id", body.EventID)
+			http.Error(w, "paired intercom not assigned to any door", http.StatusBadRequest)
+			return
+		}
+		doorID = resolved
+	}
+
+	s.log.Info("esp unlock",
+		"viewer_mac", mac,
+		"door_id", doorID,
+		"door_source", doorSource,
+		"event_id", body.EventID,
+	)
+	if err := s.ua.UnlockDoor(r.Context(), doorID, uaapiUnlockReq(info)); err != nil {
+		s.log.Warn("esp unlock: uaapi unlock failed",
+			"viewer_mac", mac, "door_id", doorID, "err", err)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -395,13 +478,12 @@ func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.log.Info("esp unlock",
-		"mac_prefix", mac[:8],
-		"door_id", body.DoorID,
-		"event_id", body.EventID,
-	)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":          true,
+		"door_id":     doorID,
+		"door_source": doorSource,
+	})
 }
 
 // espStateRequest is the JSON body of POST /esp/state.

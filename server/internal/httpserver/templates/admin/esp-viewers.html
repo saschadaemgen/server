@@ -179,6 +179,20 @@
               </div>
               <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
             </div>
+            <div class="field">
+              <label class="field-label" for="adopt-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_esp) --">
+                <select id="adopt-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_esp) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
+            </div>
           </div>
           <footer class="modal-footer">
             <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
@@ -232,6 +246,8 @@
         var linked = form.querySelector('#adopt-link').value;
         var pairedSel = form.querySelector('#adopt-paired');
         var paired = pairedSel ? pairedSel.value : '';
+        var streamSel = form.querySelector('#adopt-stream-profile');
+        var streamProfile = streamSel ? streamSel.value : '';
         fetch('/a/esp-viewers/adopt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -239,7 +255,8 @@
             mac: mac,
             name: name,
             linked_ua_user_id: linked,
-            paired_intercom_mac: paired
+            paired_intercom_mac: paired,
+            stream_profile: streamProfile
           }),
           credentials: 'same-origin'
         })
