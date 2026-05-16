@@ -460,8 +460,10 @@ func TestLogin_HappyPath(t *testing.T) {
 	if !strings.Contains(body, testViewerName) {
 		t.Errorf("home body missing viewer name %q", testViewerName)
 	}
-	if !strings.Contains(body, "Bereit") {
-		t.Errorf("home body missing intercom-idle hint")
+	// Saison 14-01b: home.html is now the screensaver/livestream
+	// idle-container; the old intercom-idle "Bereit" copy is gone.
+	if !strings.Contains(body, `id="idle-container"`) {
+		t.Errorf("home body missing idle-container scaffold")
 	}
 }
 

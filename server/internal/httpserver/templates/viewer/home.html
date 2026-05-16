@@ -7,6 +7,75 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
   <style>
+    /* Saison 14-01b: idle-container CSS lives inline because the
+       design-library style sheet pre-dates this layout. Each .idle-view
+       is a full-stage overlay; .idle-hidden swaps them. */
+    #idle-container {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .idle-view {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: var(--color-text);
+      background: var(--color-bg);
+      transition: opacity 0.15s ease-in-out;
+    }
+    .idle-view.idle-hidden { display: none; }
+
+    /* Screensaver layout: clock huge, date medium, weather row
+       at the bottom centred. */
+    #screensaver { padding: var(--space-6); text-align: center; }
+    .screensaver-clock {
+      font-size: clamp(64px, 18vw, 168px);
+      font-weight: 200;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .screensaver-date {
+      margin-top: var(--space-3);
+      font-size: clamp(16px, 3vw, 24px);
+      color: var(--color-text-secondary);
+      text-transform: capitalize;
+    }
+    .screensaver-weather {
+      margin-top: var(--space-6);
+      display: flex; align-items: center; gap: var(--space-3);
+      font-size: clamp(18px, 3vw, 26px);
+      color: var(--color-text-secondary);
+    }
+    .screensaver-weather [data-icon] {
+      display: inline-block; width: 28px; height: 28px;
+      background: currentColor; opacity: 0.8;
+      mask-size: contain; -webkit-mask-size: contain;
+      mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat;
+      mask-position: center; -webkit-mask-position: center;
+    }
+    /* Livestream layout: img fills the stage. */
+    #livestream { padding: 0; }
+    .mieter-stream-img {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+
+    /* Settings-Icon top-right, subtle. */
+    .mieter-settings-link {
+      position: fixed; top: 12px; right: 12px;
+      z-index: 50;
+      width: 38px; height: 38px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--color-text);
+      text-decoration: none;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .mieter-settings-link:hover { background: rgba(255, 255, 255, 0.16); }
+
     @media (min-width: 640px) {
       .stage {
         width: min(520px, 80vw);
@@ -34,38 +103,58 @@
 <body class="stage-room">
 
   <div class="stage">
-    {{template "intercom-idle.html" .}}
-    {{template "intercom-history.html" .}}
+    <div id="idle-container" data-default-mode="{{.IdleViewMode}}">
+
+      <div id="screensaver" class="idle-view{{if eq .IdleViewMode "livestream"}} idle-hidden{{end}}">
+        <div class="screensaver-clock">{{.Now}}</div>
+        <div class="screensaver-date">{{.NowDate}}</div>
+        {{if .Weather}}
+          <div class="screensaver-weather">
+            <span data-icon="{{.Weather.Icon}}" aria-hidden="true"></span>
+            <span class="screensaver-temp">{{printf "%.0f" .Weather.TempC}}&deg;C</span>
+            <span class="screensaver-desc">{{.Weather.Description}}</span>
+          </div>
+        {{else}}
+          <div class="screensaver-weather" style="display:none;">
+            <span data-icon="cloud" aria-hidden="true"></span>
+            <span class="screensaver-temp"></span>
+            <span class="screensaver-desc"></span>
+          </div>
+        {{end}}
+      </div>
+
+      <div id="livestream" class="idle-view{{if ne .IdleViewMode "livestream"}} idle-hidden{{end}}">
+        <img src="/einloggen/stream.mjpeg"
+             alt="Live-Bild"
+             class="mieter-stream-img"
+             onerror="this.style.display='none'"/>
+      </div>
+
+    </div>
+
     {{template "intercom-ringing.html" .}}
   </div>
 
+  <a class="mieter-settings-link" href="/einloggen/settings" title="Einstellungen" aria-label="Einstellungen">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="2.6"/>
+      <path d="M19.4 14.6a1.5 1.5 0 0 0 .3 1.7l.1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1.5 1.5 0 0 0-1.7-.3 1.5 1.5 0 0 0-.9 1.4V20a1.7 1.7 0 1 1-3.4 0v-.1a1.5 1.5 0 0 0-1-1.4 1.5 1.5 0 0 0-1.7.3l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1.5 1.5 0 0 0 .3-1.7 1.5 1.5 0 0 0-1.4-.9H4a1.7 1.7 0 1 1 0-3.4h.1a1.5 1.5 0 0 0 1.4-1 1.5 1.5 0 0 0-.3-1.7l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1.5 1.5 0 0 0 1.7.3h.1A1.5 1.5 0 0 0 10.4 4v-.1a1.7 1.7 0 1 1 3.4 0V4a1.5 1.5 0 0 0 .9 1.4 1.5 1.5 0 0 0 1.7-.3l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1.5 1.5 0 0 0-.3 1.7v.1a1.5 1.5 0 0 0 1.4.9H20a1.7 1.7 0 1 1 0 3.4h-.1a1.5 1.5 0 0 0-1.4.9Z"/>
+    </svg>
+  </a>
+
   <script src="/static/interactions.js"></script>
+  <script src="/static/idle.js"></script>
   <script>
-    // Saison 13-03-HOTFIX1: Klingel-Lifecycle-Wire-Up neu.
-    //
-    // Live-Test ergab: das HOTFIX0-Schema mit Modul-Variablen +
-    // mehreren spezifischen click-Listenern feuerte zuverlaessig
-    // doorbell_start (Overlay sichtbar) ABER liess die zwei
-    // disabled-Buttons disabled. Robusterer Ansatz:
-    //
-    //   1. doorbell_start: alle .ring-btn Buttons enablen UND
-    //      die Anruf-Identifier direkt auf die Buttons stempeln
-    //      (data-event-id, data-intercom-mac).
-    //   2. EIN delegierter click-Handler liest die Identifier
-    //      aus dataset, ruft das passende Endpoint auf.
-    //   3. doorbell_cancel: alle .ring-btn wieder disabled +
-    //      Identifier gewischt.
-    //
-    // Vorteil: keine Modul-Variablen zu warten, keine Race
-    // zwischen Listener-Registrierung und SSE-Event, jeder Button
-    // hat seinen Kontext aus eigener Hand.
+    // Saison 13-03-HOTFIX2 klingel lifecycle wire-up. Lives
+    // inline because it depends on the per-page DOM rather than
+    // a generic library. Saison 14-01b kept it verbatim; only
+    // the idle screen changed around it.
     (function () {
       var ringEl = document.querySelector('.ringing');
 
       function ringButtons() {
         return document.querySelectorAll('.ring-btn');
       }
-
       function enableRingButtons(eventID, intercomMAC) {
         ringButtons().forEach(function (btn) {
           btn.classList.remove('is-disabled');
@@ -74,7 +163,6 @@
           btn.dataset.intercomMac = intercomMAC || '';
         });
       }
-
       function disableRingButtons() {
         ringButtons().forEach(function (btn) {
           btn.classList.add('is-disabled');
@@ -83,37 +171,22 @@
           delete btn.dataset.intercomMac;
         });
       }
-
       function closeRing() {
         if (window.unifix && unifix.closeOverlay) {
           unifix.closeOverlay('ringing');
-        } else {
-          var el = document.querySelector('.ringing');
-          if (el) el.classList.remove('is-open');
+        } else if (ringEl) {
+          ringEl.classList.remove('is-open');
         }
         disableRingButtons();
       }
 
-      // Saison 13-03-HOTFIX2: explizite EventSource statt
-      // unifix.connectSSE-Wrapper. DevTools-Mitschnitt nach
-      // HOTFIX1 zeigte mehrere parallele eventsource-Verbindungen
-      // im Netzwerk-Tab; ein einzelner expliziter EventSource +
-      // addEventListener-Aufrufe machen den Lifecycle
-      // beobachtbar (eine Zeile im Network-Tab) und
-      // Reconnect-Loops sofort sichtbar.
       var es = new EventSource('/einloggen/events');
       es.addEventListener('doorbell_start', function (e) {
         var data = {};
         try { data = JSON.parse(e.data) || {}; } catch (_) {}
-        // Saison 13-03-HOTFIX2: writeSSEEvent in handler_events.go
-        // wickelt das doorbellhub.Event in einen Envelope mit
-        // {door, ts, raw: <hub event>} ein. cancel_token und
-        // device_id liegen daher unter data.raw.*. HOTFIX1 hat das
-        // uebersehen; deshalb war das dataset auf den Buttons leer.
         var raw = data.raw || {};
         var eventID = raw.cancel_token || raw.request_id || '';
         var intercomMAC = raw.device_id || data.door || '';
-        if (window.console) console.log('[unifix] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
         enableRingButtons(eventID, intercomMAC);
         if (window.unifix && unifix.openOverlay) {
           unifix.openOverlay('ringing');
@@ -121,13 +194,8 @@
           ringEl.classList.add('is-open');
         }
       });
-      es.addEventListener('doorbell_cancel', function () {
-        if (window.console) console.log('[unifix] doorbell_cancel');
-        closeRing();
-      });
-      es.addEventListener('history_update', function () {
-        location.reload();
-      });
+      es.addEventListener('doorbell_cancel', function () { closeRing(); });
+      es.addEventListener('history_update', function () { location.reload(); });
       es.addEventListener('error', function () {
         if (window.console) console.warn('[unifix] sse error (browser will reconnect)');
       });
@@ -141,27 +209,20 @@
         });
       }
 
-      // Single delegated click-handler for all .ring-btn. Reads
-      // the action + identifiers from the button's dataset so the
-      // handler doesn't need shared module state.
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('.ring-btn');
         if (!btn || btn.disabled || btn.classList.contains('is-disabled')) return;
         var action = btn.dataset.action;
         var eventID = btn.dataset.eventId || '';
         var intercomMAC = btn.dataset.intercomMac || '';
-        if (window.console) console.log('[unifix] ring-btn click', { action: action, eventID: eventID, intercomMAC: intercomMAC });
 
         if (action === 'ignore-call') {
           if (eventID) {
             jsonPost('/einloggen/reject', { event_id: eventID }).catch(function () {});
           }
-          // Library schliesst das Overlay schon parallel; doppelt
-          // schliessen ist idempotent. closeRing raeumt Buttons.
           closeRing();
           return;
         }
-
         if (action === 'unlock-door') {
           if (!intercomMAC) return;
           e.preventDefault();
@@ -169,51 +230,18 @@
             .catch(function () {});
           return;
         }
-
         if (action === 'accept-call') {
           if (!eventID) return;
           e.preventDefault();
           jsonPost('/einloggen/answer', { event_id: eventID })
             .then(function (r) {
-              if (r.status === 409) {
-                // schon woanders angenommen.
-                closeRing();
-                return null;
-              }
+              if (r.status === 409) { closeRing(); return null; }
               return r.json().catch(function () { return null; });
             })
             .catch(function () {});
-          // Overlay schliesst sich erst wenn der cancel-Push
-          // (answered_elsewhere) auf dem SSE-Kanal eintrifft;
-          // bis dahin Buttons sperren damit kein Doppel-Klick
-          // entsteht.
           disableRingButtons();
           return;
         }
-      });
-    })();
-
-    // Saison 13-07: Standby-Unlock vom idle-screen-Schluessel-
-    // Knopf. design-library/intercom-idle.html liefert
-    // <button class="action is-primary" data-action="unlock-door">
-    // ohne .ring-btn-Klasse (das ist der Bell-Overlay-Knopf).
-    // Dieser Standby-Knopf hat keine intercom-mac im Kontext und
-    // POSTet auf /einloggen/doors/standby/unlock; der Server liest
-    // viewer.paired_intercom_mac und resolved Tuer via UA-API.
-    (function () {
-      document.addEventListener('click', function (e) {
-        var btn = e.target.closest('[data-action="unlock-door"]');
-        if (!btn) return;
-        // Bell-Overlay-Variante (.ring-btn) hat ihren eigenen
-        // Handler oben, der ueber dataset.intercomMac aufloest.
-        if (btn.classList.contains('ring-btn')) return;
-        e.preventDefault();
-        if (window.console) console.log('[unifix] standby unlock');
-        fetch('/einloggen/doors/standby/unlock', {
-          method: 'POST',
-          headers: { 'Accept': 'application/json' },
-          credentials: 'same-origin'
-        }).catch(function () {});
       });
     })();
   </script>

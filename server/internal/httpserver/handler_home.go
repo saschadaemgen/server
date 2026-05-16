@@ -8,6 +8,7 @@ import (
 
 	"unifix.local/server/internal/doorhistory"
 	"unifix.local/server/internal/mockmanager"
+	"unifix.local/server/internal/weather"
 )
 
 // ViewerHistoryLimit caps the number of door_events shown on the
@@ -30,6 +31,9 @@ type viewerHomeData struct {
 	DND          bool
 	HasUnread    bool
 	HistoryItems []viewerHistoryRow // {Where, When, Unread}
+	// Saison 14-01b idle-view fields.
+	IdleViewMode string            // "screensaver" or "livestream"
+	Weather      *weather.Snapshot // nil = backend unreachable, hide weather block
 }
 
 // viewerHistoryRow matches the design-library shape for one
@@ -91,6 +95,8 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		DND:          false,
 		HasUnread:    unread > 0,
 		HistoryItems: rows,
+		IdleViewMode: info.ResolveIdleViewMode(),
+		Weather:      s.fetchHomeWeather(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderViewer(w, "home", data); err != nil {
@@ -192,4 +198,21 @@ func safePrefix(mac string) string {
 		return mac
 	}
 	return mac[:8]
+}
+
+// fetchHomeWeather returns the cached open-meteo snapshot for the
+// configured station coordinates, or nil if either no weather
+// client is wired or the backend is unreachable. The template
+// hides its weather block on nil so a degraded screensaver still
+// shows clock + date.
+func (s *Server) fetchHomeWeather(r *http.Request) *weather.Snapshot {
+	if s.weather == nil {
+		return nil
+	}
+	lat, lon := s.stationCoords(r)
+	snap, err := s.weather.Get(r.Context(), lat, lon)
+	if err != nil {
+		return nil
+	}
+	return &snap
 }
