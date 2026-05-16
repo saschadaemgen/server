@@ -17,6 +17,7 @@ package httpserver
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -229,5 +230,96 @@ func TestESPStreamHandler_LogsRequestSummary(t *testing.T) {
 	wantBackend := `backend="` + backend.URL + `/api/stream.mjpeg?src=intercom_esp"`
 	if !strings.Contains(logged, wantBackend) {
 		t.Errorf("log missing backend %q\nfull log:\n%s", wantBackend, logged)
+	}
+}
+
+// Saison 14-01-FIX03: the multipart body must reach the client
+// without Go's auto-chunked transfer-encoding wrapping it. The
+// ESP firmware reads the raw socket bytes and chokes on hex-
+// length markers between frames; the proxy hijacks the connection
+// to keep the wire format clean.
+//
+// Wire-level invariant tested in two ways:
+//
+//  1. Go's http.Client surfaces chunked transfer-encoding via
+//     resp.TransferEncoding, NOT via the Transfer-Encoding
+//     header field (which it consumes during dechunking). Assert
+//     that slice is empty / does not contain "chunked".
+//  2. The first bytes of the body must be the multipart boundary
+//     "--frame", not a hex-length marker like "8000\r\n--frame"
+//     that chunked encoding would prepend.
+func TestESPStream_NoChunkedTransferEncoding(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		_, _ = w.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 8\r\n\r\nFAKEJPEG\r\n"))
+	}))
+	defer backend.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+	env.srv.cfg.StreamBackendURL = backend.URL
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	for _, te := range resp.TransferEncoding {
+		if strings.EqualFold(te, "chunked") {
+			t.Errorf("response uses chunked transfer-encoding: %v", resp.TransferEncoding)
+		}
+	}
+	if te := resp.Header.Get("Transfer-Encoding"); te != "" && strings.Contains(strings.ToLower(te), "chunked") {
+		t.Errorf("Transfer-Encoding header contains chunked: %q", te)
+	}
+
+	data, _ := io.ReadAll(resp.Body)
+	if !bytes.HasPrefix(data, []byte("--frame")) {
+		n := len(data)
+		if n > 32 {
+			n = 32
+		}
+		t.Errorf("body did not start with --frame; first %d bytes: %q", n, data[:n])
+	}
+}
+
+// TestESPStream_HijackPreservesContentTypeAndStripsAuth pins the
+// post-hijack invariants together so a future refactor that
+// changes either side (headers or body) fails the suite loudly:
+//
+//  - the backend MUST NOT see the inbound Authorization header
+//  - the proxied response MUST surface the backend's Content-Type
+//    verbatim (multipart/x-mixed-replace; boundary=frame)
+func TestESPStream_HijackPreservesContentTypeAndStripsAuth(t *testing.T) {
+	var sawAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		_, _ = w.Write([]byte("--frame\r\nContent-Length: 4\r\n\r\nNOPE\r\n"))
+	}))
+	defer backend.Close()
+
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
+	env.srv.cfg.StreamBackendURL = backend.URL
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if sawAuth != "" {
+		t.Errorf("backend saw Authorization=%q; want stripped", sawAuth)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "multipart/x-mixed-replace") {
+		t.Errorf("Content-Type = %q, want multipart/x-mixed-replace prefix", ct)
 	}
 }

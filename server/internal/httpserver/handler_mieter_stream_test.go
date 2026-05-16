@@ -6,6 +6,7 @@ package httpserver
 
 import (
 	"bytes"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -118,5 +119,46 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 		if !strings.Contains(logged, fragment) {
 			t.Errorf("log missing %q\nfull log:\n%s", fragment, logged)
 		}
+	}
+}
+
+// Saison 14-01-FIX03: the mieter side shares proxyMJPEGStream
+// with the ESP side, so the no-chunked invariant applies here
+// too. Browsers tolerate chunked Multipart - the test is here
+// to lock in consistent behaviour across both routes so a
+// future refactor cannot silently re-introduce chunked for one
+// of them.
+func TestMieterStream_NoChunkedTransferEncoding(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		_, _ = w.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 8\r\n\r\nFAKEJPEG\r\n"))
+	}))
+	defer backend.Close()
+
+	env := loginMieterForStream(t)
+	env.srv.cfg.StreamBackendURL = backend.URL
+
+	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	for _, te := range resp.TransferEncoding {
+		if strings.EqualFold(te, "chunked") {
+			t.Errorf("response uses chunked transfer-encoding: %v", resp.TransferEncoding)
+		}
+	}
+	if te := resp.Header.Get("Transfer-Encoding"); te != "" && strings.Contains(strings.ToLower(te), "chunked") {
+		t.Errorf("Transfer-Encoding header contains chunked: %q", te)
+	}
+
+	data, _ := io.ReadAll(resp.Body)
+	if !bytes.HasPrefix(data, []byte("--frame")) {
+		n := len(data)
+		if n > 32 {
+			n = 32
+		}
+		t.Errorf("body did not start with --frame; first %d bytes: %q", n, data[:n])
 	}
 }
