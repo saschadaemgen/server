@@ -168,7 +168,7 @@
       // addEventListener-Aufrufe machen den Lifecycle
       // beobachtbar (eine Zeile im Network-Tab) und
       // Reconnect-Loops sofort sichtbar.
-      var es = new EventSource('/einloggen/events');
+      var es = new EventSource('/webviewer/events');
       es.addEventListener('doorbell_start', function (e) {
         var data = {};
         try { data = JSON.parse(e.data) || {}; } catch (_) {}
@@ -221,7 +221,7 @@
 
         if (action === 'ignore-call') {
           if (eventID) {
-            jsonPost('/einloggen/reject', { event_id: eventID }).catch(function () {});
+            jsonPost('/webviewer/reject', { event_id: eventID }).catch(function () {});
           }
           // Library schliesst das Overlay schon parallel; doppelt
           // schliessen ist idempotent. closeRing raeumt Buttons.
@@ -232,7 +232,7 @@
         if (action === 'unlock-door') {
           if (!intercomMAC) return;
           e.preventDefault();
-          jsonPost('/einloggen/doors/' + encodeURIComponent(intercomMAC) + '/unlock', null)
+          jsonPost('/webviewer/doors/' + encodeURIComponent(intercomMAC) + '/unlock', null)
             .catch(function () {});
           return;
         }
@@ -240,7 +240,7 @@
         if (action === 'accept-call') {
           if (!eventID) return;
           e.preventDefault();
-          jsonPost('/einloggen/answer', { event_id: eventID })
+          jsonPost('/webviewer/answer', { event_id: eventID })
             .then(function (r) {
               if (r.status === 409) {
                 // schon woanders angenommen.
@@ -265,7 +265,7 @@
     // <button class="action is-primary" data-action="unlock-door">
     // ohne .ring-btn-Klasse (das ist der Bell-Overlay-Knopf).
     // Dieser Standby-Knopf hat keine intercom-mac im Kontext und
-    // POSTet auf /einloggen/doors/standby/unlock; der Server liest
+    // POSTet auf /webviewer/doors/standby/unlock; der Server liest
     // viewer.paired_intercom_mac und resolved Tuer via UA-API.
     (function () {
       document.addEventListener('click', function (e) {
@@ -276,7 +276,7 @@
         if (btn.classList.contains('ring-btn')) return;
         e.preventDefault();
         if (window.console) console.log('[unifix] standby unlock');
-        fetch('/einloggen/doors/standby/unlock', {
+        fetch('/webviewer/doors/standby/unlock', {
           method: 'POST',
           headers: { 'Accept': 'application/json' },
           credentials: 'same-origin'

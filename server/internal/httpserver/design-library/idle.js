@@ -6,7 +6,7 @@
 //
 //   1. Tick the clock + date every second so the screensaver
 //      stays current without server-side renders.
-//   2. Poll /einloggen/weather every 15 minutes and patch the
+//   2. Poll /webviewer/weather every 15 minutes and patch the
 //      DOM. Hide the weather block on backend errors so the
 //      degraded screensaver still shows clock + date cleanly.
 //   3. Toggle between screensaver and livestream on tap/click
@@ -16,7 +16,7 @@
 //
 // Plus a small navigation hook: the topbar's existing
 // data-action="open-settings" button (from intercom-idle.html)
-// navigates to /einloggen/settings. The button predates the
+// navigates to /webviewer/settings. The button predates the
 // idle-mode work; we just wire it.
 //
 // Required DOM (rendered by intercom-idle.html):
@@ -32,7 +32,7 @@
 //         </div>
 //       </div>
 //       <div id="livestream" class="idle-view ...">
-//         <img src="/einloggen/stream.mjpeg" ...>
+//         <img src="/webviewer/stream.mjpeg" ...>
 //       </div>
 //     </div>
 //     <div class="stream-meta">...</div>
@@ -92,7 +92,7 @@
   }
   function refreshWeather() {
     if (!weatherEl) return;
-    fetch('/einloggen/weather', {
+    fetch('/webviewer/weather', {
       headers: { 'Accept': 'application/json' },
       credentials: 'same-origin',
     })
@@ -126,13 +126,13 @@
     });
   }
 
-  // Topbar gear button -> /einloggen/settings. The button lives
+  // Topbar gear button -> /webviewer/settings. The button lives
   // in intercom-idle.html with data-action="open-settings"; this
   // is the only handler that picks it up.
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action="open-settings"]');
     if (!btn) return;
     e.preventDefault();
-    window.location.href = '/einloggen/settings';
+    window.location.href = '/webviewer/settings';
   });
 })();

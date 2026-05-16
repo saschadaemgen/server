@@ -63,7 +63,7 @@
     <h1>Einstellungen</h1>
     <p class="sub">Wohnung: <strong>{{.UnitName}}</strong></p>
 
-    <form method="post" action="/einloggen/settings" class="mieter-card">
+    <form method="post" action="/webviewer/settings" class="mieter-card">
       <h2 class="mieter-card-title">Idle-Ansicht</h2>
       <div class="radio-stack">
         <label>
@@ -84,7 +84,7 @@
         </label>
       </div>
       <div class="actions">
-        <a class="btn btn-secondary" href="/einloggen/">Abbrechen</a>
+        <a class="btn btn-secondary" href="/webviewer/">Abbrechen</a>
         <button class="btn btn-primary" type="submit">Speichern</button>
       </div>
     </form>
@@ -95,7 +95,7 @@
       <div class="info-row"><span class="k">Aktueller Idle-Modus</span><span>{{.IdleViewMode}}</span></div>
     </div>
 
-    <form method="post" action="/einloggen/logout" class="mieter-card" style="text-align:center;">
+    <form method="post" action="/webviewer/logout" class="mieter-card" style="text-align:center;">
       <button class="btn btn-secondary" type="submit">Abmelden</button>
     </form>
   </main>
