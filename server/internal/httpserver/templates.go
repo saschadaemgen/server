@@ -96,7 +96,6 @@ func newAdminTemplates() (*adminTemplates, error) {
 	}
 	if err := addLibrarySnippets(homeShell, []string{
 		"intercom-idle.html",
-		"intercom-history.html",
 		"intercom-ringing.html",
 	}); err != nil {
 		return nil, fmt.Errorf("attach viewer home snippets: %w", err)

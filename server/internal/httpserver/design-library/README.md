@@ -10,8 +10,9 @@ tokens.css                 CSS custom properties (dark + light themes)
 components.css             All component classes — consume tokens only
 interactions.js            Vanilla JS for sheets, modals, theme, SSE
 
-intercom-idle.html         Tenant — idle screen (always rendered)
-intercom-history.html      Tenant — Verlauf bottom sheet (overlay)
+intercom-idle.html         Tenant — idle screen (hosts the four
+                           slide-up mode-layers: screensaver,
+                           livestream, settings, history)
 intercom-ringing.html      Tenant — Klingelt overlay (overlay)
 
 admin-login.html           Hausverwalter — login card
@@ -45,7 +46,6 @@ at the top.
 <body class="stage-room">
   <div class="stage">
     {{template "intercom-idle"    .}}
-    {{template "intercom-history" .}}    {{/* hidden until is-open */}}
     {{template "intercom-ringing" .}}    {{/* hidden until is-open */}}
   </div>
   <script src="/static/interactions.js"></script>
