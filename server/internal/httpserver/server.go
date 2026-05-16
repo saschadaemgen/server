@@ -215,6 +215,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
 	s.mux.Handle("POST /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
 	s.mux.Handle("GET /webviewer/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
+	// Saison 14-03: inline-history mode JSON feed (read-marks rows
+	// asynchronously so the browser still sees "NEU" on first open).
+	s.mux.Handle("GET /webviewer/history.json", s.requireSession(http.HandlerFunc(s.handleMieterHistoryJSON)))
 	s.mux.Handle("GET /webviewer", s.requireSession(http.HandlerFunc(s.handleHome)))
 	s.mux.Handle("GET /webviewer/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
