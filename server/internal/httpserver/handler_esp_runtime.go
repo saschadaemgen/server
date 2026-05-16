@@ -28,6 +28,7 @@ import (
 	"unifix.local/server/internal/eventbus"
 	"unifix.local/server/internal/mockmanager"
 	"unifix.local/server/internal/uaapi"
+	"unifix.local/server/internal/weather"
 )
 
 // uaapiUnlockReq builds the actor block UA-API sees for an
@@ -58,12 +59,19 @@ const espHeartbeatInterval = 30 * time.Second
 // wired yet. Defaults match the constants the ESP-side mock
 // firmware is being written against in the parallel ESP-Saison-2.
 type espConfigResponse struct {
-	MieterName   string         `json:"mieter_name"`
-	LocationName string         `json:"location_name"`
-	Stream       espStream      `json:"stream"`
-	Doors        []espDoor      `json:"doors"`
-	Cameras      []espCamera    `json:"cameras"`
-	UI           espUISettings  `json:"ui"`
+	MieterName   string            `json:"mieter_name"`
+	LocationName string            `json:"location_name"`
+	Stream       espStream         `json:"stream"`
+	Doors        []espDoor         `json:"doors"`
+	Cameras      []espCamera       `json:"cameras"`
+	UI           espUISettings     `json:"ui"`
+	// Saison 14-01b additions. IdleViewMode tells the firmware
+	// which start screen to draw; Weather is a snapshot the ESP
+	// can use to render its own weather card without an extra
+	// /esp/weather round-trip. Both fields are safe to ignore
+	// for older firmware that does not know about them.
+	IdleViewMode string            `json:"idle_view_mode"`
+	Weather      *weather.Snapshot `json:"weather,omitempty"`
 }
 
 type espStream struct {
@@ -128,6 +136,8 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 			ScreensaverAfterSec: 60,
 			BrightnessIdle:      30,
 		},
+		IdleViewMode: info.ResolveIdleViewMode(),
+		Weather:      s.fetchHomeWeather(r),
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
