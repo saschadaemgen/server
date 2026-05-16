@@ -349,11 +349,11 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	// Saison 13-09: spawn the mock-goroutine for both web- and
 	// esp-type viewers. The type distinction matters for the
 	// browser-vs-bearer auth surface (web has cookie sessions
-	// from /einloggen, esp has bearer tokens at /esp/), but on
+	// from /webviewer, esp has bearer tokens at /esp/), but on
 	// the UDM-facing side both run the same Stage 1+4+5+6 stack
 	// so that the ESP-Hardware can subscribe to /esp/events and
 	// receive doorbell.ring frames the same way the web-Mieter
-	// does on /einloggen/events.
+	// does on /webviewer/events.
 	if spec.Type == TypeWeb || spec.Type == TypeESP {
 		if err := m.startViewerLocked(spec); err != nil {
 			// Best-effort rollback: drop the row so the next call

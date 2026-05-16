@@ -642,14 +642,16 @@ func (s *Server) storePasswordForViewer(ctx context.Context, mac, name, manualPW
 }
 
 // buildLoginURL liefert nur die nackte Login-URL fuer den QR-Code.
-// Pre-Fill ist raus (Anti-Pattern, HOTFIX1); URL liegt seit
-// HOTFIX2 auf /einloggen.
+// Pre-Fill ist raus (Anti-Pattern, HOTFIX1); URL lag seit
+// S13-HOTFIX2 auf /einloggen und wandert mit Saison 14-02 auf
+// /login (Tenant-Tree-Split: /login fuer die Form, /webviewer/
+// fuer den eingeloggten Bereich).
 func (s *Server) buildLoginURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/einloggen", scheme, r.Host)
+	return fmt.Sprintf("%s://%s/login", scheme, r.Host)
 }
 
 func (s *Server) respondCredentials(w http.ResponseWriter, r *http.Request, c credentialsResponse) {

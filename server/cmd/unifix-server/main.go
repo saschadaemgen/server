@@ -154,10 +154,10 @@ func main() {
 		streamsClient = c
 		// Boot-Log mit der vom Briefing geforderten Wortlaut, damit
 		// der Operator nach jedem systemctl restart sofort sieht ob
-		// /esp/stream.mjpeg und /einloggen/stream.mjpeg funktionieren.
+		// /esp/stream.mjpeg und /webviewer/stream.mjpeg funktionieren.
 		log.Info("stream backend configured", "url", cfg.StreamBackendURL)
 	} else {
-		log.Warn("stream backend not configured: /esp/stream.mjpeg and /einloggen/stream.mjpeg return 503")
+		log.Warn("stream backend not configured: /esp/stream.mjpeg and /webviewer/stream.mjpeg return 503")
 	}
 
 	// Saison 14-01b: weather-Backend (open-meteo) ist immer aktiv;

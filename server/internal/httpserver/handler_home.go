@@ -21,7 +21,7 @@ const ViewerHistoryLimit = 20
 // can be reused unchanged.
 //
 // Saison 13-07 dropped StandbyDoorID; the standby-unlock JS
-// now POSTs to the literal /einloggen/doors/standby/unlock
+// now POSTs to the literal /webviewer/doors/standby/unlock
 // route and the server reads viewer.paired_intercom_mac.
 type viewerHomeData struct {
 	UnitName     string
@@ -53,14 +53,14 @@ type viewerHistoryRow struct {
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
-		http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		if errors.Is(err, mockmanager.ErrViewerNotFound) {
 			s.clearSessionCookie(w)
-			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		s.log.Error("get viewer info", "err", err, "mac_prefix", safePrefix(mac))

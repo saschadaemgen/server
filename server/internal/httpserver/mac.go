@@ -6,7 +6,7 @@ import (
 )
 
 // macAnyForm matches a MAC in either of the two spellings the
-// /einloggen/doors/{intercom_mac}/unlock path could carry:
+// /webviewer/doors/{intercom_mac}/unlock path could carry:
 //
 //	28:70:4e:31:e2:9c   colon-form (admin / mapping internal)
 //	28704e31e29c        bare 12-hex (the live UA SSE payload)

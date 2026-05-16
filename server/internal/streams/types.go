@@ -1,7 +1,7 @@
 // Package streams talks to a local go2rtc instance over its REST
 // API. unifix-server uses it for two things:
 //
-//   - serving /esp/stream.mjpeg and /einloggen/stream.mjpeg as
+//   - serving /esp/stream.mjpeg and /webviewer/stream.mjpeg as
 //     reverse-proxies onto profile-specific MJPEG sources;
 //   - letting the admin /a/streams page CRUD those profiles
 //     without having to SSH onto the RPi and hand-edit

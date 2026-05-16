@@ -27,25 +27,26 @@ func MockMACFromContext(ctx context.Context) string {
 	return ViewerMACFromContext(ctx)
 }
 
-// requireSession is the auth middleware for /m/ routes other
-// than the login endpoints. It reads the session cookie,
+// requireSession is the auth middleware for /webviewer/ routes
+// other than the login endpoints. It reads the session cookie,
 // validates it (which also performs rolling renewal), and
 // stashes the viewer_mac on the request context. Missing or
-// invalid session: redirect to /m with 303 See Other so browsers
-// downgrade the next request to GET.
+// invalid session: redirect to /login with 303 See Other so
+// browsers downgrade the next request to GET.
 //
-// Saison 13-02-FIX4-a: the session is created via
-// username+password POST to /m, no more magic-link tokens.
+// Saison 14-02 renamed the post-login tree from /einloggen/ to
+// /webviewer/; the auth mechanism (bcrypt + session cookie) is
+// unchanged.
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sid := s.readSessionCookie(r)
 		if sid == "" {
-			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		viewerMAC, err := s.sessions.Validate(r.Context(), sid)
 		if err != nil {
-			http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxKeyViewerMAC, viewerMAC)

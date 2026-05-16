@@ -70,7 +70,7 @@ func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // proxyMJPEGStream is the shared stream-proxy core used by both
-// /esp/stream.mjpeg and /einloggen/stream.mjpeg. Both paths
+// /esp/stream.mjpeg and /webviewer/stream.mjpeg. Both paths
 // resolve their viewer and profile differently but the network-
 // side mechanics are identical.
 //

@@ -1,6 +1,6 @@
 // Saison 14-01b: weather endpoints shared by mieter and admin.
 //
-//   GET /einloggen/weather   tenant pull (session cookie auth);
+//   GET /webviewer/weather   tenant pull (session cookie auth);
 //                            consumed by idle.js every 15 minutes
 //                            to refresh the screensaver block.
 //   GET /a/weather           admin pull (admin session); useful

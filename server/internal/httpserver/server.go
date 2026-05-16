@@ -1,12 +1,17 @@
-// Package httpserver hosts the unifix HTTP surface. Two trees:
+// Package httpserver hosts the unifix HTTP surface. Three trees:
 //
-//	/m/   tenant-facing: username/password login, home (intercom),
-//	                     logout (POST), SSE stream.
-//	/a/   admin-facing:  login (+ first-run setup), dashboard,
-//	                     web-viewer CRUD (mit Passwort-Reset und
-//	                     Rate-Limit-Unlock), settings, plus
-//	                     Platzhalter-Seiten fuer esp-viewers,
-//	                     users (UA-API), esp-pager.
+//	/login        tenant login form + POST (Wohnungs-Name +
+//	              Passwort + bcrypt; saison-14-02 split off from
+//	              the old /einloggen tree).
+//	/webviewer/   tenant home (intercom, stream, settings, SSE)
+//	              and logout - everything that requires a session.
+//	/a/           admin: login + first-run setup, dashboard,
+//	              web-viewer CRUD, settings, esp-viewers, users
+//	              (UA-API), esp-pager, streams.
+//
+// The legacy /m and /einloggen entry points stay registered as
+// 301 permanent redirects so old bookmarks and QR codes keep
+// resolving (see redirectLegacyM / redirectLegacyEinloggen).
 //
 // Pure net/http with Go 1.22 ServeMux pattern routing. No router
 // or web-framework dependency. TLS is provided by the standard
@@ -93,7 +98,7 @@ type Deps struct {
 	// then renders a "go2rtc nicht konfiguriert"-Hinweis.
 	Streams *streams.Client
 	// Weather is the open-meteo client used by the mieter
-	// screensaver (saison-14-01b). Nil disables /einloggen/weather
+	// screensaver (saison-14-01b). Nil disables /webviewer/weather
 	// and /a/weather with 503; the screensaver hides its weather
 	// block in that case.
 	Weather *weather.Client
@@ -189,33 +194,38 @@ func (s *Server) routes() {
 	// via go:embed; served with a long Cache-Control.
 	s.mux.Handle("GET /static/", staticHandler())
 
-	// Tenant tree (/einloggen). Saison 13-02-FIX4-a-HOTFIX2:
-	// die alte /m-Familie wird mieterfreundlich umbenannt. Der
-	// alte Pfad antwortet mit 301 (siehe /m-Handler unten).
-	s.mux.HandleFunc("GET /einloggen", s.handleViewerRoot)
-	s.mux.HandleFunc("POST /einloggen", s.handleViewerLoginPost)
-	s.mux.HandleFunc("POST /einloggen/logout", s.handleViewerLogout)
-	s.mux.Handle("GET /einloggen/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
+	// Tenant tree. Saison 14-02 splits the old /einloggen entry
+	// into a login form (/login) and a logged-in viewer area
+	// (/webviewer/). Old /einloggen URLs still resolve via the
+	// 301 redirect block below.
+	s.mux.HandleFunc("GET /login", s.handleLoginGet)
+	s.mux.HandleFunc("POST /login", s.handleViewerLoginPost)
+	s.mux.HandleFunc("POST /webviewer/logout", s.handleViewerLogout)
+	s.mux.Handle("GET /webviewer/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
 	// Saison 13-03: Klingel-Lifecycle.
-	s.mux.Handle("POST /einloggen/doors/{door_id}/unlock", s.requireSession(http.HandlerFunc(s.handleMieterUnlock)))
-	s.mux.Handle("POST /einloggen/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
-	s.mux.Handle("POST /einloggen/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
-	s.mux.Handle("POST /einloggen/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
+	s.mux.Handle("POST /webviewer/doors/{door_id}/unlock", s.requireSession(http.HandlerFunc(s.handleMieterUnlock)))
+	s.mux.Handle("POST /webviewer/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
+	s.mux.Handle("POST /webviewer/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
+	s.mux.Handle("POST /webviewer/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
 	// Saison 14-01: live MJPEG passthrough for the ringing overlay
 	// (and optionally the idle stream slot).
-	s.mux.Handle("GET /einloggen/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
+	s.mux.Handle("GET /webviewer/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
 	// Saison 14-01b: tenant settings (idle-view-mode) and weather
 	// pull for the screensaver.
-	s.mux.Handle("GET /einloggen/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
-	s.mux.Handle("POST /einloggen/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
-	s.mux.Handle("GET /einloggen/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
-	s.mux.Handle("GET /einloggen/", s.requireSession(http.HandlerFunc(s.handleHome)))
+	s.mux.Handle("GET /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
+	s.mux.Handle("POST /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
+	s.mux.Handle("GET /webviewer/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
+	s.mux.Handle("GET /webviewer", s.requireSession(http.HandlerFunc(s.handleHome)))
+	s.mux.Handle("GET /webviewer/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
-	// Old /m-Routen liefern 301 nach /einloggen. Bookmark-/QR-
-	// Bestand bleibt damit funktionsfaehig. Path-Suffix wird
-	// mitgereicht (z.B. /m/events -> /einloggen/events).
+	// Legacy redirects. /m was the original mieter tree (pre-S13-02-
+	// FIX4-a); /einloggen was its rename. Both stay as 301 permanent
+	// redirects to the saison-14-02 split (/login + /webviewer/*) so
+	// QR codes, browser bookmarks and stale tabs keep resolving.
 	s.mux.HandleFunc("/m", s.redirectLegacyM)
 	s.mux.HandleFunc("/m/", s.redirectLegacyM)
+	s.mux.HandleFunc("GET /einloggen", s.redirectLegacyEinloggen)
+	s.mux.HandleFunc("GET /einloggen/", s.redirectLegacyEinloggen)
 
 	// Admin tree (/a).
 	s.mux.HandleFunc("GET /a/login", s.handleAdminLoginGet)
@@ -325,14 +335,52 @@ func (s *Server) ListenAndServe() error {
 }
 
 // redirectLegacyM leitet alle Anfragen unter dem alten /m-Pfad
-// (vor S13-02-FIX4-a-HOTFIX2) mit 301 nach /einloggen weiter,
-// inklusive Path-Suffix. /m -> /einloggen, /m/events ->
-// /einloggen/events, /m/logout -> /einloggen/logout.
+// (vor S13-02-FIX4-a-HOTFIX2) mit 301 nach /login bzw. /webviewer
+// weiter, inklusive Path-Suffix. Saison-14-02-Mapping:
+//
+//	/m         -> /login          (war zuvor /einloggen)
+//	/m/        -> /webviewer/
+//	/m/events  -> /webviewer/events
+//	/m/logout  -> /webviewer/logout
 func (s *Server) redirectLegacyM(w http.ResponseWriter, r *http.Request) {
-	tail := strings.TrimPrefix(r.URL.Path, "/m")
-	target := "/einloggen" + tail
+	target := mapLegacyMieterPath(r.URL.Path, "/m")
 	if raw := r.URL.RawQuery; raw != "" {
 		target += "?" + raw
 	}
 	http.Redirect(w, r, target, http.StatusMovedPermanently)
+}
+
+// redirectLegacyEinloggen mappt den Saison-13-/14-01-Pfad
+// /einloggen[/*] auf die Saison-14-02-Pfade /login + /webviewer/*.
+// 301 weil dauerhaft - Browser duerfen den Redirect cachen.
+func (s *Server) redirectLegacyEinloggen(w http.ResponseWriter, r *http.Request) {
+	target := mapLegacyMieterPath(r.URL.Path, "/einloggen")
+	if raw := r.URL.RawQuery; raw != "" {
+		target += "?" + raw
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
+}
+
+// mapLegacyMieterPath strips the legacy prefix from path and
+// returns the saison-14-02 equivalent. The bare prefix (with or
+// without trailing slash) maps to /login (the form), every other
+// suffix maps to /webviewer<suffix>. Shared by the /m and
+// /einloggen redirect handlers so the routing table is one
+// canonical place.
+func mapLegacyMieterPath(path, prefix string) string {
+	tail := strings.TrimPrefix(path, prefix)
+	switch tail {
+	case "", "/":
+		// The bare prefix used to render the login form; we route
+		// it to /login. The trailing slash variant historically
+		// rendered the home page when authenticated, so we keep
+		// the trailing slash on the new path so requireSession
+		// can decide whether to send the user further.
+		if tail == "/" {
+			return "/webviewer/"
+		}
+		return "/login"
+	default:
+		return "/webviewer" + tail
+	}
 }

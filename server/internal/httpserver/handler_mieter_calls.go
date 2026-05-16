@@ -1,11 +1,11 @@
 // Saison 13-03: Mieter-side call-lifecycle endpoints. Routes
-// live under /einloggen/* (the saison-12-FIX4-a-HOTFIX2
-// renamed mieter tree) and require an active mieter session.
+// live under /webviewer/* (renamed from /einloggen/* by
+// Saison 14-02) and require an active mieter session.
 //
-//	POST /einloggen/doors/{id}/unlock   relay UA-API door unlock
-//	POST /einloggen/answer              CAS-style answer + cancel-push
-//	POST /einloggen/reject              broadcast cancel(reason=rejected)
-//	POST /einloggen/end-call            close an answered call
+//	POST /webviewer/doors/{id}/unlock   relay UA-API door unlock
+//	POST /webviewer/answer              CAS-style answer + cancel-push
+//	POST /webviewer/reject              broadcast cancel(reason=rejected)
+//	POST /webviewer/end-call            close an answered call
 //
 // Each handler reads the viewer_mac from the request context
 // (set by requireSession) and the active call event_id from the
@@ -33,11 +33,11 @@ import (
 //   - "standby": the literal string. Reads the viewer's
 //     paired_intercom_mac (set by the admin) and uses that as
 //     the intercom. The standby button on the home screen
-//     POSTs to /einloggen/doors/standby/unlock.
+//     POSTs to /webviewer/doors/standby/unlock.
 //
 //   - <intercom-mac>: a MAC address in either colon-form or
 //     bare 12-hex. The bell-overlay POSTs to
-//     /einloggen/doors/{device_id}/unlock with the intercom
+//     /webviewer/doors/{device_id}/unlock with the intercom
 //     MAC carried in the SSE doorbell_start.device_id frame.
 //
 // In both branches the door UUID is auto-resolved via

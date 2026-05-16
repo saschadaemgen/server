@@ -8,9 +8,9 @@
 //
 //	doorbellhub on doorbell_start          -> Start(event_id, mock_mac, device_id)
 //	doorbellhub on doorbell_cancel         -> MarkEnded(event_id, "", "timeout")
-//	web-viewer POST /einloggen/answer      -> MarkAnswered(event_id, viewer_mac)
-//	web-viewer POST /einloggen/reject      -> MarkRejected(event_id, viewer_mac)
-//	web-viewer POST /einloggen/end-call    -> MarkEnded(event_id, viewer_mac, "user_ended")
+//	web-viewer POST /webviewer/answer      -> MarkAnswered(event_id, viewer_mac)
+//	web-viewer POST /webviewer/reject      -> MarkRejected(event_id, viewer_mac)
+//	web-viewer POST /webviewer/end-call    -> MarkEnded(event_id, viewer_mac, "user_ended")
 //	esp-viewer POST /esp/answer            -> MarkAnswered or MarkRejected
 //
 // MarkAnswered is the only CAS-style operation: a UPDATE with a

@@ -2,7 +2,7 @@
 // Saison 14-01-FIX01: structured per-request logging, consistent
 // with handler_esp_stream.go.
 //
-// The mieter ringing overlay renders an <img src="/einloggen/
+// The mieter ringing overlay renders an <img src="/webviewer/
 // stream.mjpeg"> while a doorbell call is active, plus the
 // idle-livestream mode (saison-14-01b) keeps it open whenever
 // the screensaver is toggled off. This handler resolves the

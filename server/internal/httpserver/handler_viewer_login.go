@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -24,18 +23,20 @@ type viewerLoginPageData struct {
 	Locked       bool
 }
 
-// handleViewerRoot beantwortet GET /m und GET /m/.
+// handleLoginGet beantwortet GET /login (Saison 14-02; ersetzt
+// handleViewerRoot auf /einloggen).
 //
-// Mit gueltiger Session: Forward an handleHome.
+// Mit gueltiger Session: 303 Redirect nach /webviewer/ - die URL-
+// Anzeige im Browser bleibt damit sauber (kein /login mit
+// gerendertem Home-Body).
 // Ohne Session: Login-Form anzeigen.
 //
 // Saison 13-02-FIX4-a-HOTFIX1: ?u= und ?p= URL-Parameter werden
 // IGNORIERT (Pre-Fill via QR-Code wurde entfernt).
-func (s *Server) handleViewerRoot(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	if sid := s.readSessionCookie(r); sid != "" {
-		if mac, err := s.sessions.Validate(r.Context(), sid); err == nil {
-			ctx := context.WithValue(r.Context(), ctxKeyViewerMAC, mac)
-			s.handleHome(w, r.WithContext(ctx))
+		if _, err := s.sessions.Validate(r.Context(), sid); err == nil {
+			http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
 			return
 		}
 	}
@@ -185,7 +186,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		"cookie_path", s.viewerCookiePath(),
 		"cookie_secure", !s.cfg.DevMode,
 	)
-	http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
 }
 
 // handleViewerLogout revokiert die Viewer-Session und loescht das
@@ -195,7 +196,7 @@ func (s *Server) handleViewerLogout(w http.ResponseWriter, r *http.Request) {
 		_ = s.sessions.Revoke(r.Context(), sid)
 	}
 	s.clearSessionCookie(w)
-	http.Redirect(w, r, "/einloggen", http.StatusSeeOther)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func (s *Server) renderViewerLogin(w http.ResponseWriter, data viewerLoginPageData) {

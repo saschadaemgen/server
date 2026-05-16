@@ -1,10 +1,12 @@
 // Saison 14-01b: tenant-facing settings page.
+// Saison 14-02 renamed the URL tree from /einloggen/* to
+// /webviewer/*; the handler and form are unchanged.
 //
 // Routes:
-//   GET  /einloggen/settings    HTML form with idle-view-mode +
+//   GET  /webviewer/settings    HTML form with idle-view-mode +
 //                               info section + logout link
-//   POST /einloggen/settings    persist idle_view_mode, redirect
-//                               back to /einloggen
+//   POST /webviewer/settings    persist idle_view_mode, redirect
+//                               back to /webviewer/
 //
 // Auth: requireSession (cookie-based). The viewer MAC comes from
 // the context value the middleware sets.
@@ -65,7 +67,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/einloggen/", http.StatusSeeOther)
+	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
 }
 
 func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, error) {
