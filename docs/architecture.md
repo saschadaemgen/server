@@ -1,6 +1,8 @@
 # unifix Architecture
 
-**Status:** Saison 12 abgeschlossen 12. Mai 2026 (S12-DOC-02).
+**Status:** Saison 14-01 abgeschlossen 16. Mai 2026 (Stream-Backend
+go2rtc produktiv, Mieter- + ESP-Live-MJPEG, Admin-Profile-CRUD).
+Vorheriger Stand: S13 (Auto-Door-Resolution + ESP-API Phase A).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -272,18 +274,51 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
             espstore-Paket wie urspruenglich im Briefing
             entworfen.
 
-Saison 13b: Stream-Integration (verschoben aus dem urspruenglichen
-            S13-05-Slot, sobald die S13-04-Spike-Captures vom
-            RPi vorliegen). Live-View im Bell-Overlay, Video
-            plus Audio, eigener WebRTC-Teardown im Mieter-
-            Browser (track.stop, pc.close, Inaktivitaets-
-            Cleanup).
+Saison 14:  Stream-Integration plus Webhook-Endpoint.
 
-Saison 14:  Webhook-Endpoint.
+   S14-01:  Stream-Backend go2rtc produktiv (16. Mai 2026,
+            ABGESCHLOSSEN).
+              - Migration 012 fuegt viewers.stream_profile
+                hinzu (nullable TEXT, Convention-Fallback bei
+                NULL: TypeWeb -> "intercom_browser",
+                TypeESP -> "intercom_esp").
+              - server/internal/streams kapselt den go2rtc-
+                REST-API-Client (List, Get, Put, Delete).
+              - /esp/stream.mjpeg und /einloggen/stream.mjpeg
+                resolven das Profil ueber GetViewerInfo +
+                ResolveStreamProfile, bauen die URL
+                <UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg
+                ?src=<profile> und proxen Body mit Flush
+                pro Read. Authorization-Header wird vor
+                Forward gestrippt.
+              - Admin-Page /a/streams mit Liste / Edit /
+                Loeschen. POST-Save wirkt live ueber die
+                go2rtc-REST-API; bestehende Konsumenten
+                reconnecten beim naechsten Frame.
+              - Web-Viewer- und ESP-Viewer-Modal bekommen
+                ein Stream-Profil-Dropdown, gespeist via
+                /a/streams.json.
+              - Mieter-Klingel-Overlay rendert
+                <img src="/einloggen/stream.mjpeg"> hinter
+                dem Bell-Hero (object-fit: cover, opacity
+                0.45). onerror blendet das Bild aus damit
+                die Buttons bei Backend-Ausfall sichtbar
+                bleiben.
+              - go2rtc.yaml.example liegt im Repo-Root mit
+                drei Default-Profilen (intercom_high als
+                Source, intercom_esp und intercom_browser
+                als FFmpeg-Derivate).
+            Out-of-Scope (kommt in S14-02+):
+              - Audio (Up- und Down-Stream)
+              - WebRTC-Signaling (S14-02 oder spaeter)
+              - Original-UA-Stream-Pfad (Premium, S20+)
+
+   S14-02:  Webhook-Endpoint.
             POST /webhook/access fuer access.doorbell.* und
-            access.door.unlock-Events. Schreibt in die in S13-01
-            angelegte door_events-Tabelle. Event-Type-Dispatch-
-            Pattern als Vorbereitung fuer S16+ Plugins.
+            access.door.unlock-Events. Schreibt in die in
+            S13-01 angelegte door_events-Tabelle. Event-Type-
+            Dispatch-Pattern als Vorbereitung fuer S16+
+            Plugins.
 
 Saison 15:  Open-Source-Strategie-Tag + Plattform-Politur.
             Final-Entscheidung ESP-Firmware-Release MIT-Lizenz.
@@ -360,11 +395,12 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
                 gibt einen Fehler zurueck, Server startet nicht.
 ```
 
-### 9.3 Tabellen-Inventar (Stand Migration 004)
+### 9.3 Tabellen-Inventar (Stand Migration 012)
 
 ```
 schema_version       Migrations-Tracking. PK version, applied_at.
-                     Aktueller MAX(version) = 4.
+                     Aktueller MAX(version) = 12 (Saison 14-01:
+                     viewers.stream_profile hinzu).
                      Migration 001.
 
 magic_link_tokens    Magic-Link-Auth-Tokens.
@@ -803,3 +839,98 @@ Hinweis:         Die Mieter-/Users-Page ist seit S12-06 rein
                  den Mock-Viewern verkoppelt; ein Mock-Viewer
                  hat keine UA-User-Annotation in der DB.
 ```
+
+## 14. Stream-Backend (Saison 14-01, go2rtc)
+
+unifix nutzt go2rtc als Stream-Bridge. UDM (UniFi Protect) liefert
+RTSPS auf Port 7441, go2rtc transmuxt das fuer alle weiteren
+Klienten in beliebigen Formaten (MJPEG fuer ESP und Browser; HLS
+und WebRTC sind fuer spaetere Saisons vorbereitet aber noch nicht
+verkabelt).
+
+### 14.1 Daten-Pfad
+
+```
+UA Intercom Hardware
+    | RTSPS:7441
+    v
+go2rtc-Daemon (RPi, localhost:1984)
+    +-- intercom_high     (Source-Profil, RTSPS)
+    +-- intercom_esp      (ffmpeg:intercom_high#video=mjpeg, 9 FPS)
+    +-- intercom_browser  (ffmpeg:intercom_high#video=mjpeg, 12 FPS)
+    | HTTP MJPEG
+    v
+unifix-server (Pass-through-Proxy mit Flush pro Read)
+    +-- /esp/stream.mjpeg          (Bearer-Auth, ESP-Tier)
+    +-- /einloggen/stream.mjpeg    (Session-Auth, Mieter-Tier)
+    | HTTPS multipart/x-mixed-replace
+    v
+Endgeraet (ESP32-P4-Display, Mieter-Browser-img)
+```
+
+### 14.2 Profile-Resolution
+
+Jeder Viewer hat eine `stream_profile`-Spalte (Migration 012,
+nullable TEXT). Resolution-Order in `ViewerInfo.ResolveStreamProfile`:
+
+1. Explizit gesetztes `stream_profile`
+2. `type='esp'` -> `intercom_esp`
+3. `type='web'` -> `intercom_browser`
+4. Defensive Fallback `intercom_default`
+
+Die Convention-Defaults sind in lock-step mit der
+`go2rtc.yaml.example`-Vorlage. Wird ein Convention-Profil in go2rtc
+umbenannt OHNE den unifix-Code mitzubewegen, zeigen neue Viewer auf
+ein nicht existentes Source - die Admin-UI raeumt das auf, sobald
+ein konkretes Profil per Dropdown gewaehlt wird.
+
+### 14.3 Admin-Profile-CRUD
+
+```
+Route                                Wirkung
+GET    /a/streams                    HTML-Liste plus Create-Modal
+GET    /a/streams.json               Profile-Array fuer Viewer-Dropdown
+POST   /a/streams                    Create (form: name, source)
+GET    /a/streams/{name}             Edit-View (Source bearbeiten)
+POST   /a/streams/{name}             Update (form: source)
+POST   /a/streams/{name}/delete      Loeschen (form)
+DELETE /a/streams/{name}             Loeschen (JSON / REST)
+```
+
+Vorlage-Buttons im Create-Modal fuellen Name und Source mit den
+drei Convention-Profilen. Beim Speichern wirkt die Aenderung live
+ueber den go2rtc-PUT-Call; bestehende Konsumenten reconnecten beim
+naechsten Frame (1-3 Sek Aussetzer).
+
+### 14.4 Stream-Proxy-Mechanik
+
+`proxyMJPEGStream` (httpserver/handler_esp_stream.go) ist der
+gemeinsame Kern fuer ESP- und Mieter-Pfad. Wesentliche Punkte:
+
+- Same-Context GET gegen
+  `<UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg?src=<profile>`.
+- Authorization-Header wird NICHT geforwarded (vermeidet, dass
+  der ESP-Bearer den unifix-Prozess verlaesst).
+- Response-Header werden 1:1 durchgereicht (Content-Type ist
+  typisch `multipart/x-mixed-replace;boundary=frame`).
+- Body wird mit 32-KB-Buffer gelesen, jeder Chunk sofort via
+  `http.Flusher.Flush` rausgeschoben. KEIN `io.Copy`, KEIN bufio.
+- Client-Disconnect terminiert die Goroutine ueber `r.Context()`.
+
+### 14.5 Konfigurations-Vertrag
+
+```
+UNIFIX_STREAM_BACKEND_URL  go2rtc Base-URL ohne Pfad-Suffix.
+                            Beispiel: http://127.0.0.1:1984
+                            Empty: Server startet weiter, Stream-
+                            Endpoints liefern 503, /a/streams
+                            rendert "go2rtc nicht konfiguriert".
+                            Production sollte das Env-Var setzen;
+                            in S17+ wandert die Pruefung in
+                            config.Validate().
+```
+
+Die `streams.Client`-Instanz wird in `main.go` einmalig beim Boot
+gebaut. Hot-Reload bei Env-Var-Aenderung gibt es bewusst nicht;
+Operator startet `unifix-server` neu wenn er die go2rtc-Adresse
+aendert (Production: `systemctl restart unifix-server`).

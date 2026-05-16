@@ -478,3 +478,55 @@ weil das UDM-Backend keine Cookies setzt. Mieter- und Admin-Pfade
 bleiben unveraendert.
 
 Konkret-Spezifikation kommt im Saison-14-Briefing.
+
+## 9. Stream-Backend (Saison 14-01)
+
+unifix terminiert die oeffentlich erreichbaren Stream-Endpoints
+(`/esp/stream.mjpeg`, `/einloggen/stream.mjpeg`) selbst und proxyt
+nach `UNIFIX_STREAM_BACKEND_URL` (typisch `http://127.0.0.1:1984`).
+go2rtc lauscht ausschliesslich auf dem Loopback-Interface; LAN-
+Kunden erreichen den Stream nur ueber unifix-server. Damit haengen
+Authentifikation und Rate-Limit am vorhandenen Cookie- und Bearer-
+Pfad und nicht an einem zweiten, separat zu haertenden Daemon.
+
+### 9.1 Authorization-Header wird gestrippt
+
+Der Reverse-Proxy entfernt den eingehenden `Authorization`-Header
+bevor er den GET an go2rtc absetzt. Konkrete Folge:
+
+- Der ESP-Bearer verlaesst den unifix-Prozess nicht.
+- Mieter-Session-Cookies werden gar nicht erst zu go2rtc
+  weitergereicht (anderer Domain-Scope, Browser sendet sie
+  ohnehin nicht im img-Request).
+- Wenn go2rtc in einer spaeteren Saison einen eigenen Bearer-Mode
+  bekommt, fuegt unifix den dann gezielt im Outgoing-Request hinzu;
+  der Klartext-Token aus dem Endgeraet wird NIE direkt
+  durchgereicht.
+
+### 9.2 go2rtc-Admin nur via Session
+
+Die /a/streams-CRUD-Endpoints laufen hinter `requireAdminSession`.
+go2rtc selbst kennt keine Authentifikation - es ist nur sicher
+solange es auf 127.0.0.1 gebunden ist. Operator-Pflicht:
+
+- `api.listen` in go2rtc.yaml MUSS `127.0.0.1:1984` sein (siehe
+  go2rtc.yaml.example im Repo-Root).
+- Iptables / firewall darf 1984 nicht extern oeffnen.
+- unifix-server bleibt einzige Frontline-Komponente.
+
+### 9.3 Profil-Source-URLs sind Klartext
+
+Stream-Profile-Source-URLs (RTSPS-URLs mit eingebettetem Token aus
+UniFi Protect) werden in der go2rtc.yaml KLARTEXT gespeichert.
+Konsequenz:
+
+- Datei-Mode 0600, owned by der go2rtc-User (Default-Setup auf RPi).
+- KEIN Backup der yaml in unverschluesselten Kanaelen (kein git,
+  kein scp ohne SFTP).
+- Bei Stream-Token-Rotation in UniFi Protect MUSS der Operator das
+  Profil in /a/streams aktualisieren - die alte URL bleibt sonst
+  funktionslos und der Stream faellt aus.
+
+Eine spaetere Saison kann go2rtc hinter Tailscale oder einer
+unifix-eigenen AES-Wrapper-Schicht legen; fuer S14-01 reicht das
+Loopback-Binding.
