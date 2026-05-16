@@ -4,9 +4,10 @@
 Backend go2rtc), S14-01b (Idle-View-Modus mit Bildschirmschoner,
 open-meteo-Wetter, Mieter-Settings), S14-01-FIX01 bis FIX04
 (Stream-Proxy URL-Hardening, ESP-Unlock-Auto-Resolution,
-Hijack-no-chunked, Source-Validator) und S14-02 (Mieter-Tree-
-Split /login + /webviewer/) abgeschlossen. Vorheriger Stand:
-Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
+Hijack-no-chunked, Source-Validator), S14-02 (Mieter-Tree-
+Split /login + /webviewer/) und S14-03 (Stream-Slot-Modi
+mit Slide-Up-Animation + Auto-Screensaver-Timer) abgeschlossen.
+Vorheriger Stand: Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -426,7 +427,39 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
             Lifecycle, Logout). Legacy-Pfade /einloggen[/*]
             und /m[/*] redirecten weiter mit 301.
 
-   S14-03:  Webhook-Endpoint (verschoben von S14-02).
+   S14-03:  Stream-Slot-Modi mit Slide-Up-Animation.
+            ABGESCHLOSSEN 16. Mai 2026. Der .stream-Slot der
+            Design-Library ist ein modes-container mit vier
+            .mode-layer-Geschwistern (screensaver, livestream,
+            settings, history). Aktive Schicht traegt
+            .mode-active und sitzt bei translateY(0); inaktive
+            warten bei translateY(100%) und schieben sich beim
+            Mode-Wechsel per 400ms cubic-bezier nach oben.
+            Trigger: Tap (screensaver<->livestream), Topbar-
+            Gear (settings), Action-bar-History (history),
+            mode-close X (zurueck zum Default-Modus), Auto-
+            Screensaver-Timer. Migration 014 fuegt
+            viewers.auto_screensaver_seconds INTEGER NULL an;
+            Allow-Liste {0, 30, 60, 300, 600}, 0 = aus. POST
+            /webviewer/settings nimmt das neue Form-Feld
+            auto_screensaver und antwortet mit JSON wenn der
+            Browser Accept: application/json sendet; 303-
+            Redirect bleibt fuer die Fallback-Page. Neuer
+            Endpoint GET /webviewer/history.json (handler_
+            mieter_history.go) liefert die letzten 20
+            door_events fuer die eingeloggte Mock-MAC und
+            markiert ungelesene Eintraege asynchron als
+            gelesen (Variante A, gleiche Mechanik wie
+            handleHome). FIX 1b: die livestream-<img> wird
+            mit leerem src gerendert und erst nach
+            DOMContentLoaded aus data-stream-src hydratisiert,
+            damit der multipart/x-mixed-replace-Response den
+            initialen Paint der Home-Page nicht blockiert.
+            Help-Icons (?) in den Inline-Settings tragen
+            Tooltip-Texte (hover + click-to-pin fuer Mobil).
+
+   S14-04:  Webhook-Endpoint (verschoben von S14-02 ueber S14-03
+            in den naechsten freien Slot).
             POST /webhook/access fuer access.doorbell.* und
             access.door.unlock-Events. Schreibt in die in
             S13-01 angelegte door_events-Tabelle. Event-Type-
@@ -528,7 +561,7 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
                 gibt einen Fehler zurueck, Server startet nicht.
 ```
 
-### 9.3 Tabellen-Inventar (Stand Migration 013)
+### 9.3 Tabellen-Inventar (Stand Migration 014)
 
 > **Saison-13-Hinweis:** Migrations 005-011 haben das Schema
 > deutlich erweitert (door_events, viewers-Rename + ESP-Felder,
@@ -539,8 +572,9 @@ Rollback:       Bei Fehler in einer Migration: tx.Rollback, db.Open
 
 ```
 schema_version       Migrations-Tracking. PK version, applied_at.
-                     Aktueller MAX(version) = 13 (Saison 14-01b:
-                     viewers.idle_view_mode +
+                     Aktueller MAX(version) = 14 (Saison 14-03:
+                     viewers.auto_screensaver_seconds; davor
+                     14-01b mit viewers.idle_view_mode +
                      platform_config.station_lat/lon).
                      Migration 001.
 
