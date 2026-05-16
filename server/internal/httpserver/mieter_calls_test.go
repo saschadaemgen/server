@@ -87,7 +87,7 @@ func TestMieterUnlock_BellOverlayResolvesViaThumbnail(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
+		env.ts.URL+"/webviewer/doors/28:70:4e:31:e2:9c/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -130,7 +130,7 @@ func TestMieterUnlock_BareMACPathResolvesViaThumbnail(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/28704e31e29c/unlock", nil)
+		env.ts.URL+"/webviewer/doors/28704e31e29c/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -145,7 +145,7 @@ func TestMieterUnlock_BareMACPathResolvesViaThumbnail(t *testing.T) {
 }
 
 // Saison 13-07: standby path. The home screen POSTs to the
-// literal /einloggen/doors/standby/unlock; the handler reads the
+// literal /webviewer/doors/standby/unlock; the handler reads the
 // viewer's paired_intercom_mac and resolves from there.
 func TestMieterUnlock_StandbyUsesPairedIntercom(t *testing.T) {
 	var gotDoorID string
@@ -167,7 +167,7 @@ func TestMieterUnlock_StandbyUsesPairedIntercom(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/standby/unlock", nil)
+		env.ts.URL+"/webviewer/doors/standby/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -188,7 +188,7 @@ func TestMieterUnlock_StandbyWithoutPairingReturns404(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: "http://invalid", Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/standby/unlock", nil)
+		env.ts.URL+"/webviewer/doors/standby/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -215,7 +215,7 @@ func TestMieterUnlock_IntercomNotBoundReturns404(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/28:70:4e:31:e2:9c/unlock", nil)
+		env.ts.URL+"/webviewer/doors/28:70:4e:31:e2:9c/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -233,7 +233,7 @@ func TestMieterUnlock_BadPathParamReturns400(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: "http://invalid", Token: "t"}))
 
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/doors/garbage/unlock", nil)
+		env.ts.URL+"/webviewer/doors/garbage/unlock", nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
@@ -262,11 +262,11 @@ func TestMieterAnswer_FirstWinsPushesCancelToOthers(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"event_id": "tok-call-1"})
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/answer", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/answer", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/answer: %v", err)
+		t.Fatalf("POST /webviewer/answer: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -289,7 +289,7 @@ func TestMieterAnswer_FirstWinsPushesCancelToOthers(t *testing.T) {
 
 	// Zweiter Klick auf Answer ist 409.
 	req2, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/answer", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/answer", bytes.NewReader(body))
 	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := env.client.Do(req2)
 	if err != nil {
@@ -315,11 +315,11 @@ func TestMieterReject_CancelForAll(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"event_id": "tok-rej"})
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/reject", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/reject", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/reject: %v", err)
+		t.Fatalf("POST /webviewer/reject: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -360,11 +360,11 @@ func TestMieterEndCall_PushesUserEnded(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"event_id": "tok-end"})
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/end-call", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/end-call", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/end-call: %v", err)
+		t.Fatalf("POST /webviewer/end-call: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -412,11 +412,11 @@ func TestMieterReject_PublishesCallAdminResultToUDM(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"event_id": "tok-call-admin"})
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/reject", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/reject", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/reject: %v", err)
+		t.Fatalf("POST /webviewer/reject: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -445,11 +445,11 @@ func TestMieterEndCall_PublishesCallAdminResultToUDM(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"event_id": "tok-end-admin"})
 	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen/end-call", bytes.NewReader(body))
+		env.ts.URL+"/webviewer/end-call", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := env.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /einloggen/end-call: %v", err)
+		t.Fatalf("POST /webviewer/end-call: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

@@ -248,8 +248,8 @@ func TestAdminWebViewers_CreateReturnsCredentials(t *testing.T) {
 	}
 	// S13-02-FIX4-a-HOTFIX1: Login-URL ist jetzt nackt (kein
 	// ?u= / ?p= mehr); das war ein Sicherheits-Anti-Pattern.
-	if !strings.HasSuffix(c.LoginURL, "/einloggen") {
-		t.Errorf("login_url should be plain /einloggen, got: %q", c.LoginURL)
+	if !strings.HasSuffix(c.LoginURL, "/login") {
+		t.Errorf("login_url should be plain /login, got: %q", c.LoginURL)
 	}
 	if strings.Contains(c.LoginURL, "?u=") || strings.Contains(c.LoginURL, "&p=") {
 		t.Errorf("login_url leaks credentials: %q", c.LoginURL)
@@ -796,7 +796,7 @@ func TestSetPassword_UpdatesAndInvalidatesSessions(t *testing.T) {
 	form.Set("username", testViewerLogin)
 	form.Set("password", "1234")
 	loginReq, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
+		env.ts.URL+"/login", strings.NewReader(form.Encode()))
 	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	loginResp2, err := fresh.Do(loginReq)
 	if err != nil {
@@ -989,7 +989,7 @@ func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
 	form := url.Values{}
 	form.Set("username", testViewerLogin)
 	form.Set("password", testViewerPassword)
-	loginReq, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
+	loginReq, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/login", strings.NewReader(form.Encode()))
 	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	loginResp, err := fresh.Do(loginReq)
 	if err != nil {
@@ -1023,8 +1023,8 @@ func TestLoginInfoEndpoint_ReturnsURLAndQR(t *testing.T) {
 	if got["login_url"] == "" {
 		t.Error("login_url empty")
 	}
-	if !strings.Contains(got["login_url"], "/einloggen") {
-		t.Errorf("login_url = %q, want suffix /einloggen", got["login_url"])
+	if !strings.Contains(got["login_url"], "/login") {
+		t.Errorf("login_url = %q, want suffix /login", got["login_url"])
 	}
 	if !strings.Contains(got["qr_svg"], "<svg") {
 		t.Errorf("qr_svg missing <svg> markup: %q", got["qr_svg"])
@@ -1059,7 +1059,7 @@ func TestWebViewersList_IncludesLoginURLPerRow(t *testing.T) {
 	if !strings.Contains(body, `data-action="copy-link"`) {
 		t.Error("list missing copy-link icon button")
 	}
-	if !strings.Contains(body, `/einloggen`) {
+	if !strings.Contains(body, `/login`) {
 		t.Error("list missing login URL in data-url")
 	}
 }
@@ -1070,7 +1070,7 @@ func TestMagicLinkRoutes_AreGone(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	for _, path := range []string{
-		"/einloggen/login?t=abcdef",
+		"/webviewer/login?t=abcdef",
 		"/a/mocks",
 		"/a/mocks/0c:ea:14:42:42:42/magic-link",
 	} {

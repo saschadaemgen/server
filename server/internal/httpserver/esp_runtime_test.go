@@ -398,7 +398,7 @@ func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
 }
 
 // Saison 13-08: dedicated /esp/reject endpoint - mirrors
-// /einloggen/reject (doorbellcalls.MarkRejected + sibling
+// /webviewer/reject (doorbellcalls.MarkRejected + sibling
 // cancel + UDM ring-stop via call_admin_result).
 
 func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {

@@ -343,11 +343,11 @@ func (e *testEnv) loginViewer(t *testing.T, username, password string) *http.Res
 	form := url.Values{}
 	form.Set("username", username)
 	form.Set("password", password)
-	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/einloggen", strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := e.client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /m: %v", err)
+		t.Fatalf("POST /login: %v", err)
 	}
 	return resp
 }
@@ -375,7 +375,7 @@ type noopViewer struct {
 	once    sync.Once
 
 	// rejectMu guards the test-recorded reject calls so the
-	// mieter-endpoint tests can assert that /einloggen/reject
+	// mieter-endpoint tests can assert that /webviewer/reject
 	// reached the right viewer with the right intercom MAC.
 	rejectMu      sync.Mutex
 	rejectCalls   []rejectCall
@@ -436,8 +436,8 @@ func TestLogin_HappyPath(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusSeeOther)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
-		t.Errorf("Location = %q, want /einloggen", loc)
+	if loc := resp.Header.Get("Location"); loc != "/webviewer/" {
+		t.Errorf("Location = %q, want /webviewer/", loc)
 	}
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -448,9 +448,9 @@ func TestLogin_HappyPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	resp2, err := env.client.Get(env.ts.URL + "/einloggen/")
+	resp2, err := env.client.Get(env.ts.URL + "/webviewer/")
 	if err != nil {
-		t.Fatalf("GET /m/: %v", err)
+		t.Fatalf("GET /webviewer/: %v", err)
 	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
@@ -469,9 +469,9 @@ func TestLogin_HappyPath(t *testing.T) {
 
 func TestLogin_NoSession_RendersForm(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/einloggen")
+	resp, err := env.client.Get(env.ts.URL + "/login")
 	if err != nil {
-		t.Fatalf("GET /m: %v", err)
+		t.Fatalf("GET /login: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -492,9 +492,9 @@ func TestLogin_NoSession_RendersForm(t *testing.T) {
 // haben in URLs nichts zu suchen).
 func TestLogin_IgnoresQueryPrefill(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/einloggen?u=alice&p=hunter2")
+	resp, err := env.client.Get(env.ts.URL + "/login?u=alice&p=hunter2")
 	if err != nil {
-		t.Fatalf("GET /m: %v", err)
+		t.Fatalf("GET /login: %v", err)
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
@@ -568,8 +568,8 @@ func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303 (See Other)", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
-		t.Errorf("Location = %q, want /einloggen", loc)
+	if loc := resp.Header.Get("Location"); loc != "/webviewer/" {
+		t.Errorf("Location = %q, want /webviewer/", loc)
 	}
 	cookie := findSessionCookie(resp)
 	if cookie == nil {
@@ -645,16 +645,16 @@ func TestLogin_WhitespaceTolerant(t *testing.T) {
 
 func TestHome_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/")
 	if err != nil {
-		t.Fatalf("GET /m/: %v", err)
+		t.Fatalf("GET /webviewer/: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/einloggen" {
-		t.Errorf("Location = %q, want /einloggen", loc)
+	if loc := resp.Header.Get("Location"); loc != "/login" {
+		t.Errorf("Location = %q, want /login", loc)
 	}
 }
 
@@ -666,9 +666,9 @@ func TestHome_SessionExpired(t *testing.T) {
 
 	env.clock.Add(2 * session.DefaultIdleTimeout)
 
-	resp2, err := env.client.Get(env.ts.URL + "/einloggen/")
+	resp2, err := env.client.Get(env.ts.URL + "/webviewer/")
 	if err != nil {
-		t.Fatalf("GET /m/: %v", err)
+		t.Fatalf("GET /webviewer/: %v", err)
 	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusSeeOther {
@@ -684,22 +684,22 @@ func TestLogout_RevokesSessionAndClearsCookie(t *testing.T) {
 	resp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	resp.Body.Close()
 
-	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/einloggen/logout", nil)
+	logout, err := http.NewRequest(http.MethodPost, env.ts.URL+"/webviewer/logout", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	resp2, err := env.client.Do(logout)
 	if err != nil {
-		t.Fatalf("POST /m/logout: %v", err)
+		t.Fatalf("POST /webviewer/logout: %v", err)
 	}
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusSeeOther {
 		t.Errorf("status = %d, want 303", resp2.StatusCode)
 	}
 
-	resp3, err := env.client.Get(env.ts.URL + "/einloggen/")
+	resp3, err := env.client.Get(env.ts.URL + "/webviewer/")
 	if err != nil {
-		t.Fatalf("GET /m/ after logout: %v", err)
+		t.Fatalf("GET /webviewer/ after logout: %v", err)
 	}
 	resp3.Body.Close()
 	if resp3.StatusCode != http.StatusSeeOther {
@@ -732,22 +732,59 @@ func TestCookie_Flags(t *testing.T) {
 	}
 }
 
-// ---------- S13-02-FIX4-a-HOTFIX2: Legacy /m -> /einloggen ----------
+// ---------- Legacy redirects ----------
 
 // TestOldMRouteRedirects sichert dass alle alten /m-Pfade
-// (Bookmarks, alte QR-Codes, externe Links) mit 301 nach
-// /einloggen umgeleitet werden.
+// (Bookmarks, alte QR-Codes, externe Links) mit 301 in den
+// Saison-14-02-Split aufgeloest werden: die Wurzel auf /login
+// (Form), alles andere auf /webviewer/<suffix>.
 func TestOldMRouteRedirects(t *testing.T) {
 	env := newTestServer(t)
 	cases := []struct {
 		path string
 		want string
 	}{
-		{"/m", "/einloggen"},
-		{"/m/", "/einloggen/"},
-		{"/m/events", "/einloggen/events"},
-		{"/m/logout", "/einloggen/logout"},
-		{"/m?u=alice", "/einloggen?u=alice"},
+		{"/m", "/login"},
+		{"/m/", "/webviewer/"},
+		{"/m/events", "/webviewer/events"},
+		{"/m/logout", "/webviewer/logout"},
+		{"/m?u=alice", "/login?u=alice"},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			resp, err := env.client.Get(env.ts.URL + c.path)
+			if err != nil {
+				t.Fatalf("GET %s: %v", c.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusMovedPermanently {
+				t.Errorf("status = %d, want 301 for %s", resp.StatusCode, c.path)
+			}
+			if loc := resp.Header.Get("Location"); loc != c.want {
+				t.Errorf("Location = %q, want %q for %s", loc, c.want, c.path)
+			}
+		})
+	}
+}
+
+// TestOldEinloggenRouteRedirects ist das Saison-14-02-Pendant zu
+// TestOldMRouteRedirects: der Pfad /einloggen aus S13-S14-01b
+// bleibt als 301-Redirect bestehen, damit existierende Browser-
+// Bookmarks und QR-Codes nicht brechen.
+func TestOldEinloggenRouteRedirects(t *testing.T) {
+	env := newTestServer(t)
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/einloggen", "/login"},
+		{"/einloggen/", "/webviewer/"},
+		{"/einloggen/events", "/webviewer/events"},
+		{"/einloggen/stream.mjpeg", "/webviewer/stream.mjpeg"},
+		{"/einloggen/weather", "/webviewer/weather"},
+		{"/einloggen/settings", "/webviewer/settings"},
+		{"/einloggen/logout", "/webviewer/logout"},
+		{"/einloggen?u=alice", "/login?u=alice"},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {

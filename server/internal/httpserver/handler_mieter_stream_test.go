@@ -15,7 +15,7 @@ import (
 )
 
 // loginMieterForStream is a small test helper that seeds a viewer
-// and logs it in via the same POST /einloggen path the production
+// and logs it in via the same POST /login path the production
 // browser hits, so the resulting session cookie is what the proxy
 // handler reads. Returns the env ready to issue GET requests.
 func loginMieterForStream(t *testing.T) *testEnv {
@@ -44,7 +44,7 @@ func TestMieterStreamHandler_BuildsCorrectBackendURL(t *testing.T) {
 	env := loginMieterForStream(t)
 	env.srv.cfg.StreamBackendURL = backend.URL + "/" // trailing slash on purpose
 
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestMieterStreamHandler_503WhenBackendUnconfigured(t *testing.T) {
 	env := loginMieterForStream(t)
 	env.srv.cfg.StreamBackendURL = ""
 
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -78,8 +78,8 @@ func TestMieterStreamHandler_503WhenBackendUnconfigured(t *testing.T) {
 
 func TestMieterStreamHandler_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
-	// No login -> requireSession bounces to /einloggen with 303.
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	// No login -> requireSession bounces to /login with 303.
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 	var logBuf bytes.Buffer
 	env.srv.log = slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 	logged := logBuf.String()
 	for _, fragment := range []string{
 		`msg="stream proxy"`,
-		`route=/einloggen/stream.mjpeg`,
+		`route=/webviewer/stream.mjpeg`,
 		`label=mieter`,
 		`profile=intercom_browser`,
 		`viewer_mac=` + testViewerMAC,
@@ -138,7 +138,7 @@ func TestMieterStream_NoChunkedTransferEncoding(t *testing.T) {
 	env := loginMieterForStream(t)
 	env.srv.cfg.StreamBackendURL = backend.URL
 
-	resp, err := env.client.Get(env.ts.URL + "/einloggen/stream.mjpeg")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
