@@ -176,6 +176,7 @@ type espAdoptedRow struct {
 	HasToken       bool   `json:"has_token"`
 	LinkedUserID   string `json:"linked_ua_user_id"`
 	LinkedUserName string `json:"linked_user_name"`
+	StreamProfile  string `json:"stream_profile"`
 }
 
 // adminESPViewersData ist die Payload fuer templates/admin/esp-viewers.html.
@@ -260,12 +261,13 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 			continue
 		}
 		row := espAdoptedRow{
-			MAC:          info.MAC,
-			Name:         info.Name,
-			Model:        info.ESPModel,
-			FwVersion:    info.ESPFwVersion,
-			HasToken:     info.HasESPToken,
-			LinkedUserID: info.LinkedUAUserID,
+			MAC:           info.MAC,
+			Name:          info.Name,
+			Model:         info.ESPModel,
+			FwVersion:     info.ESPFwVersion,
+			HasToken:      info.HasESPToken,
+			LinkedUserID:  info.LinkedUAUserID,
+			StreamProfile: info.StreamProfile,
 		}
 		if name, ok := userNames[info.LinkedUAUserID]; ok {
 			row.LinkedUserName = name
@@ -318,6 +320,7 @@ type espAdoptRequest struct {
 	Name              string `json:"name"`
 	LinkedUAUserID    string `json:"linked_ua_user_id"`
 	PairedIntercomMAC string `json:"paired_intercom_mac"`
+	StreamProfile     string `json:"stream_profile"`
 }
 
 type espAdoptResponse struct {
@@ -348,6 +351,7 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		body.Name = r.PostForm.Get("name")
 		body.LinkedUAUserID = r.PostForm.Get("linked_ua_user_id")
 		body.PairedIntercomMAC = r.PostForm.Get("paired_intercom_mac")
+		body.StreamProfile = r.PostForm.Get("stream_profile")
 	}
 
 	mac := strings.ToLower(strings.TrimSpace(body.MAC))
@@ -401,6 +405,7 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		Type:              mockmanager.TypeESP,
 		LinkedUAUserID:    strings.TrimSpace(body.LinkedUAUserID),
 		PairedIntercomMAC: pairedIntercom,
+		StreamProfile:     strings.TrimSpace(body.StreamProfile),
 		ESPModel:          model.String,
 		ESPFwVersion:      fwVersion.String,
 		ESPTokenHash:      hash,
