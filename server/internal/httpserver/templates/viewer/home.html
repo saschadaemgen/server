@@ -30,11 +30,14 @@
       }
     }
 
-    /* Saison 14-01b-FIX01: idle-container lebt INNERHALB des
-       .stream-Slots aus intercom-idle.html. Keine fixed/viewport-
-       Regeln, nichts auf body oder html. Der Slot hat seine
-       Library-Dimensionen aus components.css; der Container fuellt
-       ihn und nichts darueber hinaus. */
+    /* Saison 14-01b-FIX01 + saison 14-03: idle-container lebt
+       INNERHALB des .stream-Slots aus intercom-idle.html. Keine
+       fixed/viewport-Regeln, nichts auf body oder html. Vier
+       .mode-layer-Geschwister sind absolut gestapelt; die aktive
+       Schicht traegt .mode-active und sitzt bei translateY(0),
+       die inaktiven warten bei translateY(100%) (unterhalb des
+       Slots) und schieben sich beim Umschalten ueber den 400ms
+       cubic-bezier nach oben. */
     #idle-container {
       position: absolute;
       inset: 0;
@@ -43,7 +46,7 @@
       overflow: hidden;
       cursor: pointer;
     }
-    .idle-view {
+    .mode-layer {
       position: absolute;
       inset: 0;
       display: flex;
@@ -51,8 +54,14 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
+      transform: translateY(100%);
+      transition: transform 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
+      background: var(--color-bg, #0b1220);
+      will-change: transform;
     }
-    .idle-view.idle-hidden { display: none; }
+    .mode-layer.mode-active {
+      transform: translateY(0);
+    }
     .screensaver-clock {
       font-size: clamp(48px, 14vw, 120px);
       font-weight: 200;
@@ -94,6 +103,179 @@
       height: 100%;
       object-fit: cover;
       display: block;
+    }
+
+    /* Inline settings + history shared chrome (saison 14-03). */
+    .mode-layer[data-mode="settings"],
+    .mode-layer[data-mode="history"] {
+      justify-content: flex-start;
+      align-items: stretch;
+      padding: 16px 20px 20px;
+      gap: 0;
+      color: var(--color-text, #f0f4ff);
+      cursor: default;
+    }
+    .mode-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .mode-header h2 {
+      margin: 0;
+      font-size: clamp(16px, 2.6vw, 20px);
+      font-weight: 600;
+    }
+    .mode-close {
+      background: transparent;
+      border: 0;
+      color: var(--color-text-secondary, #cbd5e1);
+      font-size: 24px;
+      line-height: 1;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      border-radius: 8px;
+    }
+    .mode-close:hover { background: rgba(255,255,255,0.06); }
+
+    .mode-settings {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow: auto;
+    }
+    .mode-field {
+      border: 0;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .mode-field legend {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-secondary, #cbd5e1);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mode-field label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .mode-field label:hover { background: rgba(255,255,255,0.04); }
+    .mode-field input[type="radio"] { accent-color: var(--color-accent, #5b9dff); }
+
+    .mode-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 4px;
+    }
+    .mode-submit {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      border: 0;
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .mode-form-status {
+      font-size: 13px;
+      color: var(--color-text-secondary, #94a3b8);
+    }
+
+    /* Help-icon (?) bubble: hover for desktop, click for mobile. */
+    .mode-help {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      color: var(--color-text-secondary, #cbd5e1);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: help;
+      position: relative;
+    }
+    .mode-help::after {
+      content: attr(data-help);
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 6px;
+      width: max-content;
+      max-width: 240px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #0b1220;
+      color: var(--color-text, #f0f4ff);
+      border: 1px solid rgba(255,255,255,0.12);
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px);
+      transition: opacity 150ms ease, transform 150ms ease;
+      z-index: 5;
+    }
+    .mode-help:hover::after,
+    .mode-help.is-open::after,
+    .mode-help:focus::after {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .mode-history {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow: auto;
+    }
+    .mode-history-empty {
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 14px;
+      padding: 8px 0;
+    }
+    .mode-history-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      font-size: 14px;
+    }
+    .mode-history-row.is-unread {
+      background: rgba(91,157,255,0.10);
+      border-color: rgba(91,157,255,0.30);
+    }
+    .mode-history-when {
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 12px;
+    }
+    .mode-history-badge {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      letter-spacing: 0.04em;
     }
   </style>
 </head>

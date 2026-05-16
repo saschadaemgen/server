@@ -34,6 +34,10 @@ type viewerHomeData struct {
 	// Saison 14-01b idle-view fields.
 	IdleViewMode string            // "screensaver" or "livestream"
 	Weather      *weather.Snapshot // nil = backend unreachable, hide weather block
+	// Saison 14-03 inline-mode payload. AutoScreensaverSeconds is
+	// the persisted timer (0 = disabled); the browser runtime
+	// promotes the setting into the slide-up modes container.
+	AutoScreensaverSeconds int
 }
 
 // viewerHistoryRow matches the design-library shape for one
@@ -88,15 +92,16 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	data := viewerHomeData{
-		UnitName:     info.Name,
-		DoorName:     "Hauseingang",
-		Now:          now.Format("15:04:05"),
-		NowDate:      formatGermanDate(now),
-		DND:          false,
-		HasUnread:    unread > 0,
-		HistoryItems: rows,
-		IdleViewMode: info.ResolveIdleViewMode(),
-		Weather:      s.fetchHomeWeather(r),
+		UnitName:               info.Name,
+		DoorName:               "Hauseingang",
+		Now:                    now.Format("15:04:05"),
+		NowDate:                formatGermanDate(now),
+		DND:                    false,
+		HasUnread:              unread > 0,
+		HistoryItems:           rows,
+		IdleViewMode:           info.ResolveIdleViewMode(),
+		Weather:                s.fetchHomeWeather(r),
+		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderViewer(w, "home", data); err != nil {

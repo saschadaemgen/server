@@ -1,5 +1,5 @@
 <!--
-  unifix · intercom-idle.html
+  unifix - intercom-idle.html
   Tenant-facing idle screen. Drop into a host page whose <body>
   has the `.stage-room` class:
 
@@ -8,18 +8,21 @@
     </body>
 
   Required server data:
-    .UnitName       — Wohnungs-Bezeichnung, e.g. "Dämgen"
-    .DoorName       — Tür-Bezeichnung, e.g. "Hauseingang"
-    .Now            — pre-formatted time HH:MM:SS (or hydrate client-side)
-    .NowDate        — pre-formatted "Di, 13. Mai"
-    .DND            — bool, "do not disturb" active
-    .HasUnread      — bool, unread bell events
+    .UnitName               - Wohnungs-Bezeichnung, e.g. "Daemgen"
+    .DoorName               - Tuer-Bezeichnung, e.g. "Hauseingang"
+    .Now                    - pre-formatted time HH:MM:SS (or hydrate client-side)
+    .NowDate                - pre-formatted "Di, 13. Mai"
+    .DND                    - bool, "do not disturb" active
+    .HasUnread              - bool, unread bell events
+    .IdleViewMode           - "screensaver" or "livestream" (default mode of the slot)
+    .Weather                - optional weather snapshot or nil
+    .AutoScreensaverSeconds - 0=off, otherwise the persisted timer (saison 14-03)
 -->
 
 <div class="stage" data-screen="idle">
   <div class="screen-idle">
 
-    <!-- Top bar: identity · controls · clock -->
+    <!-- Top bar: identity - controls - clock -->
     <div class="topbar">
 
       <div class="identity">
@@ -55,6 +58,10 @@
 
         <span class="ctrl-sep" aria-hidden="true"></span>
 
+        <!-- Saison 14-03: settings button toggles the inline
+             settings mode instead of navigating away. idle.js
+             intercepts the click; the legacy /webviewer/settings
+             page stays as fallback if JS is off. -->
         <button class="ctrl" data-action="open-settings" aria-label="Einstellungen" title="Einstellungen">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="2.6"/>
@@ -72,17 +79,22 @@
     </div>
 
     <!-- Stream slot: where the camera feed renders. Always-dark.
-         Saison 14-01b-FIX01: der existierende .stream-Slot wird
-         zum Idle-Container. Zwei Geschwister (screensaver +
-         livestream) wechseln sich per Tap ab. Default kommt vom
-         Server (.IdleViewMode = "screensaver" oder "livestream").
-         Der Slot behaelt seine Library-Hoehe und seine Position
-         im topbar/actions-Layout - es gibt KEIN Vollbild-Overlay,
-         alle anderen UI-Elemente bleiben sichtbar und klickbar. -->
+         Saison 14-03: four mode-layers stacked inside the existing
+         .stream slot. idle.js slides them up/down from below using
+         CSS transforms (400ms cubic-bezier). The .mode-active layer
+         sits at translateY(0); inactive layers wait at
+         translateY(100%) just below the visible area. No fullscreen
+         overlay, no body-level positioning - everything is scoped
+         to the slot so the topbar, action-bar, and bell-overlay
+         stay clickable. -->
     <div class="stream" role="region" aria-label="Kamerastream {{.DoorName}}">
-      <div id="idle-container" data-default-mode="{{.IdleViewMode}}">
+      <div id="idle-container"
+           data-default-mode="{{.IdleViewMode}}"
+           data-auto-screensaver-seconds="{{.AutoScreensaverSeconds}}">
 
-        <div id="screensaver" class="idle-view{{if eq .IdleViewMode "livestream"}} idle-hidden{{end}}">
+        <!-- 1. Screensaver: clock + date + weather. Default unless
+             the operator persisted livestream as their default. -->
+        <div class="mode-layer{{if ne .IdleViewMode "livestream"}} mode-active{{end}}" data-mode="screensaver">
           <div class="screensaver-clock">{{.Now}}</div>
           <div class="screensaver-date">{{.NowDate}}</div>
           {{if .Weather}}
@@ -100,11 +112,70 @@
           {{end}}
         </div>
 
-        <div id="livestream" class="idle-view{{if ne .IdleViewMode "livestream"}} idle-hidden{{end}}">
-          <img src="/webviewer/stream.mjpeg"
-               alt="Live-Bild"
+        <!-- 2. Livestream: MJPEG img. Saison 14-03-FIX-1b: src is
+             EMPTY at render-time; idle.js fills it from
+             data-stream-src on DOMContentLoaded, so the multipart
+             response never blocks page paint. -->
+        <div class="mode-layer{{if eq .IdleViewMode "livestream"}} mode-active{{end}}" data-mode="livestream">
+          <img alt="Live-Bild"
                class="mieter-stream-img"
+               data-stream-src="/webviewer/stream.mjpeg"
                onerror="this.style.display='none'"/>
+        </div>
+
+        <!-- 3. Inline settings (saison 14-03). Standalone
+             /webviewer/settings stays available as fallback for
+             JS-off browsers; the inline form POSTs the same
+             endpoint with Accept: application/json and patches
+             the runtime without a reload. -->
+        <div class="mode-layer" data-mode="settings">
+          <form class="mode-settings" data-form="settings"
+                action="/webviewer/settings" method="post">
+            <header class="mode-header">
+              <h2>Einstellungen</h2>
+              <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
+            </header>
+
+            <fieldset class="mode-field">
+              <legend>
+                Ruhe-Ansicht
+                <span class="mode-help" data-help="Was sieht der Mieter wenn nichts klingelt: Uhr+Datum (Bildschirmschoner) oder direkt das Kamerabild (Live-Stream).">?</span>
+              </legend>
+              <label><input type="radio" name="idle_view_mode" value="screensaver"{{if ne .IdleViewMode "livestream"}} checked{{end}}> Bildschirmschoner (Uhr &amp; Wetter)</label>
+              <label><input type="radio" name="idle_view_mode" value="livestream"{{if eq .IdleViewMode "livestream"}} checked{{end}}> Live-Stream (Türkamera)</label>
+            </fieldset>
+
+            <fieldset class="mode-field">
+              <legend>
+                Auto-Bildschirmschoner
+                <span class="mode-help" data-help="Wenn der Mieter eine Weile nichts macht, gleitet die Anzeige zurück zum Bildschirmschoner. Nur sinnvoll wenn 'Bildschirmschoner' oben gewählt ist.">?</span>
+              </legend>
+              <label><input type="radio" name="auto_screensaver" value="0"{{if eq .AutoScreensaverSeconds 0}} checked{{end}}> aus</label>
+              <label><input type="radio" name="auto_screensaver" value="30"{{if eq .AutoScreensaverSeconds 30}} checked{{end}}> 30 Sekunden</label>
+              <label><input type="radio" name="auto_screensaver" value="60"{{if eq .AutoScreensaverSeconds 60}} checked{{end}}> 1 Minute</label>
+              <label><input type="radio" name="auto_screensaver" value="300"{{if eq .AutoScreensaverSeconds 300}} checked{{end}}> 5 Minuten</label>
+              <label><input type="radio" name="auto_screensaver" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
+            </fieldset>
+
+            <div class="mode-actions">
+              <button type="submit" class="mode-submit">Speichern</button>
+              <span class="mode-form-status" data-bind="settings-status" role="status" aria-live="polite"></span>
+            </div>
+          </form>
+        </div>
+
+        <!-- 4. Inline history (saison 14-03). Empty container;
+             idle.js fetches /webviewer/history.json on first open
+             and renders the list. Subsequent opens re-fetch so the
+             list stays current without an SSE history-channel. -->
+        <div class="mode-layer" data-mode="history">
+          <header class="mode-header">
+            <h2>Verlauf</h2>
+            <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
+          </header>
+          <div class="mode-history" data-bind="history-list" role="list">
+            <div class="mode-history-empty" data-bind="history-empty">Lade...</div>
+          </div>
         </div>
 
       </div>
@@ -114,7 +185,7 @@
       </div>
     </div>
 
-    <!-- Action bar: microphone · door-unlock · history -->
+    <!-- Action bar: microphone - door-unlock - history -->
     <div class="actions" role="toolbar" aria-label="Aktionen">
 
       <button class="action" data-action="toggle-mic" aria-label="Mikrofon" title="Mikrofon">
