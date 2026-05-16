@@ -2,10 +2,11 @@
 
 **Status:** Saison 14 laufend, 16. Mai 2026. S14-01 (Stream-
 Backend go2rtc), S14-01b (Idle-View-Modus mit Bildschirmschoner,
-open-meteo-Wetter, Mieter-Settings), S14-01-FIX01 (Stream-Proxy
-URL-Hardening) und S14-01-FIX02 (ESP-Unlock-Auto-Resolution)
-abgeschlossen. Vorheriger Stand: Saison 13 abgeschlossen
-14. Mai 2026 (S13-DOC).
+open-meteo-Wetter, Mieter-Settings), S14-01-FIX01 bis FIX04
+(Stream-Proxy URL-Hardening, ESP-Unlock-Auto-Resolution,
+Hijack-no-chunked, Source-Validator) und S14-02 (Mieter-Tree-
+Split /login + /webviewer/) abgeschlossen. Vorheriger Stand:
+Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
 Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
@@ -126,11 +127,11 @@ Ansicht der UA-User aus der Developer-API. Sie ist seit Saison
 9. Browser-JavaScript zeigt das Bell-Overlay mit dem Mock-Namen
 10. Mieter klickt "Tuer auf" - zwei Pfade (Saison 13-07):
     a. Bell-Overlay (waehrend einer aktiven Klingel): JS POSTet
-       `POST /einloggen/doors/<intercom-mac>/unlock`. Die
+       `POST /webviewer/doors/<intercom-mac>/unlock`. Die
        Intercom-MAC kommt aus dem SSE-doorbell_start.device_id-
        Frame. Server normalisiert auf colon-form.
     b. Standby (Schluessel-Knopf vom Idle-Screen): JS POSTet
-       die literale URL `POST /einloggen/doors/standby/unlock`.
+       die literale URL `POST /webviewer/doors/standby/unlock`.
        Server liest `viewers.paired_intercom_mac` (Admin-Setting
        per "Verknuepfte Klingel"-Dropdown).
 11. unifix-server resolved die Door-UUID via
@@ -153,7 +154,7 @@ Cancel-Token gegen den persistierten Eintrag und feuert den
 Reject- und End-Call-Pfad (Saison 13-04.5):
 
 Wenn der Mieter "Ignorieren" oder "Anruf beenden" klickt
-(/einloggen/reject bzw. /einloggen/end-call; /esp/reject
+(/webviewer/reject bzw. /webviewer/end-call; /esp/reject
 analog), passiert beim Server:
 
 1. `doorbellcalls.MarkRejected` setzt `cancel_reason` in der
@@ -277,7 +278,7 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
                 /a/intercoms.json.
               - handler_mieter_calls hat zwei Pfade: Bell-
                 Overlay (intercom-MAC aus URL) und Standby
-                (literal /einloggen/doors/standby/unlock,
+                (literal /webviewer/doors/standby/unlock,
                 liest viewer.paired_intercom_mac).
             Geloescht: /a/intercom-mapping-Page, Klingel-Tuer-
             Nav-Link, platformconfig.intercom_to_door /
@@ -338,7 +339,7 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
                 TypeESP -> "intercom_esp").
               - server/internal/streams kapselt den go2rtc-
                 REST-API-Client (List, Get, Put, Delete).
-              - /esp/stream.mjpeg und /einloggen/stream.mjpeg
+              - /esp/stream.mjpeg und /webviewer/stream.mjpeg
                 resolven das Profil ueber GetViewerInfo +
                 ResolveStreamProfile, bauen die URL
                 <UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg
@@ -353,7 +354,7 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
                 ein Stream-Profil-Dropdown, gespeist via
                 /a/streams.json.
               - Mieter-Klingel-Overlay rendert
-                <img src="/einloggen/stream.mjpeg"> hinter
+                <img src="/webviewer/stream.mjpeg"> hinter
                 dem Bell-Hero (object-fit: cover, opacity
                 0.45). onerror blendet das Bild aus damit
                 die Buttons bei Backend-Ausfall sichtbar
@@ -373,8 +374,8 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
             'livestream') hinzu plus station_lat/lon-Defaults
             in platform_config. Neues Paket internal/weather
             mit open-meteo-Client, 15-Min-Cache und
-            24h-Stale-Serving. Mieter-Routes /einloggen/settings
-            (idle-Default persistieren), /einloggen/weather
+            24h-Stale-Serving. Mieter-Routes /webviewer/settings
+            (idle-Default persistieren), /webviewer/weather
             (JSON fuer idle.js). Admin bekommt einen
             "Standort"-Block in /a/settings plus /a/weather
             als Preview. Mieter-home.html ist auf das
@@ -407,7 +408,25 @@ Saison 14:  Stream-Integration plus Webhook-Endpoint. Live-View
             door_source=body|auto. Vier neue Tests in
             handler_esp_unlock_test.go decken die Pfade ab.
 
-   S14-02:  Webhook-Endpoint.
+   S14-01-FIX03: Stream-Proxy ohne chunked transfer-encoding.
+            Hijack der TCP-Verbindung, HTTP/1.1-Head selbst
+            schreiben, multipart-Body byte-fuer-byte forwarden;
+            beseitigt go-auto-chunked-wrapping das ESP raw-
+            socket-Decoder zerlegt.
+
+   S14-01-FIX04: Stream-Source-Validator + ffmpeg-Sonderfall.
+            Scheme-Allow-Liste (rtsp://, ffmpeg:, exec:, ...)
+            mit ffmpeg:-Whitespace-Erlaubnis; freundliche
+            Fehlermeldung wenn go2rtc selbst rejected.
+
+   S14-02:  URL-Rename /einloggen -> /login + /webviewer.
+            Saubere Trennung: /login traegt die Form (GET +
+            POST), /webviewer/ alle Session-gebundenen Routes
+            (Home, SSE-Events, Stream, Settings, Klingel-
+            Lifecycle, Logout). Legacy-Pfade /einloggen[/*]
+            und /m[/*] redirecten weiter mit 301.
+
+   S14-03:  Webhook-Endpoint (verschoben von S14-02).
             POST /webhook/access fuer access.doorbell.* und
             access.door.unlock-Events. Schreibt in die in
             S13-01 angelegte door_events-Tabelle. Event-Type-
@@ -1078,7 +1097,7 @@ Endpoint-Familie unter `/esp/`.
 
 Strategische Klaerung Saison 13-08: ein ESP ist KEIN Mieter,
 sondern ein Endgeraet eines Mieters. Es lebt im /esp/-Tree mit
-geraete-skoptem Bearer-Token, NICHT im /einloggen/-Tree mit
+geraete-skoptem Bearer-Token, NICHT im /webviewer/-Tree mit
 Magic-Link-Session-Cookie.
 
 ### 15.2 Adoptions-Modell
@@ -1189,7 +1208,7 @@ go2rtc-Daemon (RPi, localhost:1984)
     v
 unifix-server (Pass-through-Proxy mit Flush pro Read)
     +-- /esp/stream.mjpeg          (Bearer-Auth, ESP-Tier)
-    +-- /einloggen/stream.mjpeg    (Session-Auth, Mieter-Tier)
+    +-- /webviewer/stream.mjpeg    (Session-Auth, Mieter-Tier)
     | HTTPS multipart/x-mixed-replace
     v
 Endgeraet (ESP32-P4-Display, Mieter-Browser-img)
@@ -1281,7 +1300,7 @@ temporaer; Reload kehrt zum User-Default zurueck.
 ### 17.1 Container-Architektur
 
 ```
-GET /einloggen/                    (requireSession)
+GET /webviewer/                    (requireSession)
   -> handler_home.handleHome
      -> mockmanager.GetViewerInfo(mac)
      -> info.ResolveIdleViewMode()      ("screensaver"|"livestream")
@@ -1347,12 +1366,12 @@ Preview:         /a/weather liefert das aktuelle JSON live.
 ### 17.4 Mieter-Routen
 
 ```
-GET  /einloggen/settings     Settings-Form (radio idle_view_mode +
+GET  /webviewer/settings     Settings-Form (radio idle_view_mode +
                               Logout-Knopf)
-POST /einloggen/settings     mockmanager.SetIdleViewMode +
-                              Redirect /einloggen/
-GET  /einloggen/weather      JSON-Snapshot fuer idle.js-Refresh
-GET  /einloggen/             Home-Page mit idle-container
+POST /webviewer/settings     mockmanager.SetIdleViewMode +
+                              Redirect /webviewer/
+GET  /webviewer/weather      JSON-Snapshot fuer idle.js-Refresh
+GET  /webviewer/             Home-Page mit idle-container
 ```
 
 Settings-Link rendert als kleines Zahnrad-Icon oben rechts in der

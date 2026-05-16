@@ -590,7 +590,7 @@ Konkret-Spezifikation kommt im Saison-14-Briefing.
 ## 9. Stream-Backend (Saison 14-01)
 
 unifix terminiert die oeffentlich erreichbaren Stream-Endpoints
-(`/esp/stream.mjpeg`, `/einloggen/stream.mjpeg`) selbst und proxyt
+(`/esp/stream.mjpeg`, `/webviewer/stream.mjpeg`) selbst und proxyt
 nach `UNIFIX_STREAM_BACKEND_URL` (typisch `http://127.0.0.1:1984`).
 go2rtc lauscht ausschliesslich auf dem Loopback-Interface; LAN-
 Kunden erreichen den Stream nur ueber unifix-server. Damit haengen
