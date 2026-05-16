@@ -34,6 +34,81 @@ import (
 // through URL paths and dropdowns, so we keep it boring.
 var streamProfileNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
+// validStreamSchemes is the allow-list every Source-URL must
+// match. Saison 14-01-FIX04: switch from a generic "no spaces"
+// rule (which never existed in unifix-code but is enforced by
+// go2rtc) to a scheme-aware check so the ffmpeg:-syntax can
+// carry literal spaces in its raw=-argument list.
+var validStreamSchemes = []string{
+	"rtsp://", "rtsps://", "rtspx://",
+	"http://", "https://",
+	"ffmpeg:", "exec:",
+	"tcp://", "udp://",
+	"onvif://", "homekit://",
+}
+
+// validateStreamSource checks a go2rtc source URL against the
+// scheme allow-list.
+//
+//   - empty / whitespace-only: rejected.
+//   - prefix not in validStreamSchemes: rejected (catches things
+//     like "javascript:...", "file://", typos like "rtps://").
+//   - ffmpeg:-prefix: accepted as-is. The DSL after the prefix
+//     uses `#`-separated key=value pairs; the raw= value carries
+//     literal ffmpeg arguments separated by spaces, which are
+//     therefore allowed.
+//   - everything else (rtsp://, http://, ...): rejected if any
+//     whitespace is present. An unencoded space in a URL is
+//     almost always a typo or a smuggling attempt.
+//
+// The check is intentionally shallow - go2rtc handles the deep
+// validation when it tries to dial the source. We only catch
+// obvious mistakes early so the admin UI flash carries a
+// German-language hint instead of an opaque go2rtc 400.
+func validateStreamSource(src string) error {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return errors.New("Source-URL darf nicht leer sein")
+	}
+	hasValidPrefix := false
+	for _, p := range validStreamSchemes {
+		if strings.HasPrefix(src, p) {
+			hasValidPrefix = true
+			break
+		}
+	}
+	if !hasValidPrefix {
+		return errors.New("Source-URL muss mit einem bekannten Schema beginnen " +
+			"(rtsp://, rtsps://, rtspx://, http://, https://, " +
+			"ffmpeg:, exec:, tcp://, udp://, onvif://, homekit://)")
+	}
+	if strings.HasPrefix(src, "ffmpeg:") {
+		return nil
+	}
+	if strings.ContainsAny(src, " \t\n\r") {
+		return errors.New("Source-URL enthaelt Whitespace; " +
+			"fuer ffmpeg-Argument-Listen die ffmpeg:-Syntax verwenden, " +
+			"sonst URL-encoden")
+	}
+	return nil
+}
+
+// rewriteStreamBackendError converts the most common go2rtc REST
+// error messages into a German-language hint so the admin UI
+// flash is useful out of the box. The biggest one is the "source
+// with spaces may be insecure" 400 that go2rtc raises on its PUT
+// /api/streams endpoint - the only known workaround on the
+// go2rtc side is to edit go2rtc.yaml directly and restart.
+func rewriteStreamBackendError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "source with spaces may be insecure") {
+		return "go2rtc lehnt Source-URLs mit Leerzeichen ueber die REST-API ab " +
+			"(Backend-Sicherheits-Check). Workaround: go2rtc.yaml auf dem RPi " +
+			"manuell editieren und den go2rtc-Dienst neu starten."
+	}
+	return msg
+}
+
 // adminStreamsData is the payload for templates/admin/streams.html.
 type adminStreamsData struct {
 	User        adminUser
@@ -82,15 +157,18 @@ func adminStreamDefaults() []streamDefault {
 		},
 		{
 			Name:        "intercom_browser",
-			Label:       "Browser-Default (640x1024, 12 FPS, q:v 5)",
-			Source:      "ffmpeg:intercom_high#video=mjpeg#width=640#height=1024#raw=-r 12 -q:v 5",
-			Description: "Etwas kleinere Aufloesung fuer Mieter-Browser; ruckelfreier auf alten Mobilgeraeten.",
+			Label:       "Browser-Default (900x1200, 15 FPS, q:v 4)",
+			Source:      "ffmpeg:intercom_high#video=mjpeg#width=900#height=1200#raw=-r 15 -q:v 4",
+			Description: "Mieter-Browser. UA-Intercom liefert nativ 1200x1600; das hier ist ein leicht beschnittenes Profil bei guter Qualitaet.",
 		},
 		{
 			Name:        "intercom_high",
-			Label:       "Hochaufloesend (Source-Profil)",
+			Label:       "Hochaufloesend (Source-Profil, normalerweise in go2rtc.yaml)",
 			Source:      "rtsps://<udm-ip>:7441/<token>",
-			Description: "Source-Profil von dem ESP- und Browser-Profile abgeleitet werden. Setze hier den RTSPS-Pfad aus go2rtc.",
+			Description: "Source-Profil von dem ESP- und Browser-Profile abgeleitet werden. " +
+				"Wird normalerweise EINMAL beim Setup direkt in go2rtc.yaml angelegt; " +
+				"go2rtc lehnt RTSPS-URLs mit Token via REST-API ab (Sicherheits-Check). " +
+				"Nur als Referenz/Vorlage hier.",
 		},
 	}
 }
@@ -129,13 +207,13 @@ func (s *Server) handleAdminStreamsCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Profil-Name muss aus Buchstaben, Zahlen, '_', '-' oder '.' bestehen (1-64 Zeichen).", http.StatusBadRequest)
 		return
 	}
-	if source == "" {
-		http.Error(w, "Source-URL darf nicht leer sein.", http.StatusBadRequest)
+	if err := validateStreamSource(source); err != nil {
+		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
 	if err := s.streams.Put(r.Context(), name, []string{source}); err != nil {
 		s.log.Error("admin streams create", "err", err, "name", name)
-		http.Error(w, "Anlegen fehlgeschlagen: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "Anlegen fehlgeschlagen: "+rewriteStreamBackendError(err), http.StatusBadGateway)
 		return
 	}
 	s.log.Info("admin stream profile created", "name", name)
@@ -193,13 +271,13 @@ func (s *Server) handleAdminStreamsUpdate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	source := strings.TrimSpace(r.PostForm.Get("source"))
-	if source == "" {
-		http.Error(w, "Source-URL darf nicht leer sein.", http.StatusBadRequest)
+	if err := validateStreamSource(source); err != nil {
+		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
 	if err := s.streams.Put(r.Context(), name, []string{source}); err != nil {
 		s.log.Error("admin streams update", "err", err, "name", name)
-		http.Error(w, "Speichern fehlgeschlagen: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "Speichern fehlgeschlagen: "+rewriteStreamBackendError(err), http.StatusBadGateway)
 		return
 	}
 	s.log.Info("admin stream profile updated", "name", name)
