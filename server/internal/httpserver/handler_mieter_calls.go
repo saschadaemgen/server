@@ -339,5 +339,3 @@ func (s *Server) notifyUDMReject(ctx context.Context, eventID, viewerMAC string)
 		"event_id", eventID,
 	)
 }
-
-

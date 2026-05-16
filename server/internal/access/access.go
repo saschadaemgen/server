@@ -120,10 +120,10 @@ type UpdateUserParams struct {
 // sind 1-basiert; size<=0 wird vom Implementor auf einen Default
 // gesetzt (z.B. 20).
 type ListParams struct {
-	Page          int
-	Size          int
-	Query         string // free-text search ueber Name + Email
-	StatusFilter  Status // leer = alle
+	Page         int
+	Size         int
+	Query        string // free-text search ueber Name + Email
+	StatusFilter Status // leer = alle
 }
 
 // ListResult ist der Rueckgabe-Typ von List. Total ist die Anzahl
@@ -148,7 +148,7 @@ type UserStore interface {
 // Sentinel-Errors die Caller per errors.Is matchen koennen. Die
 // jeweiligen Backend-Errors muessen darauf gemappt werden.
 var (
-	ErrNotFound     = errors.New("access: not found")
-	ErrUnauthorized = errors.New("access: unauthorized")
+	ErrNotFound      = errors.New("access: not found")
+	ErrUnauthorized  = errors.New("access: unauthorized")
 	ErrNotConfigured = errors.New("access: backend not configured")
 )

@@ -82,13 +82,13 @@ const (
 // defaults for empty fields.
 func FromEnv() Config {
 	cfg := Config{
-		ListenAddr:    os.Getenv(envListenAddr),
-		CertFile:      os.Getenv(envCertFile),
-		KeyFile:       os.Getenv(envKeyFile),
-		DBPath:        os.Getenv(envDBPath),
-		DevMode:       parseBool(os.Getenv(envDevMode)),
-		BaseURL:       os.Getenv(envBaseURL),
-		ServerIPv4:    os.Getenv(envServerIPv4),
+		ListenAddr:       os.Getenv(envListenAddr),
+		CertFile:         os.Getenv(envCertFile),
+		KeyFile:          os.Getenv(envKeyFile),
+		DBPath:           os.Getenv(envDBPath),
+		DevMode:          parseBool(os.Getenv(envDevMode)),
+		BaseURL:          os.Getenv(envBaseURL),
+		ServerIPv4:       os.Getenv(envServerIPv4),
 		MockStateDir:     os.Getenv(envMockStateDir),
 		SecretsKeySet:    os.Getenv(envSecretsKey) != "",
 		StreamBackendURL: os.Getenv(envStreamBackendURL),

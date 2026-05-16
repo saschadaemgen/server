@@ -55,11 +55,11 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 		dec := s.adminLimiter.Allow(ip, username)
 		if dec != ratelimit.Allow {
 			s.recordAudit(r, loginaudit.Entry{
-				Realm:    loginaudit.RealmAdmin,
-				Username: username,
-				IP:       ip,
+				Realm:     loginaudit.RealmAdmin,
+				Username:  username,
+				IP:        ip,
 				UserAgent: r.UserAgent(),
-				Outcome:  loginaudit.OutcomeLocked,
+				Outcome:   loginaudit.OutcomeLocked,
 			})
 			s.renderAdminPage(w, "login", adminLoginPageData{
 				Error: "Zu viele fehlgeschlagene Versuche. Bitte spaeter erneut versuchen.",
@@ -93,11 +93,11 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 				s.adminLimiter.RegisterFailure(ip, username)
 			}
 			s.recordAudit(r, loginaudit.Entry{
-				Realm:    loginaudit.RealmAdmin,
-				Username: username,
-				IP:       ip,
+				Realm:     loginaudit.RealmAdmin,
+				Username:  username,
+				IP:        ip,
 				UserAgent: r.UserAgent(),
-				Outcome:  loginaudit.OutcomeFail,
+				Outcome:   loginaudit.OutcomeFail,
 			})
 			s.renderAdminPage(w, "login", adminLoginPageData{
 				Error: "Anmeldedaten ungueltig.",
@@ -123,11 +123,11 @@ func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, loginaudit.Entry{
-		Realm:    loginaudit.RealmAdmin,
-		Username: username,
-		IP:       ip,
+		Realm:     loginaudit.RealmAdmin,
+		Username:  username,
+		IP:        ip,
 		UserAgent: r.UserAgent(),
-		Outcome:  loginaudit.OutcomeSuccess,
+		Outcome:   loginaudit.OutcomeSuccess,
 	})
 	s.setAdminSessionCookie(w, sid)
 	http.Redirect(w, r, "/a/", http.StatusSeeOther)

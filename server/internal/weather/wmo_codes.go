@@ -5,8 +5,8 @@
 //   - wmo_codes.go: WMO weather-code -> Lucide-icon + German
 //     description mapping (this file).
 //   - cache.go:     15-minute in-memory cache with 24h stale-
-//                   serving so open-meteo outages do not slow
-//                   down browser reloads.
+//     serving so open-meteo outages do not slow
+//     down browser reloads.
 //   - openmeteo.go: thin REST client built on net/http.
 package weather
 

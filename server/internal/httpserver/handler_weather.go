@@ -1,11 +1,11 @@
 // Saison 14-01b: weather endpoints shared by mieter and admin.
 //
-//   GET /webviewer/weather   tenant pull (session cookie auth);
-//                            consumed by idle.js every 15 minutes
-//                            to refresh the screensaver block.
-//   GET /a/weather           admin pull (admin session); useful
-//                            from /a/settings to verify the
-//                            saved station_lat/lon are correct.
+//	GET /webviewer/weather   tenant pull (session cookie auth);
+//	                         consumed by idle.js every 15 minutes
+//	                         to refresh the screensaver block.
+//	GET /a/weather           admin pull (admin session); useful
+//	                         from /a/settings to verify the
+//	                         saved station_lat/lon are correct.
 //
 // Both routes share a single handler. Auth differs (each route
 // is wrapped in its own middleware in server.go); the response

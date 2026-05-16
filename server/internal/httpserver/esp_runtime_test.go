@@ -638,9 +638,9 @@ func TestESPState_StoresLatestReport(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
 
 	body, _ := json.Marshal(map[string]any{
-		"screen":         "idle",
-		"last_input_ts":  1778684500,
-		"uptime_sec":     3600,
+		"screen":        "idle",
+		"last_input_ts": 1778684500,
+		"uptime_sec":    3600,
 	})
 	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/esp/state", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tok)

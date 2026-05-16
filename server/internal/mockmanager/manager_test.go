@@ -432,10 +432,10 @@ func TestAddViewer_PersistsPairedIntercomMAC(t *testing.T) {
 // row passes the discovery + AddViewer pipeline shape.
 func espSpec(mac string, port uint16) ViewerSpec {
 	return ViewerSpec{
-		MAC:          mac,
-		Name:         "esp-" + mac,
-		ServicePort:  port,
-		Type:         TypeESP,
+		MAC:         mac,
+		Name:        "esp-" + mac,
+		ServicePort: port,
+		Type:        TypeESP,
 		ESPTokenHash: "deadbeefdeadbeefdeadbeefdeadbeef" +
 			"deadbeefdeadbeefdeadbeefdeadbeef",
 	}

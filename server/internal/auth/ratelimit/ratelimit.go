@@ -56,11 +56,11 @@ type Lock struct {
 
 // Limiter ist die Live-Datenstruktur.
 type Limiter struct {
-	mu      sync.RWMutex
-	ipHits  map[string][]time.Time
-	userHits map[string][]time.Time
+	mu              sync.RWMutex
+	ipHits          map[string][]time.Time
+	userHits        map[string][]time.Time
 	userLockedUntil map[string]time.Time
-	now     func() time.Time
+	now             func() time.Time
 }
 
 // New baut einen frischen Limiter mit time.Now als Clock-Quelle.

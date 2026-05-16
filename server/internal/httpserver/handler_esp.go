@@ -324,10 +324,10 @@ type espAdoptRequest struct {
 }
 
 type espAdoptResponse struct {
-	MAC           string `json:"mac"`
-	Name          string `json:"name"`
-	Model         string `json:"model"`
-	TokenPreview  string `json:"token_preview"`
+	MAC          string `json:"mac"`
+	Name         string `json:"name"`
+	Model        string `json:"model"`
+	TokenPreview string `json:"token_preview"`
 }
 
 // handleAdminESPViewersAdopt verschiebt einen Eintrag aus
@@ -585,4 +585,3 @@ func (s *Server) handleAdminESPViewersDelete(w http.ResponseWriter, r *http.Requ
 	}
 	http.Redirect(w, r, "/a/esp-viewers", http.StatusSeeOther)
 }
-

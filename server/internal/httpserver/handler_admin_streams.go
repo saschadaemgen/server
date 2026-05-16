@@ -8,15 +8,16 @@
 // hit the new pipeline).
 //
 // Routes (registered in server.go):
-//   GET    /a/streams                 list-view (HTML)
-//   GET    /a/streams.json            list payload as JSON (used
-//                                      by the viewer-edit modal
-//                                      stream-profile dropdown)
-//   POST   /a/streams                 create (form: name, source)
-//   GET    /a/streams/{name}          edit-view (HTML, single)
-//   POST   /a/streams/{name}          update (form: source)
-//   POST   /a/streams/{name}/delete   delete (form)
-//   DELETE /a/streams/{name}          delete (JSON / REST flavour)
+//
+//	GET    /a/streams                 list-view (HTML)
+//	GET    /a/streams.json            list payload as JSON (used
+//	                                   by the viewer-edit modal
+//	                                   stream-profile dropdown)
+//	POST   /a/streams                 create (form: name, source)
+//	GET    /a/streams/{name}          edit-view (HTML, single)
+//	POST   /a/streams/{name}          update (form: source)
+//	POST   /a/streams/{name}/delete   delete (form)
+//	DELETE /a/streams/{name}          delete (JSON / REST flavour)
 package httpserver
 
 import (
@@ -111,13 +112,13 @@ func rewriteStreamBackendError(err error) string {
 
 // adminStreamsData is the payload for templates/admin/streams.html.
 type adminStreamsData struct {
-	User        adminUser
-	Configured  bool          // false = no go2rtc backend URL set
-	BackendURL  string        // for the "go2rtc API:" hint line
-	Profiles    []streamRow
-	Flash       string
-	FlashType   string
-	Defaults    []streamDefault // template buttons in the create-modal
+	User       adminUser
+	Configured bool   // false = no go2rtc backend URL set
+	BackendURL string // for the "go2rtc API:" hint line
+	Profiles   []streamRow
+	Flash      string
+	FlashType  string
+	Defaults   []streamDefault // template buttons in the create-modal
 }
 
 type streamRow struct {
@@ -162,9 +163,9 @@ func adminStreamDefaults() []streamDefault {
 			Description: "Mieter-Browser. UA-Intercom liefert nativ 1200x1600; das hier ist ein leicht beschnittenes Profil bei guter Qualitaet.",
 		},
 		{
-			Name:        "intercom_high",
-			Label:       "Hochaufloesend (Source-Profil, normalerweise in go2rtc.yaml)",
-			Source:      "rtsps://<udm-ip>:7441/<token>",
+			Name:   "intercom_high",
+			Label:  "Hochaufloesend (Source-Profil, normalerweise in go2rtc.yaml)",
+			Source: "rtsps://<udm-ip>:7441/<token>",
 			Description: "Source-Profil von dem ESP- und Browser-Profile abgeleitet werden. " +
 				"Wird normalerweise EINMAL beim Setup direkt in go2rtc.yaml angelegt; " +
 				"go2rtc lehnt RTSPS-URLs mit Token via REST-API ab (Sicherheits-Check). " +

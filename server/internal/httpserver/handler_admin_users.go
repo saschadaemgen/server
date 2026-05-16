@@ -47,13 +47,13 @@ type userRow struct {
 
 // adminUserDetailData fuer /a/users/{id}.
 type adminUserDetailData struct {
-	User           adminUser
-	Configured     bool
-	Profile        userRow
-	LinkedViewers  []linkedViewerRow
-	NotFoundFlash  string
-	Flash          string
-	FlashType      string
+	User          adminUser
+	Configured    bool
+	Profile       userRow
+	LinkedViewers []linkedViewerRow
+	NotFoundFlash string
+	Flash         string
+	FlashType     string
 }
 
 type linkedViewerRow struct {

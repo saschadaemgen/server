@@ -34,9 +34,9 @@ type stationSettingsBlock struct {
 }
 
 type uaSettingsBlock struct {
-	BaseURL    string
-	Status     string // "connected" | "untested" | "error"
-	HasToken   bool
+	BaseURL  string
+	Status   string // "connected" | "untested" | "error"
+	HasToken bool
 }
 
 type auditRow struct {
@@ -48,10 +48,10 @@ type auditRow struct {
 }
 
 type lockRow struct {
-	Kind        string // "user" | "ip"
-	Value       string
-	UntilLabel  string
-	Attempts    int
+	Kind       string // "user" | "ip"
+	Value      string
+	UntilLabel string
+	Attempts   int
 }
 
 func (s *Server) handleAdminSettingsGet(w http.ResponseWriter, r *http.Request) {
@@ -166,11 +166,11 @@ func (s *Server) handleAdminUnlockLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAudit(r, loginaudit.Entry{
-		Realm:    loginaudit.RealmAdmin,
-		Username: value,
-		IP:       clientIP(r),
+		Realm:     loginaudit.RealmAdmin,
+		Username:  value,
+		IP:        clientIP(r),
 		UserAgent: r.UserAgent(),
-		Outcome:  loginaudit.OutcomeUnlocked,
+		Outcome:   loginaudit.OutcomeUnlocked,
 	})
 	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
 }

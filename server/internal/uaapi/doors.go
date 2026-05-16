@@ -43,11 +43,11 @@ type UnlockDoorRequest struct {
 // IntercomMAC parses that out so unifix can auto-resolve "which
 // door does THIS intercom open" without operator-curated mapping.
 type Door struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	FullName string    `json:"full_name,omitempty"`
-	HubID    string    `json:"hub_id,omitempty"`
-	Type     string    `json:"type,omitempty"`
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	FullName string     `json:"full_name,omitempty"`
+	HubID    string     `json:"hub_id,omitempty"`
+	Type     string     `json:"type,omitempty"`
 	Extras   DoorExtras `json:"extras,omitempty"`
 }
 

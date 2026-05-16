@@ -223,10 +223,10 @@ type rowScanner interface {
 
 func scanCall(r rowScanner) (Call, error) {
 	var (
-		c           Call
-		started     int64
-		answeredAt  sql.NullInt64
-		endedAt     sql.NullInt64
+		c          Call
+		started    int64
+		answeredAt sql.NullInt64
+		endedAt    sql.NullInt64
 	)
 	if err := r.Scan(&c.EventID, &c.ViewerMAC, &c.DeviceID,
 		&started, &c.AnsweredBy, &answeredAt,

@@ -61,12 +61,12 @@ const espHeartbeatInterval = 30 * time.Second
 // wired yet. Defaults match the constants the ESP-side mock
 // firmware is being written against in the parallel ESP-Saison-2.
 type espConfigResponse struct {
-	MieterName   string            `json:"mieter_name"`
-	LocationName string            `json:"location_name"`
-	Stream       espStream         `json:"stream"`
-	Doors        []espDoor         `json:"doors"`
-	Cameras      []espCamera       `json:"cameras"`
-	UI           espUISettings     `json:"ui"`
+	MieterName   string        `json:"mieter_name"`
+	LocationName string        `json:"location_name"`
+	Stream       espStream     `json:"stream"`
+	Doors        []espDoor     `json:"doors"`
+	Cameras      []espCamera   `json:"cameras"`
+	UI           espUISettings `json:"ui"`
 	// Saison 14-01b additions. IdleViewMode tells the firmware
 	// which start screen to draw; Weather is a snapshot the ESP
 	// can use to render its own weather card without an extra

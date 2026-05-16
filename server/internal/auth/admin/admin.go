@@ -33,8 +33,8 @@ import (
 // handlers must map both ErrNotFound and ErrInvalidPassword to
 // the same generic "invalid credentials" response.
 var (
-	ErrNotFound        = errors.New("admin: user not found")
-	ErrInvalidPassword = errors.New("admin: invalid password")
+	ErrNotFound         = errors.New("admin: user not found")
+	ErrInvalidPassword  = errors.New("admin: invalid password")
 	ErrPasswordTooShort = errors.New("admin: password must be at least 12 characters")
 )
 

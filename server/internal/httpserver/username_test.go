@@ -9,8 +9,8 @@ func TestNormalizeForCompare(t *testing.T) {
 		{"Familie Mueller 2OG", "familie mueller 2og"},
 		{"FAMILIE MUELLER 2OG", "familie mueller 2og"},
 		{"familie mueller 2og", "familie mueller 2og"},
-		{"Familie  Mueller   2OG", "familie mueller 2og"},   // multi-WS
-		{"  Familie Mueller 2OG  ", "familie mueller 2og"},  // padding
+		{"Familie  Mueller   2OG", "familie mueller 2og"},  // multi-WS
+		{"  Familie Mueller 2OG  ", "familie mueller 2og"}, // padding
 		{"Dämgen", "daemgen"},
 		{"DÄMGEN", "daemgen"},
 		{"Daemgen", "daemgen"},

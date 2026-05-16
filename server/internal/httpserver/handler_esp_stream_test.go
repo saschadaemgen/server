@@ -291,9 +291,9 @@ func TestESPStream_NoChunkedTransferEncoding(t *testing.T) {
 // post-hijack invariants together so a future refactor that
 // changes either side (headers or body) fails the suite loudly:
 //
-//  - the backend MUST NOT see the inbound Authorization header
-//  - the proxied response MUST surface the backend's Content-Type
-//    verbatim (multipart/x-mixed-replace; boundary=frame)
+//   - the backend MUST NOT see the inbound Authorization header
+//   - the proxied response MUST surface the backend's Content-Type
+//     verbatim (multipart/x-mixed-replace; boundary=frame)
 func TestESPStream_HijackPreservesContentTypeAndStripsAuth(t *testing.T) {
 	var sawAuth string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

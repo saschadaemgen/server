@@ -29,9 +29,9 @@ import (
 // Unknown JSON keys are ignored by encoding/json so missing or
 // new fields don't break the decode.
 type Device struct {
-	ID             string   `json:"id"`               // 12-hex-char MAC, no colons
-	Alias          string   `json:"alias"`            // display name set in UA Console
-	Type           string   `json:"type"`             // e.g. "UA-Intercom", "UA-Int-Viewer", "UAH-DOOR"
+	ID             string   `json:"id"`    // 12-hex-char MAC, no colons
+	Alias          string   `json:"alias"` // display name set in UA Console
+	Type           string   `json:"type"`  // e.g. "UA-Intercom", "UA-Int-Viewer", "UAH-DOOR"
 	IsOnline       bool     `json:"is_online"`
 	IsAdopted      bool     `json:"is_adopted"`
 	IsManaged      bool     `json:"is_managed"`

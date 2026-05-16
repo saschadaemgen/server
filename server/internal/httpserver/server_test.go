@@ -377,9 +377,9 @@ type noopViewer struct {
 	// rejectMu guards the test-recorded reject calls so the
 	// mieter-endpoint tests can assert that /webviewer/reject
 	// reached the right viewer with the right intercom MAC.
-	rejectMu      sync.Mutex
-	rejectCalls   []rejectCall
-	rejectErr     error
+	rejectMu    sync.Mutex
+	rejectCalls []rejectCall
+	rejectErr   error
 }
 
 type rejectCall struct {

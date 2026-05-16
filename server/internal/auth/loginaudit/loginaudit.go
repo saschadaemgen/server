@@ -41,14 +41,14 @@ const (
 
 // Entry ist eine Zeile aus login_audit.
 type Entry struct {
-	ID         int64
-	Timestamp  time.Time
-	Realm      Realm
-	Username   string
-	ViewerMAC  string
-	IP         string
-	UserAgent  string
-	Outcome    Outcome
+	ID        int64
+	Timestamp time.Time
+	Realm     Realm
+	Username  string
+	ViewerMAC string
+	IP        string
+	UserAgent string
+	Outcome   Outcome
 }
 
 // Service kapselt die DB-Operationen.
@@ -150,14 +150,14 @@ func (s *Service) Cleanup(ctx context.Context, retention time.Duration) (int, er
 
 func scan(rows *sql.Rows) (Entry, error) {
 	var (
-		e          Entry
-		ts         int64
-		realm      string
-		username   sql.NullString
-		viewerMAC  sql.NullString
-		ip         sql.NullString
-		userAgent  sql.NullString
-		outcome    string
+		e         Entry
+		ts        int64
+		realm     string
+		username  sql.NullString
+		viewerMAC sql.NullString
+		ip        sql.NullString
+		userAgent sql.NullString
+		outcome   string
 	)
 	if err := rows.Scan(&e.ID, &ts, &realm, &username, &viewerMAC, &ip, &userAgent, &outcome); err != nil {
 		return Entry{}, fmt.Errorf("loginaudit: scan: %w", err)

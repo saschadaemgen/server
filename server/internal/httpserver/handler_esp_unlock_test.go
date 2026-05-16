@@ -40,9 +40,9 @@ const pairedIntercomForTest = "28:70:4e:31:e2:9c"
 // were actually exercised. doorListData lets each test inject
 // different door bodies (or nil for an empty list).
 type uaUnlockStub struct {
-	srv         *httptest.Server
-	listCalls   int
-	unlockCalls int
+	srv          *httptest.Server
+	listCalls    int
+	unlockCalls  int
 	lastUnlockID string
 	doorListData []map[string]any
 }
