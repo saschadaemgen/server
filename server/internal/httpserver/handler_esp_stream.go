@@ -33,9 +33,11 @@ package httpserver
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"unifix.local/server/internal/mockmanager"
 )
@@ -123,28 +125,83 @@ func (s *Server) proxyMJPEGStream(w http.ResponseWriter, r *http.Request, profil
 	}
 	defer resp.Body.Close()
 
+	// Saison 14-01-FIX03: hijack the underlying TCP connection
+	// and write the response wire bytes directly.
+	//
+	// Background: Go's standard http.ResponseWriter wraps any
+	// streaming body of unknown length in Transfer-Encoding:
+	// chunked. Browsers parse that transparently, but strict
+	// raw-socket MJPEG decoders (the ESP32-P4 firmware seen in
+	// the live test) read the body verbatim and choke on the
+	// hex-length markers interspersed between multipart frames
+	// (W STREAM: Decode failed: ESP_ERR_INVALID_STATE).
+	//
+	// Hijacking severs the standard ResponseWriter framing and
+	// lets us emit a plain HTTP/1.1 response with Connection:
+	// close: no chunked layer, no Content-Length (the stream is
+	// open-ended), client reads until close. Matches what
+	// go2rtc itself emits when contacted directly.
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		s.log.Error("stream proxy: hijack unsupported",
+			"route", r.URL.Path, "label", label, "viewer_mac", mac)
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	conn, bufrw, herr := hijacker.Hijack()
+	if herr != nil {
+		s.log.Error("stream proxy: hijack failed",
+			"route", r.URL.Path, "label", label, "viewer_mac", mac, "err", herr)
+		return
+	}
+	defer conn.Close()
+
+	// Write the status line + backend headers (minus the framing
+	// headers we explicitly control) + Connection: close. After
+	// the blank line the body starts immediately - whatever go2rtc
+	// sends, we forward verbatim.
+	if _, err := fmt.Fprintf(bufrw, "HTTP/1.1 %d %s\r\n",
+		resp.StatusCode, http.StatusText(resp.StatusCode)); err != nil {
+		return
+	}
 	for k, vv := range resp.Header {
+		if strings.EqualFold(k, "Transfer-Encoding") ||
+			strings.EqualFold(k, "Content-Length") ||
+			strings.EqualFold(k, "Connection") {
+			continue
+		}
 		for _, v := range vv {
-			w.Header().Add(k, v)
+			if _, err := fmt.Fprintf(bufrw, "%s: %s\r\n", k, v); err != nil {
+				return
+			}
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
+	if _, err := bufrw.WriteString("Connection: close\r\n\r\n"); err != nil {
+		return
+	}
+	if err := bufrw.Flush(); err != nil {
+		s.log.Debug("stream proxy: head write failed",
+			"route", r.URL.Path, "label", label, "viewer_mac", mac, "err", err)
+		return
+	}
 
-	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 32*1024)
 	var streamed int64
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
+			if _, werr := bufrw.Write(buf[:n]); werr != nil {
 				s.log.Debug("stream proxy: client disconnected",
 					"route", r.URL.Path, "label", label, "viewer_mac", mac,
 					"bytes_streamed", streamed)
 				return
 			}
 			streamed += int64(n)
-			if flusher != nil {
-				flusher.Flush()
+			if err := bufrw.Flush(); err != nil {
+				s.log.Debug("stream proxy: flush failed",
+					"route", r.URL.Path, "label", label, "viewer_mac", mac,
+					"bytes_streamed", streamed, "err", err)
+				return
 			}
 		}
 		if readErr != nil {
