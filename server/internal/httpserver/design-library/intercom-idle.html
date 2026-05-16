@@ -71,18 +71,42 @@
 
     </div>
 
-    <!-- Stream slot: where the camera feed renders. Always-dark. -->
-    <div class="stream" role="img" aria-label="Kamerastream {{.DoorName}}">
-      <div class="stream-hint">
-        <div class="stream-hint-inner">
-          <div class="stream-hint-orb" aria-hidden="true">
-            <span class="stream-hint-dot"></span>
-          </div>
-          <div class="stream-hint-text">
-            <span class="stream-hint-label">Bereit</span>
-            <span class="stream-hint-sub">warte auf klingel</span>
-          </div>
+    <!-- Stream slot: where the camera feed renders. Always-dark.
+         Saison 14-01b-FIX01: der existierende .stream-Slot wird
+         zum Idle-Container. Zwei Geschwister (screensaver +
+         livestream) wechseln sich per Tap ab. Default kommt vom
+         Server (.IdleViewMode = "screensaver" oder "livestream").
+         Der Slot behaelt seine Library-Hoehe und seine Position
+         im topbar/actions-Layout - es gibt KEIN Vollbild-Overlay,
+         alle anderen UI-Elemente bleiben sichtbar und klickbar. -->
+    <div class="stream" role="region" aria-label="Kamerastream {{.DoorName}}">
+      <div id="idle-container" data-default-mode="{{.IdleViewMode}}">
+
+        <div id="screensaver" class="idle-view{{if eq .IdleViewMode "livestream"}} idle-hidden{{end}}">
+          <div class="screensaver-clock">{{.Now}}</div>
+          <div class="screensaver-date">{{.NowDate}}</div>
+          {{if .Weather}}
+            <div class="screensaver-weather">
+              <span class="screensaver-weather-icon" data-icon="{{.Weather.Icon}}" aria-hidden="true"></span>
+              <span class="screensaver-temp">{{printf "%.0f" .Weather.TempC}}&deg;C</span>
+              <span class="screensaver-desc">{{.Weather.Description}}</span>
+            </div>
+          {{else}}
+            <div class="screensaver-weather" style="display:none;">
+              <span class="screensaver-weather-icon" data-icon="cloud" aria-hidden="true"></span>
+              <span class="screensaver-temp"></span>
+              <span class="screensaver-desc"></span>
+            </div>
+          {{end}}
         </div>
+
+        <div id="livestream" class="idle-view{{if ne .IdleViewMode "livestream"}} idle-hidden{{end}}">
+          <img src="/einloggen/stream.mjpeg"
+               alt="Live-Bild"
+               class="mieter-stream-img"
+               onerror="this.style.display='none'"/>
+        </div>
+
       </div>
       <div class="stream-meta">
         <span class="stream-meta-dot"></span>

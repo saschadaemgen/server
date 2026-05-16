@@ -1,40 +1,60 @@
-// Saison 14-01b: mieter idle screensaver runtime.
+// Saison 14-01b-FIX01: mieter idle screensaver runtime.
 //
-// Three jobs:
+// Three jobs, all scoped to the #idle-container element that
+// lives INSIDE the design-library .stream slot. Nothing in here
+// touches body, html, or any element outside the container.
+//
 //   1. Tick the clock + date every second so the screensaver
 //      stays current without server-side renders.
 //   2. Poll /einloggen/weather every 15 minutes and patch the
-//      DOM. Hide the weather block on backend errors so a
+//      DOM. Hide the weather block on backend errors so the
 //      degraded screensaver still shows clock + date cleanly.
-//   3. Toggle between screensaver and livestream on tap/click.
-//      The toggle is page-local; reload returns to the user's
-//      persisted default (data-default-mode on #idle-container).
+//   3. Toggle between screensaver and livestream on tap/click
+//      INSIDE the container only. Clicks on buttons or links
+//      anywhere else on the page (unlock-door, mic, history,
+//      logout, open-settings) are ignored.
 //
-// Required DOM (rendered by home.html):
-//   <div id="idle-container" data-default-mode="screensaver">
-//     <div id="screensaver" class="idle-view ...">
-//       <div class="screensaver-clock"></div>
-//       <div class="screensaver-date"></div>
-//       <div class="screensaver-weather">
-//         <i data-icon="cloud"></i>
-//         <span class="screensaver-temp"></span>
-//         <span class="screensaver-desc"></span>
+// Plus a small navigation hook: the topbar's existing
+// data-action="open-settings" button (from intercom-idle.html)
+// navigates to /einloggen/settings. The button predates the
+// idle-mode work; we just wire it.
+//
+// Required DOM (rendered by intercom-idle.html):
+//   <div class="stream" role="region" ...>
+//     <div id="idle-container" data-default-mode="screensaver">
+//       <div id="screensaver" class="idle-view ...">
+//         <div class="screensaver-clock"></div>
+//         <div class="screensaver-date"></div>
+//         <div class="screensaver-weather">
+//           <span class="screensaver-weather-icon" data-icon="cloud"></span>
+//           <span class="screensaver-temp"></span>
+//           <span class="screensaver-desc"></span>
+//         </div>
+//       </div>
+//       <div id="livestream" class="idle-view ...">
+//         <img src="/einloggen/stream.mjpeg" ...>
 //       </div>
 //     </div>
-//     <div id="livestream" class="idle-view ...">
-//       <img src="/einloggen/stream.mjpeg" ...>
-//     </div>
+//     <div class="stream-meta">...</div>
 //   </div>
 //
-// Locale is hard-coded to de-DE; multi-language lands in a
-// later saison.
+// Locale is hard-coded to de-DE; i18n lands in a later saison.
 (function () {
-  var clockEl = document.querySelector('.screensaver-clock');
-  var dateEl = document.querySelector('.screensaver-date');
-  var weatherEl = document.querySelector('.screensaver-weather');
-  var tempEl = document.querySelector('.screensaver-temp');
-  var descEl = document.querySelector('.screensaver-desc');
-  var iconEl = weatherEl ? weatherEl.querySelector('[data-icon]') : null;
+  var container = document.getElementById('idle-container');
+  if (!container) {
+    // home page may have rendered without the idle-container
+    // (legacy template, unit test). Nothing to do.
+    return;
+  }
+
+  var screensaver = container.querySelector('#screensaver');
+  var livestream = container.querySelector('#livestream');
+  var clockEl = container.querySelector('.screensaver-clock');
+  var dateEl = container.querySelector('.screensaver-date');
+  var weatherEl = container.querySelector('.screensaver-weather');
+  var tempEl = container.querySelector('.screensaver-temp');
+  var descEl = container.querySelector('.screensaver-desc');
+  var iconEl = container.querySelector('.screensaver-weather-icon');
 
   function tickClock() {
     if (!clockEl && !dateEl) return;
@@ -58,9 +78,6 @@
     if (!weatherEl) return;
     weatherEl.style.display = '';
     if (tempEl && typeof snap.temp_c === 'number') {
-      // One decimal so we don't render "11.4000001"; round to
-      // whole degrees on phone-sized screens since 0.1 deg is
-      // below the open-meteo accuracy anyway.
       tempEl.textContent = Math.round(snap.temp_c) + '°C';
     }
     if (descEl && snap.description) {
@@ -70,11 +87,9 @@
       iconEl.setAttribute('data-icon', snap.icon);
     }
   }
-
   function hideWeather() {
     if (weatherEl) weatherEl.style.display = 'none';
   }
-
   function refreshWeather() {
     if (!weatherEl) return;
     fetch('/einloggen/weather', {
@@ -97,17 +112,27 @@
   refreshWeather();
   setInterval(refreshWeather, 15 * 60 * 1000);
 
-  // Tap toggle. Page-local state, no persistence.
-  var container = document.getElementById('idle-container');
-  var screensaver = document.getElementById('screensaver');
-  var livestream = document.getElementById('livestream');
-  if (container && screensaver && livestream) {
+  // Tap toggle. Strictly scoped to the container element so
+  // clicks on unlock-door, mic, history, logout, open-settings
+  // or anywhere else on the page pass through to their own
+  // handlers without ever flipping the idle mode.
+  if (screensaver && livestream) {
     container.addEventListener('click', function (e) {
-      // Don't swallow clicks on real buttons / links inside the
-      // idle views (settings icon, future widgets).
+      // Defence in depth: even if a future template puts a
+      // button inside the container, do not swallow its click.
       if (e.target.closest('a, button')) return;
       screensaver.classList.toggle('idle-hidden');
       livestream.classList.toggle('idle-hidden');
     });
   }
+
+  // Topbar gear button -> /einloggen/settings. The button lives
+  // in intercom-idle.html with data-action="open-settings"; this
+  // is the only handler that picks it up.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action="open-settings"]');
+    if (!btn) return;
+    e.preventDefault();
+    window.location.href = '/einloggen/settings';
+  });
 })();
