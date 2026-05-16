@@ -148,13 +148,16 @@ func main() {
 	if cfg.StreamBackendURL != "" {
 		c, err := streams.New(cfg.StreamBackendURL)
 		if err != nil {
-			log.Error("streams client init failed", "err", err)
+			log.Error("stream backend init failed", "err", err)
 			os.Exit(1)
 		}
 		streamsClient = c
-		log.Info("streams backend configured", "url", cfg.StreamBackendURL)
+		// Boot-Log mit der vom Briefing geforderten Wortlaut, damit
+		// der Operator nach jedem systemctl restart sofort sieht ob
+		// /esp/stream.mjpeg und /einloggen/stream.mjpeg funktionieren.
+		log.Info("stream backend configured", "url", cfg.StreamBackendURL)
 	} else {
-		log.Warn("UNIFIX_STREAM_BACKEND_URL not set; /esp/stream.mjpeg and /einloggen/stream.mjpeg will return 503")
+		log.Warn("stream backend not configured: /esp/stream.mjpeg and /einloggen/stream.mjpeg return 503")
 	}
 
 	// Saison 14-01b: weather-Backend (open-meteo) ist immer aktiv;
