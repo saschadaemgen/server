@@ -509,6 +509,11 @@ func (s *Server) handleAdminESPViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Rename fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
+	// Saison 14-XX: ESP-Geraet zieht den neuen UnitName via
+	// /esp/config nach.
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
 	http.Redirect(w, r, "/a/esp-viewers", http.StatusSeeOther)
 }
 

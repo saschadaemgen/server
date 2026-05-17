@@ -336,6 +336,11 @@ func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Rename fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
+	// Saison 14-XX: Rename veraendert die UnitName-Anzeige im
+	// Mieter-Home und im /esp/config-JSON.
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
@@ -477,6 +482,17 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		"paired_changed", pairedChanged,
 		"stream_profile_changed", streamProfileChanged,
 	)
+
+	// Saison 14-XX: config.changed broadcasten sobald eine
+	// renderwirksame Aenderung passiert ist. Passwort-Wechsel
+	// invalidiert Sessions, deshalb dort kein Broadcast (Browser
+	// ist gleich auf /login redirected). Stream-Profil + Paired-
+	// Intercom + Link beeinflussen Config-JSON / Stream-URL und
+	// triggern darum den Broadcast.
+	configChanged := nameChanged || linkChanged || pairedChanged || streamProfileChanged
+	if configChanged && s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
 
 	if wantsJSON(r) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

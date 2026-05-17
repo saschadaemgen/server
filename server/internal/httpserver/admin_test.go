@@ -421,6 +421,139 @@ func min(a, b int) int {
 	return b
 }
 
+// ---------- Saison 14-XX admin-edit config.changed broadcasts ----------
+
+func TestAdminWebViewers_RenameBroadcastsConfigChanged(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	sub, cleanup := env.hub.Subscribe(testViewerMAC)
+	defer cleanup()
+
+	form := url.Values{}
+	form.Set("name", "Familie Mueller (umbenannt)")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/rename",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST rename: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != "config.changed" {
+			t.Errorf("ev.Type = %q, want config.changed", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("rename did not trigger config.changed")
+	}
+}
+
+func TestAdminWebViewers_EditBroadcastsConfigChanged(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	sub, cleanup := env.hub.Subscribe(testViewerMAC)
+	defer cleanup()
+
+	body, _ := json.Marshal(map[string]any{
+		"name":                testViewerName,
+		"paired_intercom_mac": "28:70:4e:31:e2:9c",
+	})
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/edit",
+		strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST edit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != "config.changed" {
+			t.Errorf("ev.Type = %q, want config.changed", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("paired-intercom edit did not trigger config.changed")
+	}
+}
+
+func TestAdminESPViewers_RenameBroadcastsConfigChanged(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	adoptESPForTest(t, env, espTestMAC, "Wohnung ESP A")
+
+	sub, cleanup := env.hub.Subscribe(espTestMAC)
+	defer cleanup()
+
+	form := url.Values{}
+	form.Set("name", "Wohnung ESP A (umbenannt)")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/esp-viewers/"+espTestMAC+"/rename",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST esp rename: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != "config.changed" {
+			t.Errorf("ev.Type = %q, want config.changed", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("esp rename did not trigger config.changed")
+	}
+}
+
+func TestAdminWebViewers_PasswordResetSkipsConfigChanged(t *testing.T) {
+	// Password-Reset triggert KEINEN Broadcast - der Browser ist
+	// gleich auf /login redirected, kein laufender Subscriber.
+	// Trotzdem darf der Handler nicht panicen wenn hub nil-ish ist.
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	sub, cleanup := env.hub.Subscribe(testViewerMAC)
+	defer cleanup()
+
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/reset-pw", nil)
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST reset-pw: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	// Kein Broadcast erwartet - 150ms reicht da der Hub
+	// die Subscribe-Channel synchron mit broadcast bedient.
+	select {
+	case ev := <-sub.Events:
+		t.Errorf("password reset triggered config.changed: %+v", ev)
+	case <-time.After(150 * time.Millisecond):
+		// expected
+	}
+}
+
 func TestAdminWebViewers_Delete(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
