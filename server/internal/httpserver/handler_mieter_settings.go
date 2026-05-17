@@ -71,9 +71,20 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 
 	mode := strings.TrimSpace(r.PostForm.Get("idle_view_mode"))
 	switch mode {
-	case "", mockmanager.IdleViewModeScreensaver, mockmanager.IdleViewModeLivestream:
+	case "",
+		mockmanager.IdleViewModeScreensaver,
+		mockmanager.IdleViewModeLivestream,
+		mockmanager.IdleViewModeScreenOff:
+		// Saison 14-XX: 'screen_off' wird vom Web-Viewer akzeptiert,
+		// aber im UI nicht als Auswahl angeboten - die Browser-Runtime
+		// rendert ihn identisch zu 'screensaver'. Akzeptiert wird er
+		// trotzdem damit eine ESP-Cross-Device-Aenderung (Mieter setzt
+		// am ESP screen_off, Web-Browser zieht via config.changed
+		// nach) keine 400 produziert.
 	default:
-		http.Error(w, "idle_view_mode muss 'screensaver' oder 'livestream' sein", http.StatusBadRequest)
+		http.Error(w,
+			"idle_view_mode muss 'screensaver', 'livestream' oder 'screen_off' sein",
+			http.StatusBadRequest)
 		return
 	}
 
@@ -130,6 +141,14 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
 			return
 		}
+	}
+
+	// Saison 14-XX: config.changed broadcasten damit andere Tabs /
+	// Browser-Sessions auf demselben viewer_mac und (sobald gepaart)
+	// ESP-Geraete ihre Config neu holen. Filter ist pro viewer_mac,
+	// kein Cross-Tenant-Leak.
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
 
 	if wantsJSON(r) {

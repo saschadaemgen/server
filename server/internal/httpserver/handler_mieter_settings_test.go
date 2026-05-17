@@ -329,6 +329,80 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	}
 }
 
+// TestMieterSettingsPost_AcceptsScreenOff verifies the Saison 14-XX
+// extension: the canonical mieter POST handler now accepts the
+// third idle_view_mode value (ESP-only concept but pass-through-
+// safe for the web viewer).
+func TestMieterSettingsPost_AcceptsScreenOff(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	form := url.Values{}
+	form.Set("idle_view_mode", "screen_off")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+
+	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("GetViewerInfo: %v", err)
+	}
+	if info.ResolveIdleViewMode() != "screen_off" {
+		t.Errorf("persisted idle_view_mode = %q, want screen_off",
+			info.ResolveIdleViewMode())
+	}
+}
+
+// TestMieterSettingsPost_BroadcastsConfigChanged verifies that a
+// successful POST raises a doorbellhub config.changed event so
+// other tabs / browser sessions on the same viewer_mac pick up
+// the new state via SSE.
+func TestMieterSettingsPost_BroadcastsConfigChanged(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	sub, cleanup := env.hub.Subscribe(testViewerMAC)
+	defer cleanup()
+
+	form := url.Values{}
+	form.Set("idle_view_mode", "livestream")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != "config.changed" {
+			t.Errorf("ev.Type = %q, want config.changed", ev.Type)
+		}
+		if ev.MockMAC != testViewerMAC {
+			t.Errorf("ev.MockMAC = %q, want %q", ev.MockMAC, testViewerMAC)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("subscriber did not receive config.changed")
+	}
+}
+
 // TestMieterHistoryJSON_RequiresSession the JSON endpoint must be
 // behind requireSession; without a cookie it redirects to /login.
 func TestMieterHistoryJSON_RequiresSession(t *testing.T) {
