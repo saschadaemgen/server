@@ -52,10 +52,12 @@ func TestResolveDoorName_MultiDoor(t *testing.T) {
 	}
 }
 
-// FIX03 Sub-1b: in a single-door installation an empty intercom
-// MAC (door_unlocked-style event) resolves to the only door's
-// name instead of the generic "Tuer" label.
-func TestResolveDoorName_SingleDoorFallback(t *testing.T) {
+// FIX04 Sub-1b: in a single-door installation the only door is
+// the answer regardless of the row's intercom field - including
+// the unknown-MAC case (was generic "Tuer" pre-FIX04). A
+// single-door site has exactly one candidate; calling it "Tuer"
+// when we know its real name is silly.
+func TestResolveDoorName_SingleDoorWinsOverUnknownIntercom(t *testing.T) {
 	meta := doorMeta{
 		intercomToName: map[string]string{
 			"28:70:4e:31:e2:9c": "Hauseingang",
@@ -64,14 +66,17 @@ func TestResolveDoorName_SingleDoorFallback(t *testing.T) {
 			fakeDoor("d1", "Hauseingang", "28704e31e29c"),
 		},
 	}
-	if got := resolveDoorName(meta, ""); got != "Hauseingang" {
-		t.Errorf("single-door empty-mac fallback: got %q, want Hauseingang", got)
+	cases := []struct{ name, mac, want string }{
+		{name: "empty mac in single-door install", mac: "", want: "Hauseingang"},
+		{name: "known mac in single-door install", mac: "28:70:4e:31:e2:9c", want: "Hauseingang"},
+		{name: "unknown mac in single-door install", mac: "00:11:22:33:44:55", want: "Hauseingang"},
 	}
-	if got := resolveDoorName(meta, "28:70:4e:31:e2:9c"); got != "Hauseingang" {
-		t.Errorf("single-door known-mac: got %q, want Hauseingang", got)
-	}
-	if got := resolveDoorName(meta, "00:11:22:33:44:55"); got != genericDoorName {
-		t.Errorf("single-door unknown-mac: got %q, want %q", got, genericDoorName)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveDoorName(meta, tc.mac); got != tc.want {
+				t.Errorf("resolveDoorName(%q) = %q, want %q", tc.mac, got, tc.want)
+			}
+		})
 	}
 }
 

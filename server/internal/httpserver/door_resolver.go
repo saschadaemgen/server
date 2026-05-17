@@ -92,31 +92,31 @@ func doorShortName(d uaapi.Door) string {
 }
 
 // resolveDoorName picks the best label for a history row.
-// Order (FIX03 Sub-1b):
+// Order (FIX04 Sub-1b):
 //
-//  1. UA-API door name from the prefetched map (typical case
+//  1. Single-door installation: the one door is the answer
+//     regardless of the row's intercom field. Covers BOTH the
+//     empty-intercom case (door_unlocked via developer-API)
+//     AND the unknown-intercom case (UA-API can no longer
+//     resolve the MAC for some reason). FIX03 used the generic
+//     "Tuer" label in the unknown-intercom-with-single-door
+//     case which is silly when we know there's exactly one
+//     candidate.
+//  2. Known intercom MAC -> the mapped door name (typical case
 //     for doorbell_start, where the intercom MAC was captured
 //     in the /remote_view RPC).
-//  2. Generic "Tuer" when the intercom MAC is known but the
-//     UA-API has no matching door (UA down, or door not bound
-//     to this intercom - we cannot show a MAC to the mieter).
-//  3. Empty intercom MAC + exactly one door in the installation
-//     -> that door's display name (door_unlocked events written
-//     via the developer-API often have no intercom_mac; the
-//     single-door fallback is correct until a multi-door
-//     customer forces a schema change).
-//  4. Empty intercom MAC + multi-door installation -> generic
-//     "Tuer" label (schema work needed to do better).
+//  3. Anything else (multi-door + unknown/empty intercom MAC)
+//     -> generic label. Multi-door installs need the schema-
+//     level door_id to do better; until then the generic label
+//     is honest.
 func resolveDoorName(meta doorMeta, intercomMAC string) string {
-	if intercomMAC != "" {
-		if name, ok := meta.intercomToName[intercomMAC]; ok && name != "" {
-			return name
-		}
-		return genericDoorName
-	}
-	// intercom_mac empty: single-door auto-resolve, else generic.
 	if len(meta.allDoors) == 1 {
 		if name := doorShortName(meta.allDoors[0]); name != "" {
+			return name
+		}
+	}
+	if intercomMAC != "" {
+		if name, ok := meta.intercomToName[intercomMAC]; ok && name != "" {
 			return name
 		}
 	}
