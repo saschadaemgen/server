@@ -1539,6 +1539,64 @@ button { font-family: inherit; }
 
 
 /* ============================================================
+   18b. CARVILON BRAND  (Saison 14-03-FIX02 Sub-2a)
+   ------------------------------------------------------------
+   Two-line wordmark: "CARVILON" thin + wide-tracked,
+   "INTERCOM VIEWER" letter-spaced underneath so it sits at
+   exactly the same width as the headline. Mechanism:
+   .carvilon-brand is inline-block so it shrink-wraps to the
+   CARVILON width; .carvilon-sub is flex with space-between so
+   the letter spans distribute to fill the inherited width;
+   .carvilon-sub-space is a zero-width flex slot that creates
+   the visible gap between INTERCOM and VIEWER without breaking
+   the distribution.
+
+   Manrope is the intended display font. Per saison-14-03-FIX02
+   policy we do NOT pull from Google Fonts (LAN-only setups
+   must work offline). When the woff2 files land in
+   /static/fonts/, an @font-face block belongs here. Until
+   then the stack falls back through SF Pro Display to
+   system-ui so the wordmark still renders cleanly.
+
+   Three size variants: .size-sm (admin nav, settings footer),
+   .size-md (mieter login), .size-lg (reserved for future
+   hero placements).
+   ============================================================ */
+
+.carvilon-brand {
+  display: inline-block;
+  font-family: 'Manrope', 'SF Pro Display', system-ui, sans-serif;
+  line-height: 1;
+}
+.carvilon-name {
+  font-weight: 200;
+  letter-spacing: 0.24em;
+  line-height: 1;
+  color: var(--color-text, #f0f4ff);
+}
+.carvilon-sub {
+  font-weight: 500;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #94a3b8);
+  margin-top: 0.3em;
+  display: flex;
+  justify-content: space-between;
+}
+.carvilon-sub-space {
+  flex: 0 0 0.3em;
+}
+
+.carvilon-brand.size-sm .carvilon-name { font-size: 22px; }
+.carvilon-brand.size-sm .carvilon-sub  { font-size: 7px; }
+
+.carvilon-brand.size-md .carvilon-name { font-size: 38px; }
+.carvilon-brand.size-md .carvilon-sub  { font-size: 11.2px; }
+
+.carvilon-brand.size-lg .carvilon-name { font-size: 64px; }
+.carvilon-brand.size-lg .carvilon-sub  { font-size: 19px; }
+
+
+/* ============================================================
    19. UTILITIES
    ============================================================ */
 

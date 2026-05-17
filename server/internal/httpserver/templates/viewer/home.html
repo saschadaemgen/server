@@ -200,6 +200,24 @@
       color: var(--color-text-tertiary, #94a3b8);
       font-style: italic;
     }
+    /* S14-03-FIX02 Sub-2a: CARVILON wordmark + version inside
+       the inline settings mode-layer. Sits centered at the
+       bottom of the form, pushed down with margin-top:auto so
+       it docks to the slot floor regardless of how many radio
+       fieldsets are above. */
+    .mode-settings-footer {
+      margin-top: auto;
+      padding-top: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .mode-settings-version {
+      font-size: 9px;
+      color: var(--color-text-tertiary, #94a3b8);
+      letter-spacing: 0.08em;
+    }
 
     /* Toast slot: floats over whichever mode is active, scoped
        to the idle-container so it travels with the device frame

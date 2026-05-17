@@ -55,6 +55,20 @@
     }
     .info-row { display: flex; justify-content: space-between; padding: var(--space-2) 0; }
     .info-row .k { color: var(--color-text-tertiary); }
+
+    /* S14-03-FIX02 Sub-2a: CARVILON brand + version footer. */
+    .settings-footer {
+      margin-top: var(--space-6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .settings-version {
+      font-size: 10px;
+      color: var(--color-text-tertiary, #94a3b8);
+      letter-spacing: 0.08em;
+    }
   </style>
 </head>
 <body>
@@ -98,6 +112,18 @@
     <form method="post" action="/webviewer/logout" class="mieter-card" style="text-align:center;">
       <button class="btn btn-secondary" type="submit">Abmelden</button>
     </form>
+
+    <footer class="settings-footer" aria-label="CARVILON Intercom Viewer">
+      <span class="carvilon-brand size-sm" aria-hidden="true">
+        <span class="carvilon-name">CARVILON</span>
+        <span class="carvilon-sub">
+          <span>I</span><span>N</span><span>T</span><span>E</span><span>R</span><span>C</span><span>O</span><span>M</span><span class="carvilon-sub-space"></span><span>V</span><span>I</span><span>E</span><span>W</span><span>E</span><span>R</span>
+        </span>
+      </span>
+      <!-- TODO(saison-15+): pull from a Go build var (ldflags
+           -X) instead of a hardcoded string. -->
+      <span class="settings-version">Version 1.0</span>
+    </footer>
   </main>
 
 </body>
