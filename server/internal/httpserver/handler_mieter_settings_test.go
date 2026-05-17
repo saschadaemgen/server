@@ -309,11 +309,15 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	}
 	// Events are returned newest-first; order: known MAC, empty
 	// MAC, unknown MAC.
+	//
+	// FIX03 Sub-1b: empty MAC in a SINGLE-door install resolves
+	// to the only door's name; unknown MAC resolves to the
+	// generic "Tuer" label (the bare MAC fallback is gone).
 	type want struct{ intercom, name string }
 	wants := []want{
 		{intercom: "28:70:4e:31:e2:9c", name: "Door door-uuid-front"},
-		{intercom: "", name: genericDoorName},
-		{intercom: "11:22:33:44:55:66", name: "11:22:33:44:55:66"},
+		{intercom: "", name: "Door door-uuid-front"},
+		{intercom: "11:22:33:44:55:66", name: genericDoorName},
 	}
 	for i, ev := range out.Events {
 		if ev.IntercomMAC != wants[i].intercom {

@@ -1,43 +1,66 @@
-// Saison 14-03-FIX02: shared helpers that resolve an intercom MAC
-// (the only thing door_events stores per row) into a human door
-// name (what the mieter actually wants to read in the history
-// list).
+// Saison 14-03-FIX02 + FIX03: shared helpers that resolve an
+// intercom MAC (the only thing door_events stores per row) into
+// a human door name (what the mieter actually wants to read in
+// the history list).
 //
 // Both the synchronous /webviewer home render and the JSON
 // /webviewer/history.json endpoint render up to ViewerHistoryLimit
 // events at once. Looking each row up via the UA-API would
 // produce ViewerHistoryLimit round-trips; instead we call
-// uaapi.ListDoors EXACTLY once per request, build an in-memory
-// map from intercom MAC to door name, and let each row resolve
-// against the map.
+// uaapi.ListDoors EXACTLY once per request, build doorMeta
+// (intercom-MAC map + the full door list), and let every row
+// resolve against the cached snapshot.
 //
-// If UA is unavailable (no client wired, or ListDoors errors)
-// the map is empty and rows fall through to "Hauseingang"
-// (intercom MAC unknown for that row) or the bare MAC string
-// (last resort). The full MAC only appears when UA is completely
-// down AND the intercom MAC is known - in normal operation
-// every row carries a friendly door name.
+// FIX03 Sub-1b: door_events does not yet carry a door_id column
+// (TODO for a later saison schema change), so door_unlocked
+// rows triggered via the developer-API often have an empty
+// intercom_mac. For those rows resolveDoorName falls back to
+// the single existing door's name when the installation has
+// exactly one door; multi-door setups get a generic "Tuer"
+// label and will need the schema-level door_id once a customer
+// actually has more than one door per viewer.
+//
+// The bare MAC is NEVER returned anymore - the FIX02 last-
+// resort "show the MAC" path turned out to confuse users more
+// than it informed them (they cannot map an arbitrary
+// 12-hex string to a real door anyway). Unknown known-MAC
+// rows now also get the generic "Tuer" label.
 package httpserver
 
-import "context"
+import (
+	"context"
+
+	"unifix.local/server/internal/uaapi"
+)
 
 // genericDoorName is the fallback label for history rows that
-// have no intercom MAC (early test data, manual DB inserts).
-const genericDoorName = "Hauseingang"
+// have no intercom MAC and live in a multi-door installation
+// (single-door installs use the actual door name).
+const genericDoorName = "Tuer"
 
-// loadIntercomDoorNames returns a map of lowercase colon-form
-// intercom MAC -> human door name, built from a single
-// ListDoors call. Empty map (not nil) on error so callers can
-// resolve without nil-checking.
-func (s *Server) loadIntercomDoorNames(ctx context.Context) map[string]string {
+// doorMeta is the cached snapshot used by resolveDoorName. The
+// map covers the typical intercom-routed case; allDoors carries
+// the full list so the empty-intercom branch can pick a single-
+// door fallback.
+type doorMeta struct {
+	intercomToName map[string]string
+	allDoors       []uaapi.Door
+}
+
+// loadDoorMeta makes the one UA-API round-trip per render and
+// builds both views. Empty/zero on error so callers do not
+// need to nil-check.
+//
+// Replaces the FIX02-era loadIntercomDoorNames helper.
+func (s *Server) loadDoorMeta(ctx context.Context) doorMeta {
 	if s.ua == nil {
-		return map[string]string{}
+		return doorMeta{intercomToName: map[string]string{}}
 	}
 	doors, err := s.ua.ListDoors(ctx)
 	if err != nil {
 		s.log.Warn("door-name resolution: ua list-doors failed",
 			"err", err)
-		return map[string]string{}
+		return doorMeta{intercomToName: map[string]string{}}
 	}
 	m := make(map[string]string, len(doors))
 	for _, d := range doors {
@@ -47,24 +70,37 @@ func (s *Server) loadIntercomDoorNames(ctx context.Context) map[string]string {
 		}
 		m[mac] = d.DisplayName()
 	}
-	return m
+	return doorMeta{intercomToName: m, allDoors: doors}
 }
 
-// resolveDoorName picks the best label for a history row's
-// intercom MAC. Order:
+// resolveDoorName picks the best label for a history row.
+// Order (FIX03 Sub-1b):
 //
-//  1. UA-API door name from the prefetched map
-//  2. "Hauseingang" when the row has no intercom MAC
-//     (we have nothing specific to point to)
-//  3. The bare MAC as a last resort - shown only when the
-//     intercom MAC IS known but UA-API has no matching door
-//     (UA down, or door not bound to this intercom).
-func resolveDoorName(doorMap map[string]string, intercomMAC string) string {
-	if intercomMAC == "" {
+//  1. UA-API door name from the prefetched map (typical case
+//     for doorbell_start, where the intercom MAC was captured
+//     in the /remote_view RPC).
+//  2. Generic "Tuer" when the intercom MAC is known but the
+//     UA-API has no matching door (UA down, or door not bound
+//     to this intercom - we cannot show a MAC to the mieter).
+//  3. Empty intercom MAC + exactly one door in the installation
+//     -> that door's display name (door_unlocked events written
+//     via the developer-API often have no intercom_mac; the
+//     single-door fallback is correct until a multi-door
+//     customer forces a schema change).
+//  4. Empty intercom MAC + multi-door installation -> generic
+//     "Tuer" label (schema work needed to do better).
+func resolveDoorName(meta doorMeta, intercomMAC string) string {
+	if intercomMAC != "" {
+		if name, ok := meta.intercomToName[intercomMAC]; ok && name != "" {
+			return name
+		}
 		return genericDoorName
 	}
-	if name, ok := doorMap[intercomMAC]; ok && name != "" {
-		return name
+	// intercom_mac empty: single-door auto-resolve, else generic.
+	if len(meta.allDoors) == 1 {
+		if name := meta.allDoors[0].DisplayName(); name != "" {
+			return name
+		}
 	}
-	return intercomMAC
+	return genericDoorName
 }

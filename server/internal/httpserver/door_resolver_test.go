@@ -1,42 +1,50 @@
-// Saison 14-03-FIX02 Sub-1a: door-name-resolution coverage.
+// Saison 14-03-FIX02 + FIX03: door-name-resolution coverage.
 package httpserver
 
-import "testing"
+import (
+	"testing"
 
-func TestResolveDoorName(t *testing.T) {
-	doorMap := map[string]string{
-		"28:70:4e:31:e2:9c": "Hauseingang",
-		"aa:bb:cc:dd:ee:ff": "Tiefgarage",
+	"unifix.local/server/internal/uaapi"
+)
+
+// fakeDoor builds a uaapi.Door whose IntercomMAC() helper will
+// return the colon-form lowercase MAC the test wants.
+func fakeDoor(id, name, intercomBare string) uaapi.Door {
+	thumb := ""
+	if intercomBare != "" {
+		thumb = "/preview/reader_" + intercomBare + "_" + id + "_1.jpg"
+	}
+	return uaapi.Door{
+		ID:     id,
+		Name:   name,
+		Extras: uaapi.DoorExtras{DoorThumbnail: thumb},
+	}
+}
+
+func TestResolveDoorName_MultiDoor(t *testing.T) {
+	meta := doorMeta{
+		intercomToName: map[string]string{
+			"28:70:4e:31:e2:9c": "Hauseingang",
+			"aa:bb:cc:dd:ee:ff": "Tiefgarage",
+		},
+		allDoors: []uaapi.Door{
+			fakeDoor("d1", "Hauseingang", "28704e31e29c"),
+			fakeDoor("d2", "Tiefgarage", "aabbccddeeff"),
+		},
 	}
 	cases := []struct {
 		name string
 		mac  string
 		want string
 	}{
-		{
-			name: "known intercom -> friendly door name",
-			mac:  "28:70:4e:31:e2:9c",
-			want: "Hauseingang",
-		},
-		{
-			name: "second known intercom -> its own door name",
-			mac:  "aa:bb:cc:dd:ee:ff",
-			want: "Tiefgarage",
-		},
-		{
-			name: "empty mac -> generic fallback",
-			mac:  "",
-			want: genericDoorName,
-		},
-		{
-			name: "unknown intercom -> bare mac as last resort",
-			mac:  "00:11:22:33:44:55",
-			want: "00:11:22:33:44:55",
-		},
+		{name: "known intercom -> friendly door name", mac: "28:70:4e:31:e2:9c", want: "Hauseingang"},
+		{name: "second known intercom -> its own door name", mac: "aa:bb:cc:dd:ee:ff", want: "Tiefgarage"},
+		{name: "empty mac in multi-door install -> generic", mac: "", want: genericDoorName},
+		{name: "unknown intercom -> generic (no bare MAC)", mac: "00:11:22:33:44:55", want: genericDoorName},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveDoorName(doorMap, tc.mac)
+			got := resolveDoorName(meta, tc.mac)
 			if got != tc.want {
 				t.Errorf("resolveDoorName(%q) = %q, want %q", tc.mac, got, tc.want)
 			}
@@ -44,25 +52,48 @@ func TestResolveDoorName(t *testing.T) {
 	}
 }
 
-// Even with a nil-ish map (UA-API down so loadIntercomDoorNames
-// returned an empty map), resolveDoorName must still produce a
-// sensible label.
-func TestResolveDoorName_EmptyMap(t *testing.T) {
-	empty := map[string]string{}
-	if got := resolveDoorName(empty, ""); got != genericDoorName {
-		t.Errorf("empty mac with empty map: got %q, want %q", got, genericDoorName)
+// FIX03 Sub-1b: in a single-door installation an empty intercom
+// MAC (door_unlocked-style event) resolves to the only door's
+// name instead of the generic "Tuer" label.
+func TestResolveDoorName_SingleDoorFallback(t *testing.T) {
+	meta := doorMeta{
+		intercomToName: map[string]string{
+			"28:70:4e:31:e2:9c": "Hauseingang",
+		},
+		allDoors: []uaapi.Door{
+			fakeDoor("d1", "Hauseingang", "28704e31e29c"),
+		},
 	}
-	if got := resolveDoorName(empty, "28:70:4e:31:e2:9c"); got != "28:70:4e:31:e2:9c" {
-		t.Errorf("known mac with empty map: got %q, want bare mac", got)
+	if got := resolveDoorName(meta, ""); got != "Hauseingang" {
+		t.Errorf("single-door empty-mac fallback: got %q, want Hauseingang", got)
+	}
+	if got := resolveDoorName(meta, "28:70:4e:31:e2:9c"); got != "Hauseingang" {
+		t.Errorf("single-door known-mac: got %q, want Hauseingang", got)
+	}
+	if got := resolveDoorName(meta, "00:11:22:33:44:55"); got != genericDoorName {
+		t.Errorf("single-door unknown-mac: got %q, want %q", got, genericDoorName)
 	}
 }
 
-// A map entry whose name is the empty string (UA returned a door
-// without a name) should fall through to the MAC instead of
-// rendering an empty label.
+// UA-API down: empty meta produces only generic labels, never
+// the bare MAC the pre-FIX03 resolver used to print.
+func TestResolveDoorName_NoUAAvailable(t *testing.T) {
+	empty := doorMeta{intercomToName: map[string]string{}}
+	if got := resolveDoorName(empty, ""); got != genericDoorName {
+		t.Errorf("empty mac, no doors: got %q, want %q", got, genericDoorName)
+	}
+	if got := resolveDoorName(empty, "28:70:4e:31:e2:9c"); got != genericDoorName {
+		t.Errorf("known-mac, no doors: got %q, want %q (NOT the mac)", got, genericDoorName)
+	}
+}
+
+// A map entry with an empty name should not surface as a blank
+// label; resolveDoorName falls through to the generic label.
 func TestResolveDoorName_BlankNameFallsThrough(t *testing.T) {
-	m := map[string]string{"28:70:4e:31:e2:9c": ""}
-	if got := resolveDoorName(m, "28:70:4e:31:e2:9c"); got != "28:70:4e:31:e2:9c" {
-		t.Errorf("blank-name fallback: got %q, want bare mac", got)
+	meta := doorMeta{
+		intercomToName: map[string]string{"28:70:4e:31:e2:9c": ""},
+	}
+	if got := resolveDoorName(meta, "28:70:4e:31:e2:9c"); got != genericDoorName {
+		t.Errorf("blank-name fallback: got %q, want %q", got, genericDoorName)
 	}
 }

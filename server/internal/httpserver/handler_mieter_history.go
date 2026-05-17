@@ -62,11 +62,11 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Saison 14-03-FIX02 Sub-1a: ONE ListDoors call per render
-	// builds the intercom-MAC -> door-name map shared by every
-	// row. Replaces the FIX01 stop-gap that wrote the bare MAC
-	// into door_name.
-	doorMap := s.loadIntercomDoorNames(r.Context())
+	// Saison 14-03-FIX02/FIX03: ONE ListDoors call per render,
+	// then resolve every row through the cached doorMeta. The
+	// single-door fallback inside resolveDoorName covers the
+	// door_unlocked event-type which often has no intercom MAC.
+	meta := s.loadDoorMeta(r.Context())
 
 	items := make([]mieterHistoryItem, 0, len(events))
 	unreadIDs := make([]int64, 0, len(events))
@@ -76,7 +76,7 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 			CreatedAt:   ev.OccurredAt.Unix(),
 			When:        formatGermanWhen(ev.OccurredAt),
 			IntercomMAC: ev.IntercomMAC,
-			DoorName:    resolveDoorName(doorMap, ev.IntercomMAC),
+			DoorName:    resolveDoorName(meta, ev.IntercomMAC),
 			EventType:   ev.EventType,
 			Unread:      ev.ReadAt == nil,
 		})
