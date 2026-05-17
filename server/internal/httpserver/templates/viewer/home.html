@@ -158,14 +158,16 @@
       .screensaver-badge { animation: none; }
     }
 
-    /* S14-03-FIX04 Sub-2: history-button radar pulse + count
-       badge. Scoped to .history-btn so the design-library
-       default .action-badge (a generic 8x8 dot) stays available
-       for any other action button that might need it later. */
-    :root {
-      --color-alert-red:      rgb(239, 68, 68);
-      --color-alert-red-soft: rgba(239, 68, 68, 0.6);
-    }
+    /* S14-03-FIX04 Sub-2 + FIX05: history-button radar pulse
+       + count badge. Scoped to .history-btn so the design-
+       library default .action-badge (a generic 8x8 dot) stays
+       available for any other action button that might need it
+       later.
+       FIX05 swap: alert color goes from red to the design-
+       library accent blue (same token the Schluessel button
+       uses via .action.is-primary) - red read as alarm; blue
+       matches the action-bar accent and keeps the visual
+       language consistent. */
 
     .history-btn { position: relative; }
 
@@ -173,7 +175,7 @@
       position: absolute;
       inset: -4px;
       border-radius: 50%;
-      border: 2px solid var(--color-alert-red-soft);
+      border: 2px solid var(--color-accent-glow);
       opacity: 0;
       pointer-events: none;
       display: none;
@@ -196,9 +198,9 @@
       }
     }
 
-    .history-btn.has-unread svg { color: var(--color-alert-red); }
+    .history-btn.has-unread svg { color: var(--color-accent); }
 
-    /* Count badge: oben rechts, white-on-red mit kleinem
+    /* Count badge: oben rechts, white-on-accent mit kleinem
        Stanz-Border in der slot-Hintergrundfarbe damit es vom
        Button optisch abgesetzt wirkt. */
     .history-btn .action-badge {
@@ -209,7 +211,7 @@
       height: 18px;
       padding: 0 5px;
       border-radius: 9px;
-      background: var(--color-alert-red);
+      background: var(--color-accent);
       color: #ffffff;
       font-size: 11px;
       font-weight: 600;
