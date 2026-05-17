@@ -408,6 +408,13 @@
         var eventID = raw.cancel_token || raw.request_id || '';
         var intercomMAC = raw.device_id || data.door || '';
         if (window.console) console.log('[unifix] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
+        // S14-03-FIX02 Sub-1b: a doorbell ring counts as user
+        // activity and resets the auto-screensaver timer so the
+        // mieter does not get slid back to the screensaver while
+        // talking to the visitor.
+        if (window.unifixIdle && window.unifixIdle.resetAutoTimer) {
+          window.unifixIdle.resetAutoTimer();
+        }
         enableRingButtons(eventID, intercomMAC);
         if (window.unifix && unifix.openOverlay) {
           unifix.openOverlay('ringing');

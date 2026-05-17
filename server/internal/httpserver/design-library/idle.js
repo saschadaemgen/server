@@ -205,10 +205,30 @@
   var switchMode = setMode;
 
   // -------------------------------------------------------------
-  // Auto-screensaver timer. Resets on any interaction inside the
-  // container and on the explicit trigger buttons. Only armed if
-  // the default mode is the screensaver AND the persisted value
-  // is positive; otherwise the timer is disabled completely.
+  // Auto-screensaver timer (S14-03-FIX02 Sub-1b: "Variante B" -
+  // timer runs in ANY non-screensaver mode when both prerequisites
+  // hold: idle_default is screensaver AND auto_seconds > 0).
+  //
+  // Reset triggers (explicit):
+  //   - any tap inside the device frame (container or topbar/
+  //     action-bar - the document-level handler below)
+  //   - mode switch (setMode calls this at the end of its
+  //     transition)
+  //   - doorbell event (home.html SSE handler calls
+  //     window.unifixIdle.resetAutoTimer when a ring arrives)
+  //
+  // NOT a reset (the timer keeps ticking):
+  //   - stream-frame arrivals (browser-internal, no JS event)
+  //   - SSE heartbeat
+  //   - weather refresh
+  //
+  // The two early-returns are by design:
+  //   - autoSeconds == 0: feature disabled; don't waste a timer
+  //   - defaultMode != 'screensaver': spec says the auto-timer
+  //     only exists to bring the user BACK to the screensaver,
+  //     which makes no sense when livestream is the persisted
+  //     default
+  //   - activeMode == 'screensaver': nowhere to fall back to
   var autoTimerHandle = null;
   function resetAutoTimer() {
     if (autoTimerHandle) {
@@ -229,11 +249,15 @@
   // inputs, buttons, or the close-X are explicit and have their
   // own handlers below.
   container.addEventListener('click', function (e) {
+    // S14-03-FIX02: every tap inside the container resets the
+    // timer, regardless of whether it triggers a mode switch
+    // (taps on history rows, settings form whitespace, etc., all
+    // count as user activity).
+    resetAutoTimer();
     // Defence in depth: never swallow a click that landed on a
     // button, link, or form control - those have their own
     // semantics.
     if (e.target.closest('a, button, input, select, textarea, label')) {
-      resetAutoTimer();
       return;
     }
     if (activeMode === 'screensaver' && layers.livestream) {
@@ -242,6 +266,17 @@
       setMode('screensaver');
     }
   });
+
+  // S14-03-FIX02: any click anywhere in the device frame counts
+  // as user activity (topbar gear, action-bar mic/unlock, even
+  // accidental misses). Cheaper than tracking the .stage element
+  // and bubbles up through the existing handlers.
+  document.addEventListener('click', resetAutoTimer);
+
+  // Expose a tiny hook so the doorbell SSE handler (in home.html,
+  // separate <script>) can reset the timer when a ring arrives.
+  window.unifixIdle = window.unifixIdle || {};
+  window.unifixIdle.resetAutoTimer = resetAutoTimer;
 
   // -------------------------------------------------------------
   // Trigger buttons: gear (settings), history-action (history),
