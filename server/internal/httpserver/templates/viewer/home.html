@@ -157,6 +157,70 @@
     @media (prefers-reduced-motion: reduce) {
       .screensaver-badge { animation: none; }
     }
+
+    /* S14-03-FIX04 Sub-2: history-button radar pulse + count
+       badge. Scoped to .history-btn so the design-library
+       default .action-badge (a generic 8x8 dot) stays available
+       for any other action button that might need it later. */
+    :root {
+      --color-alert-red:      rgb(239, 68, 68);
+      --color-alert-red-soft: rgba(239, 68, 68, 0.6);
+    }
+
+    .history-btn { position: relative; }
+
+    .history-btn .pulse-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--color-alert-red-soft);
+      opacity: 0;
+      pointer-events: none;
+      display: none;
+    }
+    .history-btn.has-unread .pulse-ring {
+      display: block;
+      animation: history-btn-pulse 1.6s ease-out infinite;
+    }
+    .history-btn.has-unread .pulse-ring-2 {
+      animation-delay: 0.8s;
+    }
+    @keyframes history-btn-pulse {
+      0%   { transform: scale(1);    opacity: 0.7; }
+      100% { transform: scale(1.4);  opacity: 0;   }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .history-btn.has-unread .pulse-ring {
+        animation: none;
+        opacity: 0.45;
+      }
+    }
+
+    .history-btn.has-unread svg { color: var(--color-alert-red); }
+
+    /* Count badge: oben rechts, white-on-red mit kleinem
+       Stanz-Border in der slot-Hintergrundfarbe damit es vom
+       Button optisch abgesetzt wirkt. */
+    .history-btn .action-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: var(--color-alert-red);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      border: 2px solid var(--color-bg-stream-slot, #0a0e16);
+      box-shadow: none;
+    }
+    .history-btn .action-badge[hidden] { display: none; }
     .screensaver-temp { font-weight: 500; }
     .screensaver-desc {
       font-size: 0.92em;

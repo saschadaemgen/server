@@ -30,6 +30,7 @@ type viewerHomeData struct {
 	NowDate      string // "Di, 13. Mai"
 	DND          bool
 	HasUnread    bool
+	UnreadCount  int                // S14-03-FIX04: numeric count for the history-button badge
 	HistoryItems []viewerHistoryRow // {Where, When, Unread}
 	// Saison 14-01b idle-view fields.
 	IdleViewMode string            // "screensaver" or "livestream"
@@ -101,6 +102,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		NowDate:                formatGermanDate(now),
 		DND:                    false,
 		HasUnread:              unread > 0,
+		UnreadCount:            unread,
 		HistoryItems:           rows,
 		IdleViewMode:           info.ResolveIdleViewMode(),
 		Weather:                s.fetchHomeWeather(r),

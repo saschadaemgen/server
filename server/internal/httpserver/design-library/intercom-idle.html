@@ -243,12 +243,22 @@
         </svg>
       </button>
 
-      <button class="action" data-action="open-history" aria-label="Verlauf" title="Verlauf">
+      <!-- Saison 14-03-FIX04 Sub-2: history button gets the
+           radar-pulse + count-badge treatment. .history-btn
+           hosts two .pulse-ring elements that animate only
+           when .has-unread is on the button; the .action-badge
+           shows the unread count. Both are no-ops on a fresh
+           viewer (server renders has-unread + visible badge
+           when the page first lands with pending events, JS
+           keeps the state synced via SSE + fetch). -->
+      <button class="action history-btn{{if .HasUnread}} has-unread{{end}}" data-action="open-history" aria-label="Verlauf" title="Verlauf">
+        <span class="pulse-ring pulse-ring-1" aria-hidden="true"></span>
+        <span class="pulse-ring pulse-ring-2" aria-hidden="true"></span>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="8.5"/>
           <path d="M12 7.5V12l3 2"/>
         </svg>
-        {{if .HasUnread}}<span class="action-badge" aria-hidden="true"></span>{{end}}
+        <span class="action-badge" data-bind="history-button-badge"{{if not .HasUnread}} hidden{{end}} aria-hidden="true">{{if .HasUnread}}{{.UnreadCount}}{{end}}</span>
       </button>
 
     </div>

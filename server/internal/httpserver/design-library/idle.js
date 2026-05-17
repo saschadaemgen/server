@@ -341,17 +341,47 @@
     badgeIconEl.innerHTML = BELL_RING_SVG;
   }
 
+  // S14-03-FIX04 Sub-2: the action-bar history button mirrors
+  // the count via its own badge + radar pulse. Looked up once
+  // here so updateUnreadBadge does not query the DOM on every
+  // call.
+  var historyBtnEl = document.querySelector('[data-action="open-history"]');
+  var historyBtnBadgeEl = document.querySelector('[data-bind="history-button-badge"]');
+
+  function formatBadgeCount(n) {
+    return n > 99 ? '99+' : String(n);
+  }
+
   var unreadCount = 0;
   function updateUnreadBadge(n) {
-    if (!badgeEl) return;
     unreadCount = Math.max(0, n | 0);
-    badgeEl.setAttribute('data-count', String(unreadCount));
-    if (unreadCount > 0) {
-      badgeEl.hidden = false;
-      if (badgeCountEl) badgeCountEl.textContent = String(unreadCount);
-    } else {
-      badgeEl.hidden = true;
-      if (badgeCountEl) badgeCountEl.textContent = '0';
+    // Screensaver chip.
+    if (badgeEl) {
+      badgeEl.setAttribute('data-count', String(unreadCount));
+      if (unreadCount > 0) {
+        badgeEl.hidden = false;
+        if (badgeCountEl) badgeCountEl.textContent = String(unreadCount);
+      } else {
+        badgeEl.hidden = true;
+        if (badgeCountEl) badgeCountEl.textContent = '0';
+      }
+    }
+    // History button: pulse rings + count chip.
+    if (historyBtnEl) {
+      if (unreadCount > 0) {
+        historyBtnEl.classList.add('has-unread');
+      } else {
+        historyBtnEl.classList.remove('has-unread');
+      }
+    }
+    if (historyBtnBadgeEl) {
+      if (unreadCount > 0) {
+        historyBtnBadgeEl.hidden = false;
+        historyBtnBadgeEl.textContent = formatBadgeCount(unreadCount);
+      } else {
+        historyBtnBadgeEl.hidden = true;
+        historyBtnBadgeEl.textContent = '';
+      }
     }
   }
   function bumpUnread() {
