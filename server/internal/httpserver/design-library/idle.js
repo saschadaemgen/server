@@ -342,47 +342,73 @@
   });
 
   // -------------------------------------------------------------
-  // Inline settings form: AJAX submit with Accept: application/json.
-  // The server's JSON branch returns {"ok":true, ...} so we update
-  // local runtime state without a page reload and bounce back to
-  // the default mode.
+  // S14-03-FIX02 Sub-1e: auto-save settings on every radio
+  // change. Replaces the explicit Save button. Each change fires
+  // one POST with the FULL form state so the server always sees
+  // both fields; the JSON response patches local runtime state
+  // (defaultMode, autoSeconds) and resetAutoTimer re-arms the
+  // timer with the new value. No mode-switch on save - the user
+  // stays in settings so they can adjust further options.
   var settingsForm = container.querySelector('[data-form="settings"]');
-  var settingsStatus = container.querySelector('[data-bind="settings-status"]');
+  var toastEl = container.querySelector('[data-bind="toast"]');
+  var toastTimer = null;
+
+  function showToast(message, kind, durationMs) {
+    if (!toastEl) return;
+    toastEl.textContent = message;
+    toastEl.classList.remove('kind-error');
+    if (kind === 'error') toastEl.classList.add('kind-error');
+    toastEl.classList.add('is-visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toastEl.classList.remove('is-visible');
+    }, durationMs || 1500);
+  }
+
+  function saveSettings() {
+    if (!settingsForm) return;
+    var fd = new FormData(settingsForm);
+    fetch(settingsForm.getAttribute('action') || '/webviewer/settings', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('settings http ' + r.status);
+        return r.json();
+      })
+      .then(function (resp) {
+        if (resp && typeof resp.idle_view_mode === 'string') {
+          defaultMode = (resp.idle_view_mode === 'livestream') ? 'livestream' : 'screensaver';
+          container.setAttribute('data-default-mode', defaultMode);
+        }
+        if (resp && typeof resp.auto_screensaver_seconds === 'number') {
+          autoSeconds = resp.auto_screensaver_seconds;
+          container.setAttribute('data-auto-screensaver-seconds', String(autoSeconds));
+        }
+        // Re-arm the timer in case autoSeconds or the active-mode
+        // semantics changed.
+        resetAutoTimer();
+        showToast('Gespeichert', 'success', 1500);
+      })
+      .catch(function () {
+        showToast('Speichern fehlgeschlagen', 'error', 3000);
+      });
+  }
+
   if (settingsForm) {
+    var settingsInputs = settingsForm.querySelectorAll('input[type="radio"]');
+    for (var si = 0; si < settingsInputs.length; si++) {
+      settingsInputs[si].addEventListener('change', saveSettings);
+    }
+    // Defence in depth: if a JS-off-then-on browser still submits
+    // the form via Enter on a radio, intercept and route through
+    // saveSettings so we never do a full page reload from the
+    // inline mode.
     settingsForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      var fd = new FormData(settingsForm);
-      if (settingsStatus) settingsStatus.textContent = 'speichern ...';
-      fetch(settingsForm.getAttribute('action') || '/webviewer/settings', {
-        method: 'POST',
-        body: fd,
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' },
-      })
-        .then(function (r) {
-          if (!r.ok) throw new Error('settings http ' + r.status);
-          return r.json();
-        })
-        .then(function (resp) {
-          if (settingsStatus) settingsStatus.textContent = 'gespeichert';
-          if (resp && typeof resp.idle_view_mode === 'string') {
-            defaultMode = (resp.idle_view_mode === 'livestream') ? 'livestream' : 'screensaver';
-            container.setAttribute('data-default-mode', defaultMode);
-          }
-          if (resp && typeof resp.auto_screensaver_seconds === 'number') {
-            autoSeconds = resp.auto_screensaver_seconds;
-            container.setAttribute('data-auto-screensaver-seconds', String(autoSeconds));
-          }
-          // Slide back to the (possibly new) default after a short
-          // beat so the user can read the confirmation.
-          setTimeout(function () {
-            switchMode(defaultMode);
-            if (settingsStatus) settingsStatus.textContent = '';
-          }, 600);
-        })
-        .catch(function () {
-          if (settingsStatus) settingsStatus.textContent = 'Fehler';
-        });
+      saveSettings();
     });
   }
 

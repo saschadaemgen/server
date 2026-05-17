@@ -101,6 +101,12 @@
            data-default-mode="{{.IdleViewMode}}"
            data-auto-screensaver-seconds="{{.AutoScreensaverSeconds}}">
 
+        <!-- S14-03-FIX02 Sub-1e: shared toast slot used by the
+             auto-save settings flow (and reusable by future
+             inline actions). Hidden until idle.js gives it a
+             message via showToast(). -->
+        <div class="mode-toast" data-bind="toast" role="status" aria-live="polite"></div>
+
         <!-- 1. Screensaver: clock + date + weather. Default unless
              the operator persisted livestream as their default. -->
         <div class="mode-layer {{if eq .IdleViewMode "livestream"}}below hidden{{else}}active{{end}}" data-mode="screensaver">
@@ -132,11 +138,14 @@
                onerror="this.style.display='none'"/>
         </div>
 
-        <!-- 3. Inline settings (saison 14-03). Standalone
-             /webviewer/settings stays available as fallback for
-             JS-off browsers; the inline form POSTs the same
-             endpoint with Accept: application/json and patches
-             the runtime without a reload. -->
+        <!-- 3. Inline settings (saison 14-03 + 14-03-FIX02).
+             Standalone /webviewer/settings stays available as
+             JS-off fallback; the inline form auto-saves on every
+             radio change (FIX02-1e) with toast feedback. The
+             form tag remains so the standalone POST contract is
+             intact for the fallback page; the Save button is
+             gone because JS-off users do not see the inline
+             mode at all. -->
         <div class="mode-layer below hidden" data-mode="settings">
           <form class="mode-settings" data-form="settings"
                 action="/webviewer/settings" method="post">
@@ -166,10 +175,7 @@
               <label><input type="radio" name="auto_screensaver" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
             </fieldset>
 
-            <div class="mode-actions">
-              <button type="submit" class="mode-submit">Speichern</button>
-              <span class="mode-form-status" data-bind="settings-status" role="status" aria-live="polite"></span>
-            </div>
+            <p class="mode-settings-hint">Aenderungen werden automatisch gespeichert.</p>
           </form>
         </div>
 
