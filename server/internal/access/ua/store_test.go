@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"unifix.local/server/internal/access"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // fakeClient erfuellt UAClient ohne Netzwerk.

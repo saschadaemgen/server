@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/doorbellhub"
-	"unifix.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/doorbellhub"
+	"carvilon.local/server/internal/doorhistory"
 )
 
 // TestMieterUnreadCount_Endpoint exercises the read endpoint:

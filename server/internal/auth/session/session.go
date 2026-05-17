@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"time"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 // DefaultIdleTimeout is how far in the future expires_at is

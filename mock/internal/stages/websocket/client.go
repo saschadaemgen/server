@@ -20,9 +20,9 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"unifix.local/mock/internal/crypto"
-	"unifix.local/mock/internal/identity"
-	"unifix.local/mock/internal/state"
+	"carvilon.local/mock/internal/crypto"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/mock/internal/state"
 )
 
 const (

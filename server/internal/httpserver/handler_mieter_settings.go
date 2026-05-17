@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 // mieterSettingsData is the payload for templates/viewer/settings.html.

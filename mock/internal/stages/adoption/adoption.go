@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"unifix.local/mock/internal/identity"
-	"unifix.local/mock/internal/state"
-	"unifix.local/shared/types"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/mock/internal/state"
+	"carvilon.local/shared/types"
 )
 
 const (

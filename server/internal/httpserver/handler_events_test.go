@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/doorbellhub"
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/doorbellhub"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 // loginAndOpenEvents performs the username+password login flow and

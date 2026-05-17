@@ -27,8 +27,8 @@ import (
 
 	paho "github.com/eclipse/paho.mqtt.golang"
 
-	"unifix.local/mock/internal/state"
-	"unifix.local/shared/proto"
+	"carvilon.local/mock/internal/state"
+	"carvilon.local/shared/proto"
 )
 
 const (

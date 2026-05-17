@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // TestMieterSettingsPost_AutoScreensaverJSON exercises the JSON

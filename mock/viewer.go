@@ -17,15 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"unifix.local/mock/internal/crypto"
-	"unifix.local/mock/internal/handlers"
-	"unifix.local/mock/internal/identity"
-	"unifix.local/mock/internal/outgoing"
-	"unifix.local/mock/internal/stages/adoption"
-	"unifix.local/mock/internal/stages/discovery"
-	"unifix.local/mock/internal/stages/mqtt"
-	"unifix.local/mock/internal/stages/websocket"
-	"unifix.local/mock/internal/state"
+	"carvilon.local/mock/internal/crypto"
+	"carvilon.local/mock/internal/handlers"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/mock/internal/outgoing"
+	"carvilon.local/mock/internal/stages/adoption"
+	"carvilon.local/mock/internal/stages/discovery"
+	"carvilon.local/mock/internal/stages/mqtt"
+	"carvilon.local/mock/internal/stages/websocket"
+	"carvilon.local/mock/internal/state"
 )
 
 // Channel buffer sizes. Big enough for a doorbell burst, small

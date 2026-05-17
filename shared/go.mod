@@ -1,3 +1,3 @@
-module unifix.local/shared
+module carvilon.local/shared
 
 go 1.26

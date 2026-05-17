@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/access"
-	"unifix.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/doorhistory"
 )
 
 const adminTestUser = "saschsa"

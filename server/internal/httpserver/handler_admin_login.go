@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"unifix.local/server/internal/auth/admin"
-	"unifix.local/server/internal/auth/adminsession"
-	"unifix.local/server/internal/auth/loginaudit"
-	"unifix.local/server/internal/auth/ratelimit"
+	"carvilon.local/server/internal/auth/admin"
+	"carvilon.local/server/internal/auth/adminsession"
+	"carvilon.local/server/internal/auth/loginaudit"
+	"carvilon.local/server/internal/auth/ratelimit"
 )
 
 // adminLoginPageData matches the Claude-Design admin-login.html

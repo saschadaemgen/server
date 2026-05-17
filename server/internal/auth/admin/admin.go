@@ -24,8 +24,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"unifix.local/server/internal/auth/argon2id"
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/auth/argon2id"
+	"carvilon.local/server/internal/db"
 )
 
 // Sentinel errors. Login uses these to distinguish between

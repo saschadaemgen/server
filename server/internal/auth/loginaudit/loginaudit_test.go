@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 func newTestService(t *testing.T) *Service {

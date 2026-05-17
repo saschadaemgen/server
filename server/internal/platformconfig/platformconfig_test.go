@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"unifix.local/server/internal/db"
-	"unifix.local/server/internal/secrets"
+	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/secrets"
 )
 
 func newTestService(t *testing.T) (*Service, *db.DB) {

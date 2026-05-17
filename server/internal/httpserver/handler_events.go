@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"unifix.local/server/internal/doorbellhub"
+	"carvilon.local/server/internal/doorbellhub"
 )
 
 // defaultEventsHeartbeat is how often the SSE handler sends a

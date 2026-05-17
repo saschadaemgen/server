@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"time"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 // DefaultRetention ist die Aufbewahrungsdauer fuer Audit-Eintraege.

@@ -36,10 +36,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"unifix.local/mock"
-	"unifix.local/server/internal/doorbellcalls"
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/eventbus"
+	"carvilon.local/mock"
+	"carvilon.local/server/internal/doorbellcalls"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/eventbus"
 )
 
 // Source is the subset of mockmanager.Manager that the hub

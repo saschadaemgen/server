@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log"
 
-	"unifix.local/server/internal/secrets"
+	"carvilon.local/server/internal/secrets"
 )
 
 func main() {

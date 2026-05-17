@@ -20,8 +20,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"unifix.local/server/internal/platformconfig"
-	"unifix.local/server/internal/weather"
+	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/weather"
 )
 
 // stationCoords reads the operator's site coordinates from

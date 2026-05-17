@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/server/internal/access"
-	"unifix.local/server/internal/auth/esptoken"
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/auth/esptoken"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 // nullable mapped einen leeren string auf SQL-NULL, fuer Spalten

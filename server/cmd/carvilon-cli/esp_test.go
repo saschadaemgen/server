@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"unifix.local/server/internal/auth/esptoken"
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/auth/esptoken"
+	"carvilon.local/server/internal/db"
 )
 
 // runAdoptForTest runs the adopt subcommand against a fresh

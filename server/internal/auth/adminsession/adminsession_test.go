@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 const testAdmin = "sascha"

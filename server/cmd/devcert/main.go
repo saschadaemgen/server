@@ -4,7 +4,7 @@
 // Usage:
 //
 //	go run ./cmd/devcert -host localhost
-//	go run ./cmd/devcert -host unifix.local,192.168.1.42 -out ./certs/
+//	go run ./cmd/devcert -host carvilon.local,192.168.1.42 -out ./certs/
 package main
 
 import (

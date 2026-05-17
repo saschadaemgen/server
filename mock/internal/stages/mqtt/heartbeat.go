@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"unifix.local/mock/internal/identity"
-	"unifix.local/mock/internal/state"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/mock/internal/state"
 )
 
 // Saison-9-pcap-verified heartbeat wire format.

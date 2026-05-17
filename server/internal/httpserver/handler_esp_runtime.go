@@ -26,11 +26,11 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/server/internal/doorbellcalls"
-	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/mockmanager"
-	"unifix.local/server/internal/uaapi"
-	"unifix.local/server/internal/weather"
+	"carvilon.local/server/internal/doorbellcalls"
+	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/weather"
 )
 
 // uaapiUnlockReq builds the actor block UA-API sees for an

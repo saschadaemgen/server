@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 func (s *Server) handleMieterStream(w http.ResponseWriter, r *http.Request) {

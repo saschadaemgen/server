@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 const testPassword = "supersafe-1234!"

@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"unifix.local/server/internal/access"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // Default-Pagination wenn ListParams.Size <= 0 oder zu gross.

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"unifix.local/server/internal/doorbellcalls"
-	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/doorbellcalls"
+	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // uaDoorStubConfig drives the test-side UA-API stub used by all

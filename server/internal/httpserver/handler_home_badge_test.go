@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/doorhistory"
 )
 
 func renderHomeHTML(t *testing.T, env *testEnv) string {

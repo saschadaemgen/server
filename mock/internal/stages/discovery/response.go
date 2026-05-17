@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/mock/internal/identity"
-	"unifix.local/shared/proto"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/shared/proto"
 )
 
 // freshUptime is the placeholder uptime value the saison 9 mock

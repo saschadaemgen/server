@@ -4,7 +4,7 @@ package httpserver
 import (
 	"testing"
 
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // fakeDoor builds a uaapi.Door whose IntercomMAC() helper will

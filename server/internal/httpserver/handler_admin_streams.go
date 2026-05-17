@@ -27,7 +27,7 @@ import (
 	"regexp"
 	"strings"
 
-	"unifix.local/server/internal/streams"
+	"carvilon.local/server/internal/streams"
 )
 
 // streamProfileNameRE locks profile names down to a safe alphabet.

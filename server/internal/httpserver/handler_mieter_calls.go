@@ -21,10 +21,10 @@ import (
 	"net/http"
 	"time"
 
-	"unifix.local/server/internal/doorbellcalls"
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/doorbellcalls"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // handleMieterUnlock relays a door unlock to the UA-API. Two

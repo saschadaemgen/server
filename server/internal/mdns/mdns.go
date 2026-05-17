@@ -1,5 +1,5 @@
 // Package mdns advertises the carvilon-server on the local network
-// as `_unifix._tcp.local`, so adopted ESP-Viewers can discover
+// as `_carvilon._tcp.local`, so adopted ESP-Viewers can discover
 // the server's IP and port without manual configuration.
 //
 // Saison 13-02-FIX4-d: this is a thin wrapper around
@@ -16,9 +16,9 @@ import (
 )
 
 // ServiceName is the fully-qualified service type advertised
-// (`_unifix._tcp` per the briefing). The trailing `.local` is
+// (`_carvilon._tcp` per the briefing). The trailing `.local` is
 // added by the underlying library.
-const ServiceName = "_unifix._tcp"
+const ServiceName = "_carvilon._tcp"
 
 // InstanceName is the human-readable instance name. Multiple
 // servers on the same LAN would collide on this; that is

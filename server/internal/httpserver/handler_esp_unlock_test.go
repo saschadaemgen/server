@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // pairedIntercomForTest is the MAC the unlock tests pin a viewer

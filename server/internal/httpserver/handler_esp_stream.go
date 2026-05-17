@@ -39,7 +39,7 @@ import (
 	"net/url"
 	"strings"
 
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {

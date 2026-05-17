@@ -24,9 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"unifix.local/mock"
-	"unifix.local/server/internal/auth/esptoken"
-	"unifix.local/server/internal/db"
+	"carvilon.local/mock"
+	"carvilon.local/server/internal/auth/esptoken"
+	"carvilon.local/server/internal/db"
 )
 
 // Channel buffer for the multiplexed event streams. The manager

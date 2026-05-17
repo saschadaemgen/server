@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/shared/proto"
+	"carvilon.local/shared/proto"
 )
 
 // JWTHMACSecret is the HS256 secret extracted from the UDM service

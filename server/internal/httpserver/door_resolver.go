@@ -30,7 +30,7 @@ package httpserver
 import (
 	"context"
 
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // genericDoorName is the fallback label for history rows that

@@ -14,26 +14,26 @@ import (
 	"syscall"
 	"time"
 
-	"unifix.local/server/internal/access/ua"
-	"unifix.local/server/internal/auth/admin"
-	"unifix.local/server/internal/auth/adminsession"
-	"unifix.local/server/internal/auth/loginaudit"
-	"unifix.local/server/internal/auth/ratelimit"
-	"unifix.local/server/internal/auth/session"
-	"unifix.local/server/internal/config"
-	"unifix.local/server/internal/db"
-	"unifix.local/server/internal/doorbellcalls"
-	"unifix.local/server/internal/doorbellhub"
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/httpserver"
-	"unifix.local/server/internal/mdns"
-	"unifix.local/server/internal/mockmanager"
-	"unifix.local/server/internal/platformconfig"
-	"unifix.local/server/internal/secrets"
-	"unifix.local/server/internal/streams"
-	"unifix.local/server/internal/uaapi"
-	"unifix.local/server/internal/weather"
+	"carvilon.local/server/internal/access/ua"
+	"carvilon.local/server/internal/auth/admin"
+	"carvilon.local/server/internal/auth/adminsession"
+	"carvilon.local/server/internal/auth/loginaudit"
+	"carvilon.local/server/internal/auth/ratelimit"
+	"carvilon.local/server/internal/auth/session"
+	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/doorbellcalls"
+	"carvilon.local/server/internal/doorbellhub"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/httpserver"
+	"carvilon.local/server/internal/mdns"
+	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/secrets"
+	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/weather"
 )
 
 func main() {
@@ -193,7 +193,7 @@ func main() {
 	}
 
 	// mDNS-Advertisement (Saison 13-02-FIX4-d). Adoptierte
-	// ESP-Viewer finden den Server via _unifix._tcp.local statt
+	// ESP-Viewer finden den Server via _carvilon._tcp.local statt
 	// einer haendischen IP-Konfiguration. Skip wenn keine IP
 	// gesetzt ist; dann waere die Antwort sowieso nutzlos.
 	mdnsSvc, err := startMDNSIfPossible(cfg.ServerIPv4, cfg.ListenAddr, log)

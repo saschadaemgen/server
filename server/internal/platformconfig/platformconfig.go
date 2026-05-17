@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"time"
 
-	"unifix.local/server/internal/db"
-	"unifix.local/server/internal/secrets"
+	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/secrets"
 )
 
 // Well-known keys. Add new constants here as the platform grows.

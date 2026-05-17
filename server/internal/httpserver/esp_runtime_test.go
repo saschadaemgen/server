@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/eventbus"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // eventbusEvent is a tiny test-only helper so the test file

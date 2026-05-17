@@ -1,24 +1,25 @@
-module unifix.local/server
+module carvilon.local/server
 
 go 1.26
 
-replace unifix.local/shared => ../shared
+replace carvilon.local/shared => ../shared
 
-replace unifix.local/mock => ../mock
+replace carvilon.local/mock => ../mock
 
 require (
+	carvilon.local/mock v0.0.0-00010101000000-000000000000
+	github.com/hashicorp/mdns v1.0.6
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.51.0
 	modernc.org/sqlite v1.50.1
-	unifix.local/mock v0.0.0-00010101000000-000000000000
 )
 
 require (
+	carvilon.local/shared v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/mdns v1.0.6 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/miekg/dns v1.1.55 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -32,5 +33,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	nhooyr.io/websocket v1.8.10 // indirect
-	unifix.local/shared v0.0.0 // indirect
 )

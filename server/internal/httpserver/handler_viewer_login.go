@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"strings"
 
-	"unifix.local/server/internal/auth/argon2id"
-	"unifix.local/server/internal/auth/loginaudit"
-	"unifix.local/server/internal/auth/ratelimit"
-	"unifix.local/server/internal/auth/session"
-	"unifix.local/server/internal/mockmanager"
-	"unifix.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/auth/argon2id"
+	"carvilon.local/server/internal/auth/loginaudit"
+	"carvilon.local/server/internal/auth/ratelimit"
+	"carvilon.local/server/internal/auth/session"
+	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/platformconfig"
 )
 
 // viewerLoginPageData ist die Payload fuer das Login-Form.

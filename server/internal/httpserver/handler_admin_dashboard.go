@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/mockmanager"
 )
 
 // adminUser is the {Name, Initials} bag.

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"unifix.local/server/internal/doorhistory"
-	"unifix.local/server/internal/mockmanager"
-	"unifix.local/server/internal/weather"
+	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/weather"
 )
 
 // ViewerHistoryLimit caps the number of door_events shown on the

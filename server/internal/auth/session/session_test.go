@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/db"
 )
 
 const testViewerMAC = "0c:ea:14:42:42:42"

@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/mock/internal/state"
-	"unifix.local/shared/proto"
+	"carvilon.local/mock/internal/state"
+	"carvilon.local/shared/proto"
 )
 
 // Logger is the minimal logging surface this package needs.

@@ -1,8 +1,8 @@
-module unifix.local/mock
+module carvilon.local/mock
 
 go 1.26
 
-require unifix.local/shared v0.0.0
+require carvilon.local/shared v0.0.0
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.0
@@ -15,4 +15,4 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 )
 
-replace unifix.local/shared => ../shared
+replace carvilon.local/shared => ../shared

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/server/internal/auth/loginaudit"
-	"unifix.local/server/internal/platformconfig"
-	"unifix.local/server/internal/uaapi"
+	"carvilon.local/server/internal/auth/loginaudit"
+	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/uaapi"
 )
 
 // adminSettingsData ist die Payload fuer das eigene Settings-

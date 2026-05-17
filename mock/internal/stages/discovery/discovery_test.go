@@ -5,8 +5,8 @@ import (
 	"net"
 	"testing"
 
-	"unifix.local/mock/internal/identity"
-	"unifix.local/shared/proto"
+	"carvilon.local/mock/internal/identity"
+	"carvilon.local/shared/proto"
 )
 
 const testGUID = "2f840033-e0ce-4cf0-971a-25e61c275d07"

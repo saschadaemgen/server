@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"unifix.local/server/internal/auth/esptoken"
-	"unifix.local/server/internal/config"
-	"unifix.local/server/internal/db"
+	"carvilon.local/server/internal/auth/esptoken"
+	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/db"
 )
 
 // macFormat matches lowercase colon-form MACs (e.g. 0c:ea:14:42:42:42).

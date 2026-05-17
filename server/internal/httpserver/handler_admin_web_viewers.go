@@ -12,12 +12,12 @@ import (
 
 	"github.com/skip2/go-qrcode"
 
-	"unifix.local/server/internal/access"
-	"unifix.local/server/internal/auth/argon2id"
-	"unifix.local/server/internal/auth/loginaudit"
-	"unifix.local/server/internal/mockmanager"
-	"unifix.local/server/internal/password"
-	"unifix.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/auth/argon2id"
+	"carvilon.local/server/internal/auth/loginaudit"
+	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/password"
+	"carvilon.local/server/internal/platformconfig"
 )
 
 // macFormat matches the lowercase colon form, e.g. 0c:ea:14:42:42:42.

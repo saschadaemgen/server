@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"unifix.local/mock"
-	"unifix.local/server/internal/db"
+	"carvilon.local/mock"
+	"carvilon.local/server/internal/db"
 )
 
 // fakeViewer satisfies the Viewer interface without touching the
