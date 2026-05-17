@@ -367,12 +367,25 @@
 
   function saveSettings() {
     if (!settingsForm) return;
-    var fd = new FormData(settingsForm);
+    // S14-03-FIX03 Sub-1a: build a urlencoded body explicitly.
+    // The previous FIX02 code passed a FormData object directly,
+    // which makes fetch use multipart/form-data. Go's
+    // r.ParseForm only populates r.PostForm for the urlencoded
+    // content-type; multipart bodies leave PostForm empty, so
+    // BOTH fields were silently ignored on save.
+    var body = new URLSearchParams();
+    var inputs = settingsForm.querySelectorAll('input[type="radio"]:checked');
+    for (var bi = 0; bi < inputs.length; bi++) {
+      body.append(inputs[bi].name, inputs[bi].value);
+    }
     fetch(settingsForm.getAttribute('action') || '/webviewer/settings', {
       method: 'POST',
-      body: fd,
+      body: body.toString(),
       credentials: 'same-origin',
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
     })
       .then(function (r) {
         if (!r.ok) throw new Error('settings http ' + r.status);

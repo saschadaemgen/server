@@ -6,6 +6,9 @@
 // for it (the inline-settings mode in the home page consumes
 // JSON; the stand-alone /webviewer/settings page keeps the
 // 303 redirect).
+// Saison 14-03-FIX03 Sub-1a: canonical seconds-field name is
+// `auto_screensaver_seconds`; the previous `auto_screensaver`
+// remains accepted as a legacy alias.
 //
 // Routes:
 //
@@ -74,14 +77,21 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Saison 14-03: auto-screensaver. Empty / missing form field
-	// keeps the previous value untouched; a present field always
-	// overwrites (and 0 disables the timer).
+	// Saison 14-03 + 14-03-FIX03 Sub-1a: auto-screensaver.
+	// Canonical form field is `auto_screensaver_seconds` (matches
+	// the DB column and the JSON response key). The shorter
+	// `auto_screensaver` alias from the FIX02 implementation
+	// stays accepted as a legacy fallback so any in-flight
+	// inline-settings JS still sending the old name keeps working
+	// through a browser-cache cycle.
+	// Empty / missing field keeps the previous value untouched;
+	// a present field always overwrites (and 0 disables the timer).
 	var autoSecondsApplied *int
-	if raw, present := r.PostForm["auto_screensaver"]; present && len(raw) > 0 {
-		val, perr := strconv.Atoi(strings.TrimSpace(raw[0]))
+	autoRaw := pickAutoScreensaverField(r.PostForm)
+	if autoRaw != "" {
+		val, perr := strconv.Atoi(strings.TrimSpace(autoRaw))
 		if perr != nil {
-			http.Error(w, "auto_screensaver muss eine ganze Zahl sein", http.StatusBadRequest)
+			http.Error(w, "auto_screensaver_seconds muss eine ganze Zahl sein", http.StatusBadRequest)
 			return
 		}
 		allowed := false
@@ -93,7 +103,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 		if !allowed {
 			http.Error(w,
-				fmt.Sprintf("auto_screensaver muss einer von %v sein",
+				fmt.Sprintf("auto_screensaver_seconds muss einer von %v sein",
 					mockmanager.AutoScreensaverSecondsAllowed),
 				http.StatusBadRequest)
 			return
@@ -135,6 +145,22 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
+}
+
+// pickAutoScreensaverField returns the first non-empty value
+// from the canonical `auto_screensaver_seconds` form key or the
+// FIX02-era `auto_screensaver` alias. Returns "" if neither is
+// present, signaling "keep the previously-persisted value".
+//
+// Saison 14-03-FIX03 Sub-1a.
+func pickAutoScreensaverField(form map[string][]string) string {
+	if raw, present := form["auto_screensaver_seconds"]; present && len(raw) > 0 && raw[0] != "" {
+		return raw[0]
+	}
+	if raw, present := form["auto_screensaver"]; present && len(raw) > 0 && raw[0] != "" {
+		return raw[0]
+	}
+	return ""
 }
 
 func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, error) {
