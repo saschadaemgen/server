@@ -96,6 +96,14 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 			if err := s.history.MarkRead(ctx, mac, ids); err != nil {
 				s.log.Warn("doorhistory mark read (json) failed",
 					"mac_prefix", safePrefix(mac), "err", err)
+				return
+			}
+			// Saison 14-03-FIX03 Sub-2: tell every subscriber on
+			// this mock that the count just dropped (usually to
+			// 0). The screensaver badge uses this to hide itself
+			// without polling /webviewer/unread-count.
+			if s.hub != nil {
+				s.hub.BroadcastUnreadCount(ctx, mac)
 			}
 		}(unreadIDs)
 	}

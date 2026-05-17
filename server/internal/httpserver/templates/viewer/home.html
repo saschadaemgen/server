@@ -531,6 +531,17 @@
       es.addEventListener('history_update', function () {
         location.reload();
       });
+      // S14-03-FIX03 Sub-2: authoritative unread-doorbell count
+      // pushed from the server (after a new doorbell row lands
+      // and after the async mark-read completes).
+      es.addEventListener('unread_count', function (e) {
+        var data = {};
+        try { data = JSON.parse(e.data) || {}; } catch (_) {}
+        var n = (typeof data.count === 'number') ? data.count : 0;
+        if (window.unifixIdle && window.unifixIdle.updateUnreadBadge) {
+          window.unifixIdle.updateUnreadBadge(n);
+        }
+      });
       es.addEventListener('error', function () {
         if (window.console) console.warn('[unifix] sse error (browser will reconnect)');
       });

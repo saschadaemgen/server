@@ -66,6 +66,10 @@ const subscriberBuffer = 8
 // frames (Saison 13-01) so the browser can mark the event as
 // read without an extra DB round-trip; doorbell_cancel frames
 // leave it zero.
+//
+// Saison 14-03-FIX03 Sub-2: UnreadCount carries the
+// per-mock unread-doorbell count for TypeUnreadCount frames.
+// Other event types leave it at the zero value.
 type Event struct {
 	Type        string `json:"type"`
 	EventID     int64  `json:"event_id,omitempty"`
@@ -75,12 +79,14 @@ type Event struct {
 	RoomID      string `json:"room_id,omitempty"`
 	CancelToken string `json:"cancel_token,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
+	UnreadCount int    `json:"unread_count,omitempty"`
 }
 
 // Event type names. Browser code listens for these.
 const (
 	TypeDoorbellStart  = "doorbell_start"
 	TypeDoorbellCancel = "doorbell_cancel"
+	TypeUnreadCount    = "unread_count"
 )
 
 // Stats is a debugging snapshot of the hub state.
@@ -212,6 +218,11 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 	}
 	h.broadcast(ev.MockMAC, hubEvent)
 	h.publishToBus(ev.MockMAC, "doorbell.ring", hubEvent)
+	// Saison 14-03-FIX03 Sub-2: every new doorbell row also
+	// raises the unread count. Broadcast a separate SSE frame so
+	// the screensaver badge updates without the browser doing
+	// a /webviewer/unread-count round-trip.
+	h.BroadcastUnreadCount(ctx, ev.MockMAC)
 }
 
 func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
@@ -363,6 +374,34 @@ func (h *Hub) broadcast(mockMAC string, ev Event) {
 			)
 		}
 	}
+}
+
+// BroadcastUnreadCount queries the doorhistory store for the
+// current unread-doorbell count for mockMAC and pushes a
+// TypeUnreadCount SSE frame to every subscriber. Used by:
+//
+//   - dispatchDoorbell (count just went up after persistStart)
+//   - handler_mieter_history.go after the async MarkRead
+//     completes (count just went down to 0)
+//
+// No-op if history is unwired (test stubs) or the query fails.
+// Saison 14-03-FIX03 Sub-2.
+func (h *Hub) BroadcastUnreadCount(ctx context.Context, mockMAC string) {
+	if h.history == nil || mockMAC == "" {
+		return
+	}
+	n, err := h.history.UnreadCount(ctx, mockMAC)
+	if err != nil {
+		h.log.Warn("unread count broadcast: query failed",
+			"mac", mockMAC, "err", err)
+		return
+	}
+	h.broadcast(mockMAC, Event{
+		Type:        TypeUnreadCount,
+		MockMAC:     mockMAC,
+		UnreadCount: n,
+		CreatedAt:   time.Now().UnixMilli(),
+	})
 }
 
 // Publish lets callers feed events into the hub bypassing the

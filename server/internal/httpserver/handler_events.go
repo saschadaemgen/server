@@ -97,12 +97,21 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 // also keep the legacy fields available under nested "raw" so
 // future frontends can opt in without a hub change.
 //
+// Saison 14-03-FIX03 Sub-2: TypeUnreadCount frames use a
+// dedicated minimal payload {"count": N} so the
+// screensaver badge does not have to dig through .raw.
+//
 // The empty line at the end is required by the SSE protocol.
 func writeSSEEvent(w http.ResponseWriter, ev doorbellhub.Event) error {
-	payload := map[string]any{
-		"door": doorNameFor(ev),
-		"ts":   time.UnixMilli(ev.CreatedAt).UTC().Format(time.RFC3339),
-		"raw":  ev,
+	var payload map[string]any
+	if ev.Type == doorbellhub.TypeUnreadCount {
+		payload = map[string]any{"count": ev.UnreadCount}
+	} else {
+		payload = map[string]any{
+			"door": doorNameFor(ev),
+			"ts":   time.UnixMilli(ev.CreatedAt).UTC().Format(time.RFC3339),
+			"raw":  ev,
+		}
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
