@@ -1,7 +1,7 @@
-# go2rtc configuration example for unifix (Saison 14-01).
+# go2rtc configuration example for carvilon (Saison 14-01).
 #
 # Place this file at the path go2rtc reads on startup (usually
-# /usr/local/etc/go2rtc.yaml on the RPi). The unifix-server
+# /usr/local/etc/go2rtc.yaml on the RPi). The carvilon-server
 # /a/streams admin page edits the same surface via the REST API,
 # so once go2rtc is running you typically do not need to hand-edit
 # this file again - it is here as a known-good starting point.
@@ -20,10 +20,10 @@
 #   intercom_browser   - 640x1024 MJPEG, 12 FPS, q:v 5. Smaller
 #                        for browsers; ruckelfrei on older phones.
 #
-# The unifix server proxies /esp/stream.mjpeg and /einloggen/
+# The carvilon server proxies /esp/stream.mjpeg and /einloggen/
 # stream.mjpeg onto these profiles via UNIFIX_STREAM_BACKEND_URL
 # (typically http://127.0.0.1:1984). Authentication on the
-# unifix side is bearer (ESP) or session cookie (mieter); go2rtc
+# carvilon side is bearer (ESP) or session cookie (mieter); go2rtc
 # itself stays unauthenticated on the loopback interface.
 
 api:
@@ -31,7 +31,7 @@ api:
 
 streams:
   # Source profile - replace the URL with your actual UA Intercom
-  # feed. The unifix /a/streams page can update this live without
+  # feed. The carvilon /a/streams page can update this live without
   # touching this file once the server is running.
   intercom_high:
     - "rtsps://192.168.1.1:7441/REPLACE_WITH_INTERCOM_STREAM_TOKEN"
@@ -47,7 +47,7 @@ streams:
     - "ffmpeg:intercom_high#video=mjpeg#width=640#height=1024#raw=-r 12 -q:v 5"
 
 # Optional: bind only to loopback so go2rtc is never reachable
-# directly from the LAN. unifix terminates the public endpoints
+# directly from the LAN. carvilon terminates the public endpoints
 # and strips Authorization headers before forwarding.
 rtsp:
   listen: "127.0.0.1:8554"

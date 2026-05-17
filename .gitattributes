@@ -1,4 +1,4 @@
-# unifix repo line-ending convention.
+# carvilon repo line-ending convention.
 #
 # Default: every text file stored as LF in the index, autoconverted
 # on checkout per the user's core.autocrlf setting. The explicit
