@@ -95,9 +95,15 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
+	// S14-03-FIX06: cam-label door name flows through the same
+	// resolver as the history rows so a UA-Console rename is
+	// reflected in one render cycle. PairedIntercomMAC is the
+	// natural lookup key (S13-07); single-door installs fall
+	// through to that one door regardless.
+	camDoorName := resolveDoorName(meta, info.PairedIntercomMAC)
 	data := viewerHomeData{
 		UnitName:               info.Name,
-		DoorName:               "Hauseingang",
+		DoorName:               camDoorName,
 		Now:                    now.Format("15:04:05"),
 		NowDate:                formatGermanDate(now),
 		DND:                    false,

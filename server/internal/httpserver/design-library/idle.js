@@ -189,6 +189,20 @@
   var activeMode = defaultMode;
   var animating = false;
   var ANIM_MS = 420; // 400ms transition + 20ms safety margin
+
+  // S14-03-FIX06: the cam-meta chip sits in the .stream wrapper
+  // as a sibling of #idle-container (it is not a child of any
+  // mode-layer, so opaque settings/history layers cannot hide
+  // it on their own). updateStreamMetaVisibility toggles the
+  // .is-hidden utility class on it based on the active mode.
+  var streamMetaEl = container.parentElement
+    ? container.parentElement.querySelector('.stream-meta')
+    : null;
+  function updateStreamMetaVisibility(mode) {
+    if (!streamMetaEl) return;
+    var hide = (mode === 'settings' || mode === 'history');
+    streamMetaEl.classList.toggle('is-hidden', hide);
+  }
   function setMode(target) {
     if (animating) return;
     if (!layers[target]) return;
@@ -226,6 +240,13 @@
       targetEl.classList.remove('above', 'below');
       targetEl.classList.add('active');
     });
+
+    // S14-03-FIX06: the cam-meta chip (`cam · DoorName` at
+    // bottom-left of the slot) only belongs to the screensaver
+    // and livestream modes. In settings/history it would
+    // shine through the opaque mode-layer because it lives in
+    // the .stream wrapper, outside #idle-container.
+    updateStreamMetaVisibility(target);
 
     // Kick off the history fetch in parallel with the slide so the
     // payload is on its way before the layer is visible.
