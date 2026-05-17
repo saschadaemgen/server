@@ -562,6 +562,147 @@ func TestLoadFromDB_StartsBothWebAndESPViewers(t *testing.T) {
 	}
 }
 
+// ---------- Saison 14-XX ESP-Settings ----------
+
+func TestSetIdleViewMode_AcceptsScreenOff(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetIdleViewMode(context.Background(), spec.MAC, IdleViewModeScreenOff); err != nil {
+		t.Fatalf("SetIdleViewMode(screen_off): %v", err)
+	}
+	info, err := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if err != nil {
+		t.Fatalf("GetViewerInfo: %v", err)
+	}
+	if info.IdleViewMode != IdleViewModeScreenOff {
+		t.Errorf("IdleViewMode = %q, want %q", info.IdleViewMode, IdleViewModeScreenOff)
+	}
+	if info.ResolveIdleViewMode() != IdleViewModeScreenOff {
+		t.Errorf("ResolveIdleViewMode = %q, want %q",
+			info.ResolveIdleViewMode(), IdleViewModeScreenOff)
+	}
+}
+
+func TestSetIdleViewMode_RejectsUnknownValue(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetIdleViewMode(context.Background(), spec.MAC, "bogus"); err == nil {
+		t.Error("SetIdleViewMode bogus returned nil error")
+	}
+}
+
+func TestSetBrightnessIdle_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetBrightnessIdle(context.Background(), spec.MAC, 42); err != nil {
+		t.Fatalf("SetBrightnessIdle: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveBrightnessIdle(); got != 42 {
+		t.Errorf("ResolveBrightnessIdle = %d, want 42", got)
+	}
+}
+
+func TestSetBrightnessIdle_RejectsOutOfRange(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	for _, bad := range []int{-1, 101, 200} {
+		if err := mgr.SetBrightnessIdle(context.Background(), spec.MAC, bad); err == nil {
+			t.Errorf("SetBrightnessIdle(%d) returned nil error", bad)
+		}
+	}
+}
+
+func TestResolveBrightnessIdle_DefaultsWhenNull(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveBrightnessIdle(); got != DefaultBrightnessIdle {
+		t.Errorf("ResolveBrightnessIdle = %d, want %d (default)", got, DefaultBrightnessIdle)
+	}
+}
+
+func TestSetScreenOffAfterSec_RoundTripAndDisable(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetScreenOffAfterSec(context.Background(), spec.MAC, 300); err != nil {
+		t.Fatalf("SetScreenOffAfterSec(300): %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveScreenOffAfterSec(); got != 300 {
+		t.Errorf("ResolveScreenOffAfterSec = %d, want 300", got)
+	}
+	if err := mgr.SetScreenOffAfterSec(context.Background(), spec.MAC, 0); err != nil {
+		t.Fatalf("SetScreenOffAfterSec(0): %v", err)
+	}
+	info, _ = mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveScreenOffAfterSec(); got != 0 {
+		t.Errorf("after disable = %d, want 0", got)
+	}
+}
+
+func TestSetScreenOffAfterSec_RejectsUnknownValue(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetScreenOffAfterSec(context.Background(), spec.MAC, 999); err == nil {
+		t.Error("SetScreenOffAfterSec(999) returned nil error")
+	}
+}
+
+func TestSetLanguage_RoundTripAndDefault(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetLanguage(context.Background(), spec.MAC, "en"); err != nil {
+		t.Fatalf("SetLanguage(en): %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveLanguage(); got != "en" {
+		t.Errorf("ResolveLanguage = %q, want en", got)
+	}
+	if err := mgr.SetLanguage(context.Background(), spec.MAC, ""); err != nil {
+		t.Fatalf("SetLanguage(empty): %v", err)
+	}
+	info, _ = mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if got := info.ResolveLanguage(); got != DefaultLanguage {
+		t.Errorf("after clear = %q, want %q (default)", got, DefaultLanguage)
+	}
+}
+
+func TestSetLanguage_RejectsUnknown(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetLanguage(context.Background(), spec.MAC, "fr"); err == nil {
+		t.Error("SetLanguage(fr) returned nil error")
+	}
+}
+
 func TestShutdown_StopsAllViewers(t *testing.T) {
 	mgr, factory := newTestManager(t)
 	for _, s := range []ViewerSpec{

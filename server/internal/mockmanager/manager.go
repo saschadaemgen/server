@@ -104,6 +104,8 @@ type ViewerSpec struct {
 	// render clock + date + weather; "livestream" puts the
 	// MJPEG img directly. Tap toggles temporarily, reload goes
 	// back to the persisted default.
+	// Saison 14-XX added "screen_off" as a third valid value
+	// (ESP backlight off; web viewers render it like screensaver).
 	IdleViewMode string
 	// AutoScreensaverSeconds enables the saison-14-03 auto-
 	// fallback timer: if the mieter has switched to livestream /
@@ -131,20 +133,35 @@ type ViewerInfo struct {
 	Running                bool
 	PairedIntercomMAC      string // saison-13-07 standby pairing
 	StreamProfile          string // saison-14-01 go2rtc profile override
-	IdleViewMode           string // saison-14-01b "screensaver" or "livestream"; "" = default screensaver
+	IdleViewMode           string // saison-14-01b "screensaver", "livestream" or "screen_off" (S14-XX); "" = default screensaver
 	AutoScreensaverSeconds *int   // saison-14-03 auto-fallback timer; nil/0 = disabled
+	// Saison 14-XX ESP-Settings (also accessible to web viewers
+	// for the "language" choice; the two display-hardware fields
+	// are only honoured by ESP firmware).
+	BrightnessIdle    *int // 0..100; nil = use DefaultBrightnessIdle
+	ScreenOffAfterSec *int // seconds; nil/0 = backlight stays on
+	Language          string // "de"/"en"; "" = use DefaultLanguage
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
 // screensaver); the helper below picks the right string for the
 // template and the /esp/config JSON.
+//
+// Saison 14-XX added IdleViewModeScreenOff: ESP firmware turns
+// the backlight off; web viewers render the slot identical to
+// IdleViewModeScreensaver (the concept of "display off" does not
+// apply to a browser tab).
 const (
 	IdleViewModeScreensaver = "screensaver"
 	IdleViewModeLivestream  = "livestream"
+	IdleViewModeScreenOff   = "screen_off"
 )
 
 // ResolveIdleViewMode picks the rendered mode for the calling
 // viewer. NULL / empty falls back to the screensaver default.
+// The value is returned as-is when valid so web-viewer JS can
+// branch on it (and treat screen_off the same as screensaver
+// while ESP firmware switches the backlight).
 func (v *ViewerInfo) ResolveIdleViewMode() string {
 	if v == nil {
 		return IdleViewModeScreensaver
@@ -152,6 +169,8 @@ func (v *ViewerInfo) ResolveIdleViewMode() string {
 	switch v.IdleViewMode {
 	case IdleViewModeLivestream:
 		return IdleViewModeLivestream
+	case IdleViewModeScreenOff:
+		return IdleViewModeScreenOff
 	default:
 		return IdleViewModeScreensaver
 	}
@@ -169,6 +188,60 @@ func (v *ViewerInfo) ResolveAutoScreensaverSeconds() int {
 		return 0
 	}
 	return *v.AutoScreensaverSeconds
+}
+
+// Saison 14-XX ESP-Settings: Defaults + Allow-Lists.
+//
+// Defaults werden im Resolver-Layer angewandt damit ein nicht-
+// gesetzter Wert (NULL in der DB) konsistent zwischen Web- und
+// ESP-Pfad denselben Default sieht; die Migration legt KEINE
+// DDL-Defaults an.
+const (
+	DefaultBrightnessIdle    = 70
+	DefaultScreenOffAfterSec = 0 // 0 = Backlight bleibt an
+	DefaultLanguage          = "de"
+)
+
+// ScreenOffAfterSecAllowed enumerates the persisted seconds-values
+// for the ESP backlight-off timer. 0 disables the feature; the
+// rest are common UI choices (30s, 1m, 5m, 10m, 30m). 0 stores
+// SQL NULL via nullableInt, the rest go in as plain integers.
+var ScreenOffAfterSecAllowed = []int{0, 30, 60, 300, 600, 1800}
+
+// LanguageAllowed enumerates the UI-language values the ESP
+// firmware understands today. Web viewers render German strings
+// from the template regardless, so this column primarily steers
+// the ESP firmware string tables.
+var LanguageAllowed = []string{"de", "en"}
+
+// ResolveBrightnessIdle returns the persisted idle-brightness or
+// DefaultBrightnessIdle when the column is NULL. ESP-only
+// concept; web viewers ignore it.
+func (v *ViewerInfo) ResolveBrightnessIdle() int {
+	if v == nil || v.BrightnessIdle == nil {
+		return DefaultBrightnessIdle
+	}
+	return *v.BrightnessIdle
+}
+
+// ResolveScreenOffAfterSec returns the persisted backlight-off
+// timer or DefaultScreenOffAfterSec (= 0, off) when NULL. ESP-
+// only concept; web viewers ignore it.
+func (v *ViewerInfo) ResolveScreenOffAfterSec() int {
+	if v == nil || v.ScreenOffAfterSec == nil {
+		return DefaultScreenOffAfterSec
+	}
+	return *v.ScreenOffAfterSec
+}
+
+// ResolveLanguage returns the persisted UI-language or
+// DefaultLanguage when the column is empty. The same default
+// applies to both web and ESP renderers.
+func (v *ViewerInfo) ResolveLanguage() string {
+	if v == nil || v.Language == "" {
+		return DefaultLanguage
+	}
+	return v.Language
 }
 
 // ResolveStreamProfile picks the go2rtc stream profile name for
@@ -527,7 +600,9 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
-		        auto_screensaver_seconds
+		        auto_screensaver_seconds,
+		        brightness_idle, screen_off_after_sec,
+		        COALESCE(language, '')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -537,24 +612,35 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 
 	for rows.Next() {
 		var (
-			info     ViewerInfo
-			port     int64
-			hash     sql.NullString
-			setAt    sql.NullInt64
-			espModel sql.NullString
-			espFW    sql.NullString
-			espHash  sql.NullString
-			autoSec  sql.NullInt64
+			info       ViewerInfo
+			port       int64
+			hash       sql.NullString
+			setAt      sql.NullInt64
+			espModel   sql.NullString
+			espFW      sql.NullString
+			espHash    sql.NullString
+			autoSec    sql.NullInt64
+			brightness sql.NullInt64
+			screenOff  sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode, &autoSec); err != nil {
+			&info.StreamProfile, &info.IdleViewMode, &autoSec,
+			&brightness, &screenOff, &info.Language); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if autoSec.Valid {
 			v := int(autoSec.Int64)
 			info.AutoScreensaverSeconds = &v
+		}
+		if brightness.Valid {
+			v := int(brightness.Int64)
+			info.BrightnessIdle = &v
+		}
+		if screenOff.Valid {
+			v := int(screenOff.Int64)
+			info.ScreenOffAfterSec = &v
 		}
 		if NormalizeName(info.Name) != target {
 			continue
@@ -631,25 +717,30 @@ func (m *Manager) GetViewerInfo(ctx context.Context, mac string) (*ViewerInfo, e
 
 func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error) {
 	var (
-		info     ViewerInfo
-		port     int64
-		hash     sql.NullString
-		setAt    sql.NullInt64
-		espModel sql.NullString
-		espFW    sql.NullString
-		espHash  sql.NullString
+		info       ViewerInfo
+		port       int64
+		hash       sql.NullString
+		setAt      sql.NullInt64
+		espModel   sql.NullString
+		espFW      sql.NullString
+		espHash    sql.NullString
+		autoSec    sql.NullInt64
+		brightness sql.NullInt64
+		screenOff  sql.NullInt64
 	)
-	var autoSec sql.NullInt64
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
-		        auto_screensaver_seconds
+		        auto_screensaver_seconds,
+		        brightness_idle, screen_off_after_sec,
+		        COALESCE(language, '')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode, &autoSec)
+			&info.StreamProfile, &info.IdleViewMode, &autoSec,
+			&brightness, &screenOff, &info.Language)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -677,6 +768,14 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		v := int(autoSec.Int64)
 		info.AutoScreensaverSeconds = &v
 	}
+	if brightness.Valid {
+		v := int(brightness.Int64)
+		info.BrightnessIdle = &v
+	}
+	if screenOff.Valid {
+		v := int(screenOff.Int64)
+		info.ScreenOffAfterSec = &v
+	}
 	return &info, nil
 }
 
@@ -689,7 +788,9 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
-		        auto_screensaver_seconds
+		        auto_screensaver_seconds,
+		        brightness_idle, screen_off_after_sec,
+		        COALESCE(language, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -698,24 +799,35 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	out := make([]ViewerInfo, 0)
 	for rows.Next() {
 		var (
-			info     ViewerInfo
-			port     int64
-			hash     sql.NullString
-			setAt    sql.NullInt64
-			espModel sql.NullString
-			espFW    sql.NullString
-			espHash  sql.NullString
-			autoSec  sql.NullInt64
+			info       ViewerInfo
+			port       int64
+			hash       sql.NullString
+			setAt      sql.NullInt64
+			espModel   sql.NullString
+			espFW      sql.NullString
+			espHash    sql.NullString
+			autoSec    sql.NullInt64
+			brightness sql.NullInt64
+			screenOff  sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
-			&info.StreamProfile, &info.IdleViewMode, &autoSec); err != nil {
+			&info.StreamProfile, &info.IdleViewMode, &autoSec,
+			&brightness, &screenOff, &info.Language); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
 			v := int(autoSec.Int64)
 			info.AutoScreensaverSeconds = &v
+		}
+		if brightness.Valid {
+			v := int(brightness.Int64)
+			info.BrightnessIdle = &v
+		}
+		if screenOff.Valid {
+			v := int(screenOff.Int64)
+			info.ScreenOffAfterSec = &v
 		}
 		info.ServicePort = uint16(port)
 		if hash.Valid {
@@ -866,17 +978,18 @@ func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) err
 // SetIdleViewMode updates a viewer's idle-view-mode preference.
 // Empty string clears it (next render falls back to "screensaver").
 // Any non-empty value other than IdleViewModeScreensaver /
-// IdleViewModeLivestream is rejected so we never persist garbage
-// that a future template lookup would not recognise.
+// IdleViewModeLivestream / IdleViewModeScreenOff is rejected so
+// we never persist garbage that a future template lookup would
+// not recognise.
 //
-// Saison 14-01b.
+// Saison 14-01b; saison 14-XX added "screen_off" for ESP backlight.
 func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 	trimmed := strings.TrimSpace(mode)
 	switch trimmed {
-	case "", IdleViewModeScreensaver, IdleViewModeLivestream:
+	case "", IdleViewModeScreensaver, IdleViewModeLivestream, IdleViewModeScreenOff:
 	default:
-		return fmt.Errorf("mockmanager: idle view mode %q must be %q or %q",
-			trimmed, IdleViewModeScreensaver, IdleViewModeLivestream)
+		return fmt.Errorf("mockmanager: idle view mode %q must be %q, %q or %q",
+			trimmed, IdleViewModeScreensaver, IdleViewModeLivestream, IdleViewModeScreenOff)
 	}
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
@@ -894,6 +1007,101 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 		entry.spec.IdleViewMode = trimmed
 	}
 	m.mu.Unlock()
+	return nil
+}
+
+// SetBrightnessIdle persistiert die ESP-Idle-Helligkeit (Range
+// 0..100). Werte ausserhalb der Range werden zurueckgewiesen.
+// Saison 14-XX.
+func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) error {
+	if value < 0 || value > 100 {
+		return fmt.Errorf("mockmanager: brightness_idle %d must be in 0..100", value)
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET brightness_idle = ?, updated_at = ? WHERE mac = ?`,
+		int64(value), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set brightness idle: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	m.mu.Lock()
+	if _, ok := m.viewers[mac]; ok {
+		// ViewerSpec haelt brightness_idle nicht; aktualisierung
+		// lazy beim naechsten loadInfo. Lock-Release nur fuer den
+		// existence-Check noetig (keine cache-Mutation).
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// SetScreenOffAfterSec persistiert den ESP-Backlight-Off-Timer.
+// Werte ausserhalb ScreenOffAfterSecAllowed werden zurueckgewiesen.
+// 0 disabled das Feature und speichert SQL NULL.
+// Saison 14-XX.
+func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value int) error {
+	allowed := false
+	for _, v := range ScreenOffAfterSecAllowed {
+		if v == value {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("mockmanager: screen_off_after_sec %d not in %v",
+			value, ScreenOffAfterSecAllowed)
+	}
+	var stored any
+	if value > 0 {
+		stored = int64(value)
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET screen_off_after_sec = ?, updated_at = ? WHERE mac = ?`,
+		stored, now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set screen off after sec: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// SetLanguage persistiert die UI-Sprache. Werte ausserhalb der
+// Allow-Liste werden zurueckgewiesen. Empty erlaubt = "auf
+// Default zuruecksetzen" (NULL in der DB).
+// Saison 14-XX.
+func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		allowed := false
+		for _, v := range LanguageAllowed {
+			if v == trimmed {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("mockmanager: language %q not in %v",
+				trimmed, LanguageAllowed)
+		}
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET language = ?, updated_at = ? WHERE mac = ?`,
+		nullable(trimmed), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set language: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
 	return nil
 }
 
