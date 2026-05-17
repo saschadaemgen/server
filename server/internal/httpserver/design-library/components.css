@@ -1548,61 +1548,75 @@ button { font-family: inherit; }
 
 
 /* ============================================================
-   18b. CARVILON BRAND  (Saison 14-03-FIX02 Sub-2a)
+   18b. CARVILON BRAND  (Saison 14-03-FIX03 V4)
    ------------------------------------------------------------
-   Two-line wordmark: "CARVILON" thin + wide-tracked,
-   "INTERCOM VIEWER" letter-spaced underneath so it sits at
-   exactly the same width as the headline. Mechanism:
-   .carvilon-brand is inline-block so it shrink-wraps to the
-   CARVILON width; .carvilon-sub is flex with space-between so
-   the letter spans distribute to fill the inherited width;
-   .carvilon-sub-space is a zero-width flex slot that creates
-   the visible gap between INTERCOM and VIEWER without breaking
-   the distribution.
+   Two-line wordmark: thin wide-tracked "CARVILON" headline
+   above a centered "INTERCOM VIEWER" subline. FIX03 replaces
+   the FIX02 per-letter span gymnastics (which broke copy-paste
+   and accessibility) with a single .sub text node whose
+   letter-spacing is measured-and-set in JS so the subline
+   reaches a target ratio of the headline width (0.85 by
+   default - see data-target-ratio on the .sub element).
 
-   Manrope is the intended display font. Per saison-14-03-FIX02
-   policy we do NOT pull from Google Fonts (LAN-only setups
-   must work offline). When the woff2 files land in
-   /static/fonts/, an @font-face block belongs here. Until
-   then the stack falls back through SF Pro Display to
-   system-ui so the wordmark still renders cleanly.
+   The JS lives in design-library/idle.js (adjustCarvilonBrand)
+   and runs on load + on document.fonts.ready so the
+   measurement happens AFTER the chosen webfont has settled.
+   Without JS the subline still renders, just without the
+   precisely-matched width.
 
-   Three size variants: .size-sm (admin nav, settings footer),
-   .size-md (mieter login), .size-lg (reserved for future
-   hero placements).
+   Manrope is the intended display font. Per the LAN-only
+   policy we do NOT pull from Google Fonts; when self-hosted
+   woff2 files land in /static/fonts/, an @font-face block
+   belongs here. Until then the stack falls back through
+   SF Pro Display to system-ui.
+
+   Three size variants: .sz-sm (admin nav, settings footer),
+   .sz-md (mieter login), .sz-lg (reserved hero use).
+   The earlier .size-sm/md/lg modifiers were removed - V4
+   uses the shorter .sz-* spelling everywhere.
    ============================================================ */
 
 .carvilon-brand {
   display: inline-block;
+  text-align: center;
   font-family: 'Manrope', 'SF Pro Display', system-ui, sans-serif;
   line-height: 1;
 }
-.carvilon-name {
+.carvilon-brand .name {
   font-weight: 200;
   letter-spacing: 0.24em;
   line-height: 1;
+  white-space: nowrap;
+  display: block;
   color: var(--color-text, #f0f4ff);
+  /* The headline's wide letter-spacing leaves an empty slot to
+     the right of the last letter; padding-left of the same width
+     re-centers the visible glyph block under the box. */
+  padding-left: 0.24em;
 }
-.carvilon-sub {
+.carvilon-brand .sub-wrap {
+  margin-top: 0.4em;
+  text-align: center;
+}
+.carvilon-brand .sub {
   font-weight: 500;
   text-transform: uppercase;
   color: var(--color-text-secondary, #94a3b8);
-  margin-top: 0.3em;
-  display: flex;
-  justify-content: space-between;
+  white-space: nowrap;
+  display: inline-block;
+  /* JS sets letter-spacing dynamically; start at 0 so a flash
+     of unset content does not jump. */
+  letter-spacing: 0;
 }
-.carvilon-sub-space {
-  flex: 0 0 0.3em;
-}
 
-.carvilon-brand.size-sm .carvilon-name { font-size: 22px; }
-.carvilon-brand.size-sm .carvilon-sub  { font-size: 7px; }
+.carvilon-brand.sz-sm .name { font-size: 22px; }
+.carvilon-brand.sz-sm .sub  { font-size: 11px; }
 
-.carvilon-brand.size-md .carvilon-name { font-size: 38px; }
-.carvilon-brand.size-md .carvilon-sub  { font-size: 11.2px; }
+.carvilon-brand.sz-md .name { font-size: 38px; }
+.carvilon-brand.sz-md .sub  { font-size: 19px; }
 
-.carvilon-brand.size-lg .carvilon-name { font-size: 64px; }
-.carvilon-brand.size-lg .carvilon-sub  { font-size: 19px; }
+.carvilon-brand.sz-lg .name { font-size: 64px; }
+.carvilon-brand.sz-lg .sub  { font-size: 32px; }
 
 
 /* ============================================================
