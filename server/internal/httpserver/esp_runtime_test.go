@@ -150,10 +150,82 @@ func TestESPConfig_ReturnsAllFields(t *testing.T) {
 		}
 	}
 	ui, _ := got["ui"].(map[string]any)
-	for _, k := range []string{"language", "screensaver_after_sec", "brightness_idle"} {
+	// Saison 14-XX: das ui-Block enthaelt jetzt die persistierten
+	// Settings plus den FIX4-d-Legacy-Alias screensaver_after_sec.
+	for _, k := range []string{
+		"language", "idle_view_mode",
+		"auto_screensaver_seconds", "screensaver_after_sec",
+		"screen_off_after_sec", "brightness_idle",
+	} {
 		if _, ok := ui[k]; !ok {
 			t.Errorf("missing ui.%s", k)
 		}
+	}
+}
+
+// TestESPConfig_IncludesNewSettingsFields ist der Saison-14-XX-
+// Sanity-Check: nachdem POST /esp/settings ein paar Felder
+// persistiert hat, taucht der gleiche Wert in /esp/config wieder
+// auf (kein Cache, kein Default-Override).
+func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Config A")
+
+	if err := env.mockMgr.SetIdleViewMode(context.Background(), espTestMAC, "screen_off"); err != nil {
+		t.Fatalf("SetIdleViewMode: %v", err)
+	}
+	if err := env.mockMgr.SetBrightnessIdle(context.Background(), espTestMAC, 42); err != nil {
+		t.Fatalf("SetBrightnessIdle: %v", err)
+	}
+	if err := env.mockMgr.SetScreenOffAfterSec(context.Background(), espTestMAC, 600); err != nil {
+		t.Fatalf("SetScreenOffAfterSec: %v", err)
+	}
+	if err := env.mockMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
+		t.Fatalf("SetLanguage: %v", err)
+	}
+	if err := env.mockMgr.SetAutoScreensaverSeconds(context.Background(), espTestMAC, 60); err != nil {
+		t.Fatalf("SetAutoScreensaverSeconds: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/config", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /esp/config: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ui, _ := got["ui"].(map[string]any)
+	if ui["language"] != "en" {
+		t.Errorf("ui.language = %v, want en", ui["language"])
+	}
+	if ui["idle_view_mode"] != "screen_off" {
+		t.Errorf("ui.idle_view_mode = %v, want screen_off", ui["idle_view_mode"])
+	}
+	if got, _ := ui["brightness_idle"].(float64); int(got) != 42 {
+		t.Errorf("ui.brightness_idle = %v, want 42", ui["brightness_idle"])
+	}
+	if got, _ := ui["screen_off_after_sec"].(float64); int(got) != 600 {
+		t.Errorf("ui.screen_off_after_sec = %v, want 600", ui["screen_off_after_sec"])
+	}
+	if got, _ := ui["auto_screensaver_seconds"].(float64); int(got) != 60 {
+		t.Errorf("ui.auto_screensaver_seconds = %v, want 60", ui["auto_screensaver_seconds"])
+	}
+	if got, _ := ui["screensaver_after_sec"].(float64); int(got) != 60 {
+		t.Errorf("ui.screensaver_after_sec (legacy alias) = %v, want 60",
+			ui["screensaver_after_sec"])
+	}
+	// Top-level idle_view_mode bleibt fuer Backwards-Compat erhalten.
+	if got["idle_view_mode"] != "screen_off" {
+		t.Errorf("top-level idle_view_mode = %v, want screen_off",
+			got["idle_view_mode"])
 	}
 }
 

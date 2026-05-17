@@ -94,10 +94,25 @@ type espCamera struct {
 	StreamURL string `json:"stream_url"`
 }
 
+// espUISettings is the ui-block returned by GET /esp/config.
+//
+// Saison 14-XX expands the block from the FIX4-d placeholders
+// (language + screensaver_after_sec + brightness_idle, hardcoded
+// defaults) to the persisted per-viewer values that POST
+// /esp/settings writes. ScreensaverAfterSec is kept as an alias
+// for AutoScreensaverSeconds so existing firmware that only
+// reads the old key keeps working; new firmware should prefer
+// the explicit names.
 type espUISettings struct {
-	Language            string `json:"language"`
-	ScreensaverAfterSec int    `json:"screensaver_after_sec"`
-	BrightnessIdle      int    `json:"brightness_idle"`
+	Language               string `json:"language"`
+	IdleViewMode           string `json:"idle_view_mode"`
+	AutoScreensaverSeconds int    `json:"auto_screensaver_seconds"`
+	ScreenOffAfterSec      int    `json:"screen_off_after_sec"`
+	BrightnessIdle         int    `json:"brightness_idle"`
+	// ScreensaverAfterSec is the legacy alias from FIX4-d; mirrors
+	// AutoScreensaverSeconds verbatim. Will be dropped after the
+	// ESP firmware migration to the canonical key lands.
+	ScreensaverAfterSec int `json:"screensaver_after_sec"`
 }
 
 // handleESPConfig renders the snapshot for the calling ESP-Viewer.
@@ -122,6 +137,7 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 	// TODO Saison 13-03+: stream-URL aus go2rtc-Config holen,
 	// doors aus uaapi.ListDoors, location_name aus uaapi-Sitemap.
 	// Aktuell Defaults damit das ESP-Firmware-Skelett bauen kann.
+	autoSec := info.ResolveAutoScreensaverSeconds()
 	resp := espConfigResponse{
 		MieterName:   info.Name,
 		LocationName: "Hauseingang",
@@ -134,9 +150,12 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 		Doors:   []espDoor{},
 		Cameras: []espCamera{},
 		UI: espUISettings{
-			Language:            "de",
-			ScreensaverAfterSec: 60,
-			BrightnessIdle:      30,
+			Language:               info.ResolveLanguage(),
+			IdleViewMode:           info.ResolveIdleViewMode(),
+			AutoScreensaverSeconds: autoSec,
+			ScreensaverAfterSec:    autoSec,
+			ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
+			BrightnessIdle:         info.ResolveBrightnessIdle(),
 		},
 		IdleViewMode: info.ResolveIdleViewMode(),
 		Weather:      s.fetchHomeWeather(r),
