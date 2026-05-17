@@ -303,9 +303,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
 	s.mux.Handle("GET /esp/stream.mjpeg", s.requireESPBearer(http.HandlerFunc(s.handleESPStream)))
 	// Saison 14-XX: POST /esp/settings (Partial-Update mit
-	// config.changed-Broadcast). /esp/weather + /esp/unread-count
-	// folgen in den Nachbar-Commits.
+	// config.changed-Broadcast). /esp/unread-count folgt im
+	// Nachbar-Commit.
 	s.mux.Handle("POST /esp/settings", s.requireESPBearer(http.HandlerFunc(s.handleESPSettings)))
+	s.mux.Handle("GET /esp/weather", s.requireESPBearer(http.HandlerFunc(s.handleESPWeather)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
