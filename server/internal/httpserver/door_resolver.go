@@ -68,9 +68,27 @@ func (s *Server) loadDoorMeta(ctx context.Context) doorMeta {
 		if mac == "" {
 			continue
 		}
-		m[mac] = d.DisplayName()
+		m[mac] = doorShortName(d)
 	}
 	return doorMeta{intercomToName: m, allDoors: doors}
+}
+
+// doorShortName picks the user-facing label for a uaapi.Door,
+// preferring the short `name` over the hierarchical `full_name`.
+// FIX02 used uaapi.DisplayName() which inverted the priority and
+// surfaced UA's "<Hub-Device> - <Floor> - <Door>" path strings
+// to the mieter. uaapi.DisplayName stays unchanged for admin
+// callers that actually want the full path.
+//
+// Saison 14-03-FIX04 Sub-1a.
+func doorShortName(d uaapi.Door) string {
+	if d.Name != "" {
+		return d.Name
+	}
+	if d.FullName != "" {
+		return d.FullName
+	}
+	return d.ID
 }
 
 // resolveDoorName picks the best label for a history row.
@@ -98,7 +116,7 @@ func resolveDoorName(meta doorMeta, intercomMAC string) string {
 	}
 	// intercom_mac empty: single-door auto-resolve, else generic.
 	if len(meta.allDoors) == 1 {
-		if name := meta.allDoors[0].DisplayName(); name != "" {
+		if name := doorShortName(meta.allDoors[0]); name != "" {
 			return name
 		}
 	}
