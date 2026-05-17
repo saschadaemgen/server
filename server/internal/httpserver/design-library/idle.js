@@ -93,6 +93,34 @@
   // -------------------------------------------------------------
   // Weather refresh. Identical to S14-01b: 15-min cadence, hide
   // the weather block on backend errors.
+  // S14-03-FIX02 Sub-1d: Lucide-shaped SVG dictionary. The
+  // screensaver previously rendered weather icons via CSS mask
+  // (-webkit-mask: var(--icon-cloud)) but those tokens were
+  // never defined, so the icon span fell back to a solid grey
+  // background-color square. Now we inject the real SVG markup
+  // directly into the span and let stroke=currentColor inherit
+  // the screensaver's text color.
+  //
+  // Icon names match wmo_codes.go (Lucide name set, e.g. "cloud",
+  // "sun", "cloud-rain"). Unknown names fall back to "cloud".
+  var WEATHER_ICONS = {
+    'sun': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m4.93 19.07 1.41-1.41"/><path d="m17.66 6.34 1.41-1.41"/></svg>',
+    'cloud': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>',
+    'cloud-sun': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="M20 12h2"/><path d="m19.07 4.93-1.41 1.41"/><path d="M15.947 12.65a4 4 0 0 0-5.925-4.128"/><path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/></svg>',
+    'cloud-fog': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 17H7"/><path d="M17 21H9"/><path d="M17 13a5 5 0 1 0-9.9-1.1A4 4 0 1 0 5 19h12a4 4 0 0 0 0-8z"/></svg>',
+    'cloud-drizzle': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M8 19v1"/><path d="M8 14v1"/><path d="M16 19v1"/><path d="M16 14v1"/><path d="M12 21v1"/><path d="M12 16v1"/></svg>',
+    'cloud-rain': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></svg>',
+    'cloud-rain-wind': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m9.2 22 3-7"/><path d="m9 13-3 7"/><path d="m17 13-3 7"/></svg>',
+    'snowflake': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"/><path d="M12 2v20"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/></svg>',
+    'cloud-lightning': '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973"/><path d="m13 12-3 5h4l-3 5"/></svg>'
+  };
+  function setWeatherIcon(name) {
+    if (!iconEl) return;
+    var svg = WEATHER_ICONS[name] || WEATHER_ICONS['cloud'];
+    iconEl.innerHTML = svg;
+    iconEl.setAttribute('data-icon', name || 'cloud');
+  }
+
   function showWeather(snap) {
     if (!weatherEl) return;
     weatherEl.style.display = '';
@@ -102,9 +130,16 @@
     if (descEl && snap.description) {
       descEl.textContent = snap.description;
     }
-    if (iconEl && snap.icon) {
-      iconEl.setAttribute('data-icon', snap.icon);
+    if (snap.icon) {
+      setWeatherIcon(snap.icon);
     }
+  }
+
+  // Hydrate the initial icon from the server-rendered data-icon
+  // attribute so the screensaver shows a real SVG immediately,
+  // before the first weather refresh response lands.
+  if (iconEl && !iconEl.firstChild) {
+    setWeatherIcon(iconEl.getAttribute('data-icon') || 'cloud');
   }
   function hideWeather() {
     if (weatherEl) weatherEl.style.display = 'none';
