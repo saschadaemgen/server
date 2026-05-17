@@ -218,6 +218,11 @@ func (s *Server) routes() {
 	// Saison 14-03: inline-history mode JSON feed (read-marks rows
 	// asynchronously so the browser still sees "NEU" on first open).
 	s.mux.Handle("GET /webviewer/history.json", s.requireSession(http.HandlerFunc(s.handleMieterHistoryJSON)))
+	// Saison 14-03-FIX03: read-only unread-doorbell counter for the
+	// screensaver badge. Live updates ride the SSE channel; this
+	// endpoint hydrates the initial value and recovers from SSE
+	// reconnect.
+	s.mux.Handle("GET /webviewer/unread-count", s.requireSession(http.HandlerFunc(s.handleMieterUnreadCount)))
 	s.mux.Handle("GET /webviewer", s.requireSession(http.HandlerFunc(s.handleHome)))
 	s.mux.Handle("GET /webviewer/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
