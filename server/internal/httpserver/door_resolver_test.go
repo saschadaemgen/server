@@ -102,3 +102,52 @@ func TestResolveDoorName_BlankNameFallsThrough(t *testing.T) {
 		t.Errorf("blank-name fallback: got %q, want %q", got, genericDoorName)
 	}
 }
+
+// FIX04 Sub-1a: doorShortName must prefer the short Name over
+// the hierarchical FullName. uaapi.Door's own DisplayName helper
+// stays unchanged (admin-side callers still get full_name) but
+// every mieter-facing render goes through doorShortName.
+func TestDoorShortName_PreferenceOrder(t *testing.T) {
+	cases := []struct {
+		name string
+		d    uaapi.Door
+		want string
+	}{
+		{
+			name: "both set: Name wins over FullName",
+			d:    uaapi.Door{ID: "d1", Name: "Hauseingangstür", FullName: "UDM SE - 1F - Hauseingangstür"},
+			want: "Hauseingangstür",
+		},
+		{
+			name: "only FullName: fall back to FullName",
+			d:    uaapi.Door{ID: "d1", FullName: "UDM SE - 1F - Hauseingangstür"},
+			want: "UDM SE - 1F - Hauseingangstür",
+		},
+		{
+			name: "neither: fall back to ID",
+			d:    uaapi.Door{ID: "d1"},
+			want: "d1",
+		},
+		{
+			name: "blank name with FullName: FullName wins",
+			d:    uaapi.Door{ID: "d1", Name: "", FullName: "UDM SE - Backyard"},
+			want: "UDM SE - Backyard",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := doorShortName(tc.d); got != tc.want {
+				t.Errorf("doorShortName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// FIX04 Sub-1c: the generic fallback label must carry a real
+// umlaut. Documents the convention so a future refactor that
+// reaches for the ASCII spelling fails the test.
+func TestGenericDoorName_HasUmlaut(t *testing.T) {
+	if genericDoorName != "Tür" {
+		t.Errorf("genericDoorName = %q, want %q", genericDoorName, "Tür")
+	}
+}
