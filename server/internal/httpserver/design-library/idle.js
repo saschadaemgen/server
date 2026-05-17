@@ -132,18 +132,22 @@
   setInterval(refreshWeather, 15 * 60 * 1000);
 
   // -------------------------------------------------------------
-  // Mode switcher (S14-03-FIX01 push animation). Both layers travel
-  // parallel via a CSS transition on transform: the source moves
-  // from .active to .above (or .below for the return path), and
-  // the target moves from .below (or .above) to .active in the
-  // same frame. After the 400ms transition we mark the now-hidden
+  // Mode switcher (S14-03-FIX01 push animation + FIX02 Sub-1c
+  // idle-default-aware direction). Both layers travel parallel
+  // via a CSS transition on transform: the source moves from
+  // .active to .above (or .below for the return path), and the
+  // target moves from .below (or .above) to .active in the same
+  // frame. After the 400ms transition we mark the now-hidden
   // source with .hidden so it cannot intercept clicks.
   //
-  // Direction rule: the screensaver is the conceptual "home" and
-  // sits above the parked modes. Returning to it slides DOWN
-  // (source leaves through the bottom, screensaver enters from
-  // above); opening anything else slides UP (source leaves
-  // through the top, target enters from below).
+  // Direction rule (FIX02): the IDLE mode (the mieter's persisted
+  // default - screensaver OR livestream) is conceptually "above"
+  // and parked modes sit "below". Returning to idle slides DOWN
+  // (target enters from above, source leaves down); opening
+  // anything else slides UP (target enters from below, source
+  // leaves up). Pre-FIX02 the direction was hard-coded to
+  // screensaver-as-home; with livestream-as-default the close
+  // direction felt wrong.
   //
   // An animation lock (`animating`) coalesces double-clicks so a
   // second trigger before the transition finishes is dropped.
@@ -170,7 +174,7 @@
     if (!currentEl || !targetEl) return;
     animating = true;
 
-    var isReturnToHome = (target === 'screensaver');
+    var isReturnToIdle = (target === defaultMode);
 
     // Park the target on the opposite side of the slot and make it
     // visible BEFORE the transition kicks in. The void offsetHeight
@@ -178,12 +182,12 @@
     // so the next frame's class swap actually animates instead of
     // teleporting.
     targetEl.classList.remove('above', 'below', 'active', 'hidden');
-    targetEl.classList.add(isReturnToHome ? 'above' : 'below');
+    targetEl.classList.add(isReturnToIdle ? 'above' : 'below');
     void targetEl.offsetHeight;
 
     requestAnimationFrame(function () {
       currentEl.classList.remove('active');
-      currentEl.classList.add(isReturnToHome ? 'below' : 'above');
+      currentEl.classList.add(isReturnToIdle ? 'below' : 'above');
       targetEl.classList.remove('above', 'below');
       targetEl.classList.add('active');
     });
