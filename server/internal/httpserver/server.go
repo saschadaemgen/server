@@ -302,11 +302,14 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
 	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
 	s.mux.Handle("GET /esp/stream.mjpeg", s.requireESPBearer(http.HandlerFunc(s.handleESPStream)))
-	// Saison 14-XX: POST /esp/settings (Partial-Update mit
-	// config.changed-Broadcast). /esp/unread-count folgt im
-	// Nachbar-Commit.
+	// Saison 14-XX ESP-Settings + Weather + Unread.
+	// POST /esp/settings persistiert Partial-Updates und
+	// broadcastet config.changed; /esp/weather und
+	// /esp/unread-count sind Bearer-gated-Re-Uses der
+	// Mieter-Endpoints (gleiche Response-Form, andere Auth).
 	s.mux.Handle("POST /esp/settings", s.requireESPBearer(http.HandlerFunc(s.handleESPSettings)))
 	s.mux.Handle("GET /esp/weather", s.requireESPBearer(http.HandlerFunc(s.handleESPWeather)))
+	s.mux.Handle("GET /esp/unread-count", s.requireESPBearer(http.HandlerFunc(s.handleESPUnreadCount)))
 
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
