@@ -82,6 +82,13 @@ button { font-family: inherit; }
 }
 
 .stage {
+  /* S14-03-FIX02 Sub-2b: dezenter Geraete-Rahmen. Vorher war
+     nur ein einzelner 1px-hairline plus shadow-xl gestapelt -
+     auf Saschas Display kaum wahrnehmbar. Jetzt vier Schichten:
+       - 0.5px rgba 0.04 outer ring (kantet die Silhouette an)
+       - 1px hairline-strong border (sichtbarer Rand)
+       - 0 8px 24px drop-shadow (das Geraet "schwebt" leicht)
+       - inset 1px top highlight (Material-Anmutung) */
   position: relative;
   width: min(420px, 96vw);
   height: min(900px, 96vh);
@@ -89,8 +96,10 @@ button { font-family: inherit; }
   border-radius: var(--radius-device);
   overflow: hidden;
   box-shadow:
-    0 0 0 1px var(--color-hairline),
-    var(--shadow-xl);
+    0 0 0 0.5px rgba(255, 255, 255, 0.04),
+    0 0 0 1px var(--color-hairline-strong),
+    0 8px 24px rgba(0, 0, 0, 0.40),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   isolation: isolate;
   transition: background var(--dur-slow) var(--ease-out);
 }
