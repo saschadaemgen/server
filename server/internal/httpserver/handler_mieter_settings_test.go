@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"unifix.local/server/internal/doorhistory"
+	"unifix.local/server/internal/uaapi"
 )
 
 // TestMieterSettingsPost_AutoScreensaverJSON exercises the JSON
@@ -246,6 +247,80 @@ func TestMieterHistoryJSON_EmptyAndPopulated(t *testing.T) {
 	for _, ev := range out3.Events {
 		if ev.Unread {
 			t.Errorf("event %d still unread after read-mark", ev.ID)
+		}
+	}
+}
+
+// TestMieterHistoryJSON_DoorNameResolved covers the saison-14-03-FIX02
+// Sub-1a fix: when UA-API knows the intercom MAC, the response
+// must surface the friendly door name (not the bare MAC, which
+// was the pre-FIX02 stop-gap).
+func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
+	uaStub := newUADoorsStub(t, uaDoorStubConfig{
+		doors: map[string]string{
+			"door-uuid-front": "28704e31e29c",
+		},
+	}, nil)
+	defer uaStub.Close()
+
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
+
+	// One event whose intercom MAC matches the stub.
+	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:     testViewerMAC,
+		EventType:   doorhistory.TypeDoorbellStart,
+		IntercomMAC: "28:70:4e:31:e2:9c",
+		OccurredAt:  time.Now(),
+	}, nil); err != nil {
+		t.Fatalf("seed insert: %v", err)
+	}
+	// One event with no intercom MAC -> generic Hauseingang.
+	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now().Add(-1 * time.Minute),
+	}, nil); err != nil {
+		t.Fatalf("seed insert empty mac: %v", err)
+	}
+	// One event with an intercom MAC that UA does NOT know ->
+	// last-resort bare MAC.
+	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:     testViewerMAC,
+		EventType:   doorhistory.TypeDoorbellStart,
+		IntercomMAC: "11:22:33:44:55:66",
+		OccurredAt:  time.Now().Add(-2 * time.Minute),
+	}, nil); err != nil {
+		t.Fatalf("seed insert unknown mac: %v", err)
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	var out mieterHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(out.Events) != 3 {
+		t.Fatalf("events len = %d, want 3", len(out.Events))
+	}
+	// Events are returned newest-first; order: known MAC, empty
+	// MAC, unknown MAC.
+	type want struct{ intercom, name string }
+	wants := []want{
+		{intercom: "28:70:4e:31:e2:9c", name: "Door door-uuid-front"},
+		{intercom: "", name: genericDoorName},
+		{intercom: "11:22:33:44:55:66", name: "11:22:33:44:55:66"},
+	}
+	for i, ev := range out.Events {
+		if ev.IntercomMAC != wants[i].intercom {
+			t.Errorf("event %d intercom_mac = %q, want %q", i, ev.IntercomMAC, wants[i].intercom)
+		}
+		if ev.DoorName != wants[i].name {
+			t.Errorf("event %d door_name = %q, want %q", i, ev.DoorName, wants[i].name)
 		}
 	}
 }

@@ -73,15 +73,18 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	history, unread := s.loadViewerHistory(r.Context(), mac)
+	// Saison 14-03-FIX02 Sub-1a: resolve every row's intercom MAC
+	// to a human door name via ONE UA-API round-trip per render.
+	// Pre-fix the rows showed the bare MAC for any event that had
+	// an intercom MAC set, and the generic "Hauseingang" only for
+	// the (rare) empty-MAC rows - the inverse of what the mieter
+	// wants.
+	doorMap := s.loadIntercomDoorNames(r.Context())
 	rows := make([]viewerHistoryRow, 0, len(history))
 	displayedIDs := make([]int64, 0, len(history))
 	for _, ev := range history {
-		where := ev.IntercomMAC
-		if where == "" {
-			where = "Hauseingang"
-		}
 		rows = append(rows, viewerHistoryRow{
-			Where:  where,
+			Where:  resolveDoorName(doorMap, ev.IntercomMAC),
 			When:   formatGermanWhen(ev.OccurredAt),
 			Unread: ev.ReadAt == nil,
 		})

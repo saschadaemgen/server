@@ -62,6 +62,12 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Saison 14-03-FIX02 Sub-1a: ONE ListDoors call per render
+	// builds the intercom-MAC -> door-name map shared by every
+	// row. Replaces the FIX01 stop-gap that wrote the bare MAC
+	// into door_name.
+	doorMap := s.loadIntercomDoorNames(r.Context())
+
 	items := make([]mieterHistoryItem, 0, len(events))
 	unreadIDs := make([]int64, 0, len(events))
 	for _, ev := range events {
@@ -70,7 +76,7 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 			CreatedAt:   ev.OccurredAt.Unix(),
 			When:        formatGermanWhen(ev.OccurredAt),
 			IntercomMAC: ev.IntercomMAC,
-			DoorName:    ev.IntercomMAC, // briefing-allowed fallback; UA-lookup may replace this in a later saison
+			DoorName:    resolveDoorName(doorMap, ev.IntercomMAC),
 			EventType:   ev.EventType,
 			Unread:      ev.ReadAt == nil,
 		})
