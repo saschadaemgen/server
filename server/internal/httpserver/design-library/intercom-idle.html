@@ -166,30 +166,36 @@
               <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
             </header>
 
-            <fieldset class="mode-field">
-              <legend>
-                Ruhe-Ansicht
-                <span class="mode-help" data-help="Was sieht der Mieter wenn nichts klingelt: Uhr+Datum (Bildschirmschoner) oder direkt das Kamerabild (Live-Stream).">?</span>
-              </legend>
-              <label><input type="radio" name="idle_view_mode" value="screensaver"{{if ne .IdleViewMode "livestream"}} checked{{end}}> Bildschirmschoner (Uhr &amp; Wetter)</label>
-              <label><input type="radio" name="idle_view_mode" value="livestream"{{if eq .IdleViewMode "livestream"}} checked{{end}}> Live-Stream (Türkamera)</label>
-            </fieldset>
+            <!-- S14-04 Bereich C: fieldsets live inside a
+                 scrollable wrapper so the footer below stays
+                 pinned even when more sections land in later
+                 sub-saisons. Toast covers the save-feedback
+                 the old hint paragraph used to spell out. -->
+            <div class="mode-settings-scroll">
+              <fieldset class="mode-field">
+                <legend>
+                  Ruhe-Ansicht
+                  <span class="mode-help" data-help="Was sieht der Mieter wenn nichts klingelt: Uhr+Datum (Bildschirmschoner) oder direkt das Kamerabild (Live-Stream).">?</span>
+                </legend>
+                <label><input type="radio" name="idle_view_mode" value="screensaver"{{if ne .IdleViewMode "livestream"}} checked{{end}}> Bildschirmschoner (Uhr &amp; Wetter)</label>
+                <label><input type="radio" name="idle_view_mode" value="livestream"{{if eq .IdleViewMode "livestream"}} checked{{end}}> Live-Stream (Türkamera)</label>
+              </fieldset>
 
-            <fieldset class="mode-field">
-              <legend>
-                Auto-Bildschirmschoner
-                <span class="mode-help" data-help="Wenn der Mieter eine Weile nichts macht, gleitet die Anzeige zurück zum Bildschirmschoner. Nur sinnvoll wenn 'Bildschirmschoner' oben gewählt ist.">?</span>
-              </legend>
-              <label><input type="radio" name="auto_screensaver_seconds" value="0"{{if eq .AutoScreensaverSeconds 0}} checked{{end}}> aus</label>
-              <label><input type="radio" name="auto_screensaver_seconds" value="30"{{if eq .AutoScreensaverSeconds 30}} checked{{end}}> 30 Sekunden</label>
-              <label><input type="radio" name="auto_screensaver_seconds" value="60"{{if eq .AutoScreensaverSeconds 60}} checked{{end}}> 1 Minute</label>
-              <label><input type="radio" name="auto_screensaver_seconds" value="300"{{if eq .AutoScreensaverSeconds 300}} checked{{end}}> 5 Minuten</label>
-              <label><input type="radio" name="auto_screensaver_seconds" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
-            </fieldset>
-
-            <p class="mode-settings-hint">Aenderungen werden automatisch gespeichert.</p>
+              <fieldset class="mode-field">
+                <legend>
+                  Auto-Bildschirmschoner
+                  <span class="mode-help" data-help="Wenn der Mieter eine Weile nichts macht, gleitet die Anzeige zurück zum Bildschirmschoner. Nur sinnvoll wenn 'Bildschirmschoner' oben gewählt ist.">?</span>
+                </legend>
+                <label><input type="radio" name="auto_screensaver_seconds" value="0"{{if eq .AutoScreensaverSeconds 0}} checked{{end}}> aus</label>
+                <label><input type="radio" name="auto_screensaver_seconds" value="30"{{if eq .AutoScreensaverSeconds 30}} checked{{end}}> 30 Sekunden</label>
+                <label><input type="radio" name="auto_screensaver_seconds" value="60"{{if eq .AutoScreensaverSeconds 60}} checked{{end}}> 1 Minute</label>
+                <label><input type="radio" name="auto_screensaver_seconds" value="300"{{if eq .AutoScreensaverSeconds 300}} checked{{end}}> 5 Minuten</label>
+                <label><input type="radio" name="auto_screensaver_seconds" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
+              </fieldset>
+            </div>
 
             <footer class="mode-settings-footer" aria-label="CARVILON Intercom Web Viewer">
+              <div class="mode-settings-footer-divider" aria-hidden="true"></div>
               <span class="carvilon-brand sz-sm" aria-hidden="true">
                 <span class="name">CARVILON</span>
                 <span class="sub-wrap">

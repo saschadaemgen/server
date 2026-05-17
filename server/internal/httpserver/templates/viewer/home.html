@@ -269,11 +269,24 @@
     }
     .mode-close:hover { background: rgba(255,255,255,0.06); }
 
+    /* S14-04 Bereich C: the form is the flex shell now; the
+       inner .mode-settings-scroll owns the scroll so the
+       footer stays pinned even when more fieldsets land in a
+       later sub-saison. */
     .mode-settings {
       display: flex;
       flex-direction: column;
       gap: 16px;
-      overflow: auto;
+      height: 100%;
+      overflow: hidden;
+    }
+    .mode-settings-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
     .mode-field {
       border: 0;
@@ -304,26 +317,26 @@
     .mode-field label:hover { background: rgba(255,255,255,0.04); }
     .mode-field input[type="radio"] { accent-color: var(--color-accent, #5b9dff); }
 
-    /* S14-03-FIX02 Sub-1e: auto-save hint replaces the old
-       Save button + status-text combo. */
-    .mode-settings-hint {
-      margin: 4px 0 0 0;
-      font-size: 12px;
-      color: var(--color-text-tertiary, #94a3b8);
-      font-style: italic;
-    }
-    /* S14-03-FIX02 Sub-2a: CARVILON wordmark + version inside
-       the inline settings mode-layer. Sits centered at the
-       bottom of the form, pushed down with margin-top:auto so
-       it docks to the slot floor regardless of how many radio
-       fieldsets are above. */
+    /* S14-03-FIX02 Sub-2a + S14-04 Bereich C: CARVILON wordmark
+       + version + hairline divider inside the inline settings
+       mode-layer. Sits at the bottom because the parent .mode-
+       settings is a flex-column whose middle child
+       (.mode-settings-scroll) takes flex:1 and consumes the
+       extra space. The FIX02 auto-save hint paragraph above the
+       footer is gone - the toast already informs of the save. */
     .mode-settings-footer {
-      margin-top: auto;
-      padding-top: 16px;
+      padding-top: 12px;
+      padding-bottom: 4px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
+    }
+    .mode-settings-footer-divider {
+      width: 70%;
+      height: 0.5px;
+      background: rgba(255, 255, 255, 0.12);
+      margin-bottom: 6px;
     }
     .mode-settings-version {
       font-size: 9px;
@@ -456,29 +469,34 @@
        scrollbar (if a future layout ever needs it) stays alone. */
     .mode-layer,
     .mode-settings,
+    .mode-settings-scroll,
     .mode-history {
       scrollbar-width: thin;
       scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
     }
     .mode-layer::-webkit-scrollbar,
     .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar,
     .mode-history::-webkit-scrollbar {
       width: 8px;
       height: 8px;
     }
     .mode-layer::-webkit-scrollbar-track,
-    .mode-settings::-webkit-scrollbar-track,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-track,
     .mode-history::-webkit-scrollbar-track {
       background: transparent;
     }
     .mode-layer::-webkit-scrollbar-thumb,
-    .mode-settings::-webkit-scrollbar-thumb,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-thumb,
     .mode-history::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.15);
       border-radius: 4px;
     }
     .mode-layer::-webkit-scrollbar-thumb:hover,
-    .mode-settings::-webkit-scrollbar-thumb:hover,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-thumb:hover,
     .mode-history::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.25);
     }
