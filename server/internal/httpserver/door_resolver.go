@@ -36,7 +36,10 @@ import (
 // genericDoorName is the fallback label for history rows that
 // have no intercom MAC and live in a multi-door installation
 // (single-door installs use the actual door name).
-const genericDoorName = "Tuer"
+//
+// FIX04 Sub-1c: real "ue" umlaut in the user-facing string;
+// ASCII spelling stays in comments and log fields only.
+const genericDoorName = "Tür"
 
 // doorMeta is the cached snapshot used by resolveDoorName. The
 // map covers the typical intercom-routed case; allDoors carries
