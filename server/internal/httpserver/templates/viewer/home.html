@@ -111,6 +111,52 @@
       width: 100%;
       height: 100%;
     }
+
+    /* S14-03-FIX03 Sub-2: unread-doorbell badge. Hidden via
+       [hidden] attribute when count=0; idle.js toggles it on
+       SSE unread_count events and initial fetch. The subtle
+       pulse animation hints "es liegt etwas vor" without
+       being distracting. */
+    .screensaver-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4em;
+      padding: 0.4em 0.8em;
+      margin-top: 0.8em;
+      background: rgba(255, 255, 255, 0.06);
+      border: 0.5px solid rgba(255, 255, 255, 0.10);
+      border-radius: 999px;
+      font-size: 14px;
+      color: var(--color-text-secondary, #cbd5e1);
+      animation: screensaver-badge-pulse 2.4s ease-in-out infinite alternate;
+    }
+    .screensaver-badge[hidden] { display: none; }
+    .screensaver-badge-count {
+      font-weight: 500;
+      color: var(--color-text, #f0f4ff);
+      font-variant-numeric: tabular-nums;
+    }
+    .screensaver-badge-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1em;
+      height: 1em;
+    }
+    .screensaver-badge-icon svg {
+      width: 100%;
+      height: 100%;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      fill: none;
+    }
+    @keyframes screensaver-badge-pulse {
+      from { opacity: 0.7; }
+      to   { opacity: 1.0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .screensaver-badge { animation: none; }
+    }
     .screensaver-temp { font-weight: 500; }
     .screensaver-desc {
       font-size: 0.92em;
@@ -462,6 +508,14 @@
         // talking to the visitor.
         if (window.unifixIdle && window.unifixIdle.resetAutoTimer) {
           window.unifixIdle.resetAutoTimer();
+        }
+        // S14-03-FIX03 Sub-2: bump the unread-doorbell badge so
+        // the count is visible immediately on the screensaver.
+        // The authoritative count arrives shortly after via the
+        // unread_count SSE event (commit 6); this local bump is
+        // belt-and-braces for the gap.
+        if (window.unifixIdle && window.unifixIdle.bumpUnread) {
+          window.unifixIdle.bumpUnread();
         }
         enableRingButtons(eventID, intercomMAC);
         if (window.unifix && unifix.openOverlay) {

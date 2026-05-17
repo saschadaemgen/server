@@ -125,6 +125,18 @@
               <span class="screensaver-desc"></span>
             </div>
           {{end}}
+
+          <!-- Saison 14-03-FIX03 Sub-2: unread-doorbell badge.
+               Hidden by default; idle.js queries
+               /webviewer/unread-count on init and listens for
+               SSE unread_count events to update the number.
+               History-mode open marks the rows read and clears
+               the badge to 0. -->
+          <div class="screensaver-badge" data-bind="unread-badge" data-count="0" hidden>
+            <span class="screensaver-badge-icon" aria-hidden="true"></span>
+            <span class="screensaver-badge-count" data-bind="unread-count">0</span>
+            <span class="screensaver-badge-label">verpasst</span>
+          </div>
         </div>
 
         <!-- 2. Livestream: MJPEG img. Saison 14-03-FIX-1b: src is

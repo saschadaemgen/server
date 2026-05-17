@@ -318,6 +318,75 @@
   window.unifixIdle.resetAutoTimer = resetAutoTimer;
 
   // -------------------------------------------------------------
+  // Saison 14-03-FIX03 Sub-2: unread-doorbell badge runtime.
+  //
+  // Three event sources feed the badge:
+  //   1. initial fetch /webviewer/unread-count on page load
+  //   2. SSE doorbell_start (count +=1, set via the home-page SSE
+  //      script which calls window.unifixIdle.bumpUnread()
+  //      because it has access to the EventSource we don't)
+  //   3. history mode opening (we just fetched the list, the
+  //      server marks rows read async, so we drop the badge to 0)
+  //
+  // The badge is positioned inside the screensaver layer so it
+  // travels with screensaver-on-top / screensaver-below
+  // transitions; no separate visibility logic needed.
+  var badgeEl = container.querySelector('[data-bind="unread-badge"]');
+  var badgeCountEl = container.querySelector('[data-bind="unread-count"]');
+  var badgeIconEl = container.querySelector('.screensaver-badge-icon');
+  // Lucide-style "bell-ring" icon inlined as a one-shot string;
+  // no extra library load.
+  var BELL_RING_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 17h13l-1.4-1.8c-.4-.5-.6-1.1-.6-1.8V10a4.5 4.5 0 0 0-9 0v3.4c0 .7-.2 1.3-.6 1.8L5.5 17Z"/><path d="M10 19.5a2 2 0 0 0 4 0"/><path d="M21 9c-.7-1.8-1.7-3.4-3-4.7"/><path d="M3 9c.7-1.8 1.7-3.4 3-4.7"/></svg>';
+  if (badgeIconEl && !badgeIconEl.firstChild) {
+    badgeIconEl.innerHTML = BELL_RING_SVG;
+  }
+
+  var unreadCount = 0;
+  function updateUnreadBadge(n) {
+    if (!badgeEl) return;
+    unreadCount = Math.max(0, n | 0);
+    badgeEl.setAttribute('data-count', String(unreadCount));
+    if (unreadCount > 0) {
+      badgeEl.hidden = false;
+      if (badgeCountEl) badgeCountEl.textContent = String(unreadCount);
+    } else {
+      badgeEl.hidden = true;
+      if (badgeCountEl) badgeCountEl.textContent = '0';
+    }
+  }
+  function bumpUnread() {
+    updateUnreadBadge(unreadCount + 1);
+  }
+
+  function fetchUnreadCount() {
+    if (!badgeEl) return;
+    fetch('/webviewer/unread-count', {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin',
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('unread-count http ' + r.status);
+        return r.json();
+      })
+      .then(function (resp) {
+        updateUnreadBadge((resp && resp.count) || 0);
+      })
+      .catch(function () { /* leave badge as-is on transient error */ });
+  }
+  // Initial hydrate after DOMContentLoaded so the badge is
+  // correct before the user has interacted with anything.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fetchUnreadCount);
+  } else {
+    fetchUnreadCount();
+  }
+
+  // Expose for home.html's doorbell SSE handler and for the
+  // SSE unread_count listener it'll wire up.
+  window.unifixIdle.bumpUnread = bumpUnread;
+  window.unifixIdle.updateUnreadBadge = updateUnreadBadge;
+
+  // -------------------------------------------------------------
   // Trigger buttons: gear (settings), history-action (history),
   // mode-close (back to default).
   document.addEventListener('click', function (e) {
@@ -445,6 +514,12 @@
       })
       .then(function (resp) {
         renderHistory((resp && resp.events) || []);
+        // S14-03-FIX03 Sub-2: opening history marks rows read on
+        // the server (handler_mieter_history.go does it
+        // asynchronously after the JSON ships), so the badge can
+        // drop to 0 right away. SSE will reaffirm with a
+        // unread_count frame.
+        updateUnreadBadge(0);
       })
       .catch(function () {
         if (historyEmpty) {
