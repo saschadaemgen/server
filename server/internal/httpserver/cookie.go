@@ -13,14 +13,14 @@ import "net/http"
 //
 // In DevMode (UNIFIX_DEV_MODE=1, plain HTTP) ist Secure unmoeglich
 // und damit der __Host-Prefix nicht regelkonform; die Browser
-// wuerden ihn ablehnen. Wir fallen dann auf "unifix_viewer" ohne
+// wuerden ihn ablehnen. Wir fallen dann auf "carvilon_viewer" ohne
 // Prefix zurueck (akzeptierter Trade-Off, dokumentiert).
 //
 // MaxAge ist quasi-permanent (1 Jahr); das DB-rolling-renewal in
 // session.Validate sorgt fuer "echte" 30-Tage-Idle-Loesung.
 const (
-	viewerCookieNameSecure = "__Host-unifix_viewer"
-	viewerCookieNameDev    = "unifix_viewer"
+	viewerCookieNameSecure = "__Host-carvilon_viewer"
+	viewerCookieNameDev    = "carvilon_viewer"
 	// Saison 13-02-FIX4-a-HOTFIX2: Cookie laeuft jetzt unter / ,
 	// damit sowohl /einloggen als auch zukuenftige Pfade (z.B.
 	// /api/...) das Cookie sehen ohne Path-Mismatch. Production

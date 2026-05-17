@@ -4,7 +4,7 @@
 -- Replaces the saison-13-06 platform_config.viewer_to_door
 -- approach. Saison-13-07 lifted door-resolution into the
 -- UA-API (Door.IntercomMAC parses extras.door_thumbnail), so
--- the only piece unifix needs to remember per viewer is which
+-- the only piece carvilon needs to remember per viewer is which
 -- INTERCOM the viewer is paired with - the door follows
 -- automatically.
 --

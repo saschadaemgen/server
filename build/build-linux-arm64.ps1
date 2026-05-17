@@ -1,4 +1,4 @@
-# Cross-compile all unifix binaries for linux/arm64 (Raspberry Pi)
+# Cross-compile all carvilon binaries for linux/arm64 (Raspberry Pi)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -13,8 +13,8 @@ $buildFlags = @("-trimpath", "-ldflags=$ldflags")
 
 New-Item -ItemType Directory -Force -Path "bin" | Out-Null
 
-Write-Host "Building unifix-server..."
-go build @buildFlags -o bin\unifix-server-linux-arm64 .\server\cmd\unifix-server
+Write-Host "Building carvilon-server..."
+go build @buildFlags -o bin\carvilon-server-linux-arm64 .\server\cmd\carvilon-server
 
 Write-Host "Building mock..."
 go build @buildFlags -o bin\mock-linux-arm64 .\mock\cmd\mock
@@ -25,8 +25,8 @@ go build @buildFlags -o bin\mqtt-spy-linux-arm64 .\mock\cmd\mqtt-spy
 Write-Host "Building genkey..."
 go build @buildFlags -o bin\genkey-linux-arm64 .\server\cmd\genkey
 
-Write-Host "Building unifix-cli..."
-go build @buildFlags -o bin\unifix-cli-linux-arm64 .\server\cmd\unifix-cli
+Write-Host "Building carvilon-cli..."
+go build @buildFlags -o bin\carvilon-cli-linux-arm64 .\server\cmd\carvilon-cli
 
 Write-Host "Building license-server..."
 go build @buildFlags -o bin\license-server-linux-arm64 .\license-server\cmd\license-server

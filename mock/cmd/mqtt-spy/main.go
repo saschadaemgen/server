@@ -144,9 +144,9 @@ func main() {
 func defaultBundlePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "/home/sash710/unifix-server/state/0cea14424242"
+		return "/home/sash710/carvilon-server/state/0cea14424242"
 	}
-	return filepath.Join(home, "unifix-server", "state", "0cea14424242")
+	return filepath.Join(home, "carvilon-server", "state", "0cea14424242")
 }
 
 // buildTLSConfig replicates the saison-11 mock mTLS setup so the

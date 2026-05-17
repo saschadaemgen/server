@@ -1,9 +1,9 @@
-// Package mdns advertises the unifix-server on the local network
+// Package mdns advertises the carvilon-server on the local network
 // as `_unifix._tcp.local`, so adopted ESP-Viewers can discover
 // the server's IP and port without manual configuration.
 //
 // Saison 13-02-FIX4-d: this is a thin wrapper around
-// github.com/hashicorp/mdns, kept tiny so cmd/unifix-server
+// github.com/hashicorp/mdns, kept tiny so cmd/carvilon-server
 // only sees a Start / Close pair.
 package mdns
 
@@ -23,14 +23,14 @@ const ServiceName = "_unifix._tcp"
 // InstanceName is the human-readable instance name. Multiple
 // servers on the same LAN would collide on this; that is
 // acceptable for now (one server per RPi-Lauflage).
-const InstanceName = "unifix-server"
+const InstanceName = "carvilon-server"
 
 // Service holds an active advertisement. Close it on shutdown.
 type Service struct {
 	server *hashimdns.Server
 }
 
-// Start advertises the unifix-server on the LAN. ip is the
+// Start advertises the carvilon-server on the LAN. ip is the
 // IPv4 the server's HTTP listener is reachable on (typically
 // cfg.ServerIPv4); port is the HTTP port.
 //

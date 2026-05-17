@@ -1,5 +1,5 @@
 // Package uaapi talks to the UniFi Access Developer API on
-// behalf of the unifix admin UI. Saison 12-04 scope: user CRUD
+// behalf of the carvilon admin UI. Saison 12-04 scope: user CRUD
 // plus a TestConnection probe. Other endpoints (doors, devices,
 // webhooks, ...) will land here in later sub-briefings.
 //

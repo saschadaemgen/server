@@ -1,2 +1,2 @@
-// Package ui will serve the unifix-server web UI.
+// Package ui will serve the carvilon-server web UI.
 package ui

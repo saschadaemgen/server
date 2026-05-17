@@ -37,7 +37,7 @@ var streamProfileNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 // validStreamSchemes is the allow-list every Source-URL must
 // match. Saison 14-01-FIX04: switch from a generic "no spaces"
-// rule (which never existed in unifix-code but is enforced by
+// rule (which never existed in carvilon-code but is enforced by
 // go2rtc) to a scheme-aware check so the ffmpeg:-syntax can
 // carry literal spaces in its raw=-argument list.
 var validStreamSchemes = []string{

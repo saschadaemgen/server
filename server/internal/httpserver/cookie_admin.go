@@ -3,10 +3,10 @@ package httpserver
 import "net/http"
 
 // Admin-Session-Cookie. Wie das Viewer-Cookie: __Host-Prefix und
-// Path=/ in Production, "unifix_a_session" mit Path=/a/ in DevMode.
+// Path=/ in Production, "carvilon_a_session" mit Path=/a/ in DevMode.
 const (
-	adminCookieNameSecure = "__Host-unifix_admin"
-	adminCookieNameDev    = "unifix_a_session"
+	adminCookieNameSecure = "__Host-carvilon_admin"
+	adminCookieNameDev    = "carvilon_a_session"
 	adminCookiePathSecure = "/"
 	adminCookiePathDev    = "/a/"
 )

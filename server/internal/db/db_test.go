@@ -184,7 +184,7 @@ func TestOpen_EmptyPathRejected(t *testing.T) {
 }
 
 func TestOpen_CreatesParentDirIfMissing(t *testing.T) {
-	nested := filepath.Join(t.TempDir(), "deep", "state", "unifix.db")
+	nested := filepath.Join(t.TempDir(), "deep", "state", "carvilon.db")
 	if _, err := os.Stat(filepath.Dir(nested)); !os.IsNotExist(err) {
 		t.Fatalf("test setup: parent dir already exists")
 	}

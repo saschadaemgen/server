@@ -1,4 +1,4 @@
-// Saison 13-08 Phase A: 'esp' subcommand tree of unifix-cli.
+// Saison 13-08 Phase A: 'esp' subcommand tree of carvilon-cli.
 // Currently only 'adopt' lives here; later phases can grow
 // 'rotate-token' / 'list' / 'revoke' next to it.
 package main
@@ -28,13 +28,13 @@ const servicePortStart = 8100
 
 func runESP(args []string) error {
 	if len(args) < 1 {
-		return errors.New("missing 'esp' subcommand; try 'unifix-cli esp adopt --help'")
+		return errors.New("missing 'esp' subcommand; try 'carvilon-cli esp adopt --help'")
 	}
 	switch args[0] {
 	case "adopt":
 		return runESPAdopt(args[1:], os.Stdout)
 	case "-h", "--help", "help":
-		fmt.Fprintln(os.Stdout, "usage: unifix-cli esp <command> [args]")
+		fmt.Fprintln(os.Stdout, "usage: carvilon-cli esp <command> [args]")
 		fmt.Fprintln(os.Stdout, "")
 		fmt.Fprintln(os.Stdout, "commands:")
 		fmt.Fprintln(os.Stdout, "  adopt    adopt an ESP-Viewer + emit a fresh bearer token")
@@ -55,7 +55,7 @@ func runESPAdopt(args []string, out io.Writer) error {
 	name := fs.String("name", "", "Wohnungs-Name (display name)")
 	intercom := fs.String("intercom", "", "paired intercom MAC (optional)")
 	mieter := fs.String("mieter", "", "linked UA-User ID (optional)")
-	dbPath := fs.String("db", "", "SQLite DB path (default: $UNIFIX_DB_PATH or ./state/unifix.db)")
+	dbPath := fs.String("db", "", "SQLite DB path (default: $UNIFIX_DB_PATH or ./state/carvilon.db)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

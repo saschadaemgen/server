@@ -12,7 +12,7 @@
 //     so a regression points at the failing field directly.
 //   - TestESPStreamHandler_LogsRequestSummary captures the
 //     slog output and asserts the INFO line the operator now
-//     greps for in /tmp/unifix.log.
+//     greps for in /tmp/carvilon.log.
 package httpserver
 
 import (

@@ -1,2 +1,2 @@
-// Package api will expose the unifix-server REST API.
+// Package api will expose the carvilon-server REST API.
 package api

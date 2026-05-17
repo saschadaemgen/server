@@ -1,5 +1,5 @@
 // Package streams talks to a local go2rtc instance over its REST
-// API. unifix-server uses it for two things:
+// API. carvilon-server uses it for two things:
 //
 //   - serving /esp/stream.mjpeg and /webviewer/stream.mjpeg as
 //     reverse-proxies onto profile-specific MJPEG sources;
@@ -22,7 +22,7 @@ package streams
 // Sources is the list of upstream URLs go2rtc tries in order
 // (typical entries: "rtsps://<udm-ip>:7441/<token>",
 // "ffmpeg:<other-profile>#video=mjpeg#..."). For the
-// unifix-managed profiles we only ever set one source per
+// carvilon-managed profiles we only ever set one source per
 // profile; multiple sources are allowed by go2rtc itself.
 //
 // Consumers is the live count of clients currently pulling the

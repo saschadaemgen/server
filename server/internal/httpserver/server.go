@@ -1,4 +1,4 @@
-// Package httpserver hosts the unifix HTTP surface. Three trees:
+// Package httpserver hosts the carvilon HTTP surface. Three trees:
 //
 //	/login        tenant login form + POST (Wohnungs-Name +
 //	              Passwort + bcrypt; saison-14-02 split off from

@@ -282,8 +282,8 @@
   // Das hidden <select> bleibt fuer Form-Submit; der Custom-Trigger
   // legt sich darueber. fetch-Modus laed beim ersten Open.
   (function () {
-    window.unifix = window.unifix || {};
-    if (window.unifix.dropdownInit) return; // doppelt-Init verhindern
+    window.carvilon = window.carvilon || {};
+    if (window.carvilon.dropdownInit) return; // doppelt-Init verhindern
 
     var openInstance = null;
     // Saison 13-02-FIX4-a-HOTFIX7: closeOpen muss den vollen
@@ -722,8 +722,8 @@
       }
     }
 
-    window.unifix.dropdownInit = initAll;
-    window.unifix.dropdownRender = render;
+    window.carvilon.dropdownInit = initAll;
+    window.carvilon.dropdownRender = render;
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () { initAll(document); });
     } else {
@@ -752,7 +752,7 @@
   // Vorher hingen die toggle-pw-Handler in der page-local IIFE
   // von web-viewers.html. Im Live-Test feuerten sie nicht
   // zuverlaessig (vermutlich Race mit interactions.js
-  // window.unifix-Overwrite). Globale Event-Delegation auf
+  // window.carvilon-Overwrite). Globale Event-Delegation auf
   // document mit closest() ist robust gegen DOM-Reihenfolge
   // und Modal-Reopen.
   //
@@ -763,8 +763,8 @@
   // wird. data-pw="1"-Marker hilft Strategie 3 das Input wieder
   // zu finden wenn type schon auf "text" steht.
   (function () {
-    if (window.__unifixPwToggleBound) return;
-    window.__unifixPwToggleBound = true;
+    if (window.__carvilonPwToggleBound) return;
+    window.__carvilonPwToggleBound = true;
     document.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-action="toggle-pw"]');
       if (!btn) return;
@@ -819,8 +819,8 @@
   // URL-Input-Feld). Zwei-Sekunden-Erfolgs-Feedback via
   // is-success-Klasse.
   (function () {
-    if (window.__unifixCopyLinkBound) return;
-    window.__unifixCopyLinkBound = true;
+    if (window.__carvilonCopyLinkBound) return;
+    window.__carvilonCopyLinkBound = true;
 
     function copyText(t) {
       if (navigator.clipboard && navigator.clipboard.writeText) {

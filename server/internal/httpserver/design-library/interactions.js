@@ -1,21 +1,21 @@
 /* ============================================================
- * unifix · interactions.js
+ * carvilon · interactions.js
  * ------------------------------------------------------------
- * Minimal vanilla JavaScript for the unifix library. No build,
+ * Minimal vanilla JavaScript for the carvilon library. No build,
  * no dependencies. Load with a normal <script src="interactions.js">.
  *
- * Public surface (all available on window.unifix):
+ * Public surface (all available on window.carvilon):
  *
- *   unifix.openSheet(name)
- *   unifix.closeSheet(name)
- *   unifix.openModal(name)
- *   unifix.closeModal(name)
- *   unifix.openOverlay(name)     // e.g. "ringing"
- *   unifix.closeOverlay(name)
- *   unifix.setTheme("light" | "dark" | "system")
- *   unifix.setDND(true | false)
+ *   carvilon.openSheet(name)
+ *   carvilon.closeSheet(name)
+ *   carvilon.openModal(name)
+ *   carvilon.closeModal(name)
+ *   carvilon.openOverlay(name)     // e.g. "ringing"
+ *   carvilon.closeOverlay(name)
+ *   carvilon.setTheme("light" | "dark" | "system")
+ *   carvilon.setDND(true | false)
  *
- *   unifix.connectSSE(url, handlers)
+ *   carvilon.connectSSE(url, handlers)
  *     handlers = {
  *       onDoorbellStart(payload), onDoorbellCancel(payload),
  *       onHistoryUpdate(payload), onConnect(), onError(err)
@@ -44,7 +44,7 @@
   // Theme  ·  dark / light / system
   // --------------------------------------------------------------
 
-  var THEME_KEY = 'unifix.theme';
+  var THEME_KEY = 'carvilon.theme';
 
   function setTheme(theme) {
     // theme: "dark" | "light" | "system"
@@ -208,9 +208,9 @@
   // ------------------------------------------------------------
   // Stub wiring for doorbell events. Connect like:
   //
-  //   unifix.connectSSE("/intercom/stream", {
-  //     onDoorbellStart:  (p) => unifix.openOverlay("ringing"),
-  //     onDoorbellCancel: ()  => unifix.closeOverlay("ringing"),
+  //   carvilon.connectSSE("/intercom/stream", {
+  //     onDoorbellStart:  (p) => carvilon.openOverlay("ringing"),
+  //     onDoorbellCancel: ()  => carvilon.closeOverlay("ringing"),
   //     onHistoryUpdate:  (p) => location.reload(),
   //   });
   //
@@ -325,7 +325,7 @@
         var isOn = btn.classList.contains('is-on');
         setDND(!isOn);
         // Notify server (stub — wire to your route)
-        if (window.unifix.onDNDChange) window.unifix.onDNDChange(!isOn);
+        if (window.carvilon.onDNDChange) window.carvilon.onDNDChange(!isOn);
         break;
 
       case 'copy-magic-link':
@@ -416,7 +416,7 @@
   // Export public API
   // --------------------------------------------------------------
 
-  window.unifix = {
+  window.carvilon = {
     setTheme:     setTheme,
     cycleTheme:   cycleTheme,
     openSheet:    openSheet,

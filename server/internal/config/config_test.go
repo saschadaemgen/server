@@ -58,11 +58,11 @@ func TestFromEnv_OverridesApplied(t *testing.T) {
 	t.Setenv(envListenAddr, ":9000")
 	t.Setenv(envCertFile, "/etc/cert.pem")
 	t.Setenv(envKeyFile, "/etc/key.pem")
-	t.Setenv(envDBPath, "/var/lib/unifix.db")
+	t.Setenv(envDBPath, "/var/lib/carvilon.db")
 	t.Setenv(envDevMode, "false")
 	t.Setenv(envBaseURL, "https://example.com")
 	t.Setenv(envServerIPv4, "192.168.1.42")
-	t.Setenv(envMockStateDir, "/var/lib/unifix/mocks")
+	t.Setenv(envMockStateDir, "/var/lib/carvilon/mocks")
 	cfg := FromEnv()
 	if cfg.ListenAddr != ":9000" {
 		t.Errorf("ListenAddr = %q", cfg.ListenAddr)
@@ -73,7 +73,7 @@ func TestFromEnv_OverridesApplied(t *testing.T) {
 	if cfg.KeyFile != "/etc/key.pem" {
 		t.Errorf("KeyFile = %q", cfg.KeyFile)
 	}
-	if cfg.DBPath != "/var/lib/unifix.db" {
+	if cfg.DBPath != "/var/lib/carvilon.db" {
 		t.Errorf("DBPath = %q", cfg.DBPath)
 	}
 	if cfg.DevMode {
@@ -85,7 +85,7 @@ func TestFromEnv_OverridesApplied(t *testing.T) {
 	if cfg.ServerIPv4 != "192.168.1.42" {
 		t.Errorf("ServerIPv4 = %q", cfg.ServerIPv4)
 	}
-	if cfg.MockStateDir != "/var/lib/unifix/mocks" {
+	if cfg.MockStateDir != "/var/lib/carvilon/mocks" {
 		t.Errorf("MockStateDir = %q", cfg.MockStateDir)
 	}
 }

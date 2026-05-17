@@ -1,4 +1,4 @@
-# unifix Security Plan
+# carvilon Security Plan
 
 **Status:** Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
 Lebendes Dokument, wird pro Saison ergaenzt.
@@ -12,7 +12,7 @@ Lizenz-Server-TLS bleiben Saison 14+.
 
 ## 1. Sicherheits-Philosophie
 
-unifix ist eine Convenience-Plattform, kein Sicherheits-Produkt.
+carvilon ist eine Convenience-Plattform, kein Sicherheits-Produkt.
 Mieter-Authentifizierung lauft auf Convenience-Niveau (Magic-Link),
 nicht Bank-Sicherheit. Hochsensitive Bereiche brauchen die nativen
 UniFi-Reader und Hub-Door-Mechanismen.
@@ -35,13 +35,13 @@ Cert-Material kommt aus dem Adoption-Bundle (Saison 8 + 9
 Reverse-Engineering). Keine Arbeit fuer uns ausser korrektem
 TLS-Setup im Go-Code.
 
-### 2.2 Mieter-Klient-Seite (Endgeraet <-> unifix-server)
+### 2.2 Mieter-Klient-Seite (Endgeraet <-> carvilon-server)
 
 ```
 Saison 10-11:  HTTP plain im LAN, Magic-Link-UUID als Token
                Bewusst Convenience-Niveau, kein Sicherheits-Versprechen.
 
-Saison 12:     IMPLEMENTIERT. TLS-Layer direkt im unifix-server-
+Saison 12:     IMPLEMENTIERT. TLS-Layer direkt im carvilon-server-
                Prozess (Variante 3b). HttpOnly + SameSite=Strict
                Cookie auf Pfad /m/ (Mieter) und /a/ (Admin, S12-04).
                DevMode-Schalter fuer lokale Entwicklung mit
@@ -74,15 +74,15 @@ Doorbell-Trigger usw. Es muss daher:
 - niemals im Browser oder Endgeraet landen
 - niemals in Logs oder Error-Reports erscheinen
 - niemals in Saison-Protokollen oder Goldminen-Files persistieren
-- nur im unifix-server-Process-Speicher als entschluesselter
+- nur im carvilon-server-Process-Speicher als entschluesselter
   Wert leben; persistent gespeichert wird ausschliesslich die
   AES-256-GCM-Variante in `platform_config.value_encrypted`
   (Details Sektion 7.4)
 - pro Anlage einmalig vom Admin im Admin-UI `/a/settings`
-  gesetzt werden, nicht generierbar vom unifix-server selbst
+  gesetzt werden, nicht generierbar vom carvilon-server selbst
 
 Der Browser/Endgeraet-Klient redet ausschliesslich mit dem
-unifix-server (eigener Magic-Link), nicht direkt mit der UDM-API.
+carvilon-server (eigener Magic-Link), nicht direkt mit der UDM-API.
 
 #### 2.2.5 Magic-Link und Session Klartext-Storage (Saison 12)
 
@@ -94,10 +94,10 @@ Bewusster Trade-off, Sascha-Beschluss 12. Mai 2026:
 
 ```
 Risiko-Modell:    Single-Tenant pro Anlage. Die SQLite-Datei
-                  liegt im Server-Process unter ./state/unifix.db
+                  liegt im Server-Process unter ./state/carvilon.db
                   mit File-Mode 0600 (Unix) bzw. nur fuer den
                   Service-User lesbar (Windows). Der einzige
-                  legitime Reader ist der unifix-server-Prozess
+                  legitime Reader ist der carvilon-server-Prozess
                   selbst. Lokale Angreifer-Annahme: wer
                   File-Zugriff auf state/ hat, hat auch
                   Process-Memory und damit ohnehin volle
@@ -132,8 +132,8 @@ S12-06-Refactor:  magic_link_tokens und mieter_sessions haengen
 Session-Cookies sind defensiv konfiguriert:
 
 ```
-Name:       unifix_m_session  (Mieter)
-            unifix_a_session  (Admin)
+Name:       carvilon_m_session  (Mieter)
+            carvilon_a_session  (Admin)
 Pfad:       /m/  bzw.  /a/    (Pfad-Scoping verhindert dass das
                               Admin-Cookie unter /m/ gesendet wird
                               und umgekehrt; strikt seit dem
@@ -147,7 +147,7 @@ MaxAge:     30 Tage           (passend zu Session-Rolling-TTL)
 ```
 
 `SameSite=Strict` ist die maximale Stufe. Wir akzeptieren bewusst,
-dass externe Links zu unifix-Seiten den Klienten nicht
+dass externe Links zu carvilon-Seiten den Klienten nicht
 automatisch eingeloggt zeigen (er muss erst ueber /m/login mit
 Magic-Link reinkommen).
 
@@ -294,7 +294,7 @@ Produkt produktiv und stabil ist.
 ### 7.1 SQLite-Datei-Schutz
 
 ```
-Pfad:           ./state/unifix.db (default, ueberschreibbar
+Pfad:           ./state/carvilon.db (default, ueberschreibbar
                 via UNIFIX_DB_PATH)
 File-Mode:      0600 (db.Open via os.MkdirAll setzt Parent-Dir
                 auf 0700, SQLite legt die Datei mit 0644 an die
@@ -443,7 +443,7 @@ Speicherung:    NUR der SHA-256-Hash in
                     pending-Zeile sofort GELOESCHT (single-
                     delivery).
                   - Workflow CLI-First: Klartext wird einmalig
-                    auf stdout des unifix-cli ausgegeben; gar
+                    auf stdout des carvilon-cli ausgegeben; gar
                     nicht erst in einer DB-Spalte gespeichert.
                 In beiden Faellen ist der Klartext nach der
                 ersten Auslieferung WEG. Verlorene Tokens =
@@ -494,7 +494,7 @@ Bearer-Filter:  Der Endpoint sitzt hinter requireESPBearer.
 
 Token-Stripping: Vor dem Forward an das Backend wird der
                 Authorization-Header GESTRIPPT. Das ESP-Token
-                darf den unifix-Process-Boundary nicht
+                darf den carvilon-Process-Boundary nicht
                 ueberschreiten - das Backend ist typisch ein
                 unauthenticated Localhost-Daemon, der den
                 Token weder kennt noch braucht. Wuerde der
@@ -568,7 +568,7 @@ Stempelkarten-Anforderung (Saison 16) fest steht.
 ### 8.1 Webhook-Authentifikation (Sicherheits-Aspekt fuer Saison 14)
 
 UA-Webhooks unterstuetzen Signed-Body via HMAC-SHA256 mit einem
-Shared-Secret. In Saison 14 muss unifix-server:
+Shared-Secret. In Saison 14 muss carvilon-server:
 
 ```
 - Pro Webhook-Registration ein eigenes Secret pflegen (gespeichert
@@ -589,11 +589,11 @@ Konkret-Spezifikation kommt im Saison-14-Briefing.
 
 ## 9. Stream-Backend (Saison 14-01)
 
-unifix terminiert die oeffentlich erreichbaren Stream-Endpoints
+carvilon terminiert die oeffentlich erreichbaren Stream-Endpoints
 (`/esp/stream.mjpeg`, `/webviewer/stream.mjpeg`) selbst und proxyt
 nach `UNIFIX_STREAM_BACKEND_URL` (typisch `http://127.0.0.1:1984`).
 go2rtc lauscht ausschliesslich auf dem Loopback-Interface; LAN-
-Kunden erreichen den Stream nur ueber unifix-server. Damit haengen
+Kunden erreichen den Stream nur ueber carvilon-server. Damit haengen
 Authentifikation und Rate-Limit am vorhandenen Cookie- und Bearer-
 Pfad und nicht an einem zweiten, separat zu haertenden Daemon.
 
@@ -602,12 +602,12 @@ Pfad und nicht an einem zweiten, separat zu haertenden Daemon.
 Der Reverse-Proxy entfernt den eingehenden `Authorization`-Header
 bevor er den GET an go2rtc absetzt. Konkrete Folge:
 
-- Der ESP-Bearer verlaesst den unifix-Prozess nicht.
+- Der ESP-Bearer verlaesst den carvilon-Prozess nicht.
 - Mieter-Session-Cookies werden gar nicht erst zu go2rtc
   weitergereicht (anderer Domain-Scope, Browser sendet sie
   ohnehin nicht im img-Request).
 - Wenn go2rtc in einer spaeteren Saison einen eigenen Bearer-Mode
-  bekommt, fuegt unifix den dann gezielt im Outgoing-Request hinzu;
+  bekommt, fuegt carvilon den dann gezielt im Outgoing-Request hinzu;
   der Klartext-Token aus dem Endgeraet wird NIE direkt
   durchgereicht.
 
@@ -620,7 +620,7 @@ solange es auf 127.0.0.1 gebunden ist. Operator-Pflicht:
 - `api.listen` in go2rtc.yaml MUSS `127.0.0.1:1984` sein (siehe
   go2rtc.yaml.example im Repo-Root).
 - Iptables / firewall darf 1984 nicht extern oeffnen.
-- unifix-server bleibt einzige Frontline-Komponente.
+- carvilon-server bleibt einzige Frontline-Komponente.
 
 ### 9.3 Profil-Source-URLs sind Klartext
 
@@ -636,5 +636,5 @@ Konsequenz:
   funktionslos und der Stream faellt aus.
 
 Eine spaetere Saison kann go2rtc hinter Tailscale oder einer
-unifix-eigenen AES-Wrapper-Schicht legen; fuer S14-01 reicht das
+carvilon-eigenen AES-Wrapper-Schicht legen; fuer S14-01 reicht das
 Loopback-Binding.

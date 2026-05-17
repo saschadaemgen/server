@@ -108,7 +108,7 @@ func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
 }
 
 // Saison 13-07: extras.door_thumbnail carries the intercom MAC.
-// IntercomMAC parses it back out so unifix can auto-resolve a
+// IntercomMAC parses it back out so carvilon can auto-resolve a
 // door by its calling intercom without admin-curated mapping.
 func TestLookupDoorForIntercom_Found(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

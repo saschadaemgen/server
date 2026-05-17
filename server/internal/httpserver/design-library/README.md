@@ -1,6 +1,6 @@
-# unifix · Frontend Library
+# carvilon · Frontend Library
 
-Production-ready, framework-free HTML/CSS/JS for the unifix tenant
+Production-ready, framework-free HTML/CSS/JS for the carvilon tenant
 intercom viewer and the Hausverwalter admin panel.
 
 ## Files
@@ -50,9 +50,9 @@ at the top.
   </div>
   <script src="/static/interactions.js"></script>
   <script>
-    unifix.connectSSE("/intercom/{{.Token}}/events", {
-      onDoorbellStart:  () => unifix.openOverlay("ringing"),
-      onDoorbellCancel: () => unifix.closeOverlay("ringing"),
+    carvilon.connectSSE("/intercom/{{.Token}}/events", {
+      onDoorbellStart:  () => carvilon.openOverlay("ringing"),
+      onDoorbellCancel: () => carvilon.closeOverlay("ringing"),
       onHistoryUpdate:  () => location.reload(),
     });
   </script>
@@ -87,22 +87,22 @@ Themes are switched by setting `data-theme` on `<html>`:
 ```
 
 `interactions.js` persists the user's choice in `localStorage`
-(`unifix.theme`). It also handles `"system"` by following the OS
+(`carvilon.theme`). It also handles `"system"` by following the OS
 `prefers-color-scheme` and re-applying on change.
 
 JS API:
 
 ```js
-unifix.setTheme("dark" | "light" | "system");
-unifix.cycleTheme();          // dark → light → system → dark
-unifix.openSheet("history");
-unifix.closeSheet("history");
-unifix.openOverlay("ringing");
-unifix.closeOverlay("ringing");
-unifix.openModal("magic-link");
-unifix.closeModal("magic-link");
-unifix.setDND(true);
-unifix.connectSSE(url, handlers);
+carvilon.setTheme("dark" | "light" | "system");
+carvilon.cycleTheme();          // dark → light → system → dark
+carvilon.openSheet("history");
+carvilon.closeSheet("history");
+carvilon.openOverlay("ringing");
+carvilon.closeOverlay("ringing");
+carvilon.openModal("magic-link");
+carvilon.closeModal("magic-link");
+carvilon.setDND(true);
+carvilon.connectSSE(url, handlers);
 ```
 
 ## Declarative attributes
@@ -137,7 +137,7 @@ event: history_update
 data:  { "items": [...] }
 ```
 
-Wire them up with `unifix.connectSSE(url, handlers)` — see the
+Wire them up with `carvilon.connectSSE(url, handlers)` — see the
 tenant-routes example above.
 
 ## Browser support

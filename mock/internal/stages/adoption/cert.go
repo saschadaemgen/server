@@ -63,7 +63,7 @@ func generateAndPersist(crtPath, keyPath string, hostnames []string, ips []net.I
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName: "unifix-mock",
+			CommonName: "carvilon-mock",
 		},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(certValidity),

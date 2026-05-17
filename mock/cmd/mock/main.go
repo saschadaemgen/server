@@ -1,7 +1,7 @@
 // mock is the stand-alone runner for the UA Intercom Viewer
 // simulator. It is preserved for saison-research and stage tests;
 // production deployment embeds the same code as a library inside
-// unifix-server.
+// carvilon-server.
 package main
 
 import (
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	host, _ := os.Hostname()
-	fmt.Printf("unifix mock starting host=%s go=%s\n", host, runtime.Version())
+	fmt.Printf("carvilon mock starting host=%s go=%s\n", host, runtime.Version())
 	fmt.Printf("identity: %s\n", v.Identity())
 
 	if !*run {
@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// In stand-alone mode the only consumer is this logger. The
-	// embedded library path inside unifix-server reads the same
+	// embedded library path inside carvilon-server reads the same
 	// channels through the mock manager.
 	go func() {
 		for ev := range v.Events() {

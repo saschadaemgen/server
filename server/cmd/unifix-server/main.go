@@ -206,7 +206,7 @@ func main() {
 		}
 	}()
 
-	log.Info("unifix-server starting",
+	log.Info("carvilon-server starting",
 		"addr", cfg.ListenAddr,
 		"dev_mode", cfg.DevMode,
 		"db", cfg.DBPath,

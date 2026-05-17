@@ -1,5 +1,5 @@
 // Package mock exposes the UA Intercom Viewer simulator as an
-// importable library. The unifix-server embeds Viewer instances
+// importable library. The carvilon-server embeds Viewer instances
 // as goroutines so it can read incoming doorbell events directly
 // from channels instead of going through IPC.
 //
@@ -101,7 +101,7 @@ type DoorbellEvent struct {
 	RoomID         string    // WebRTC room id, submessage field_9
 	CancelToken    string    // one-shot match key for the cancel push, submessage field_10
 	CreateTimeUnix int64     // UDM-side unix seconds, submessage field_14
-	ReceivedAt     time.Time // unifix-server clock at handler dispatch
+	ReceivedAt     time.Time // carvilon-server clock at handler dispatch
 	RawBody        []byte    // original protobuf body (already base64-decoded)
 }
 

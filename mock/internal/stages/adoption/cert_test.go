@@ -86,19 +86,19 @@ func TestEnsureServerCert_RegeneratesAfterDeletion(t *testing.T) {
 func TestEnsureServerCert_SANsIncludeHostnameAndIP(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := EnsureServerCert(dir,
-		[]string{"unifix-mock"},
+		[]string{"carvilon-mock"},
 		[]net.IP{net.ParseIP("192.168.1.42")}); err != nil {
 		t.Fatalf("EnsureServerCert: %v", err)
 	}
 	cert := parseCert(t, dir)
 	foundDNS := false
 	for _, n := range cert.DNSNames {
-		if n == "unifix-mock" {
+		if n == "carvilon-mock" {
 			foundDNS = true
 		}
 	}
 	if !foundDNS {
-		t.Errorf("DNS SAN missing 'unifix-mock', got %v", cert.DNSNames)
+		t.Errorf("DNS SAN missing 'carvilon-mock', got %v", cert.DNSNames)
 	}
 	foundIP := false
 	for _, ip := range cert.IPAddresses {

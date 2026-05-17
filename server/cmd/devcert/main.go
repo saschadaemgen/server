@@ -1,5 +1,5 @@
 // devcert generates a self-signed RSA-2048 certificate plus key
-// for local TLS testing of unifix-server. NOT for production.
+// for local TLS testing of carvilon-server. NOT for production.
 //
 // Usage:
 //
@@ -48,7 +48,7 @@ func main() {
 	now := time.Now()
 	tmpl := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{Organization: []string{"unifix dev"}},
+		Subject:               pkix.Name{Organization: []string{"carvilon dev"}},
 		NotBefore:             now,
 		NotAfter:              now.Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

@@ -1,4 +1,4 @@
-# unifix Architecture
+# carvilon Architecture
 
 **Status:** Saison 14 laufend, 16. Mai 2026. S14-01 (Stream-
 Backend go2rtc), S14-01b (Idle-View-Modus mit Bildschirmschoner,
@@ -19,10 +19,10 @@ UniFi-Welt (UDM + Hub Door + echte Intercom) <- bleibt unveraendert
    |
    | MQTT/mTLS, WebSocket/JWT, HTTPS-Adoption
    v
-unifix-Host (RPi pro Standort)
-   - mock-Viewer-Goroutines (im unifix-server-Prozess,
+carvilon-Host (RPi pro Standort)
+   - mock-Viewer-Goroutines (im carvilon-server-Prozess,
      simulieren UA Intercom Viewer fuer das UDM)
-   - unifix-server (HTTPS, Admin- und Mieter-UI, SSE-Hub,
+   - carvilon-server (HTTPS, Admin- und Mieter-UI, SSE-Hub,
      Auth, Persistenz, UA-API-Client)
    - go2rtc (Stream-Bridge fuer RTSP-zu-Klient, Saison 13+)
    |
@@ -55,9 +55,9 @@ Source-Code:      geschlossen, kein Push zu Remote-Hostern
 
 ```
 Pro Kunden-Anlage:
-   1x RPi mit unifix-server-Binary
+   1x RPi mit carvilon-server-Binary
    1x oder mehr UDM-SE als UniFi-Controller
-   N x Mock-Viewer-Goroutines im unifix-server-Prozess
+   N x Mock-Viewer-Goroutines im carvilon-server-Prozess
    N x Mieter-Endgeraete (Browser, ESP, etc.)
 
 Pro Sascha-Kunde (Multi-Anlage):
@@ -75,12 +75,12 @@ Lizenz-Server (spaetere Saison, zeitlich offen):
 
 Saison-10-Vision sah hier einen Pool-Manager mit Subprozessen vor.
 Diese ist durch die Saison-12-Architektur-Entscheidung abgeloest:
-Mock-Viewer laufen als Goroutines im unifix-server-Prozess. Siehe
+Mock-Viewer laufen als Goroutines im carvilon-server-Prozess. Siehe
 Sektion 10 fuer die Begruendung.
 
 Aktueller Lebenszyklus eines Mock-Viewers:
 
-1. Admin im unifix-Admin-UI (`/a/mocks`): "Neuen Mock-Viewer anlegen"
+1. Admin im carvilon-Admin-UI (`/a/mocks`): "Neuen Mock-Viewer anlegen"
    (Name vom Admin frei vergeben, MAC optional; bei leer wird eine
    Ubiquiti-OUI-MAC generiert)
 2. `mockmanager.AddViewer` persistiert in `mock_viewers`-Tabelle und
@@ -92,7 +92,7 @@ Aktueller Lebenszyklus eines Mock-Viewers:
 6. UDM schickt Adoption-POST an `Mock:port` (Stage 4)
 7. `mock.Viewer` baut WS (Stage 5) und MQTT (Stage 6) auf
 8. UDM sieht Mock als online (gruener Punkt)
-9. Admin im unifix-Admin-UI: bei dem Mock-Viewer auf "Login-Link"
+9. Admin im carvilon-Admin-UI: bei dem Mock-Viewer auf "Login-Link"
    klicken; ein Modal zeigt eine 24h-gueltige Magic-Link-URL
    (`/m/login?t=...`)
 10. Admin verschickt den Magic-Link manuell an den Mieter
@@ -135,12 +135,12 @@ Ansicht der UA-User aus der Developer-API. Sie ist seit Saison
        die literale URL `POST /webviewer/doors/standby/unlock`.
        Server liest `viewers.paired_intercom_mac` (Admin-Setting
        per "Verknuepfte Klingel"-Dropdown).
-11. unifix-server resolved die Door-UUID via
+11. carvilon-server resolved die Door-UUID via
     `uaapi.LookupDoorForIntercom(intercom-mac)`: iteriert ueber
     `GET /api/v1/developer/doors` und matched die MAC gegen
     `extras.door_thumbnail` (Pfad-Form
     `/preview/reader_<intercom-mac>_<door-uuid>_<ts>.jpg`).
-12. unifix-server proxied via
+12. carvilon-server proxied via
     `PUT /api/v1/developer/doors/<door-uuid>/unlock` gegen die
     UniFi Access Developer-API mit Auth
     `Authorization: Bearer <token>`
@@ -293,7 +293,7 @@ Saison 13:  Sammelsaison mit fuenf Sub-Themen rund um Doorbell-
               - GET /esp/stream.mjpeg - Reverse-Proxy auf
                 UNIFIX_STREAM_BACKEND_URL (503 wenn unkonfiguriert,
                 Authorization-Header wird vor Forward gestrippt)
-              - cmd/unifix-cli mit "esp adopt"-Subcommand:
+              - cmd/carvilon-cli mit "esp adopt"-Subcommand:
                 schreibt eine ESP-Viewer-Reihe mit frischem Bearer-
                 Token, Klartext einmalig auf stdout
             Nutzt die existierende viewers-Tabelle (type='esp')
@@ -492,10 +492,10 @@ Saison 17:  Production-Hardening + Lizenz-Server-Fleisch.
 
 Saison 18:  Eigene ESP32-Intercom-Hardware. ESP32-basiertes
             Intercom 200-300 EUR, eigene Adapter-Schicht unter
-            internal/access/unifix/*. Nutzt die /esp/-API aus
+            internal/access/carvilon/*. Nutzt die /esp/-API aus
             S13-08 als Wire-Format-Basis.
 
-Saison 19:  Cloud-Bridge (3-Stufen-Modell Stufe 2). unifix-VPS,
+Saison 19:  Cloud-Bridge (3-Stufen-Modell Stufe 2). carvilon-VPS,
             Authenticated Stream-Tunnel pro Klingel-Event,
             Mobile-App holt Stream via VPS. Skalierbar fuer
             viele Hausverwalter.
@@ -506,7 +506,7 @@ Saison 20:  Premium UA-Stream-Qualitaet (Stufe 3). Direkter
             Echo-Cancellation.
 ```
 
-## 8. Was unifix NICHT ist
+## 8. Was carvilon NICHT ist
 
 - Kein UniFi-Replacement (UDM + Hub Door + echte Kamera bleiben Pflicht)
 - Kein Open-Source-Projekt
@@ -518,7 +518,7 @@ Saison 20:  Premium UA-Stream-Qualitaet (Stufe 3). Direkter
 
 ## 9. Plattform-Daten-Schicht (Saison 12)
 
-unifix-server haelt eine eigene SQLite-Datenbank fuer Plattform-
+carvilon-server haelt eine eigene SQLite-Datenbank fuer Plattform-
 Daten. UA-User-Stammdaten (Mieter-Identitaet, NFC-Karten, PIN-Codes,
 Zutritts-Policies) bleiben in der UniFi Access Developer-API; die
 Plattform-DB referenziert sie NICHT mehr als Foreign-Key (Saison
@@ -531,7 +531,7 @@ Lebenszyklus auch ohne UA-User existieren kann).
 Treiber:        modernc.org/sqlite v1.50.1
                 Pure-Go-Port von SQLite. Kein CGO, kompatibel
                 mit CGO_ENABLED=0 (docs/security.md Sektion 4).
-Pfad:           ./state/unifix.db  (Default, ueberschreibbar via
+Pfad:           ./state/carvilon.db  (Default, ueberschreibbar via
                 UNIFIX_DB_PATH-env)
 File-Mode:      0600 auf Linux, Windows ignoriert POSIX-Modes
 Parent-Mode:    0700 (vom db.Open mkdir-Aufruf)
@@ -749,11 +749,11 @@ NICHT MEHR im Schema (S13-07 entfernt):
 
 ### 10.1 Architektur-Entscheidung
 
-Mock-Viewer laufen als Goroutines IM unifix-server-Prozess, NICHT als
+Mock-Viewer laufen als Goroutines IM carvilon-server-Prozess, NICHT als
 separate Prozesse. Beschluss Sascha 12. Mai 2026. Begruendung:
 
 1. **Plattform-First-Architektur:** ein Binary fuer alles. Ein
-   einzelner systemd-Service `unifix-server` startet und stoppt die
+   einzelner systemd-Service `carvilon-server` startet und stoppt die
    gesamte Anlage. Erleichtert spaetere Updates ueber den
    Lizenz-Server, sobald der ausgebaut wird (zeitlich offen,
    ehemals Saison 14).
@@ -766,7 +766,7 @@ separate Prozesse. Beschluss Sascha 12. Mai 2026. Begruendung:
    aus dem Channel. Kein RPC zwischen Prozessen, keine Socket-Datei,
    keine MessagePack-Serialisierung.
 
-### 10.2 Library-API `unifix.local/mock`
+### 10.2 Library-API `carvilon.local/mock`
 
 ```
 mock.Config              Per-Viewer-Settings: MAC, IPv4, Name,
@@ -890,7 +890,7 @@ Token-Service:  magiclink.Service mit Methoden
                 die Session-Erstellung. Token-Foreign-Key auf
                 mock_viewers.mac mit ON DELETE CASCADE.
 
-Cookie:         Name "unifix_m_session", Pfad "/m/", HttpOnly,
+Cookie:         Name "carvilon_m_session", Pfad "/m/", HttpOnly,
                 SameSite=Strict, Secure (ausser DevMode).
                 MaxAge 30d entsprechend Session-TTL.
 
@@ -934,7 +934,7 @@ Service:        adminsession.Service mit Methoden
                 CleanupExpired(ctx).
                 DefaultIdleTimeout = 30 * 24 Stunden.
 
-Cookie:         Name "unifix_a_session", Pfad "/a/". Sonst wie
+Cookie:         Name "carvilon_a_session", Pfad "/a/". Sonst wie
                 Mieter-Cookie (HttpOnly, SameSite=Strict, Secure
                 ausser DevMode, MaxAge 30d).
 
@@ -965,7 +965,7 @@ Storage:        AES-256-GCM-verschluesselt in der
 Lebenszyklus:   Admin setzt einmalig pro Anlage in /a/settings
                 eine Base-URL (Klartext in platform_config unter
                 "ua_api_base_url") und einen API-Token. Aenderbar
-                jederzeit. unifix-server baut den uaapi.Client
+                jederzeit. carvilon-server baut den uaapi.Client
                 lazy nach dem Setting-Save (kein Restart noetig,
                 main.SetUAClient swappt zur Laufzeit).
 
@@ -1079,7 +1079,7 @@ Hinweis:         Die Mieter-/Users-Page ist seit S12-06 rein
 
 ## 14. Auto-Door-Resolution (Saison 13-07)
 
-Vor S13-07 hatte unifix ein admin-kuratiertes Mapping von
+Vor S13-07 hatte carvilon ein admin-kuratiertes Mapping von
 intercom-MAC zu door-UUID in der `platform_config`-Tabelle. Bei
 jeder neuen Klingel im Hauseingang musste der Admin manuell den
 Eintrag pflegen.
@@ -1092,7 +1092,7 @@ das Feld `extras.door_thumbnail` mit einem URL-Pfad der Form
 ```
 
 Das ist die Verknuepfung intercom-zu-tuer in der UA-Antwort selbst.
-unifix iteriert ueber `ListDoors()`, parst die Thumbnail-URL und
+carvilon iteriert ueber `ListDoors()`, parst die Thumbnail-URL und
 laesst das admin-kuratierte Mapping komplett weg.
 
 ```
@@ -1124,7 +1124,7 @@ Tuer-Nav-Link.
 ### 15.1 Zweck
 
 Eigener API-Pfad fuer ESP-Endgeraete getrennt vom Mieter-Web-API.
-Ein ESP-Endgeraet wird vom unifix-Server adoptiert wie ein
+Ein ESP-Endgeraet wird vom carvilon-Server adoptiert wie ein
 Mock-Viewer (eigene Zeile in `viewers` mit `type=esp`). Bearer-
 Token-Auth, eigene Middleware (`requireESPBearer`), eigene
 Endpoint-Familie unter `/esp/`.
@@ -1140,13 +1140,13 @@ Magic-Link-Session-Cookie.
 Phase A (Saison 13-08, fertig):
   Workflow 1 (Discover-First):
     - ESP sendet POST /esp/discover (im LAN, ohne Auth)
-    - unifix-Server traegt in esp_pending_devices ein
+    - carvilon-Server traegt in esp_pending_devices ein
     - Admin klickt im /a/esp-viewers auf "Adoptieren"
     - Server generiert frischen 32-Byte-Bearer-Token
     - ESP holt den Token via GET /esp/discover/status
       (Long-Poll, einmalige Klartext-Auslieferung)
   Workflow 2 (CLI-First, headless):
-    - Operator: unifix-cli esp adopt --mac ... --name ...
+    - Operator: carvilon-cli esp adopt --mac ... --name ...
                                      [--intercom <mac>]
                                      [--mieter <ua-user-id>]
     - CLI generiert Bearer-Token + INSERT in viewers
@@ -1192,7 +1192,7 @@ Wire-Format-Details fuer alle Endpoints siehe
                      dropdown, optionale UA-User-Verknuepfung.
                      "Token erneuern" + "Loeschen"-Aktionen.
 
-unifix-cli           Headless-Tool fuer CLI-First-Adoption.
+carvilon-cli           Headless-Tool fuer CLI-First-Adoption.
    esp adopt         Generiert Token + INSERT viewers + stdout.
    --mac <MAC>       Pflicht.
    --name <NAME>     Pflicht (max 64 chars).
@@ -1203,7 +1203,7 @@ unifix-cli           Headless-Tool fuer CLI-First-Adoption.
                      loesste die buggy 404-Notiz aus S13-08 ab).
    --mieter <UA-ID>  Optional - in linked_ua_user_id; rein
                      Annotation, kein Routing-Effekt.
-   --db <PATH>       Optional - default ./state/unifix.db.
+   --db <PATH>       Optional - default ./state/carvilon.db.
 ```
 
 ### 15.5 Stream-Backend-Reverse-Proxy
@@ -1211,7 +1211,7 @@ unifix-cli           Headless-Tool fuer CLI-First-Adoption.
 `/esp/stream.mjpeg` ist ein Profile-bewusster MJPEG-Proxy auf
 `UNIFIX_STREAM_BACKEND_URL`. Der Authorization-Header wird vor
 dem Forward gestrippt (das Backend ist typisch ein lokaler
-go2rtc-Daemon ohne Auth; ESP-Token darf nie ueber den unifix-
+go2rtc-Daemon ohne Auth; ESP-Token darf nie ueber den carvilon-
 Prozess hinaus). Wenn die Env-Variable nicht gesetzt ist:
 HTTP 503 "stream backend not configured". Volle Spezifikation
 in Sektion 16 weiter unten (Saison 14-01: go2rtc-Profile +
@@ -1221,7 +1221,7 @@ S14-01-FIX01-URL-Hardening).
 
 ## 16. Stream-Backend (Saison 14-01, go2rtc)
 
-unifix nutzt go2rtc als Stream-Bridge. UDM (UniFi Protect) liefert
+carvilon nutzt go2rtc als Stream-Bridge. UDM (UniFi Protect) liefert
 RTSPS auf Port 7441, go2rtc transmuxt das fuer alle weiteren
 Klienten in beliebigen Formaten (MJPEG fuer ESP und Browser; HLS
 und WebRTC sind fuer spaetere Saisons vorbereitet aber noch nicht
@@ -1240,7 +1240,7 @@ go2rtc-Daemon (RPi, localhost:1984)
     +-- intercom_browser  (ffmpeg:intercom_high#video=mjpeg, 12 FPS)
     | HTTP MJPEG
     v
-unifix-server (Pass-through-Proxy mit Flush pro Read)
+carvilon-server (Pass-through-Proxy mit Flush pro Read)
     +-- /esp/stream.mjpeg          (Bearer-Auth, ESP-Tier)
     +-- /webviewer/stream.mjpeg    (Session-Auth, Mieter-Tier)
     | HTTPS multipart/x-mixed-replace
@@ -1260,7 +1260,7 @@ nullable TEXT). Resolution-Order in `ViewerInfo.ResolveStreamProfile`:
 
 Die Convention-Defaults sind in lock-step mit der
 `go2rtc.yaml.example`-Vorlage. Wird ein Convention-Profil in go2rtc
-umbenannt OHNE den unifix-Code mitzubewegen, zeigen neue Viewer auf
+umbenannt OHNE den carvilon-Code mitzubewegen, zeigen neue Viewer auf
 ein nicht existentes Source - die Admin-UI raeumt das auf, sobald
 ein konkretes Profil per Dropdown gewaehlt wird.
 
@@ -1294,7 +1294,7 @@ gemeinsame Kern fuer ESP- und Mieter-Pfad. Wesentliche Punkte:
   Konkatenation). Tolerant gegenueber Trailing-Slashes und
   Fragments; ein konfigurierter Path-Prefix bleibt erhalten.
 - Authorization-Header wird NICHT geforwarded (vermeidet, dass
-  der ESP-Bearer den unifix-Prozess verlaesst).
+  der ESP-Bearer den carvilon-Prozess verlaesst).
 - Response-Header werden 1:1 durchgereicht (Content-Type ist
   typisch `multipart/x-mixed-replace;boundary=frame`).
 - Body wird mit 32-KB-Buffer gelesen, jeder Chunk sofort via
@@ -1321,8 +1321,8 @@ UNIFIX_STREAM_BACKEND_URL  go2rtc Base-URL ohne Pfad-Suffix.
 
 Die `streams.Client`-Instanz wird in `main.go` einmalig beim Boot
 gebaut. Hot-Reload bei Env-Var-Aenderung gibt es bewusst nicht;
-Operator startet `unifix-server` neu wenn er die go2rtc-Adresse
-aendert (Production: `systemctl restart unifix-server`).
+Operator startet `carvilon-server` neu wenn er die go2rtc-Adresse
+aendert (Production: `systemctl restart carvilon-server`).
 
 ## 17. Idle-View-Modus + Wetter-Backend (Saison 14-01b)
 

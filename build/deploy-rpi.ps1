@@ -6,21 +6,21 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 $rpiHost = "sash710@192.168.1.42"
-$rpiTarget = "$rpiHost`:~/unifix-server/bin/"
+$rpiTarget = "$rpiHost`:~/carvilon-server/bin/"
 
 Write-Host "Ensuring target directory exists on RPi..."
-ssh $rpiHost "mkdir -p ~/unifix-server/bin"
+ssh $rpiHost "mkdir -p ~/carvilon-server/bin"
 
 Write-Host "Copying binaries..."
-scp bin\unifix-server-linux-arm64 $rpiTarget
+scp bin\carvilon-server-linux-arm64 $rpiTarget
 scp bin\mock-linux-arm64 $rpiTarget
 scp bin\mqtt-spy-linux-arm64 $rpiTarget
 scp bin\genkey-linux-arm64 $rpiTarget
-scp bin\unifix-cli-linux-arm64 $rpiTarget
+scp bin\carvilon-cli-linux-arm64 $rpiTarget
 scp bin\license-server-linux-arm64 $rpiTarget
 
 Write-Host "Setting executable permissions..."
-ssh $rpiHost "chmod +x ~/unifix-server/bin/*-linux-arm64"
+ssh $rpiHost "chmod +x ~/carvilon-server/bin/*-linux-arm64"
 
 Write-Host "Done. Files on RPi:"
-ssh $rpiHost "ls -la ~/unifix-server/bin/"
+ssh $rpiHost "ls -la ~/carvilon-server/bin/"

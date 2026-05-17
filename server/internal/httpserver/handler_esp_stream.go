@@ -3,7 +3,7 @@
 // trailing slash on UNIFIX_STREAM_BACKEND_URL or a stray query
 // fragment cannot break the path, and add structured logging
 // per request (route + profile + backend + viewer_mac) so the
-// operator can see in /tmp/unifix.log what each stream request
+// operator can see in /tmp/carvilon.log what each stream request
 // resolved to.
 //
 // The ESP firmware pulls an MJPEG stream from /esp/stream.mjpeg
@@ -24,7 +24,7 @@
 //     http.Flusher.Flush per chunk so the ESP/browser sees frames
 //     immediately instead of waiting for io.Copy's buffer drain.
 //   - drop the inbound Authorization header before forwarding so
-//     the bearer token never leaves the unifix process.
+//     the bearer token never leaves the carvilon process.
 //
 // When UNIFIX_STREAM_BACKEND_URL is empty (DevMode bootstrap)
 // every request gets 503 with an explicit log warn at startup; no
@@ -75,7 +75,7 @@ func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {
 // side mechanics are identical.
 //
 // label is "esp" or "mieter" and flows into the log line so a
-// tail of /tmp/unifix.log can tell the two flows apart.
+// tail of /tmp/carvilon.log can tell the two flows apart.
 func (s *Server) proxyMJPEGStream(w http.ResponseWriter, r *http.Request, profile, label, mac string) {
 	if s.cfg.StreamBackendURL == "" {
 		s.log.Warn("stream proxy: backend not configured",
@@ -111,7 +111,7 @@ func (s *Server) proxyMJPEGStream(w http.ResponseWriter, r *http.Request, profil
 		return
 	}
 	// Forward Accept so go2rtc can pick the right Content-Type;
-	// strip Authorization so the ESP bearer never leaves unifix.
+	// strip Authorization so the ESP bearer never leaves carvilon.
 	if accept := r.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}

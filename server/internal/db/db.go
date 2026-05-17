@@ -1,4 +1,4 @@
-// Package db opens the unifix-server sqlite database and applies
+// Package db opens the carvilon-server sqlite database and applies
 // pending schema migrations. The database stores platform data:
 // admin users, mock viewers, magic-link tokens, and the two session
 // tables (mieter_sessions, admin_sessions). Since Saison 12-06 the

@@ -1,5 +1,5 @@
 // Package config loads server runtime configuration from
-// environment variables and validates it. Unifix-server is a
+// environment variables and validates it. Carvilon-server is a
 // single-binary daemon, so config lives in the process
 // environment rather than in a file: easier to inject via systemd
 // unit files and trivial to override in dev.
@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Config holds runtime settings for unifix-server.
+// Config holds runtime settings for carvilon-server.
 type Config struct {
 	// ListenAddr is the bind address. Default ":8443" for TLS,
 	// ":8080" for DevMode.
@@ -23,7 +23,7 @@ type Config struct {
 	KeyFile  string
 
 	// DBPath is the SQLite database location. Default
-	// "./state/unifix.db".
+	// "./state/carvilon.db".
 	DBPath string
 
 	// DevMode enables plain HTTP and disables the Secure cookie
@@ -46,10 +46,11 @@ type Config struct {
 	// Default "./state/mocks".
 	MockStateDir string
 
-	// SecretsKeySet mirrors whether UNIFIX_SECRETS_KEY is set in
-	// the environment. The actual key bytes are read by the
-	// secrets package; Config only carries the boolean so
-	// Validate can warn (not fail) when the operator forgot it.
+	// SecretsKeySet mirrors whether CARVILON_SECRETS_KEY (or the
+	// legacy UNIFIX_SECRETS_KEY) is set in the environment. The
+	// actual key bytes are read by the secrets package; Config
+	// only carries the boolean so Validate can warn (not fail)
+	// when the operator forgot it.
 	SecretsKeySet bool
 
 	// StreamBackendURL is the upstream URL the /esp/stream.mjpeg
@@ -61,37 +62,65 @@ type Config struct {
 }
 
 const (
-	defaultDBPath       = "./state/unifix.db"
+	defaultDBPath       = "./state/carvilon.db"
 	defaultListenDev    = ":8080"
 	defaultListenTLS    = ":8443"
 	defaultBaseURLDev   = "http://localhost:8080"
 	defaultMockStateDir = "./state/mocks"
-	envListenAddr       = "UNIFIX_LISTEN_ADDR"
-	envCertFile         = "UNIFIX_CERT_FILE"
-	envKeyFile          = "UNIFIX_KEY_FILE"
-	envDBPath           = "UNIFIX_DB_PATH"
-	envDevMode          = "UNIFIX_DEV_MODE"
-	envBaseURL          = "UNIFIX_BASE_URL"
-	envServerIPv4       = "UNIFIX_SERVER_IPV4"
-	envMockStateDir     = "UNIFIX_MOCK_STATE_DIR"
-	envSecretsKey       = "UNIFIX_SECRETS_KEY"
-	envStreamBackendURL = "UNIFIX_STREAM_BACKEND_URL"
+	// Canonical CARVILON_* env-var names. The matching
+	// UNIFIX_* legacy aliases below stay accepted by lookupEnv()
+	// so a dev-script still exporting the old names keeps working
+	// through a Saison-14 transition cycle.
+	envListenAddr       = "CARVILON_LISTEN_ADDR"
+	envCertFile         = "CARVILON_CERT_FILE"
+	envKeyFile          = "CARVILON_KEY_FILE"
+	envDBPath           = "CARVILON_DB_PATH"
+	envDevMode          = "CARVILON_DEV_MODE"
+	envBaseURL          = "CARVILON_BASE_URL"
+	envServerIPv4       = "CARVILON_SERVER_IPV4"
+	envMockStateDir     = "CARVILON_MOCK_STATE_DIR"
+	envSecretsKey       = "CARVILON_SECRETS_KEY"
+	envStreamBackendURL = "CARVILON_STREAM_BACKEND_URL"
+	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
+	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
+	legacyCertFile         = "UNIFIX_CERT_FILE"
+	legacyKeyFile          = "UNIFIX_KEY_FILE"
+	legacyDBPath           = "UNIFIX_DB_PATH"
+	legacyDevMode          = "UNIFIX_DEV_MODE"
+	legacyBaseURL          = "UNIFIX_BASE_URL"
+	legacyServerIPv4       = "UNIFIX_SERVER_IPV4"
+	legacyMockStateDir     = "UNIFIX_MOCK_STATE_DIR"
+	legacySecretsKey       = "UNIFIX_SECRETS_KEY"
+	legacyStreamBackendURL = "UNIFIX_STREAM_BACKEND_URL"
 )
 
-// FromEnv reads the unifix environment variables and fills in
+// lookupEnv returns the first non-empty env-var value from the
+// given names. Carvilon-prefixed names always come first; the
+// UNIFIX_* aliases stay accepted as a Saison-14 backwards-compat
+// for dev workflows still exporting the old spelling.
+func lookupEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// FromEnv reads the carvilon environment variables and fills in
 // defaults for empty fields.
 func FromEnv() Config {
 	cfg := Config{
-		ListenAddr:       os.Getenv(envListenAddr),
-		CertFile:         os.Getenv(envCertFile),
-		KeyFile:          os.Getenv(envKeyFile),
-		DBPath:           os.Getenv(envDBPath),
-		DevMode:          parseBool(os.Getenv(envDevMode)),
-		BaseURL:          os.Getenv(envBaseURL),
-		ServerIPv4:       os.Getenv(envServerIPv4),
-		MockStateDir:     os.Getenv(envMockStateDir),
-		SecretsKeySet:    os.Getenv(envSecretsKey) != "",
-		StreamBackendURL: os.Getenv(envStreamBackendURL),
+		ListenAddr:       lookupEnv(envListenAddr, legacyListenAddr),
+		CertFile:         lookupEnv(envCertFile, legacyCertFile),
+		KeyFile:          lookupEnv(envKeyFile, legacyKeyFile),
+		DBPath:           lookupEnv(envDBPath, legacyDBPath),
+		DevMode:          parseBool(lookupEnv(envDevMode, legacyDevMode)),
+		BaseURL:          lookupEnv(envBaseURL, legacyBaseURL),
+		ServerIPv4:       lookupEnv(envServerIPv4, legacyServerIPv4),
+		MockStateDir:     lookupEnv(envMockStateDir, legacyMockStateDir),
+		SecretsKeySet:    lookupEnv(envSecretsKey, legacySecretsKey) != "",
+		StreamBackendURL: lookupEnv(envStreamBackendURL, legacyStreamBackendURL),
 	}
 	if cfg.ListenAddr == "" {
 		if cfg.DevMode {

@@ -29,7 +29,7 @@ type UnlockDoorRequest struct {
 	ActorName string `json:"actor_name,omitempty"`
 }
 
-// Door mirrors the read-side fields unifix consumes. ID is the
+// Door mirrors the read-side fields carvilon consumes. ID is the
 // UUID the PUT /doors/{id}/unlock path expects; Name is the
 // human label from the UA Console; HubID/Type help disambiguate
 // across hubs.
@@ -40,7 +40,7 @@ type UnlockDoorRequest struct {
 //
 //	/preview/reader_28704e31e29c_321e5134-..._<ts>.jpg
 //
-// IntercomMAC parses that out so unifix can auto-resolve "which
+// IntercomMAC parses that out so carvilon can auto-resolve "which
 // door does THIS intercom open" without operator-curated mapping.
 type Door struct {
 	ID       string     `json:"id"`

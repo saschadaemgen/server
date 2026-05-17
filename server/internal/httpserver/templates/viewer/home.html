@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>unifix - {{.UnitName}}</title>
+  <title>carvilon - {{.UnitName}}</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
   <style>
@@ -557,8 +557,8 @@
       }
 
       function closeRing() {
-        if (window.unifix && unifix.closeOverlay) {
-          unifix.closeOverlay('ringing');
+        if (window.carvilon && carvilon.closeOverlay) {
+          carvilon.closeOverlay('ringing');
         } else {
           var el = document.querySelector('.ringing');
           if (el) el.classList.remove('is-open');
@@ -567,7 +567,7 @@
       }
 
       // Saison 13-03-HOTFIX2: explizite EventSource statt
-      // unifix.connectSSE-Wrapper. DevTools-Mitschnitt nach
+      // carvilon.connectSSE-Wrapper. DevTools-Mitschnitt nach
       // HOTFIX1 zeigte mehrere parallele eventsource-Verbindungen
       // im Netzwerk-Tab; ein einzelner expliziter EventSource +
       // addEventListener-Aufrufe machen den Lifecycle
@@ -585,31 +585,31 @@
         var raw = data.raw || {};
         var eventID = raw.cancel_token || raw.request_id || '';
         var intercomMAC = raw.device_id || data.door || '';
-        if (window.console) console.log('[unifix] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
+        if (window.console) console.log('[carvilon] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
         // S14-03-FIX02 Sub-1b: a doorbell ring counts as user
         // activity and resets the auto-screensaver timer so the
         // mieter does not get slid back to the screensaver while
         // talking to the visitor.
-        if (window.unifixIdle && window.unifixIdle.resetAutoTimer) {
-          window.unifixIdle.resetAutoTimer();
+        if (window.carvilonIdle && window.carvilonIdle.resetAutoTimer) {
+          window.carvilonIdle.resetAutoTimer();
         }
         // S14-03-FIX03 Sub-2: bump the unread-doorbell badge so
         // the count is visible immediately on the screensaver.
         // The authoritative count arrives shortly after via the
         // unread_count SSE event (commit 6); this local bump is
         // belt-and-braces for the gap.
-        if (window.unifixIdle && window.unifixIdle.bumpUnread) {
-          window.unifixIdle.bumpUnread();
+        if (window.carvilonIdle && window.carvilonIdle.bumpUnread) {
+          window.carvilonIdle.bumpUnread();
         }
         enableRingButtons(eventID, intercomMAC);
-        if (window.unifix && unifix.openOverlay) {
-          unifix.openOverlay('ringing');
+        if (window.carvilon && carvilon.openOverlay) {
+          carvilon.openOverlay('ringing');
         } else if (ringEl) {
           ringEl.classList.add('is-open');
         }
       });
       es.addEventListener('doorbell_cancel', function () {
-        if (window.console) console.log('[unifix] doorbell_cancel');
+        if (window.console) console.log('[carvilon] doorbell_cancel');
         closeRing();
       });
       es.addEventListener('history_update', function () {
@@ -622,12 +622,12 @@
         var data = {};
         try { data = JSON.parse(e.data) || {}; } catch (_) {}
         var n = (typeof data.count === 'number') ? data.count : 0;
-        if (window.unifixIdle && window.unifixIdle.updateUnreadBadge) {
-          window.unifixIdle.updateUnreadBadge(n);
+        if (window.carvilonIdle && window.carvilonIdle.updateUnreadBadge) {
+          window.carvilonIdle.updateUnreadBadge(n);
         }
       });
       es.addEventListener('error', function () {
-        if (window.console) console.warn('[unifix] sse error (browser will reconnect)');
+        if (window.console) console.warn('[carvilon] sse error (browser will reconnect)');
       });
 
       function jsonPost(url, body) {
@@ -648,7 +648,7 @@
         var action = btn.dataset.action;
         var eventID = btn.dataset.eventId || '';
         var intercomMAC = btn.dataset.intercomMac || '';
-        if (window.console) console.log('[unifix] ring-btn click', { action: action, eventID: eventID, intercomMAC: intercomMAC });
+        if (window.console) console.log('[carvilon] ring-btn click', { action: action, eventID: eventID, intercomMAC: intercomMAC });
 
         if (action === 'ignore-call') {
           if (eventID) {
@@ -706,7 +706,7 @@
         // Handler oben, der ueber dataset.intercomMac aufloest.
         if (btn.classList.contains('ring-btn')) return;
         e.preventDefault();
-        if (window.console) console.log('[unifix] standby unlock');
+        if (window.console) console.log('[carvilon] standby unlock');
         fetch('/webviewer/doors/standby/unlock', {
           method: 'POST',
           headers: { 'Accept': 'application/json' },

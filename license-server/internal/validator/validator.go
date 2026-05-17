@@ -1,2 +1,2 @@
-// Package validator will validate license keys presented by unifix-server instances.
+// Package validator will validate license keys presented by carvilon-server instances.
 package validator

@@ -19,15 +19,16 @@ import (
 )
 
 const (
-	envKey      = "UNIFIX_SECRETS_KEY"
-	keyByteLen  = 32
-	keyHexLen   = keyByteLen * 2
-	nonceLength = 12 // GCM standard nonce size
+	envKey       = "CARVILON_SECRETS_KEY"
+	legacyEnvKey = "UNIFIX_SECRETS_KEY"
+	keyByteLen   = 32
+	keyHexLen    = keyByteLen * 2
+	nonceLength  = 12 // GCM standard nonce size
 )
 
 // Sentinel errors.
 var (
-	ErrNoKey         = errors.New("secrets: UNIFIX_SECRETS_KEY env var not set")
+	ErrNoKey         = errors.New("secrets: CARVILON_SECRETS_KEY env var not set (legacy UNIFIX_SECRETS_KEY also accepted)")
 	ErrInvalidKey    = errors.New("secrets: key must be 64 hex chars (32 bytes)")
 	ErrDecryptFailed = errors.New("secrets: decrypt failed (wrong key or corrupted data)")
 )
@@ -39,10 +40,15 @@ type Service struct {
 	key []byte
 }
 
-// New reads UNIFIX_SECRETS_KEY from the environment and parses
-// it as 64 hex characters. Returns ErrNoKey if unset.
+// New reads the secrets master-key env-var and parses it as 64
+// hex characters. The canonical name is CARVILON_SECRETS_KEY;
+// the legacy UNIFIX_SECRETS_KEY is still accepted as a Saison-14
+// rename transition alias. Returns ErrNoKey if neither is set.
 func New() (*Service, error) {
 	raw := os.Getenv(envKey)
+	if raw == "" {
+		raw = os.Getenv(legacyEnvKey)
+	}
 	if raw == "" {
 		return nil, ErrNoKey
 	}

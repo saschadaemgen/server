@@ -15,7 +15,7 @@ package weather
 // a Lucide icon name plus a short German label.
 //
 // The Lucide names are chosen from the icon set already bundled
-// in unifix-server's design-library; the same set ships with the
+// in carvilon-server's design-library; the same set ships with the
 // ESP firmware so /esp/config can pass the icon name straight
 // through.
 //

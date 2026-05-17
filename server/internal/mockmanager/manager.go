@@ -1,5 +1,5 @@
 // Package mockmanager owns the lifecycle of embedded mock viewers
-// inside unifix-server. Each viewer runs as a goroutine hosted by
+// inside carvilon-server. Each viewer runs as a goroutine hosted by
 // the server process; the manager loads persisted specs from the
 // viewers table on boot, starts the goroutines, multiplexes their
 // event channels, and handles admin-driven add / remove operations.

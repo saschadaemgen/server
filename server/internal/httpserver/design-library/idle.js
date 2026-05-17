@@ -275,7 +275,7 @@
   //   - mode switch (setMode calls this at the end of its
   //     transition)
   //   - doorbell event (home.html SSE handler calls
-  //     window.unifixIdle.resetAutoTimer when a ring arrives)
+  //     window.carvilonIdle.resetAutoTimer when a ring arrives)
   //
   // NOT a reset (the timer keeps ticking):
   //   - stream-frame arrivals (browser-internal, no JS event)
@@ -335,8 +335,8 @@
 
   // Expose a tiny hook so the doorbell SSE handler (in home.html,
   // separate <script>) can reset the timer when a ring arrives.
-  window.unifixIdle = window.unifixIdle || {};
-  window.unifixIdle.resetAutoTimer = resetAutoTimer;
+  window.carvilonIdle = window.carvilonIdle || {};
+  window.carvilonIdle.resetAutoTimer = resetAutoTimer;
 
   // -------------------------------------------------------------
   // Saison 14-03-FIX03 Sub-2: unread-doorbell badge runtime.
@@ -344,7 +344,7 @@
   // Three event sources feed the badge:
   //   1. initial fetch /webviewer/unread-count on page load
   //   2. SSE doorbell_start (count +=1, set via the home-page SSE
-  //      script which calls window.unifixIdle.bumpUnread()
+  //      script which calls window.carvilonIdle.bumpUnread()
   //      because it has access to the EventSource we don't)
   //   3. history mode opening (we just fetched the list, the
   //      server marks rows read async, so we drop the badge to 0)
@@ -434,8 +434,8 @@
 
   // Expose for home.html's doorbell SSE handler and for the
   // SSE unread_count listener it'll wire up.
-  window.unifixIdle.bumpUnread = bumpUnread;
-  window.unifixIdle.updateUnreadBadge = updateUnreadBadge;
+  window.carvilonIdle.bumpUnread = bumpUnread;
+  window.carvilonIdle.updateUnreadBadge = updateUnreadBadge;
 
   // -------------------------------------------------------------
   // Trigger buttons: gear (settings), history-action (history),

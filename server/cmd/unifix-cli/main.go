@@ -1,7 +1,7 @@
-// unifix-cli is the operator command-line companion to
-// unifix-server. Currently a single subcommand-tree:
+// carvilon-cli is the operator command-line companion to
+// carvilon-server. Currently a single subcommand-tree:
 //
-//	unifix-cli esp adopt --mac <MAC> --name <NAME>
+//	carvilon-cli esp adopt --mac <MAC> --name <NAME>
 //	                     [--intercom <MAC>] [--mieter <UA-USER-ID>]
 //	                     [--db <PATH>]
 //
@@ -40,7 +40,7 @@ func main() {
 }
 
 func usage(w *os.File) {
-	fmt.Fprintln(w, "usage: unifix-cli <subcommand> [args]")
+	fmt.Fprintln(w, "usage: carvilon-cli <subcommand> [args]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "subcommands:")
 	fmt.Fprintln(w, "  esp adopt    adopt an ESP-Viewer + emit a fresh bearer token")

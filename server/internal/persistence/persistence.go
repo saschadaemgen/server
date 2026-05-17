@@ -1,2 +1,2 @@
-// Package persistence will handle on-disk state for the unifix-server.
+// Package persistence will handle on-disk state for the carvilon-server.
 package persistence

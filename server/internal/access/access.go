@@ -1,4 +1,4 @@
-// Package access ist die Adapter-Schicht zwischen dem unifix-
+// Package access ist die Adapter-Schicht zwischen dem carvilon-
 // Admin-UI und den verschiedenen Access-Backends. In Saison 13
 // gibt es genau einen Backend (UniFi Access via uaapi); spaeter
 // (Saison 16+) kommt eine eigene Hardware-Schicht dazu. Beide

@@ -68,5 +68,5 @@
 
   // Expose for tests / future callers that mutate the DOM and
   // want to re-trigger the sync.
-  window.unifixCarvilon = { adjust: adjustAll };
+  window.carvilonBrand = { adjust: adjustAll };
 })();
