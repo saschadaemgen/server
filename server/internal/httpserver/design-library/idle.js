@@ -49,7 +49,16 @@
     return;
   }
 
+  // Saison 14-XX: drei persistierbare Idle-Defaults im Server-
+  // Vokabular (screensaver | livestream | screen_off). Der
+  // Web-Viewer hat aber nur zwei Render-Pfade - screen_off ist
+  // ein ESP-Hardware-Konzept (Backlight aus). Wir mappen
+  // screen_off hier auf screensaver, damit ein Cross-Device-
+  // Switch am ESP (Mieter setzt am ESP screen_off, Web-Browser
+  // zieht via config.changed nach) keinen leeren Container
+  // rendert.
   var defaultMode = container.getAttribute('data-default-mode') || 'screensaver';
+  if (defaultMode === 'screen_off') defaultMode = 'screensaver';
   if (defaultMode !== 'livestream') defaultMode = 'screensaver';
 
   var autoSeconds = parseInt(container.getAttribute('data-auto-screensaver-seconds') || '0', 10);

@@ -626,6 +626,22 @@
           window.carvilonIdle.updateUnreadBadge(n);
         }
       });
+      // Saison 14-XX: config.changed signalisiert eine server-
+      // seitige Settings-Mutation auf diesem viewer_mac (Mieter-
+      // POST, Admin-Edit, ESP-POST). Wir holen die Seite frisch
+      // statt einzelne DOM-Stellen zu patchen - Settings beruehren
+      // mehrere Stellen (Idle-Default-Mode, Auto-Screensaver-Timer,
+      // pet-Daten im Topbar...), Reload ist robust und billig.
+      // Eine kleine Verzoegerung (180ms) sammelt nahe Multi-Field-
+      // Aenderungen in einen einzigen Reload statt N kaskadierender.
+      var configReloadTimer = null;
+      es.addEventListener('config.changed', function () {
+        if (window.console) console.log('[carvilon] config.changed');
+        if (configReloadTimer) clearTimeout(configReloadTimer);
+        configReloadTimer = setTimeout(function () {
+          location.reload();
+        }, 180);
+      });
       es.addEventListener('error', function () {
         if (window.console) console.warn('[carvilon] sse error (browser will reconnect)');
       });
