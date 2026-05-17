@@ -545,6 +545,90 @@ func TestHub_PublishesToEventBus(t *testing.T) {
 	}
 }
 
+// ---------- Saison 14-XX config.changed ----------
+
+func TestBroadcastConfigChanged_DispatchesToSubscriber(t *testing.T) {
+	src := newFakeSource()
+	h := New(src, nil, quietLogger())
+	sub, cleanup := h.Subscribe(macA)
+	defer cleanup()
+
+	h.BroadcastConfigChanged(context.Background(), macA)
+
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != TypeConfigChanged {
+			t.Errorf("Type = %q, want %q", ev.Type, TypeConfigChanged)
+		}
+		if ev.MockMAC != macA {
+			t.Errorf("MockMAC = %q, want %q", ev.MockMAC, macA)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("subscriber did not receive config.changed")
+	}
+}
+
+func TestBroadcastConfigChanged_FilteredByViewerMAC(t *testing.T) {
+	src := newFakeSource()
+	h := New(src, nil, quietLogger())
+	subA, cleanupA := h.Subscribe(macA)
+	defer cleanupA()
+	subB, cleanupB := h.Subscribe(macB)
+	defer cleanupB()
+
+	h.BroadcastConfigChanged(context.Background(), macA)
+
+	select {
+	case ev := <-subA.Events:
+		if ev.Type != TypeConfigChanged {
+			t.Errorf("subA got Type = %q", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("subA did not receive config.changed")
+	}
+	select {
+	case ev := <-subB.Events:
+		t.Errorf("cross-tenant leak: subB got %+v", ev)
+	case <-time.After(80 * time.Millisecond):
+		// expected: nothing for B
+	}
+}
+
+func TestBroadcastConfigChanged_PublishesToBus(t *testing.T) {
+	src := newFakeSource()
+	bus := eventbus.New()
+	mac := "0c:ea:14:42:42:42"
+	ch := bus.Subscribe(mac)
+	defer bus.Unsubscribe(mac, ch)
+
+	h := NewWithOptions(src, nil, quietLogger(), Options{Bus: bus})
+	h.BroadcastConfigChanged(context.Background(), mac)
+
+	select {
+	case ev := <-ch:
+		if ev.Type != TypeConfigChanged {
+			t.Errorf("ev.Type = %q, want %q", ev.Type, TypeConfigChanged)
+		}
+		if ev.JSON != "{}" {
+			t.Errorf("ev.JSON = %q, want %q", ev.JSON, "{}")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("eventbus subscriber did not receive config.changed")
+	}
+}
+
+func TestBroadcastConfigChanged_EmptyMACNoOp(t *testing.T) {
+	src := newFakeSource()
+	bus := eventbus.New()
+	h := NewWithOptions(src, nil, quietLogger(), Options{Bus: bus})
+	// Without a subscriber: just verify no panic and EventsTotal
+	// stays at zero.
+	h.BroadcastConfigChanged(context.Background(), "")
+	if got := h.Stats().EventsTotal; got != 0 {
+		t.Errorf("EventsTotal = %d, want 0 after empty broadcast", got)
+	}
+}
+
 func TestHub_StartsAndEndsCallLifecycle(t *testing.T) {
 	src := newFakeSource()
 	dir := t.TempDir()

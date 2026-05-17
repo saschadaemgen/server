@@ -101,12 +101,19 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 // dedicated minimal payload {"count": N} so the
 // screensaver badge does not have to dig through .raw.
 //
+// Saison 14-XX: TypeConfigChanged ships an empty `{}` payload -
+// receivers refetch from the relevant config endpoint rather
+// than reading any field on the event itself.
+//
 // The empty line at the end is required by the SSE protocol.
 func writeSSEEvent(w http.ResponseWriter, ev doorbellhub.Event) error {
 	var payload map[string]any
-	if ev.Type == doorbellhub.TypeUnreadCount {
+	switch ev.Type {
+	case doorbellhub.TypeUnreadCount:
 		payload = map[string]any{"count": ev.UnreadCount}
-	} else {
+	case doorbellhub.TypeConfigChanged:
+		payload = map[string]any{}
+	default:
 		payload = map[string]any{
 			"door": doorNameFor(ev),
 			"ts":   time.UnixMilli(ev.CreatedAt).UTC().Format(time.RFC3339),

@@ -83,10 +83,18 @@ type Event struct {
 }
 
 // Event type names. Browser code listens for these.
+//
+// Saison 14-XX TypeConfigChanged: signal-only event that a
+// per-viewer setting has been mutated server-side (the mieter
+// hit /webviewer/settings, the admin hit /a/web-viewers/{mac}/edit,
+// the ESP hit /esp/settings, ...). Subscribers refetch whatever
+// they care about; the event itself carries no payload beyond the
+// type so receivers cannot drift into reading stale fields.
 const (
 	TypeDoorbellStart  = "doorbell_start"
 	TypeDoorbellCancel = "doorbell_cancel"
 	TypeUnreadCount    = "unread_count"
+	TypeConfigChanged  = "config.changed"
 )
 
 // Stats is a debugging snapshot of the hub state.
@@ -373,6 +381,29 @@ func (h *Hub) broadcast(mockMAC string, ev Event) {
 				"type", ev.Type,
 			)
 		}
+	}
+}
+
+// BroadcastConfigChanged fans a TypeConfigChanged event out to
+// every subscriber for viewerMAC, on both the SSE side (web
+// viewers via /webviewer/events) and the eventbus side (ESP
+// viewers via /esp/events). Subscribers refetch their config
+// from /esp/config or /webviewer/settings; the SSE/eventbus
+// payload itself is empty (`{}`) so the receivers cannot drift
+// into reading stale fields.
+//
+// Saison 14-XX. Filter is per-viewer-MAC so no cross-tenant leak.
+func (h *Hub) BroadcastConfigChanged(ctx context.Context, viewerMAC string) {
+	if viewerMAC == "" {
+		return
+	}
+	h.broadcast(viewerMAC, Event{
+		Type:      TypeConfigChanged,
+		MockMAC:   viewerMAC,
+		CreatedAt: time.Now().UnixMilli(),
+	})
+	if h.bus != nil {
+		h.bus.Publish(viewerMAC, eventbus.Event{Type: TypeConfigChanged, JSON: "{}"})
 	}
 }
 
