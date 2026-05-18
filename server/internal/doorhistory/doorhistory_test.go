@@ -593,3 +593,127 @@ func TestHidden_SurvivesCascadeOnHardDelete(t *testing.T) {
 		t.Errorf("hidden row survived hard delete (count=%d)", n)
 	}
 }
+
+// ---------- Admin reads + hard-delete ----------
+
+func TestAdminListAll_IncludesHiddenWithFlag(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+		t.Fatalf("HideEvent: %v", err)
+	}
+	res, err := s.AdminListAll(context.Background(), testMockMAC, ListOpts{})
+	if err != nil {
+		t.Fatalf("AdminListAll: %v", err)
+	}
+	if len(res.Events) != 3 {
+		t.Fatalf("Events len = %d, want 3 (admin sees all)", len(res.Events))
+	}
+	if res.TotalCount != 3 {
+		t.Errorf("TotalCount = %d, want 3", res.TotalCount)
+	}
+	if res.HiddenCount != 1 {
+		t.Errorf("HiddenCount = %d, want 1", res.HiddenCount)
+	}
+	if res.HasMore {
+		t.Errorf("HasMore = true, want false (3/3 fits in default page)")
+	}
+	var hiddenIdx = -1
+	for i, ev := range res.Events {
+		if ev.ID == ids[0] {
+			hiddenIdx = i
+			if !ev.HiddenByViewer {
+				t.Errorf("hidden event %d HiddenByViewer = false", ids[0])
+			}
+			if ev.HiddenAt == nil {
+				t.Errorf("hidden event %d HiddenAt nil", ids[0])
+			}
+		} else if ev.HiddenByViewer {
+			t.Errorf("non-hidden event %d HiddenByViewer = true", ev.ID)
+		}
+	}
+	if hiddenIdx < 0 {
+		t.Errorf("hidden id %d not present in admin list", ids[0])
+	}
+}
+
+func TestAdminListAll_PaginationHasMore(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	base := time.Unix(1747000000, 0)
+	for i := 0; i < 5; i++ {
+		if _, err := s.Insert(ctx, Event{
+			MockMAC:    testMockMAC,
+			EventType:  TypeDoorbellStart,
+			OccurredAt: base.Add(time.Duration(i) * time.Hour),
+		}, nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	res, err := s.AdminListAll(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("AdminListAll: %v", err)
+	}
+	if !res.HasMore {
+		t.Errorf("HasMore = false, want true (2 of 5)")
+	}
+	if res.TotalCount != 5 {
+		t.Errorf("TotalCount = %d, want 5", res.TotalCount)
+	}
+	res2, err := s.AdminListAll(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 4})
+	if err != nil {
+		t.Fatalf("AdminListAll page 3: %v", err)
+	}
+	if res2.HasMore {
+		t.Errorf("last page HasMore = true, want false")
+	}
+}
+
+func TestAdminDeleteEvent_HardDeletes(t *testing.T) {
+	s, d := newStore(t)
+	ids := seedThreeEvents(t, s)
+	if err := s.AdminDeleteEvent(context.Background(), testMockMAC, ids[1]); err != nil {
+		t.Fatalf("AdminDeleteEvent: %v", err)
+	}
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM door_events WHERE id = ?`, ids[1]).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("event still in DB after AdminDeleteEvent")
+	}
+}
+
+func TestAdminDeleteEvent_CrossMACRejected(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	err := s.AdminDeleteEvent(context.Background(), testMockMACB, ids[0])
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-mac delete returned %v, want ErrNotFound", err)
+	}
+}
+
+func TestAdminDeleteAllForViewer_PurgesEverything(t *testing.T) {
+	s, d := newStore(t)
+	seedThreeEvents(t, s)
+	// Add a hidden marker so we can verify cascade.
+	ids, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	if err := s.HideEvent(context.Background(), testMockMAC, ids[0].ID); err != nil {
+		t.Fatalf("seed hide: %v", err)
+	}
+	n, err := s.AdminDeleteAllForViewer(context.Background(), testMockMAC)
+	if err != nil {
+		t.Fatalf("AdminDeleteAllForViewer: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("AdminDeleteAllForViewer returned %d, want 3", n)
+	}
+	// Hidden-Markers are also gone via FK CASCADE.
+	var hidden int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM viewer_hidden_events WHERE viewer_mac = ?`, testMockMAC).Scan(&hidden); err != nil {
+		t.Fatalf("count hidden: %v", err)
+	}
+	if hidden != 0 {
+		t.Errorf("hidden markers survived AdminDeleteAllForViewer (count=%d)", hidden)
+	}
+}

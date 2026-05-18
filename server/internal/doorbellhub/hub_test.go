@@ -396,6 +396,13 @@ func (f *fakeHistory) ListVisible(context.Context, string, doorhistory.ListOpts)
 func (f *fakeHistory) CountVisible(context.Context, string, doorhistory.ListOpts) (int, error) {
 	return 0, nil
 }
+func (f *fakeHistory) AdminListAll(context.Context, string, doorhistory.ListOpts) (doorhistory.AdminListResult, error) {
+	return doorhistory.AdminListResult{}, nil
+}
+func (f *fakeHistory) AdminDeleteEvent(context.Context, string, int64) error    { return nil }
+func (f *fakeHistory) AdminDeleteAllForViewer(context.Context, string) (int, error) {
+	return 0, nil
+}
 
 func TestRun_PersistsAndAssignsEventID(t *testing.T) {
 	src := newFakeSource()

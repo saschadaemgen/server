@@ -122,12 +122,14 @@ type Store interface {
 	UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	AggregateAdmin(ctx context.Context, now time.Time) (AdminStats, error)
-	// Saison 14-04-Phase2 (mieter-side; admin operations in the
-	// follow-up commit).
+	// Saison 14-04-Phase2.
 	HideEvent(ctx context.Context, mockMAC string, eventID int64) error
 	HideAllEvents(ctx context.Context, mockMAC string) (int, error)
 	ListVisible(ctx context.Context, mockMAC string, opts ListOpts) ([]Event, error)
 	CountVisible(ctx context.Context, mockMAC string, opts ListOpts) (int, error)
+	AdminListAll(ctx context.Context, mockMAC string, opts ListOpts) (AdminListResult, error)
+	AdminDeleteEvent(ctx context.Context, mockMAC string, eventID int64) error
+	AdminDeleteAllForViewer(ctx context.Context, mockMAC string) (int, error)
 }
 
 // ErrNotFound is returned by UpdateCancel when no matching open
@@ -684,4 +686,217 @@ func buildVisibleQuery(mockMAC string, opts ListOpts, limit, offset int) (string
 	q += " ORDER BY de.occurred_at DESC, de.id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	return q, args
+}
+
+// ---------- Admin reads + hard-delete (Saison 14-04-Phase2) ----------
+
+// AdminListAll returns the page-of-events for mockMAC as the
+// admin sees it: hidden rows are INCLUDED but flagged via
+// HiddenByViewer + HiddenAt so the template can render the
+// eye-off-icon + tooltip. TotalCount and HiddenCount in the
+// envelope let the per-viewer admin page show the
+// "84 Eintraege - 12 vom Mieter ausgeblendet"-line. HasMore is
+// (offset+len(events)) < TotalCount.
+//
+// Admins always see the full audit trail; the only thing
+// HiddenByViewer changes is rendering.
+func (s *SQLStore) AdminListAll(ctx context.Context, mockMAC string, opts ListOpts) (AdminListResult, error) {
+	if mockMAC == "" {
+		return AdminListResult{Events: []Event{}}, nil
+	}
+	limit, offset := normalizeListOpts(opts)
+	q, args := buildAdminQuery(mockMAC, opts, limit, offset)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return AdminListResult{}, fmt.Errorf("doorhistory: admin list: %w", err)
+	}
+	defer rows.Close()
+	events := make([]Event, 0, limit)
+	for rows.Next() {
+		ev, hiddenAt, err := scanAdminEvent(rows)
+		if err != nil {
+			return AdminListResult{}, err
+		}
+		if hiddenAt.Valid {
+			t := time.Unix(hiddenAt.Int64, 0)
+			ev.HiddenByViewer = true
+			ev.HiddenAt = &t
+		}
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return AdminListResult{}, fmt.Errorf("doorhistory: admin list rows: %w", err)
+	}
+	// Total + Hidden in einer einzigen Aggregat-Query. Filter
+	// (Date-Range) wird beruecksichtigt damit "84 Eintraege" sich
+	// auf das aktuell geladene Filter-Fenster bezieht.
+	total, hidden, err := s.adminCounts(ctx, mockMAC, opts)
+	if err != nil {
+		return AdminListResult{}, err
+	}
+	return AdminListResult{
+		Events:      events,
+		TotalCount:  total,
+		HiddenCount: hidden,
+		HasMore:     offset+len(events) < total,
+	}, nil
+}
+
+func (s *SQLStore) adminCounts(ctx context.Context, mockMAC string, opts ListOpts) (total, hidden int, err error) {
+	q := `SELECT
+	          COUNT(*),
+	          SUM(CASE WHEN vhe.event_id IS NOT NULL THEN 1 ELSE 0 END)
+	      FROM door_events de
+	      LEFT JOIN viewer_hidden_events vhe
+	             ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+	      WHERE de.viewer_mac = ?`
+	args := []any{mockMAC}
+	if !opts.From.IsZero() {
+		q += " AND de.occurred_at >= ?"
+		args = append(args, opts.From.Unix())
+	}
+	if !opts.To.IsZero() {
+		q += " AND de.occurred_at <= ?"
+		args = append(args, endOfDayUnix(opts.To))
+	}
+	var totalRaw sql.NullInt64
+	var hiddenRaw sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&totalRaw, &hiddenRaw); err != nil {
+		return 0, 0, fmt.Errorf("doorhistory: admin counts: %w", err)
+	}
+	return int(totalRaw.Int64), int(hiddenRaw.Int64), nil
+}
+
+// AdminDeleteEvent hard-deletes one door_events row scoped by
+// mockMAC so a stray ID guess cannot wipe another viewer's audit
+// trail. FK CASCADE on viewer_hidden_events purges the matching
+// hidden-marker automatically.
+//
+// Returns ErrNotFound when the row does not exist or does not
+// belong to mockMAC.
+func (s *SQLStore) AdminDeleteEvent(ctx context.Context, mockMAC string, eventID int64) error {
+	if mockMAC == "" || eventID == 0 {
+		return ErrNotFound
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM door_events WHERE id = ? AND viewer_mac = ?`,
+		eventID, mockMAC,
+	)
+	if err != nil {
+		return fmt.Errorf("doorhistory: admin delete: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("doorhistory: admin delete rows: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AdminDeleteAllForViewer hard-deletes every door_events row for
+// mockMAC. Returns the count of deleted rows so the admin UI can
+// surface "84 Eintraege geloescht". FK CASCADE removes the
+// hidden-markers in the same DELETE.
+func (s *SQLStore) AdminDeleteAllForViewer(ctx context.Context, mockMAC string) (int, error) {
+	if mockMAC == "" {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM door_events WHERE viewer_mac = ?`, mockMAC)
+	if err != nil {
+		return 0, fmt.Errorf("doorhistory: admin delete all: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("doorhistory: admin delete all rows: %w", err)
+	}
+	return int(n), nil
+}
+
+func buildAdminQuery(mockMAC string, opts ListOpts, limit, offset int) (string, []any) {
+	q := `SELECT de.id, de.viewer_mac, de.event_type, de.intercom_mac,
+	             de.occurred_at, de.cancelled_at, de.answered_at,
+	             de.ended_at, de.cancel_token, de.room_id, de.read_at,
+	             de.prev_hash, de.entry_hash,
+	             vhe.hidden_at
+	        FROM door_events de
+	        LEFT JOIN viewer_hidden_events vhe
+	               ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+	       WHERE de.viewer_mac = ?`
+	args := []any{mockMAC}
+	if !opts.From.IsZero() {
+		q += " AND de.occurred_at >= ?"
+		args = append(args, opts.From.Unix())
+	}
+	if !opts.To.IsZero() {
+		q += " AND de.occurred_at <= ?"
+		args = append(args, endOfDayUnix(opts.To))
+	}
+	q += " ORDER BY de.occurred_at DESC, de.id DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	return q, args
+}
+
+// scanAdminEvent is the AdminListAll-specific row scan: identical
+// to scanEvent but pulls the joined viewer_hidden_events.hidden_at
+// into a NullInt64 the caller hydrates into HiddenByViewer + HiddenAt.
+func scanAdminEvent(rows *sql.Rows) (Event, sql.NullInt64, error) {
+	var (
+		ev           Event
+		intercomMAC  sql.NullString
+		cancelledAt  sql.NullInt64
+		answeredAt   sql.NullInt64
+		endedAt      sql.NullInt64
+		cancelToken  sql.NullString
+		roomID       sql.NullString
+		readAt       sql.NullInt64
+		prevHash     sql.NullString
+		entryHash    sql.NullString
+		occurredUnix int64
+		hiddenAt     sql.NullInt64
+	)
+	if err := rows.Scan(
+		&ev.ID, &ev.MockMAC, &ev.EventType, &intercomMAC, &occurredUnix,
+		&cancelledAt, &answeredAt, &endedAt,
+		&cancelToken, &roomID, &readAt,
+		&prevHash, &entryHash,
+		&hiddenAt,
+	); err != nil {
+		return Event{}, sql.NullInt64{}, fmt.Errorf("doorhistory: admin scan: %w", err)
+	}
+	ev.OccurredAt = time.Unix(occurredUnix, 0)
+	if intercomMAC.Valid {
+		ev.IntercomMAC = intercomMAC.String
+	}
+	if cancelledAt.Valid {
+		t := time.Unix(cancelledAt.Int64, 0)
+		ev.CancelledAt = &t
+	}
+	if answeredAt.Valid {
+		t := time.Unix(answeredAt.Int64, 0)
+		ev.AnsweredAt = &t
+	}
+	if endedAt.Valid {
+		t := time.Unix(endedAt.Int64, 0)
+		ev.EndedAt = &t
+	}
+	if cancelToken.Valid {
+		ev.CancelToken = cancelToken.String
+	}
+	if roomID.Valid {
+		ev.RoomID = roomID.String
+	}
+	if readAt.Valid {
+		t := time.Unix(readAt.Int64, 0)
+		ev.ReadAt = &t
+	}
+	if prevHash.Valid {
+		ev.PrevHash = prevHash.String
+	}
+	if entryHash.Valid {
+		ev.EntryHash = entryHash.String
+	}
+	return ev, hiddenAt, nil
 }
