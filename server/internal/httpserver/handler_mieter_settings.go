@@ -37,10 +37,15 @@ import (
 )
 
 // mieterSettingsData is the payload for templates/viewer/settings.html.
+//
+// Saison 14-04-Phase2: HistoryCaptureEnabled hydrates the new
+// radio-group "Verlauf-Erfassung" in the inline settings mode and
+// the standalone /webviewer/settings page.
 type mieterSettingsData struct {
 	UnitName               string
 	IdleViewMode           string // "screensaver" or "livestream"
 	AutoScreensaverSeconds int    // 0 = off, otherwise one of AutoScreensaverSecondsAllowed
+	HistoryCaptureEnabled  bool   // true = Mieter sieht Verlauf
 	Flash                  string
 	FlashType              string
 }
@@ -143,6 +148,35 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Saison 14-04-Phase2: history_capture toggle. Akzeptiert "1"
+	// und "0" als string-Form-Werte (HTML radio-input liefert
+	// genau das). Fehlend = unveraendert, ungueltig = 400.
+	var captureApplied *bool
+	if raw, present := r.PostForm["history_capture"]; present && len(raw) > 0 && raw[0] != "" {
+		switch strings.TrimSpace(raw[0]) {
+		case "1", "true":
+			t := true
+			captureApplied = &t
+		case "0", "false":
+			f := false
+			captureApplied = &f
+		default:
+			http.Error(w, "history_capture muss 0 oder 1 sein", http.StatusBadRequest)
+			return
+		}
+	}
+	if captureApplied != nil {
+		if err := s.mockMgr.SetHistoryCaptureEnabled(r.Context(), mac, *captureApplied); err != nil {
+			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+				return
+			}
+			s.log.Error("mieter settings save capture", "err", err, "mac_prefix", safePrefix(mac))
+			http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// Saison 14-XX: config.changed broadcasten damit andere Tabs /
 	// Browser-Sessions auf demselben viewer_mac und (sobald gepaart)
 	// ESP-Geraete ihre Config neu holen. Filter ist pro viewer_mac,
@@ -159,6 +193,9 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 		if autoSecondsApplied != nil {
 			out["auto_screensaver_seconds"] = *autoSecondsApplied
+		}
+		if captureApplied != nil {
+			out["history_capture"] = *captureApplied
 		}
 		_ = json.NewEncoder(w).Encode(out)
 		return
@@ -192,5 +229,6 @@ func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, e
 		UnitName:               info.Name,
 		IdleViewMode:           info.ResolveIdleViewMode(),
 		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
+		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
 	}, nil
 }

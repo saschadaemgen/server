@@ -364,6 +364,68 @@ func TestMieterSettingsPost_AcceptsScreenOff(t *testing.T) {
 	}
 }
 
+// TestMieterSettingsPost_HistoryCaptureToggle covers the
+// saison-14-04-phase2 capture-disable surface. Setting "0"
+// flips the toggle and the next /webviewer/history.json call
+// returns capture_enabled:false + empty events.
+func TestMieterSettingsPost_HistoryCaptureToggle(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	form := url.Values{}
+	form.Set("idle_view_mode", "screensaver")
+	form.Set("history_capture", "0")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got, _ := out["history_capture"].(bool); got != false {
+		t.Errorf("history_capture echo = %v, want false", out["history_capture"])
+	}
+
+	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("GetViewerInfo: %v", err)
+	}
+	if info.ResolveHistoryCaptureEnabled() {
+		t.Errorf("after Set(0) capture still enabled")
+	}
+}
+
+func TestMieterSettingsPost_HistoryCaptureRejectsBogus(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	form := url.Values{}
+	form.Set("idle_view_mode", "screensaver")
+	form.Set("history_capture", "maybe")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 // TestMieterSettingsPost_BroadcastsConfigChanged verifies that a
 // successful POST raises a doorbellhub config.changed event so
 // other tabs / browser sessions on the same viewer_mac pick up
