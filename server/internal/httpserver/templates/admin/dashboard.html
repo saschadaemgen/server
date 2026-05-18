@@ -6,6 +6,31 @@
   <title>carvilon - Dashboard</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
+  <style>
+    /* Saison 14-04-Phase2-FIX01: Filter-Aktiv-Indikator am
+       Filter-Button. .filter-btn-is-active hebt den Button mit
+       Akzent-Farbe hervor; .filter-btn-count rendert das
+       Badge mit der Anzahl ausgewaehlter Viewer. */
+    #dashboard-filter-btn.filter-btn-is-active {
+      color: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+    .filter-btn-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      margin-left: 4px;
+      border-radius: 999px;
+      background: var(--color-accent);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+    }
+  </style>
 </head>
 <body class="admin-shell">
 
@@ -104,13 +129,19 @@
         <span class="badge">letzte 20</span>
         {{if .Page.AnyFilter}}<span class="badge" style="background: rgba(91,157,255,0.15); color: var(--color-accent);">Filter aktiv</span>{{end}}
         <!-- Saison 14-04-Phase2: Filter-Dropdown. JS-only, ohne
-             JS funktioniert die Page weiter (alle Eintraege). -->
+             JS funktioniert die Page weiter (alle Eintraege).
+             FIX01: Schliess-Logik (Apply + Outside + ESC) plus
+             Aktiv-Indikator (.is-active + Count-Badge wenn nicht
+             alle Viewer ausgewaehlt sind). -->
         <div class="dashboard-filter" style="margin-left: auto; position: relative;">
-          <button type="button" id="dashboard-filter-btn" class="btn btn-secondary" style="display:inline-flex; align-items:center; gap:6px;">
+          <button type="button" id="dashboard-filter-btn"
+                  class="btn btn-secondary{{if .Page.AnyFilter}} filter-btn-is-active{{end}}"
+                  style="display:inline-flex; align-items:center; gap:6px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18"/><path d="M6 12h12"/><path d="M10 18h4"/>
             </svg>
             Wohnung filtern
+            {{if .Page.AnyFilter}}<span class="filter-btn-count">{{len .Page.SelectedMACs}}</span>{{end}}
           </button>
           <div id="dashboard-filter-dropdown" hidden style="
               position:absolute; right:0; top:100%; margin-top:6px;
@@ -160,20 +191,56 @@
     </section>
 
     <script>
-      // Saison 14-04-Phase2: Dashboard-Filter-Dropdown.
+      // Saison 14-04-Phase2 + FIX01: Dashboard-Filter-Dropdown.
+      //
+      // Schliess-Logik (FIX01):
+      //   - Klick auf "Anwenden" navigiert weg (Filter wird angewandt);
+      //     dropdown wird zusaetzlich vor der Navigation explizit
+      //     hidden gemacht so dass Browser-Back-Cache nicht mit
+      //     offenem Dropdown zurueckkehrt.
+      //   - Klick ausserhalb (document-listener) schliesst.
+      //   - ESC-Taste schliesst.
+      //   - Klick auf den Filter-Button toggelt; stopPropagation
+      //     verhindert dass der document-listener gleichzeitig
+      //     greift und den frisch geoeffneten Dropdown wieder
+      //     zumacht.
+      //   - Klicks INNERHALB des Dropdowns (Checkboxes, Alle-an/
+      //     Alle-aus) sollen NICHT schliessen; deshalb fangen wir
+      //     dropdown-clicks im outside-handler ab.
       (function () {
         var btn = document.getElementById('dashboard-filter-btn');
         var dropdown = document.getElementById('dashboard-filter-dropdown');
         if (!btn || !dropdown) return;
+
+        function closeDropdown() { dropdown.hidden = true; }
+        function openDropdown()  { dropdown.hidden = false; }
+        function toggleDropdown() {
+          if (dropdown.hidden) openDropdown(); else closeDropdown();
+        }
+
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
-          dropdown.hidden = !dropdown.hidden;
+          toggleDropdown();
         });
+
+        // Outside-Click. dropdown.contains(target) deckt auch
+        // verschachtelte Klick-Targets (z.B. Klick auf das svg-
+        // path-Element innerhalb des btn) ab.
         document.addEventListener('click', function (e) {
-          if (!dropdown.hidden && !dropdown.contains(e.target) && e.target !== btn) {
-            dropdown.hidden = true;
+          if (dropdown.hidden) return;
+          if (dropdown.contains(e.target) || btn.contains(e.target)) return;
+          closeDropdown();
+        });
+
+        // ESC. Nur reagieren wenn Dropdown sichtbar ist, damit der
+        // Listener andere ESC-Use-Cases (z.B. zukuenftige Modals)
+        // nicht stoert.
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && !dropdown.hidden) {
+            closeDropdown();
           }
         });
+
         document.getElementById('dashboard-filter-all-on').addEventListener('click', function () {
           dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').forEach(function (cb) {
             cb.checked = true;
@@ -195,6 +262,9 @@
           if (macs.length > 0 && macs.length < total) {
             params.set('viewer_macs', macs.join(','));
           }
+          // FIX01: vor der Navigation explizit schliessen damit
+          // Browser-Back-Cache den Zustand sauber uebernimmt.
+          closeDropdown();
           var qs = params.toString();
           location.href = '/a/' + (qs ? '?' + qs : '');
         });
