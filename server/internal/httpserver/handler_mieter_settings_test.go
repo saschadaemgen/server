@@ -419,3 +419,195 @@ func TestMieterHistoryJSON_RequiresSession(t *testing.T) {
 		t.Errorf("Location = %q, want /login", loc)
 	}
 }
+
+// ---------- Saison 14-04-Phase2 history pagination + filter ----------
+
+func TestMieterHistoryJSON_Pagination(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	// 5 Events seeden.
+	ctx := t.Context()
+	base := time.Now()
+	for i := 0; i < 5; i++ {
+		if _, err := env.history.Insert(ctx, doorhistory.Event{
+			MockMAC:    testViewerMAC,
+			EventType:  doorhistory.TypeDoorbellStart,
+			OccurredAt: base.Add(time.Duration(-i) * time.Hour),
+		}, nil); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json?limit=2&offset=0")
+	if err != nil {
+		t.Fatalf("page1 GET: %v", err)
+	}
+	var p1 mieterHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&p1); err != nil {
+		t.Fatalf("decode page1: %v", err)
+	}
+	resp.Body.Close()
+	if len(p1.Events) != 2 {
+		t.Errorf("page1 events = %d, want 2", len(p1.Events))
+	}
+	if !p1.HasMore {
+		t.Errorf("page1 HasMore = false, want true")
+	}
+	if p1.NextOffset != 2 {
+		t.Errorf("page1 NextOffset = %d, want 2", p1.NextOffset)
+	}
+
+	resp2, err := env.client.Get(env.ts.URL + "/webviewer/history.json?limit=2&offset=4")
+	if err != nil {
+		t.Fatalf("last page GET: %v", err)
+	}
+	var p3 mieterHistoryResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&p3); err != nil {
+		t.Fatalf("decode last page: %v", err)
+	}
+	resp2.Body.Close()
+	if len(p3.Events) != 1 {
+		t.Errorf("last page events = %d, want 1", len(p3.Events))
+	}
+	if p3.HasMore {
+		t.Errorf("last page HasMore = true, want false")
+	}
+}
+
+func TestMieterHistoryJSON_DateFilter(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	ctx := t.Context()
+	// Drei Events: vor 7 Tagen, vor 2 Tagen, jetzt.
+	now := time.Now()
+	for _, when := range []time.Time{
+		now.AddDate(0, 0, -7),
+		now.AddDate(0, 0, -2),
+		now,
+	} {
+		if _, err := env.history.Insert(ctx, doorhistory.Event{
+			MockMAC:    testViewerMAC,
+			EventType:  doorhistory.TypeDoorbellStart,
+			OccurredAt: when,
+		}, nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	from := now.AddDate(0, 0, -3).Format("2006-01-02")
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json?from=" + from)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var got mieterHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Events) != 2 {
+		t.Errorf("from-filter events = %d, want 2", len(got.Events))
+	}
+}
+
+func TestMieterHistoryJSON_InvalidOffsetRejected(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json?offset=99999")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestMieterHistoryJSON_InvalidLimitRejected(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json?limit=999")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestMieterHistoryJSON_InvalidDateRejected(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json?from=garbage")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestMieterHistoryJSON_CaptureDisabledReturnsEmpty(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now(),
+	}, nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := env.mockMgr.SetHistoryCaptureEnabled(t.Context(), testViewerMAC, false); err != nil {
+		t.Fatalf("disable capture: %v", err)
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var got mieterHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.CaptureEnabled {
+		t.Errorf("CaptureEnabled = true, want false")
+	}
+	if len(got.Events) != 0 {
+		t.Errorf("Events len = %d, want 0 (capture disabled)", len(got.Events))
+	}
+	if got.HasMore {
+		t.Errorf("HasMore = true, want false")
+	}
+}
+
+func TestMieterHistoryJSON_HiddenEventsAreFilteredOut(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	id, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := env.history.HideEvent(t.Context(), testViewerMAC, id); err != nil {
+		t.Fatalf("HideEvent: %v", err)
+	}
+	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var got mieterHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Events) != 0 {
+		t.Errorf("hidden event still in response (len=%d)", len(got.Events))
+	}
+}
