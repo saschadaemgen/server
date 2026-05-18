@@ -146,6 +146,10 @@ type ViewerInfo struct {
 	// settings page. ResolveHistoryCaptureEnabled hides the NULL
 	// detail from callers.
 	HistoryCaptureEnabled *bool
+	// Saison 14-04-Phase2-FIX05 clock layout. "" = use Default
+	// (vertical, Pixel-Style FIX04); explicit "horizontal" or
+	// "vertical" come from mieter / admin / esp settings POSTs.
+	ClockLayout string
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -219,6 +223,19 @@ var ScreenOffAfterSecAllowed = []int{0, 30, 60, 300, 600, 1800}
 // the ESP firmware string tables.
 var LanguageAllowed = []string{"de", "en"}
 
+// Saison 14-04-Phase2-FIX05: Clock-Layout-Praeferenz.
+// "vertical"  = FIX04 Pixel-Style HH ueber MM
+// "horizontal" = klassisch HH:MM mit Doppelpunkt
+const (
+	ClockLayoutVertical   = "vertical"
+	ClockLayoutHorizontal = "horizontal"
+	DefaultClockLayout    = ClockLayoutVertical
+)
+
+// ClockLayoutAllowed ist die strict Allow-List fuer alle
+// Settings-Setter (Web + ESP + Admin).
+var ClockLayoutAllowed = []string{ClockLayoutHorizontal, ClockLayoutVertical}
+
 // ResolveBrightnessIdle returns the persisted idle-brightness or
 // DefaultBrightnessIdle when the column is NULL. ESP-only
 // concept; web viewers ignore it.
@@ -259,6 +276,23 @@ func (v *ViewerInfo) ResolveHistoryCaptureEnabled() bool {
 		return true
 	}
 	return *v.HistoryCaptureEnabled
+}
+
+// ResolveClockLayout liefert "horizontal" oder "vertical".
+// NULL / empty in der DB faellt auf DefaultClockLayout
+// (vertical, FIX04-Pixel-Style). Saison 14-04-Phase2-FIX05.
+func (v *ViewerInfo) ResolveClockLayout() string {
+	if v == nil {
+		return DefaultClockLayout
+	}
+	switch v.ClockLayout {
+	case ClockLayoutHorizontal:
+		return ClockLayoutHorizontal
+	case ClockLayoutVertical:
+		return ClockLayoutVertical
+	default:
+		return DefaultClockLayout
+	}
 }
 
 // ResolveStreamProfile picks the go2rtc stream profile name for
@@ -620,7 +654,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
-		        history_capture_enabled
+		        history_capture_enabled,
+		        COALESCE(clock_layout, '')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -646,7 +681,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language, &capture); err != nil {
+			&brightness, &screenOff, &info.Language, &capture,
+			&info.ClockLayout); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -760,12 +796,14 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
-		        history_capture_enabled
+		        history_capture_enabled,
+		        COALESCE(clock_layout, '')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language, &capture)
+			&brightness, &screenOff, &info.Language, &capture,
+			&info.ClockLayout)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -820,7 +858,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
-		        history_capture_enabled
+		        history_capture_enabled,
+		        COALESCE(clock_layout, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -845,7 +884,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language, &capture); err != nil {
+			&brightness, &screenOff, &info.Language, &capture,
+			&info.ClockLayout); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -1099,6 +1139,39 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 		stored, now, mac)
 	if err != nil {
 		return fmt.Errorf("mockmanager: set screen off after sec: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// SetClockLayout persistiert die Mieter-Praeferenz fuer die
+// Bildschirmschoner-Uhr-Anzeige. Strict gegen ClockLayoutAllowed
+// gepruefte Werte; alles andere -> Fehler.
+// Saison 14-04-Phase2-FIX05.
+func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		allowed := false
+		for _, v := range ClockLayoutAllowed {
+			if v == trimmed {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("mockmanager: clock_layout %q not in %v",
+				trimmed, ClockLayoutAllowed)
+		}
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET clock_layout = ?, updated_at = ? WHERE mac = ?`,
+		nullable(trimmed), now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set clock layout: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {

@@ -736,6 +736,62 @@ func TestSetHistoryCaptureEnabled_UnknownViewer(t *testing.T) {
 	}
 }
 
+// ---------- Saison 14-04-Phase2-FIX05 clock_layout ----------
+
+func TestClockLayout_DefaultsToVerticalWhenNull(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.ResolveClockLayout() != ClockLayoutVertical {
+		t.Errorf("default = %q, want %q (vertical)",
+			info.ResolveClockLayout(), ClockLayoutVertical)
+	}
+}
+
+func TestSetClockLayout_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetClockLayout(context.Background(), spec.MAC, ClockLayoutHorizontal); err != nil {
+		t.Fatalf("SetClockLayout(horizontal): %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.ResolveClockLayout() != ClockLayoutHorizontal {
+		t.Errorf("after Set(horizontal) = %q", info.ResolveClockLayout())
+	}
+	if err := mgr.SetClockLayout(context.Background(), spec.MAC, ClockLayoutVertical); err != nil {
+		t.Fatalf("SetClockLayout(vertical): %v", err)
+	}
+	info, _ = mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.ResolveClockLayout() != ClockLayoutVertical {
+		t.Errorf("after Set(vertical) = %q", info.ResolveClockLayout())
+	}
+}
+
+func TestSetClockLayout_RejectsUnknown(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetClockLayout(context.Background(), spec.MAC, "diagonal"); err == nil {
+		t.Error("SetClockLayout(diagonal) returned nil error")
+	}
+}
+
+func TestSetClockLayout_UnknownViewer(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	err := mgr.SetClockLayout(context.Background(), "0c:ea:14:00:00:00", ClockLayoutHorizontal)
+	if !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("err = %v, want ErrViewerNotFound", err)
+	}
+}
+
 func TestSetLanguage_RejectsUnknown(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
