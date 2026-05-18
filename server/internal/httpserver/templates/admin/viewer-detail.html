@@ -617,6 +617,7 @@
         <dt>Verknuepfte Klingel</dt><dd data-bind="read-paired">{{if .Page.PairedIntercomMAC}}{{.Page.PairedIntercomMAC}}{{else}}-{{end}}</dd>
         <dt>Stream-Profil</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
         <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
+        <dt>Uhr-Anzeige</dt><dd>{{if eq .Page.ClockLayout "horizontal"}}Horizontal{{else}}Vertikal{{end}}</dd>
       </dl>
 
       <!-- EDIT-Mode (versteckt by default). Aktiviert via
@@ -694,6 +695,13 @@
         <legend>Verlauf-Erfassung</legend>
         <label><input type="radio" name="history_capture" value="1" {{if .Page.HistoryCaptureEnabled}}checked{{end}}> Aktiv</label>
         <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
+      </fieldset>
+
+      <!-- Saison 14-04-Phase2-FIX05 Uhr-Anzeige. -->
+      <fieldset class="settings-field">
+        <legend>Uhr-Anzeige</legend>
+        <label><input type="radio" name="clock_layout" value="vertical"   {{if eq .Page.ClockLayout "vertical"}}checked{{end}}> Vertikal (Stunden über Minuten)</label>
+        <label><input type="radio" name="clock_layout" value="horizontal" {{if eq .Page.ClockLayout "horizontal"}}checked{{end}}> Horizontal (HH:MM)</label>
       </fieldset>
 
       {{if eq .Page.Type "esp"}}
@@ -1069,7 +1077,7 @@
         var brightnessTimer = null;
         function saveSetting(name, value) {
           var body = {};
-          if (name === 'idle_view_mode' || name === 'language') {
+          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout') {
             body[name] = String(value);
           } else if (name === 'history_capture') {
             body[name] = (value === '1' || value === 'true' || value === true);
