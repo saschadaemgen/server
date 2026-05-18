@@ -388,6 +388,14 @@ func (f *fakeHistory) CountSince(context.Context, time.Time) (int, error) { retu
 func (f *fakeHistory) AggregateAdmin(context.Context, time.Time) (doorhistory.AdminStats, error) {
 	return doorhistory.AdminStats{}, nil
 }
+func (f *fakeHistory) HideEvent(context.Context, string, int64) error    { return nil }
+func (f *fakeHistory) HideAllEvents(context.Context, string) (int, error) { return 0, nil }
+func (f *fakeHistory) ListVisible(context.Context, string, doorhistory.ListOpts) ([]doorhistory.Event, error) {
+	return nil, nil
+}
+func (f *fakeHistory) CountVisible(context.Context, string, doorhistory.ListOpts) (int, error) {
+	return 0, nil
+}
 
 func TestRun_PersistsAndAssignsEventID(t *testing.T) {
 	src := newFakeSource()

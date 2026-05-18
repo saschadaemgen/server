@@ -38,20 +38,59 @@ const (
 // the corresponding SQL column is NULL. raw_frame is intentionally
 // not exposed here; if a future consumer needs it, the Store grows
 // a dedicated read method.
+//
+// Saison 14-04-Phase2: HiddenByViewer is set when a row is joined
+// against viewer_hidden_events for the calling mac (admin-side
+// read). HiddenAt is the corresponding hidden_at timestamp.
+// Mieter-side reads filter the row out entirely; only AdminListAll
+// surfaces the flag.
 type Event struct {
-	ID          int64
-	MockMAC     string
-	EventType   string
-	IntercomMAC string
-	OccurredAt  time.Time
-	CancelledAt *time.Time
-	AnsweredAt  *time.Time
-	EndedAt     *time.Time
-	CancelToken string
-	RoomID      string
-	ReadAt      *time.Time
-	PrevHash    string
-	EntryHash   string
+	ID             int64
+	MockMAC        string
+	EventType      string
+	IntercomMAC    string
+	OccurredAt     time.Time
+	CancelledAt    *time.Time
+	AnsweredAt     *time.Time
+	EndedAt        *time.Time
+	CancelToken    string
+	RoomID         string
+	ReadAt         *time.Time
+	PrevHash       string
+	EntryHash      string
+	HiddenByViewer bool
+	HiddenAt       *time.Time
+}
+
+// ListOpts bundles the pagination + date-range filter for the
+// saison-14-04-phase2 listing endpoints. Zero values default to
+// "no bound": Limit 0 falls back to 20, Offset 0 starts at the
+// newest row, From/To zero-time means no lower/upper cutoff.
+// Limit is clamped to ListOptsMaxLimit so a stray client cannot
+// pull the whole table in one request.
+type ListOpts struct {
+	Limit  int
+	Offset int
+	From   time.Time
+	To     time.Time
+}
+
+// ListOptsMaxLimit caps how many rows a single ListVisible /
+// AdminListAll call returns. Handlers can pre-clamp the query
+// parameter; the store re-clamps defensively.
+const ListOptsMaxLimit = 50
+
+// AdminListResult is the envelope AdminListAll returns. Events
+// is the requested page (admin sees hidden ones too, flagged),
+// TotalCount is the count of ALL door_events rows for the viewer
+// regardless of hidden state, HiddenCount is the subset that the
+// mieter has soft-deleted, HasMore signals whether another page
+// is available beyond this offset+limit.
+type AdminListResult struct {
+	Events      []Event
+	TotalCount  int
+	HiddenCount int
+	HasMore     bool
 }
 
 // AdminStats aggregates door_events for the admin dashboard. The
@@ -66,6 +105,13 @@ type AdminStats struct {
 
 // Store is the doorhistory contract. Implementations live in this
 // package (sqlite) or in tests (memory fake).
+//
+// Saison 14-04-Phase2 adds the soft-delete + admin-hard-delete +
+// pagination contract. ListVisible is the mieter-side equivalent
+// of ListForMock that respects viewer_hidden_events; ListForMock
+// stays as the unfiltered legacy reader (used by handler_home.go
+// at server-render time, where the existing Variante-A mark-read
+// flow expects the full list).
 type Store interface {
 	Insert(ctx context.Context, ev Event, rawFrame []byte) (int64, error)
 	UpdateCancel(ctx context.Context, mockMAC, cancelToken string, cancelledAt time.Time) error
@@ -76,6 +122,12 @@ type Store interface {
 	UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	AggregateAdmin(ctx context.Context, now time.Time) (AdminStats, error)
+	// Saison 14-04-Phase2 (mieter-side; admin operations in the
+	// follow-up commit).
+	HideEvent(ctx context.Context, mockMAC string, eventID int64) error
+	HideAllEvents(ctx context.Context, mockMAC string) (int, error)
+	ListVisible(ctx context.Context, mockMAC string, opts ListOpts) ([]Event, error)
+	CountVisible(ctx context.Context, mockMAC string, opts ListOpts) (int, error)
 }
 
 // ErrNotFound is returned by UpdateCancel when no matching open
@@ -439,4 +491,197 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+// ---------- Saison 14-04-Phase2: soft-delete + pagination ----------
+
+// HideEvent records a mieter-soft-delete on a single door_events
+// row. Idempotent via ON CONFLICT - calling it twice for the same
+// (viewer_mac, event_id) is a no-op. Mock-scoping is enforced via
+// a sub-select against door_events so a malicious caller cannot
+// hide another mock's events by guessing ids.
+//
+// Returns ErrNotFound when the event_id does not belong to
+// mockMAC (or does not exist at all). Tests rely on this so a
+// missing-id attempt does not silently succeed.
+func (s *SQLStore) HideEvent(ctx context.Context, mockMAC string, eventID int64) error {
+	if mockMAC == "" || eventID == 0 {
+		return ErrNotFound
+	}
+	now := time.Now().Unix()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO viewer_hidden_events (viewer_mac, event_id, hidden_at)
+		 SELECT ?, id, ? FROM door_events
+		  WHERE id = ? AND viewer_mac = ?
+		 ON CONFLICT (viewer_mac, event_id) DO NOTHING`,
+		mockMAC, now, eventID, mockMAC,
+	)
+	if err != nil {
+		return fmt.Errorf("doorhistory: hide event: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("doorhistory: hide event rows: %w", err)
+	}
+	if rows == 0 {
+		// Could be either "event_id does not belong to mockMAC" or
+		// "already hidden". Distinguish via an existence check to
+		// keep idempotent calls quiet.
+		var exists int
+		_ = s.db.QueryRowContext(ctx,
+			`SELECT 1 FROM viewer_hidden_events
+			  WHERE viewer_mac = ? AND event_id = ?`,
+			mockMAC, eventID,
+		).Scan(&exists)
+		if exists == 1 {
+			return nil
+		}
+		return ErrNotFound
+	}
+	return nil
+}
+
+// HideAllEvents hides every door_events row that is currently
+// visible to mockMAC. Returns the count of newly-hidden rows
+// (already-hidden rows are skipped via the LEFT JOIN guard).
+func (s *SQLStore) HideAllEvents(ctx context.Context, mockMAC string) (int, error) {
+	if mockMAC == "" {
+		return 0, nil
+	}
+	now := time.Now().Unix()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO viewer_hidden_events (viewer_mac, event_id, hidden_at)
+		 SELECT de.viewer_mac, de.id, ?
+		   FROM door_events de
+		   LEFT JOIN viewer_hidden_events vhe
+		          ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+		  WHERE de.viewer_mac = ? AND vhe.event_id IS NULL`,
+		now, mockMAC,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("doorhistory: hide all: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("doorhistory: hide all rows: %w", err)
+	}
+	return int(n), nil
+}
+
+// ListVisible returns the paginated set of door_events that the
+// mieter on mockMAC has NOT soft-hidden. Filter semantics:
+//
+//   - opts.Limit  clamped to [1, ListOptsMaxLimit]; 0 -> 20
+//   - opts.Offset clamped to [0, +inf); 0 starts at newest
+//   - opts.From   zero-time -> no lower cutoff (occurred_at >= from)
+//   - opts.To     zero-time -> no upper cutoff (occurred_at <= to+1d)
+//
+// Newest-first ordering. To-bound is inclusive over the WHOLE day
+// (we add 24h so a "to=2026-05-17" filter catches every event of
+// that day regardless of the actual seconds).
+func (s *SQLStore) ListVisible(ctx context.Context, mockMAC string, opts ListOpts) ([]Event, error) {
+	if mockMAC == "" {
+		return nil, nil
+	}
+	limit, offset := normalizeListOpts(opts)
+	q, args := buildVisibleQuery(mockMAC, opts, limit, offset)
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("doorhistory: list visible: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Event, 0, limit)
+	for rows.Next() {
+		ev, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("doorhistory: list visible rows: %w", err)
+	}
+	return out, nil
+}
+
+// CountVisible returns the total number of door_events that
+// ListVisible would surface for the given opts (ignoring
+// Limit/Offset). Used by the mieter pagination logic to decide
+// whether to render the "Mehr laden"-button.
+func (s *SQLStore) CountVisible(ctx context.Context, mockMAC string, opts ListOpts) (int, error) {
+	if mockMAC == "" {
+		return 0, nil
+	}
+	q := `SELECT COUNT(*)
+	        FROM door_events de
+	        LEFT JOIN viewer_hidden_events vhe
+	               ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+	       WHERE de.viewer_mac = ?
+	         AND vhe.event_id IS NULL`
+	args := []any{mockMAC}
+	if !opts.From.IsZero() {
+		q += " AND de.occurred_at >= ?"
+		args = append(args, opts.From.Unix())
+	}
+	if !opts.To.IsZero() {
+		q += " AND de.occurred_at <= ?"
+		args = append(args, endOfDayUnix(opts.To))
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("doorhistory: count visible: %w", err)
+	}
+	return n, nil
+}
+
+func normalizeListOpts(opts ListOpts) (limit, offset int) {
+	limit = opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > ListOptsMaxLimit {
+		limit = ListOptsMaxLimit
+	}
+	offset = opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// endOfDayUnix returns the Unix timestamp of the end-of-day
+// (23:59:59) for the given date. Used to make the To-bound
+// inclusive over the whole day; the user's "bis 17.05." filter
+// should include every event of 17 May regardless of the time
+// portion the date-picker shipped.
+func endOfDayUnix(t time.Time) int64 {
+	end := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, t.Location())
+	return end.Unix()
+}
+
+// buildVisibleQuery composes the mieter ListVisible SQL with
+// optional date-range predicates. The query shape stays parameter-
+// safe; no string concatenation of user input.
+func buildVisibleQuery(mockMAC string, opts ListOpts, limit, offset int) (string, []any) {
+	q := `SELECT de.id, de.viewer_mac, de.event_type, de.intercom_mac,
+	             de.occurred_at, de.cancelled_at, de.answered_at,
+	             de.ended_at, de.cancel_token, de.room_id, de.read_at,
+	             de.prev_hash, de.entry_hash
+	        FROM door_events de
+	        LEFT JOIN viewer_hidden_events vhe
+	               ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+	       WHERE de.viewer_mac = ?
+	         AND vhe.event_id IS NULL`
+	args := []any{mockMAC}
+	if !opts.From.IsZero() {
+		q += " AND de.occurred_at >= ?"
+		args = append(args, opts.From.Unix())
+	}
+	if !opts.To.IsZero() {
+		q += " AND de.occurred_at <= ?"
+		args = append(args, endOfDayUnix(opts.To))
+	}
+	q += " ORDER BY de.occurred_at DESC, de.id DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	return q, args
 }

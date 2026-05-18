@@ -347,3 +347,249 @@ func TestAggregateAdmin_IgnoresCancelEvents(t *testing.T) {
 		t.Errorf("Total24h should ignore doorbell_cancel rows; got %d", stats.Total24h)
 	}
 }
+
+// ---------- Saison 14-04-Phase2 soft-delete + pagination ----------
+
+func seedThreeEvents(t *testing.T, s *SQLStore) (ids [3]int64) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Unix(1747000000, 0)
+	for i, when := range []time.Time{
+		base.Add(-2 * time.Hour),
+		base.Add(-1 * time.Hour),
+		base,
+	} {
+		id, err := s.Insert(ctx, Event{
+			MockMAC:    testMockMAC,
+			EventType:  TypeDoorbellStart,
+			OccurredAt: when,
+		}, nil)
+		if err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+	return ids
+}
+
+func TestHideEvent_HidesOnlySpecifiedID(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	if err := s.HideEvent(context.Background(), testMockMAC, ids[1]); err != nil {
+		t.Fatalf("HideEvent: %v", err)
+	}
+	events, err := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	if err != nil {
+		t.Fatalf("ListVisible: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("ListVisible len = %d, want 2", len(events))
+	}
+	for _, ev := range events {
+		if ev.ID == ids[1] {
+			t.Errorf("hidden event %d still visible", ids[1])
+		}
+	}
+}
+
+func TestHideEvent_IsIdempotent(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	for i := 0; i < 3; i++ {
+		if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+			t.Fatalf("HideEvent iter %d: %v", i, err)
+		}
+	}
+}
+
+func TestHideEvent_OtherViewerCannotHide(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	// macB tries to hide one of macA's events. The cross-viewer
+	// hide must not succeed: HideEvent enforces the mock-scope via
+	// a sub-select.
+	err := s.HideEvent(context.Background(), testMockMACB, ids[0])
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-viewer hide returned %v, want ErrNotFound", err)
+	}
+	// And the event is still visible for macA.
+	events, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	if len(events) != 3 {
+		t.Errorf("ListVisible after cross-viewer hide = %d, want 3", len(events))
+	}
+}
+
+func TestHideAllEvents_HidesEverythingForMAC(t *testing.T) {
+	s, _ := newStore(t)
+	seedThreeEvents(t, s)
+	n, err := s.HideAllEvents(context.Background(), testMockMAC)
+	if err != nil {
+		t.Fatalf("HideAllEvents: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("HideAllEvents returned %d, want 3", n)
+	}
+	events, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	if len(events) != 0 {
+		t.Errorf("ListVisible after HideAll = %d, want 0", len(events))
+	}
+	// Re-Aktivierung-Semantik: HideAllEvents bei einem leeren
+	// sichtbaren Set sollte 0 neu-versteckte zurueckgeben.
+	n2, err := s.HideAllEvents(context.Background(), testMockMAC)
+	if err != nil {
+		t.Fatalf("HideAllEvents second call: %v", err)
+	}
+	if n2 != 0 {
+		t.Errorf("second HideAllEvents returned %d, want 0", n2)
+	}
+}
+
+func TestListVisible_Pagination(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	// 5 Events seeden (zeitlich gestaffelt).
+	base := time.Unix(1747000000, 0)
+	for i := 0; i < 5; i++ {
+		if _, err := s.Insert(ctx, Event{
+			MockMAC:    testMockMAC,
+			EventType:  TypeDoorbellStart,
+			OccurredAt: base.Add(time.Duration(i) * time.Hour),
+		}, nil); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	page1, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Errorf("page1 len = %d, want 2", len(page1))
+	}
+	page2, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Errorf("page2 len = %d, want 2", len(page2))
+	}
+	page3, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 4})
+	if err != nil {
+		t.Fatalf("page3: %v", err)
+	}
+	if len(page3) != 1 {
+		t.Errorf("page3 len = %d, want 1 (only the oldest event left)", len(page3))
+	}
+	// Pages duerfen sich nicht ueberlappen.
+	seen := map[int64]bool{}
+	for _, pg := range [][]Event{page1, page2, page3} {
+		for _, ev := range pg {
+			if seen[ev.ID] {
+				t.Errorf("ID %d appears in multiple pages", ev.ID)
+			}
+			seen[ev.ID] = true
+		}
+	}
+}
+
+func TestListVisible_LimitClampedToMax(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	base := time.Unix(1747000000, 0)
+	for i := 0; i < ListOptsMaxLimit+10; i++ {
+		if _, err := s.Insert(ctx, Event{
+			MockMAC:    testMockMAC,
+			EventType:  TypeDoorbellStart,
+			OccurredAt: base.Add(time.Duration(i) * time.Second),
+		}, nil); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	got, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 9999})
+	if err != nil {
+		t.Fatalf("ListVisible: %v", err)
+	}
+	if len(got) != ListOptsMaxLimit {
+		t.Errorf("limit=9999 returned %d rows, want clamp to %d",
+			len(got), ListOptsMaxLimit)
+	}
+}
+
+func TestListVisible_DateRange(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	day1 := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	day2 := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	day3 := time.Date(2026, 5, 17, 10, 0, 0, 0, time.UTC)
+	for _, t0 := range []time.Time{day1, day2, day3} {
+		if _, err := s.Insert(ctx, Event{
+			MockMAC:    testMockMAC,
+			EventType:  TypeDoorbellStart,
+			OccurredAt: t0,
+		}, nil); err != nil {
+			t.Fatalf("seed %v: %v", t0, err)
+		}
+	}
+	// From=day2 schliesst day1 aus.
+	got, err := s.ListVisible(ctx, testMockMAC, ListOpts{From: day2})
+	if err != nil {
+		t.Fatalf("ListVisible from: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("From=day2 returned %d, want 2 (day2+day3)", len(got))
+	}
+	// To=day2 schliesst day3 aus aber inkludiert beide bis Ende-Tag-23:59.
+	got2, err := s.ListVisible(ctx, testMockMAC, ListOpts{To: day2})
+	if err != nil {
+		t.Fatalf("ListVisible to: %v", err)
+	}
+	if len(got2) != 2 {
+		t.Errorf("To=day2 returned %d, want 2 (day1+day2 with end-of-day cutoff)", len(got2))
+	}
+	// From + To: nur day2 sichtbar.
+	got3, err := s.ListVisible(ctx, testMockMAC, ListOpts{From: day2, To: day2})
+	if err != nil {
+		t.Fatalf("ListVisible range: %v", err)
+	}
+	if len(got3) != 1 {
+		t.Errorf("From=To=day2 returned %d, want 1", len(got3))
+	}
+}
+
+func TestCountVisible_IgnoresHidden(t *testing.T) {
+	s, _ := newStore(t)
+	ids := seedThreeEvents(t, s)
+	if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+		t.Fatalf("HideEvent: %v", err)
+	}
+	n, err := s.CountVisible(context.Background(), testMockMAC, ListOpts{})
+	if err != nil {
+		t.Fatalf("CountVisible: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("CountVisible after hide = %d, want 2", n)
+	}
+}
+
+func TestHidden_SurvivesCascadeOnHardDelete(t *testing.T) {
+	s, d := newStore(t)
+	ids := seedThreeEvents(t, s)
+	ctx := context.Background()
+	if err := s.HideEvent(ctx, testMockMAC, ids[0]); err != nil {
+		t.Fatalf("HideEvent: %v", err)
+	}
+	// Hard-delete des hidden Events. Cascade muss die hidden-Zeile
+	// mitnehmen damit kein baumelnder FK liegt.
+	if _, err := d.Exec(`DELETE FROM door_events WHERE id = ?`, ids[0]); err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	var n int
+	if err := d.QueryRow(
+		`SELECT COUNT(*) FROM viewer_hidden_events WHERE event_id = ?`, ids[0],
+	).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("hidden row survived hard delete (count=%d)", n)
+	}
+}
