@@ -542,6 +542,13 @@
           autoSeconds = resp.auto_screensaver_seconds;
           container.setAttribute('data-auto-screensaver-seconds', String(autoSeconds));
         }
+        // Saison 14-04-Phase2-FIX05: clock_layout-Echo. data-layout
+        // auf .screensaver-clock flippt CSS-Selektor sofort um -
+        // kein Reload noetig damit der Mieter den Wechsel im
+        // Hintergrund sieht.
+        if (resp && typeof resp.clock_layout === 'string' && clockEl) {
+          clockEl.setAttribute('data-layout', resp.clock_layout);
+        }
         // Re-arm the timer in case autoSeconds or the active-mode
         // semantics changed.
         resetAutoTimer();

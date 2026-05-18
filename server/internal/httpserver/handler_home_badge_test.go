@@ -92,6 +92,29 @@ func TestHomeRender_HistoryButton_WithUnread(t *testing.T) {
 	}
 }
 
+// TestHomeRender_ClockLayoutAttributeOnScreensaver bewacht die
+// Saison 14-04-Phase2-FIX05-Verdrahtung: das Screensaver-Markup
+// rendert immer ein data-layout-Attribut auf .screensaver-clock,
+// und das clock_layout-Settings-Fieldset taucht im Settings-Form
+// auf. CSS-Selektor + idle.js-Echo-Handler haengen daran.
+func TestHomeRender_ClockLayoutAttributeOnScreensaver(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	html := renderHomeHTML(t, env)
+
+	if !strings.Contains(html, `data-layout="vertical"`) {
+		t.Errorf("default clock layout data-attribute fehlt (vertical)")
+	}
+	if !strings.Contains(html, `name="clock_layout"`) {
+		t.Errorf("clock_layout-radios fehlen im settings-form")
+	}
+	// Beide Radio-Werte muessen gerendert sein damit der Mieter
+	// zwischen den zwei Layouts waehlen kann.
+	if !strings.Contains(html, `value="vertical"`) || !strings.Contains(html, `value="horizontal"`) {
+		t.Errorf("clock_layout radio options unvollstaendig")
+	}
+}
+
 // TestHomeRender_ConfigChangedHasSkipEchoLogic ist der Regression-
 // Bewacher fuer Saison 14-04-Phase2-FIX03. Der Mieter-Settings-
 // Auto-Save broadcastet config.changed; ohne Skip-Echo wuerde

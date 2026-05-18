@@ -113,10 +113,14 @@
           <!-- Saison 14-04-Phase2-FIX04 Pixel-Style stacked clock.
                Initial-Paint via Template-Slice (HH und MM aus
                .Now "HH:MM:SS"); idle.js hydratisiert die beiden
-               Elemente alle 1s via tickClock. -->
-          <div class="screensaver-clock">
-            <div class="screensaver-clock-hours">{{slice .Now 0 2}}</div>
-            <div class="screensaver-clock-minutes">{{slice .Now 3 5}}</div>
+               Elemente alle 1s via tickClock.
+               Saison 14-04-Phase2-FIX05: data-layout-Attribut
+               toggelt zwischen "vertical" (FIX04-Default) und
+               "horizontal" (klassisch mit Doppelpunkt). CSS macht
+               das ganze Layout via Selektor-Branching. -->
+          <div class="screensaver-clock" data-layout="{{.ClockLayout}}">
+            <span class="screensaver-clock-hours">{{slice .Now 0 2}}</span>
+            <span class="screensaver-clock-minutes">{{slice .Now 3 5}}</span>
           </div>
           <div class="screensaver-date">{{.NowDate}}</div>
           {{if .Weather}}
@@ -198,6 +202,19 @@
                 <label><input type="radio" name="auto_screensaver_seconds" value="60"{{if eq .AutoScreensaverSeconds 60}} checked{{end}}> 1 Minute</label>
                 <label><input type="radio" name="auto_screensaver_seconds" value="300"{{if eq .AutoScreensaverSeconds 300}} checked{{end}}> 5 Minuten</label>
                 <label><input type="radio" name="auto_screensaver_seconds" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
+              </fieldset>
+
+              <!-- Saison 14-04-Phase2-FIX05 Uhr-Anzeige. Toggle
+                   zwischen Pixel-Style (vertikal) und klassisch
+                   (horizontal). Default "vertical" wenn der Mieter
+                   noch nichts gewaehlt hat. -->
+              <fieldset class="mode-field">
+                <legend>
+                  Uhr-Anzeige
+                  <span class="mode-help" data-help="Wie die Uhrzeit im Bildschirmschoner angezeigt wird. Vertikal: Stunden über Minuten. Horizontal: klassisch HH:MM.">?</span>
+                </legend>
+                <label><input type="radio" name="clock_layout" value="vertical"{{if eq .ClockLayout "vertical"}} checked{{end}}> Vertikal</label>
+                <label><input type="radio" name="clock_layout" value="horizontal"{{if eq .ClockLayout "horizontal"}} checked{{end}}> Horizontal</label>
               </fieldset>
 
               <!-- Saison 14-04-Phase2: Verlauf-Erfassung-Toggle. Wenn

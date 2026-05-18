@@ -71,22 +71,20 @@
       visibility: hidden;
       pointer-events: none;
     }
-    /* Saison 14-04-Phase2-FIX04: Pixel-Style stacked clock.
-       Stunden ueber Minuten ohne Trennzeichen; line-height 0.85
-       laesst die zwei Zeilen eng aneinander ruecken, Manrope-200
-       (ExtraLight) bleibt elegant, font-feature-settings "tnum"
-       sorgt fuer gleich breite Ziffern (11:11 und 17:00 nehmen
-       die selbe Spalte ein). */
+    /* Saison 14-04-Phase2-FIX04 + FIX05: Bildschirmschoner-Uhr.
+       data-layout="vertical" (FIX04-Default Pixel-Style):
+          Stunden ueber Minuten, kein Trennzeichen, gross + eng
+       data-layout="horizontal" (FIX05 klassisches Layout):
+          Stunden + Minuten nebeneinander, ":" via Pseudo-Element,
+          kleinere Schrift + lockeres letter-spacing
+       Gemeinsam: Manrope-200, tnum-Ziffern (gleichbreit),
+       color-inherit aus dem Slot-Hintergrund. */
     .screensaver-clock {
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
       font-family: 'Manrope', 'SF Pro Display', system-ui, sans-serif;
       font-weight: 200;
-      font-size: 144px;
-      letter-spacing: -0.02em;
-      line-height: 0.85;
       font-feature-settings: "tnum";
       font-variant-numeric: tabular-nums;
       color: var(--color-text, #f0f4ff);
@@ -95,9 +93,34 @@
     .screensaver-clock-minutes {
       display: block;
     }
+
+    /* Vertical (Pixel-Style, FIX04 Default). */
+    .screensaver-clock[data-layout="vertical"] {
+      flex-direction: column;
+      font-size: 144px;
+      letter-spacing: -0.02em;
+      line-height: 0.85;
+    }
+
+    /* Horizontal (FIX05 klassisches HH:MM). */
+    .screensaver-clock[data-layout="horizontal"] {
+      flex-direction: row;
+      font-size: 96px;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+    .screensaver-clock[data-layout="horizontal"] .screensaver-clock-hours::after {
+      content: ":";
+      margin: 0 0.06em;
+      /* Doppelpunkt erbt font-weight 200 + color */
+    }
+
     @media (max-width: 480px) {
-      .screensaver-clock {
+      .screensaver-clock[data-layout="vertical"] {
         font-size: 112px;
+      }
+      .screensaver-clock[data-layout="horizontal"] {
+        font-size: 72px;
       }
     }
     .screensaver-date {
