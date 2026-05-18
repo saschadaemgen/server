@@ -59,8 +59,9 @@ var adminLibraryFor = map[string][]string{
 	"users":       {},
 	"user-detail": {},
 	"esp-pager":   {},
-	"streams":     {},
-	"stream-edit": {},
+	"streams":       {},
+	"stream-edit":   {},
+	"viewer-detail": {},
 }
 
 func newAdminTemplates() (*adminTemplates, error) {

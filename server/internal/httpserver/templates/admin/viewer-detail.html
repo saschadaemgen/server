@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - {{.Page.Name}}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    .viewer-meta {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 16px;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+    .viewer-meta dt {
+      color: var(--color-text-secondary, #94a3b8);
+      font-weight: 500;
+    }
+    .viewer-meta dd { margin: 0; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(91,157,255,0.10);
+      color: var(--color-accent, #5b9dff);
+      border: 1px solid rgba(91,157,255,0.25);
+    }
+    .pill.is-running {
+      background: rgba(34,197,94,0.10);
+      color: #22c55e;
+      border-color: rgba(34,197,94,0.25);
+    }
+    .viewer-history-section {
+      margin-top: 32px;
+    }
+    .history-meta {
+      display: inline-flex;
+      gap: 12px;
+      margin-left: 12px;
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--color-text-secondary, #94a3b8);
+    }
+    .history-meta .total-count { color: var(--color-text, #f0f4ff); }
+    .history-meta .hidden-count { color: #facc15; }
+    .history-actions {
+      display: flex;
+      gap: 12px;
+      margin: 16px 0;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .history-actions .filter-fields {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .history-actions input[type="date"] {
+      padding: 6px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      font: inherit;
+    }
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .history-table th,
+    .history-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .history-table th {
+      font-weight: 600;
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .history-table tr.hidden-by-viewer td { opacity: 0.55; }
+    .history-table .eye-off-icon {
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 6px;
+      color: #facc15;
+      cursor: help;
+    }
+    .history-table .hard-delete-btn {
+      background: transparent;
+      border: 1px solid rgba(239,68,68,0.30);
+      color: #ef4444;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .history-table .hard-delete-btn:hover {
+      background: rgba(239,68,68,0.10);
+    }
+    .history-empty {
+      padding: 24px 0;
+      color: var(--color-text-secondary, #94a3b8);
+      text-align: center;
+    }
+    .btn-danger {
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.40);
+      color: #ef4444;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-danger.btn-danger-active {
+      background: #ef4444;
+      color: #fff;
+    }
+    .load-more-btn {
+      margin-top: 16px;
+      padding: 10px 18px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .load-more-btn[hidden] { display: none; }
+  </style>
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <a href="{{.Page.BackHref}}" class="back-link" style="color:var(--color-accent);text-decoration:none;font-size:13px;">&larr; {{.Page.BackLabel}}</a>
+        <h1 class="page-title">{{.Page.Name}}
+          {{if .Page.Running}}<span class="pill is-running">online</span>
+          {{else}}<span class="pill">offline</span>{{end}}
+          <span class="pill">{{.Page.Type}}</span>
+        </h1>
+        <p class="page-subtitle">{{.Page.MAC}}</p>
+      </div>
+    </header>
+
+    <section>
+      <h2>Stammdaten</h2>
+      <dl class="viewer-meta">
+        {{if eq .Page.Type "esp"}}
+          <dt>ESP-Modell:</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
+          <dt>Firmware:</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
+          <dt>Bearer-Token gesetzt:</dt><dd>{{if .Page.HasESPToken}}ja{{else}}nein{{end}}</dd>
+        {{else}}
+          <dt>Passwort gesetzt:</dt><dd>{{if .Page.HasPassword}}ja{{else}}nein{{end}}</dd>
+        {{end}}
+        <dt>Verknuepfte Klingel:</dt><dd>{{if .Page.PairedIntercomMAC}}{{.Page.PairedIntercomMAC}}{{else}}-{{end}}</dd>
+        <dt>Stream-Profil:</dt><dd>{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
+        <dt>UA-User-Verknuepfung:</dt><dd>{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
+        <dt>Idle-Ansicht:</dt><dd>{{.Page.IdleViewMode}}</dd>
+        <dt>Auto-Bildschirmschoner:</dt><dd>{{if eq .Page.AutoScreensaverSeconds 0}}aus{{else}}{{.Page.AutoScreensaverSeconds}} Sekunden{{end}}</dd>
+        <dt>Verlauf-Erfassung:</dt><dd>{{if .Page.HistoryCaptureEnabled}}aktiv{{else}}vom Mieter deaktiviert{{end}}</dd>
+      </dl>
+    </section>
+
+    <section class="viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
+      <h2>
+        Verlauf
+        <span class="history-meta">
+          <span class="total-count" data-bind="total-count">-</span>
+          <span class="hidden-count" data-bind="hidden-count" hidden></span>
+        </span>
+      </h2>
+
+      <div class="history-actions">
+        <div class="filter-fields">
+          <label>Von <input type="date" id="history-filter-from"></label>
+          <label>Bis <input type="date" id="history-filter-to"></label>
+          <button type="button" id="history-filter-apply" class="btn btn-secondary">Anwenden</button>
+          <button type="button" id="history-filter-reset" class="btn btn-secondary">Zuruecksetzen</button>
+        </div>
+        <button type="button" id="history-clear-all" class="btn-danger">Verlauf leeren</button>
+      </div>
+
+      <table class="history-table">
+        <thead>
+          <tr><th>Tuer</th><th>Wann</th><th>Aktion</th></tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+      <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
+
+      <button type="button" class="load-more-btn" id="history-load-more" hidden>Mehr laden</button>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var section = document.getElementById('history-section');
+      var viewerMAC = section.getAttribute('data-viewer-mac');
+      var tbody = document.getElementById('history-tbody');
+      var emptyEl = document.getElementById('history-empty');
+      var totalEl = section.querySelector('[data-bind="total-count"]');
+      var hiddenEl = section.querySelector('[data-bind="hidden-count"]');
+      var loadMoreBtn = document.getElementById('history-load-more');
+      var fromInput = document.getElementById('history-filter-from');
+      var toInput = document.getElementById('history-filter-to');
+      var applyBtn = document.getElementById('history-filter-apply');
+      var resetBtn = document.getElementById('history-filter-reset');
+      var clearAllBtn = document.getElementById('history-clear-all');
+
+      var nextOffset = 0;
+      var pendingClearClick = false;
+      var pendingClearTimer = null;
+
+      function loadPage(append) {
+        var params = new URLSearchParams();
+        params.set('offset', append ? String(nextOffset) : '0');
+        params.set('limit', '50');
+        if (fromInput.value) params.set('from', fromInput.value);
+        if (toInput.value)   params.set('to',   toInput.value);
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history?' + params, {
+          headers: { 'Accept': 'application/json' },
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('http ' + r.status);
+            return r.json();
+          })
+          .then(function (resp) {
+            if (!append) {
+              tbody.innerHTML = '';
+              nextOffset = 0;
+            }
+            totalEl.textContent = resp.total_count + ' Eintraege';
+            if (resp.hidden_count > 0) {
+              hiddenEl.textContent = resp.hidden_count + ' vom Mieter ausgeblendet';
+              hiddenEl.hidden = false;
+            } else {
+              hiddenEl.hidden = true;
+            }
+            (resp.events || []).forEach(function (ev) {
+              tbody.appendChild(renderRow(ev));
+            });
+            loadMoreBtn.hidden = !resp.has_more;
+            nextOffset = resp.next_offset || (nextOffset + (resp.events || []).length);
+            emptyEl.hidden = tbody.children.length > 0;
+          })
+          .catch(function (err) {
+            if (window.console) console.warn('history load failed', err);
+          });
+      }
+
+      function renderRow(ev) {
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-event-id', String(ev.id));
+        if (ev.hidden_by_viewer) tr.classList.add('hidden-by-viewer');
+
+        var tdDoor = document.createElement('td');
+        tdDoor.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang';
+        if (ev.hidden_by_viewer) {
+          var icon = document.createElement('span');
+          icon.className = 'eye-off-icon';
+          icon.setAttribute('title', 'Vom Mieter ausgeblendet' + (ev.hidden_at ? ' am ' + formatStamp(ev.hidden_at) : ''));
+          icon.textContent = '⊘'; // circled-slash glyph
+          tdDoor.appendChild(icon);
+        }
+        tr.appendChild(tdDoor);
+
+        var tdWhen = document.createElement('td');
+        tdWhen.textContent = ev.when;
+        tr.appendChild(tdWhen);
+
+        var tdAction = document.createElement('td');
+        var btn = document.createElement('button');
+        btn.className = 'hard-delete-btn';
+        btn.type = 'button';
+        btn.setAttribute('data-event-id', String(ev.id));
+        btn.setAttribute('title', 'Eintrag dauerhaft loeschen');
+        btn.textContent = '×';
+        tdAction.appendChild(btn);
+        tr.appendChild(tdAction);
+        return tr;
+      }
+
+      function formatStamp(unix) {
+        try {
+          return new Date(unix * 1000).toLocaleString('de-DE');
+        } catch (_) { return ''; }
+      }
+
+      tbody.addEventListener('click', function (e) {
+        var btn = e.target.closest('.hard-delete-btn');
+        if (!btn) return;
+        if (!confirm('Diesen Eintrag dauerhaft loeschen?')) return;
+        var id = btn.getAttribute('data-event-id');
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history/' + id, {
+          method: 'DELETE',
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('http ' + r.status);
+            loadPage(false);
+          })
+          .catch(function (err) {
+            alert('Loeschen fehlgeschlagen.');
+            if (window.console) console.warn('delete failed', err);
+          });
+      });
+
+      applyBtn.addEventListener('click', function () { loadPage(false); });
+      resetBtn.addEventListener('click', function () {
+        fromInput.value = '';
+        toInput.value = '';
+        loadPage(false);
+      });
+      loadMoreBtn.addEventListener('click', function () { loadPage(true); });
+
+      clearAllBtn.addEventListener('click', function () {
+        if (!pendingClearClick) {
+          pendingClearClick = true;
+          clearAllBtn.textContent = 'Wirklich? Nochmal klicken';
+          clearAllBtn.classList.add('btn-danger-active');
+          pendingClearTimer = setTimeout(function () {
+            pendingClearClick = false;
+            clearAllBtn.textContent = 'Verlauf leeren';
+            clearAllBtn.classList.remove('btn-danger-active');
+          }, 5000);
+          return;
+        }
+        clearTimeout(pendingClearTimer);
+        pendingClearClick = false;
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history', {
+          method: 'DELETE',
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('http ' + r.status);
+            return r.json();
+          })
+          .then(function (resp) {
+            clearAllBtn.textContent = 'Verlauf leeren';
+            clearAllBtn.classList.remove('btn-danger-active');
+            loadPage(false);
+            if (window.console) console.log('deleted', resp.deleted_count, 'events');
+          })
+          .catch(function () {
+            alert('Loeschen fehlgeschlagen.');
+            clearAllBtn.textContent = 'Verlauf leeren';
+            clearAllBtn.classList.remove('btn-danger-active');
+          });
+      });
+
+      loadPage(false);
+    })();
+  </script>
+
+</body>
+</html>

@@ -327,6 +327,15 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/esp-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
 	s.mux.Handle("DELETE /a/esp-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
 
+	// Saison 14-04-Phase2: unified per-viewer detail page +
+	// history endpoints. /a/viewers/{mac} ist die HTML-Drill-Down-
+	// Sicht aus den Listen-Seiten; die drei /history-Endpoints
+	// liefern paged JSON + Hard-Delete.
+	s.mux.Handle("GET /a/viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerDetail)))
+	s.mux.Handle("GET /a/viewers/{mac}/history", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryJSON)))
+	s.mux.Handle("DELETE /a/viewers/{mac}/history/{event_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteOne)))
+	s.mux.Handle("DELETE /a/viewers/{mac}/history", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteAll)))
+
 	// Benutzer-CRUD (Saison 13-02-FIX4-b). UA-Access-Developer-API
 	// ist die Source-of-Truth; alle Zugriffe gehen ueber das
 	// access.UserStore-Interface.

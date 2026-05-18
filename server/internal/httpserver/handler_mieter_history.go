@@ -92,6 +92,9 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if opts.Limit == 0 {
+		opts.Limit = mieterHistoryDefaultLimit
+	}
 
 	// Capture-Toggle: wenn der Mieter die Erfassung deaktiviert
 	// hat, liefern wir eine leere Liste mit capture_enabled=false.
@@ -285,9 +288,16 @@ func (s *Server) handleMieterHistoryHideAll(w http.ResponseWriter, r *http.Reque
 // translates them into a doorhistory.ListOpts. Invalid input
 // returns a deutsche-Fehlermeldung; the handler maps that to 400.
 //
+// Wenn der Client keinen ?limit= mitschickt, bleibt opts.Limit
+// auf 0; jeder Handler setzt seinen eigenen Page-Default
+// (mieter: 20, admin: 50) bevor er ListVisible/AdminListAll
+// aufruft. So koennen Caller mit identischer parser-Logik
+// unterschiedliche Defaults bedienen ohne dass der Parser sie
+// kennen muss.
+//
 // Saison 14-04-Phase2.
 func parseHistoryListOpts(r *http.Request) (doorhistory.ListOpts, error) {
-	opts := doorhistory.ListOpts{Limit: mieterHistoryDefaultLimit}
+	var opts doorhistory.ListOpts
 
 	q := r.URL.Query()
 	if raw := strings.TrimSpace(q.Get("offset")); raw != "" {

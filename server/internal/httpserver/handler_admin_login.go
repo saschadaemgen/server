@@ -183,6 +183,13 @@ func navSlotFor(name string) string {
 		return "streams"
 	case "settings":
 		return "settings"
+	case "viewer-detail":
+		// Saison 14-04-Phase2: Detail-Seite gehoert nicht zu einem
+		// einzelnen Nav-Slot - sie ist die Drill-Down-Sicht aus
+		// web-viewers / esp-viewers. Wir markieren keinen Slot;
+		// der Back-Link im Header fuehrt den Admin zurueck zur
+		// Liste.
+		return ""
 	default:
 		return ""
 	}
@@ -209,6 +216,8 @@ func extractUser(data any) adminUser {
 	case adminStreamsData:
 		return v.User
 	case adminStreamEditData:
+		return v.User
+	case adminViewerDetailData:
 		return v.User
 	case placeholderData:
 		return v.User
