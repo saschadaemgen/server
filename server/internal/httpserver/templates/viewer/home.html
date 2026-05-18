@@ -838,8 +838,24 @@
       // pet-Daten im Topbar...), Reload ist robust und billig.
       // Eine kleine Verzoegerung (180ms) sammelt nahe Multi-Field-
       // Aenderungen in einen einzigen Reload statt N kaskadierender.
+      //
+      // Saison 14-04-Phase2-FIX03 Skip-Echo. Wenn der Mieter
+      // gerade selbst eine Settings-Aenderung gespeichert hat,
+      // ist der Wert lokal schon im UI. Ein Reload waehrend er
+      // im Settings-Modus steht reisst ihn aus dem Mode raus -
+      // genau der Echo-Race aus dem Live-Test. Skip-Window:
+      // wenn lastOwnSaveAt juenger als 1000ms ist, ignorieren
+      // wir den config.changed; Cross-Device-Sync bleibt intakt
+      // weil Fremd-Trigger ausserhalb des Fensters liegen.
       var configReloadTimer = null;
+      var CONFIG_ECHO_SKIP_MS = 1000;
       es.addEventListener('config.changed', function () {
+        var lastSaveAt = (window.carvilonIdle && window.carvilonIdle.lastOwnSaveAt) || 0;
+        var elapsed = Date.now() - lastSaveAt;
+        if (elapsed < CONFIG_ECHO_SKIP_MS) {
+          if (window.console) console.log('[carvilon] config.changed skipped (own echo, ' + elapsed + 'ms)');
+          return;
+        }
         if (window.console) console.log('[carvilon] config.changed');
         if (configReloadTimer) clearTimeout(configReloadTimer);
         configReloadTimer = setTimeout(function () {

@@ -92,6 +92,30 @@ func TestHomeRender_HistoryButton_WithUnread(t *testing.T) {
 	}
 }
 
+// TestHomeRender_ConfigChangedHasSkipEchoLogic ist der Regression-
+// Bewacher fuer Saison 14-04-Phase2-FIX03. Der Mieter-Settings-
+// Auto-Save broadcastet config.changed; ohne Skip-Echo wuerde
+// derselbe Tab seinen eigenen Echo aufgreifen und location.reload
+// ausloesen, was den User aus dem Settings-Modus reisst. Der Test
+// verifiziert dass das gerenderte home.html sowohl die
+// CONFIG_ECHO_SKIP_MS-Konstante als auch den lastOwnSaveAt-Check
+// enthaelt - beides ist das, was die Skip-Echo-Heuristik
+// faktisch ausmacht.
+func TestHomeRender_ConfigChangedHasSkipEchoLogic(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	html := renderHomeHTML(t, env)
+
+	for _, marker := range []string{
+		"CONFIG_ECHO_SKIP_MS",
+		"lastOwnSaveAt",
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("Skip-Echo-Marker %q fehlt im home.html-Render", marker)
+		}
+	}
+}
+
 // truncateForLog returns a window around the first occurrence of
 // needle, so test failure messages stay readable instead of
 // dumping the entire response body.

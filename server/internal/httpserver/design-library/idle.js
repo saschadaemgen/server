@@ -496,6 +496,15 @@
 
   function saveSettings() {
     if (!settingsForm) return;
+    // Saison 14-04-Phase2-FIX03 Skip-Echo-Marker. Wir stempeln
+    // den Zeitpunkt VOR dem POST damit der gleich-darauf-folgende
+    // config.changed SSE-Echo erkennen kann dass die Aenderung
+    // schon aus diesem Tab kam - kein Reload, User bleibt im
+    // Settings-Modus. Cross-Device-Sync via SSE bleibt intakt
+    // weil Fremd-Triggers ausserhalb des Skip-Fensters liegen.
+    window.carvilonIdle = window.carvilonIdle || {};
+    window.carvilonIdle.lastOwnSaveAt = Date.now();
+
     // S14-03-FIX03 Sub-1a: build a urlencoded body explicitly.
     // The previous FIX02 code passed a FormData object directly,
     // which makes fetch use multipart/form-data. Go's
