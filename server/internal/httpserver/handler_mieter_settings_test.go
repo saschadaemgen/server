@@ -405,6 +405,51 @@ func TestMieterSettingsPost_HistoryCaptureToggle(t *testing.T) {
 	}
 }
 
+func TestMieterSettingsPost_ClockLayoutPersists(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	form := url.Values{}
+	form.Set("clock_layout", "horizontal")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	if info.ResolveClockLayout() != "horizontal" {
+		t.Errorf("persisted clock_layout = %q, want horizontal",
+			info.ResolveClockLayout())
+	}
+}
+
+func TestMieterSettingsPost_ClockLayoutRejectsBogus(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	form := url.Values{}
+	form.Set("clock_layout", "diagonal")
+	req, _ := http.NewRequest(http.MethodPost,
+		env.ts.URL+"/webviewer/settings",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestMieterSettingsPost_HistoryCaptureRejectsBogus(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)

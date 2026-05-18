@@ -41,11 +41,14 @@ import (
 // Saison 14-04-Phase2: HistoryCaptureEnabled hydrates the new
 // radio-group "Verlauf-Erfassung" in the inline settings mode and
 // the standalone /webviewer/settings page.
+// Saison 14-04-Phase2-FIX05: ClockLayout fuer die Uhr-Anzeige-
+// Praeferenz (vertical / horizontal).
 type mieterSettingsData struct {
 	UnitName               string
 	IdleViewMode           string // "screensaver" or "livestream"
 	AutoScreensaverSeconds int    // 0 = off, otherwise one of AutoScreensaverSecondsAllowed
 	HistoryCaptureEnabled  bool   // true = Mieter sieht Verlauf
+	ClockLayout            string // "vertical" oder "horizontal"
 	Flash                  string
 	FlashType              string
 }
@@ -148,6 +151,27 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Saison 14-04-Phase2-FIX05 clock_layout. Akzeptiert die zwei
+	// Allow-List-Werte; fehlend = unveraendert.
+	var clockLayoutApplied *string
+	if raw, present := r.PostForm["clock_layout"]; present && len(raw) > 0 && raw[0] != "" {
+		v := strings.TrimSpace(raw[0])
+		allowed := false
+		for _, opt := range mockmanager.ClockLayoutAllowed {
+			if opt == v {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w,
+				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		clockLayoutApplied = &v
+	}
+
 	// Saison 14-04-Phase2: history_capture toggle. Akzeptiert "1"
 	// und "0" als string-Form-Werte (HTML radio-input liefert
 	// genau das). Fehlend = unveraendert, ungueltig = 400.
@@ -176,6 +200,17 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	if clockLayoutApplied != nil {
+		if err := s.mockMgr.SetClockLayout(r.Context(), mac, *clockLayoutApplied); err != nil {
+			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+				return
+			}
+			s.log.Error("mieter settings save clock", "err", err, "mac_prefix", safePrefix(mac))
+			http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Saison 14-XX: config.changed broadcasten damit andere Tabs /
 	// Browser-Sessions auf demselben viewer_mac und (sobald gepaart)
@@ -196,6 +231,9 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 		if captureApplied != nil {
 			out["history_capture"] = *captureApplied
+		}
+		if clockLayoutApplied != nil {
+			out["clock_layout"] = *clockLayoutApplied
 		}
 		_ = json.NewEncoder(w).Encode(out)
 		return
@@ -230,5 +268,6 @@ func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, e
 		IdleViewMode:           info.ResolveIdleViewMode(),
 		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
+		ClockLayout:            info.ResolveClockLayout(),
 	}, nil
 }

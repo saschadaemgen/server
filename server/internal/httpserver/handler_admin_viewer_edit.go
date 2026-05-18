@@ -146,6 +146,7 @@ type adminViewerSettingsRequest struct {
 	IdleViewMode           *string `json:"idle_view_mode,omitempty"`
 	AutoScreensaverSeconds *int    `json:"auto_screensaver_seconds,omitempty"`
 	HistoryCapture         *bool   `json:"history_capture,omitempty"`
+	ClockLayout            *string `json:"clock_layout,omitempty"`
 	ScreenOffAfterSec      *int    `json:"screen_off_after_sec,omitempty"`
 	BrightnessIdle         *int    `json:"brightness_idle,omitempty"`
 	Language               *string `json:"language,omitempty"`
@@ -221,6 +222,21 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		applied["history_capture"] = *body.HistoryCapture
+	}
+
+	if body.ClockLayout != nil {
+		v := *body.ClockLayout
+		if !slices.Contains(mockmanager.ClockLayoutAllowed, v) {
+			http.Error(w,
+				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		if err := s.mockMgr.SetClockLayout(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "clock_layout", err)
+			return
+		}
+		applied["clock_layout"] = v
 	}
 
 	// ESP-only Felder. type='web' -> 400 mit klarem Hinweis.
@@ -450,6 +466,7 @@ func adminViewerJSON(info *mockmanager.ViewerInfo) map[string]any {
 		"brightness_idle":           info.ResolveBrightnessIdle(),
 		"language":                  info.ResolveLanguage(),
 		"history_capture_enabled":   info.ResolveHistoryCaptureEnabled(),
+		"clock_layout":              info.ResolveClockLayout(),
 		"has_password":              info.HasPassword,
 		"has_esp_token":             info.HasESPToken,
 	}

@@ -51,6 +51,8 @@ type adminViewerDetailData struct {
 	ScreenOffAfterSec int
 	BrightnessIdle    int
 	Language          string
+	// Saison 14-04-Phase2-FIX05 clock-layout.
+	ClockLayout       string
 	BackHref          string // "/a/web-viewers" oder "/a/esp-viewers"
 	BackLabel         string
 }
@@ -90,6 +92,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
 		BrightnessIdle:         info.ResolveBrightnessIdle(),
 		Language:               info.ResolveLanguage(),
+		ClockLayout:            info.ResolveClockLayout(),
 	}
 	if info.Type == mockmanager.TypeESP {
 		data.BackHref = "/a/esp-viewers"

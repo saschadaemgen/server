@@ -109,6 +109,10 @@ type espUISettings struct {
 	AutoScreensaverSeconds int    `json:"auto_screensaver_seconds"`
 	ScreenOffAfterSec      int    `json:"screen_off_after_sec"`
 	BrightnessIdle         int    `json:"brightness_idle"`
+	// Saison 14-04-Phase2-FIX05. "vertical" / "horizontal";
+	// ESP-Chat baut den Switch in scr_screensaver.c separat,
+	// das Feld liefert die Praeferenz schon mit.
+	ClockLayout string `json:"clock_layout"`
 	// ScreensaverAfterSec is the legacy alias from FIX4-d; mirrors
 	// AutoScreensaverSeconds verbatim. Will be dropped after the
 	// ESP firmware migration to the canonical key lands.
@@ -156,6 +160,7 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 			ScreensaverAfterSec:    autoSec,
 			ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
 			BrightnessIdle:         info.ResolveBrightnessIdle(),
+			ClockLayout:            info.ResolveClockLayout(),
 		},
 		IdleViewMode: info.ResolveIdleViewMode(),
 		Weather:      s.fetchHomeWeather(r),

@@ -42,6 +42,9 @@ type viewerHomeData struct {
 	// Saison 14-04-Phase2: hydrates the inline settings-mode
 	// "Verlauf-Erfassung" radio group. True = capture aktiv.
 	HistoryCaptureEnabled bool
+	// Saison 14-04-Phase2-FIX05 clock-layout. Initial-Paint des
+	// Screensavers + Settings-Radio.
+	ClockLayout string
 }
 
 // viewerHistoryRow matches the design-library shape for one
@@ -117,6 +120,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		Weather:                s.fetchHomeWeather(r),
 		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
+		ClockLayout:            info.ResolveClockLayout(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderViewer(w, "home", data); err != nil {

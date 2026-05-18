@@ -32,6 +32,7 @@ type espSettingsRequest struct {
 	ScreenOffAfterSec        *int    `json:"screen_off_after_sec,omitempty"`
 	BrightnessIdle           *int    `json:"brightness_idle,omitempty"`
 	Language                 *string `json:"language,omitempty"`
+	ClockLayout              *string `json:"clock_layout,omitempty"`
 }
 
 // idleViewModeAllowed mirrors the mockmanager.SetIdleViewMode
@@ -133,6 +134,21 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		applied["language"] = v
+	}
+
+	if body.ClockLayout != nil {
+		v := *body.ClockLayout
+		if !slices.Contains(mockmanager.ClockLayoutAllowed, v) {
+			http.Error(w,
+				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		if err := s.mockMgr.SetClockLayout(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "clock_layout", err)
+			return
+		}
+		applied["clock_layout"] = v
 	}
 
 	// Broadcast config.changed sobald mindestens ein Feld

@@ -196,6 +196,35 @@ func TestESPSettings_TriggersConfigChangedOnESPBus(t *testing.T) {
 	}
 }
 
+func TestESPSettings_AcceptsClockLayout(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Clock A")
+
+	resp := postESPSettings(t, env, tok, map[string]any{"clock_layout": "horizontal"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	if info.ResolveClockLayout() != "horizontal" {
+		t.Errorf("persisted clock_layout = %q, want horizontal",
+			info.ResolveClockLayout())
+	}
+}
+
+func TestESPSettings_RejectsBogusClockLayout(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Clock B")
+
+	resp := postESPSettings(t, env, tok, map[string]any{"clock_layout": "diagonal"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestESPSettings_EmptyBodyNoBroadcast(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

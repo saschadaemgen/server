@@ -222,6 +222,10 @@ func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
 		t.Errorf("ui.screensaver_after_sec (legacy alias) = %v, want 60",
 			ui["screensaver_after_sec"])
 	}
+	// Saison 14-04-Phase2-FIX05 clock_layout default (vertical).
+	if ui["clock_layout"] != "vertical" {
+		t.Errorf("ui.clock_layout = %v, want vertical (default)", ui["clock_layout"])
+	}
 	// Top-level idle_view_mode bleibt fuer Backwards-Compat erhalten.
 	if got["idle_view_mode"] != "screen_off" {
 		t.Errorf("top-level idle_view_mode = %v, want screen_off",
