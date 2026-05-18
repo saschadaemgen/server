@@ -88,7 +88,7 @@
           <tbody>
             {{range .Page.Adopted}}
               <tr>
-                <td><strong>{{.Name}}</strong></td>
+                <td><a href="/a/viewers/{{.MAC}}" style="color:inherit; text-decoration:none;" title="Detail-Seite"><strong>{{.Name}}</strong></a></td>
                 <td><code>{{.MAC}}</code></td>
                 <td>{{if .Model}}{{.Model}}{{else}}<em>-</em>{{end}}</td>
                 <td>{{if .FwVersion}}{{.FwVersion}}{{else}}<em>-</em>{{end}}</td>

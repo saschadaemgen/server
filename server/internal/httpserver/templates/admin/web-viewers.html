@@ -45,7 +45,9 @@
           {{range .Page.Viewers}}
             <tr id="row-{{macID .MAC}}">
               <td>
-                <strong>{{.Name}}</strong>
+                <a href="/a/viewers/{{.MAC}}" style="color:inherit; text-decoration:none;" title="Detail-Seite">
+                  <strong>{{.Name}}</strong>
+                </a>
                 <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
               </td>
               <td>
