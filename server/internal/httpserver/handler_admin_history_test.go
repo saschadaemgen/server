@@ -313,6 +313,70 @@ func TestAdminDashboard_FilterRejectsBogusButDoesNotError(t *testing.T) {
 	}
 }
 
+// TestAdminDashboard_FilterDropdownHasNoInlineDisplay ist der
+// Regression-Test fuer Saison 14-04-Phase2-FIX02: die FIX01-
+// Schliess-Logik greift nicht weil das Markup inline
+// "display:flex" plus das hidden-Attribut zusammen rendert.
+// Inline-Style schlaegt das User-Agent-[hidden]{display:none}.
+// Folge: dropdown.hidden=true hatte keinen sichtbaren Effekt.
+//
+// Der Fix verschiebt die Sichtbarkeits-Steuerung auf eine
+// .is-open-Klasse. Dieser Test bewacht das: das gerenderte
+// Dropdown-Element darf weder ein inline "display:" tragen noch
+// das hidden-Attribut auf dem Dropdown-Container haben. Beides
+// wuerde den Bug zurueckbringen.
+func TestAdminDashboard_FilterDropdownHasNoInlineDisplay(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	// Locate the dropdown element + its opening tag.
+	openIdx := indexOf(body, `id="dashboard-filter-dropdown"`)
+	if openIdx < 0 {
+		t.Fatal("dashboard-filter-dropdown not in rendered HTML")
+	}
+	tagStart := openIdx
+	// Scan back to the preceding "<" so we have the full opening
+	// tag in our search window.
+	for tagStart > 0 && body[tagStart] != '<' {
+		tagStart--
+	}
+	tagEnd := openIdx
+	for tagEnd < len(body) && body[tagEnd] != '>' {
+		tagEnd++
+	}
+	tag := body[tagStart : tagEnd+1]
+
+	// Pre-FIX02-Regressionen: inline display und/oder hidden-Attribut.
+	if contains(tag, `display:`) || contains(tag, `display :`) {
+		t.Errorf("dropdown opening tag carries inline display style; this is the FIX02 bug:\n%s", tag)
+	}
+	if contains(tag, ` hidden`) || contains(tag, ` hidden=`) {
+		t.Errorf("dropdown opening tag still has the hidden attribute; that was the visibility-toggle pre-FIX02:\n%s", tag)
+	}
+	// Positive: muss die FIX02-Visibility-Klasse erlauben.
+	if !contains(body, "#dashboard-filter-dropdown.is-open") {
+		t.Errorf("expected .is-open visibility rule for the dropdown in the page CSS")
+	}
+}
+
+// indexOf returns the first index of needle in haystack or -1.
+// Avoids pulling strings into a test file that already has its
+// own minimal contains helper.
+func indexOf(haystack, needle string) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}
+
 // contains is a thin strings.Contains wrapper that keeps the
 // test files free of the extra import for one-shot checks.
 func contains(haystack, needle string) bool {

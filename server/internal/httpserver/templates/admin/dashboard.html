@@ -11,6 +11,11 @@
        Filter-Button. .filter-btn-is-active hebt den Button mit
        Akzent-Farbe hervor; .filter-btn-count rendert das
        Badge mit der Anzahl ausgewaehlter Viewer. */
+    #dashboard-filter-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
     #dashboard-filter-btn.filter-btn-is-active {
       color: var(--color-accent);
       border-color: var(--color-accent);
@@ -29,6 +34,58 @@
       font-size: 11px;
       font-weight: 600;
       line-height: 1;
+    }
+
+    /* Saison 14-04-Phase2-FIX02 ECHTER Filter-Dropdown-Fix.
+       FIX01-Bug: das Markup hatte inline style="display:flex"
+       UND das hidden-Attribut. Inline-Style schlaegt das
+       User-Agent-[hidden]{display:none}; das Dropdown ist immer
+       sichtbar gewesen, egal was dropdown.hidden setzte.
+       FIX02 verschiebt alle Styles in den style-Block und
+       toggelt Sichtbarkeit ueber eine .is-open-Klasse. */
+    .dashboard-filter {
+      margin-left: auto;
+      position: relative;
+    }
+    #dashboard-filter-dropdown {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 100%;
+      margin-top: 6px;
+      background: #0b1220;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 240px;
+      max-height: 320px;
+      overflow: auto;
+      z-index: 5;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      flex-direction: column;
+      gap: 6px;
+    }
+    #dashboard-filter-dropdown.is-open {
+      display: flex;
+    }
+    .filter-dropdown-mass-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .filter-dropdown-mass-row .btn {
+      flex: 1;
+    }
+    .filter-dropdown-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 4px 0;
+      cursor: pointer;
+    }
+    #dashboard-filter-apply {
+      margin-top: 8px;
     }
   </style>
 </head>
@@ -133,34 +190,27 @@
              FIX01: Schliess-Logik (Apply + Outside + ESC) plus
              Aktiv-Indikator (.is-active + Count-Badge wenn nicht
              alle Viewer ausgewaehlt sind). -->
-        <div class="dashboard-filter" style="margin-left: auto; position: relative;">
+        <div class="dashboard-filter">
           <button type="button" id="dashboard-filter-btn"
-                  class="btn btn-secondary{{if .Page.AnyFilter}} filter-btn-is-active{{end}}"
-                  style="display:inline-flex; align-items:center; gap:6px;">
+                  class="btn btn-secondary{{if .Page.AnyFilter}} filter-btn-is-active{{end}}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18"/><path d="M6 12h12"/><path d="M10 18h4"/>
             </svg>
             Wohnung filtern
             {{if .Page.AnyFilter}}<span class="filter-btn-count">{{len .Page.SelectedMACs}}</span>{{end}}
           </button>
-          <div id="dashboard-filter-dropdown" hidden style="
-              position:absolute; right:0; top:100%; margin-top:6px;
-              background:#0b1220; border:1px solid rgba(255,255,255,0.12);
-              border-radius:10px; padding:12px; min-width:240px;
-              max-height:320px; overflow:auto; z-index:5;
-              box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-              display:flex; flex-direction:column; gap:6px;">
-            <div style="display:flex; gap:8px; margin-bottom:8px;">
-              <button type="button" id="dashboard-filter-all-on" class="btn btn-secondary" style="flex:1;">Alle an</button>
-              <button type="button" id="dashboard-filter-all-off" class="btn btn-secondary" style="flex:1;">Alle aus</button>
+          <div id="dashboard-filter-dropdown">
+            <div class="filter-dropdown-mass-row">
+              <button type="button" id="dashboard-filter-all-on" class="btn btn-secondary">Alle an</button>
+              <button type="button" id="dashboard-filter-all-off" class="btn btn-secondary">Alle aus</button>
             </div>
             {{range .Page.AllViewers}}
-              <label style="display:flex; align-items:center; gap:8px; font-size:13px; padding:4px 0;">
+              <label class="filter-dropdown-option">
                 <input type="checkbox" name="dashboard-viewer-mac" value="{{.MAC}}"{{if .Selected}} checked{{end}}>
                 {{.Name}}
               </label>
             {{end}}
-            <button type="button" id="dashboard-filter-apply" class="btn btn-primary" style="margin-top:8px;">Anwenden</button>
+            <button type="button" id="dashboard-filter-apply" class="btn btn-primary">Anwenden</button>
           </div>
         </div>
       </div>
@@ -191,56 +241,57 @@
     </section>
 
     <script>
-      // Saison 14-04-Phase2 + FIX01: Dashboard-Filter-Dropdown.
+      // Saison 14-04-Phase2 + FIX01 + FIX02: Dashboard-Filter-Dropdown.
       //
-      // Schliess-Logik (FIX01):
-      //   - Klick auf "Anwenden" navigiert weg (Filter wird angewandt);
-      //     dropdown wird zusaetzlich vor der Navigation explizit
-      //     hidden gemacht so dass Browser-Back-Cache nicht mit
-      //     offenem Dropdown zurueckkehrt.
-      //   - Klick ausserhalb (document-listener) schliesst.
-      //   - ESC-Taste schliesst.
-      //   - Klick auf den Filter-Button toggelt; stopPropagation
-      //     verhindert dass der document-listener gleichzeitig
-      //     greift und den frisch geoeffneten Dropdown wieder
-      //     zumacht.
-      //   - Klicks INNERHALB des Dropdowns (Checkboxes, Alle-an/
-      //     Alle-aus) sollen NICHT schliessen; deshalb fangen wir
-      //     dropdown-clicks im outside-handler ab.
+      // FIX02 echter Bug-Fix: das Sichtbarkeits-Toggle laeuft jetzt
+      // ueber die .is-open-Klasse statt das hidden-Attribut. Pre-
+      // FIX02 hatte das Markup inline-Style mit display:flex - dieser
+      // Spezifitaets-Sieger hat das User-Agent-[hidden]{display:none}
+      // ueberschrieben, weshalb das Dropdown nie versteckt wurde.
+      //
+      // Verhalten:
+      //   - Klick Filter-Button: Dropdown auf/zu
+      //   - Klick "Anwenden": Filter anwenden + Dropdown zu + Navigation
+      //   - Klick "Alle an" / "Alle aus": nur Checkboxes togglen,
+      //     Dropdown bleibt offen damit Admin weiter klicken kann
+      //   - Klick ausserhalb des Dropdowns + nicht auf Button: zu
+      //   - ESC-Taste: zu
       (function () {
         var btn = document.getElementById('dashboard-filter-btn');
         var dropdown = document.getElementById('dashboard-filter-dropdown');
         if (!btn || !dropdown) return;
 
-        function closeDropdown() { dropdown.hidden = true; }
-        function openDropdown()  { dropdown.hidden = false; }
-        function toggleDropdown() {
-          if (dropdown.hidden) openDropdown(); else closeDropdown();
-        }
+        function isOpen()        { return dropdown.classList.contains('is-open'); }
+        function openDropdown()  { dropdown.classList.add('is-open'); }
+        function closeDropdown() { dropdown.classList.remove('is-open'); }
+        function toggleDropdown() { if (isOpen()) closeDropdown(); else openDropdown(); }
 
         btn.addEventListener('click', function (e) {
+          // stopPropagation verhindert dass der document-listener
+          // direkt nach dem Oeffnen wieder schliesst.
           e.stopPropagation();
           toggleDropdown();
         });
 
         // Outside-Click. dropdown.contains(target) deckt auch
-        // verschachtelte Klick-Targets (z.B. Klick auf das svg-
-        // path-Element innerhalb des btn) ab.
+        // verschachtelte Klick-Targets ab (Checkboxes, Buttons).
         document.addEventListener('click', function (e) {
-          if (dropdown.hidden) return;
+          if (!isOpen()) return;
           if (dropdown.contains(e.target) || btn.contains(e.target)) return;
           closeDropdown();
         });
 
-        // ESC. Nur reagieren wenn Dropdown sichtbar ist, damit der
-        // Listener andere ESC-Use-Cases (z.B. zukuenftige Modals)
-        // nicht stoert.
+        // ESC schliesst. Nur reagieren wenn Dropdown offen, damit
+        // andere ESC-Use-Cases (zukuenftige Modals) ungestoert sind.
         document.addEventListener('keydown', function (e) {
-          if (e.key === 'Escape' && !dropdown.hidden) {
+          if (e.key === 'Escape' && isOpen()) {
             closeDropdown();
           }
         });
 
+        // Mass-Toggle Buttons sollen das Dropdown OFFEN lassen
+        // (Admin koennte gleich nach "Alle aus" einzelne Mieter
+        // wieder anklicken wollen). Keine closeDropdown-Calls.
         document.getElementById('dashboard-filter-all-on').addEventListener('click', function () {
           dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').forEach(function (cb) {
             cb.checked = true;
@@ -251,19 +302,17 @@
             cb.checked = false;
           });
         });
+
         document.getElementById('dashboard-filter-apply').addEventListener('click', function () {
           var macs = [];
           dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]:checked').forEach(function (cb) {
             macs.push(cb.value);
           });
           var params = new URLSearchParams();
-          // Wenn alle markiert sind: gar kein Filter (cleaner URL).
           var total = dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').length;
           if (macs.length > 0 && macs.length < total) {
             params.set('viewer_macs', macs.join(','));
           }
-          // FIX01: vor der Navigation explizit schliessen damit
-          // Browser-Back-Cache den Zustand sauber uebernimmt.
           closeDropdown();
           var qs = params.toString();
           location.href = '/a/' + (qs ? '?' + qs : '');
