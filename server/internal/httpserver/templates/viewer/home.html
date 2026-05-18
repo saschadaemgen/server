@@ -459,6 +459,210 @@
       letter-spacing: 0.04em;
     }
 
+    /* Saison 14-04-Phase2: Header-Buttons im Verlauf-Modus
+       (Filter + Edit + Schliessen). */
+    .mode-header-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .history-header-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text-secondary, #cbd5e1);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .history-header-btn:hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--color-text, #f0f4ff);
+    }
+    .history-header-btn.is-active {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      border-color: var(--color-accent, #5b9dff);
+    }
+
+    /* Saison 14-04-Phase2: Hinweis-Banner wenn capture deaktiviert. */
+    .mode-history-capture-off {
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      background: rgba(250,204,21,0.10);
+      border: 1px solid rgba(250,204,21,0.25);
+      color: #facc15;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .mode-history-capture-off[hidden] { display: none; }
+
+    /* Saison 14-04-Phase2: Mehr-Laden-Button im Verlauf-Modus. */
+    .mode-history-load-more {
+      margin-top: 8px;
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      align-self: center;
+    }
+    .mode-history-load-more:hover { background: rgba(255,255,255,0.08); }
+    .mode-history-load-more[hidden] { display: none; }
+
+    /* Saison 14-04-Phase2: Per-Item Loeschen-Button (X) - rechts
+       neben dem When-Text, sichtbar nur im Edit-Mode. Edit-Mode
+       gibt der Mode-Layer eine .is-edit-mode Klasse; das Selektor-
+       Pattern hidden-by-default zieht den Knopf in den Layout-Fluss
+       sobald Edit-Mode aktiv ist. */
+    .mode-history-row .history-delete-btn {
+      display: none;
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.30);
+      color: #ef4444;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+    }
+    .mode-history-row .history-delete-btn:hover {
+      background: rgba(239,68,68,0.25);
+    }
+    [data-mode="history"].is-edit-mode .mode-history-row .history-delete-btn {
+      display: inline-flex;
+    }
+
+    /* Saison 14-04-Phase2: Filter-Modal innerhalb des history-mode-
+       layers. Slidet von unten ein, ueberlagert die Liste. */
+    .mode-history-filter-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      padding: 24px;
+    }
+    .mode-history-filter-modal[hidden] { display: none; }
+    .mode-history-filter-modal .modal-glass {
+      background: #0b1220;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 20px;
+      width: min(360px, 90vw);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.50);
+    }
+    .mode-history-filter-modal h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .mode-history-filter-modal label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--color-text-secondary, #cbd5e1);
+    }
+    .mode-history-filter-modal input[type="date"] {
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      font: inherit;
+    }
+    .mode-history-filter-modal .filter-quick-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .mode-history-filter-modal .filter-quick-row button {
+      flex: 1 1 0;
+      min-width: 70px;
+      padding: 6px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    .mode-history-filter-modal .filter-quick-row button:hover {
+      background: rgba(91,157,255,0.15);
+    }
+    .mode-history-filter-modal .filter-quick-row button.is-active {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      border-color: var(--color-accent, #5b9dff);
+    }
+    .mode-history-filter-modal .filter-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .mode-history-filter-modal .btn-primary,
+    .mode-history-filter-modal .btn-secondary {
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      border: 1px solid transparent;
+    }
+    .mode-history-filter-modal .btn-secondary {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+    }
+    .mode-history-filter-modal .btn-primary {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+    }
+
+    /* Saison 14-04-Phase2: Reset-Button im Settings-Mode. */
+    .mode-reset-btn {
+      align-self: flex-start;
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid rgba(239,68,68,0.40);
+      color: #ef4444;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+    }
+    .mode-reset-btn:hover { background: rgba(239,68,68,0.10); }
+    .mode-reset-btn.is-pending {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+    }
+    .mode-field-hint {
+      color: var(--color-text-tertiary, #94a3b8);
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 4px;
+    }
+
     /* Saison 14-03-FIX01 Sub-1c: dark scrollbar for the inline
        modes that can overflow (settings form, history list). The
        default browser scrollbar is light and clashes with the

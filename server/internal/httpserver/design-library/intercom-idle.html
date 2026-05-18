@@ -192,6 +192,31 @@
                 <label><input type="radio" name="auto_screensaver_seconds" value="300"{{if eq .AutoScreensaverSeconds 300}} checked{{end}}> 5 Minuten</label>
                 <label><input type="radio" name="auto_screensaver_seconds" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
               </fieldset>
+
+              <!-- Saison 14-04-Phase2: Verlauf-Erfassung-Toggle. Wenn
+                   deaktiviert, blendet die Mieter-API alle Eintraege
+                   aus (mit capture_enabled-Flag). Admin sieht weiter
+                   alles via /a/viewers/{mac}/history. -->
+              <fieldset class="mode-field">
+                <legend>
+                  Verlauf-Erfassung
+                  <span class="mode-help" data-help="Wenn aus: Klingel-Anrufe werden für dich nicht mehr im Verlauf angezeigt. Der Hausverwalter sieht weiterhin alle Einträge.">?</span>
+                </legend>
+                <label><input type="radio" name="history_capture" value="1"{{if .HistoryCaptureEnabled}} checked{{end}}> Aktiv</label>
+                <label><input type="radio" name="history_capture" value="0"{{if not .HistoryCaptureEnabled}} checked{{end}}> Deaktiviert</label>
+              </fieldset>
+
+              <!-- Saison 14-04-Phase2: Verlauf leeren (Soft-Delete).
+                   Zwei-Klick-Bestaetigung verdrahtet in idle.js. -->
+              <fieldset class="mode-field">
+                <legend>Verlauf leeren</legend>
+                <button type="button" class="mode-reset-btn" data-action="reset-history">
+                  Verlauf leeren
+                </button>
+                <small class="mode-field-hint">
+                  Versteckt deinen kompletten bisherigen Verlauf. Der Hausverwalter sieht den Verlauf weiterhin.
+                </small>
+              </fieldset>
             </div>
 
             <footer class="mode-settings-footer" aria-label="CARVILON Intercom Web Viewer">
@@ -207,17 +232,62 @@
           </form>
         </div>
 
-        <!-- 4. Inline history (saison 14-03). Empty container;
-             idle.js fetches /webviewer/history.json on first open
-             and renders the list. Subsequent opens re-fetch so the
-             list stays current without an SSE history-channel. -->
+        <!-- 4. Inline history (saison 14-03 + 14-04-Phase2).
+             Empty container; idle.js fetches /webviewer/history.json
+             on first open and renders the list. Subsequent opens
+             re-fetch so the list stays current without an SSE
+             history-channel.
+             14-04-Phase2 fuegt ein Header mit Filter-Knopf und
+             Bearbeiten-Knopf hinzu, dazu einen Mehr-Laden-Button
+             und das Filter-Modal (Schnellfilter + From/To). -->
         <div class="mode-layer below hidden" data-mode="history">
           <header class="mode-header">
             <h2>Verlauf</h2>
-            <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
+            <div class="mode-header-actions">
+              <button type="button" class="history-header-btn" data-action="history-filter-open" aria-label="Filter" title="Filter">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 6h18"/><path d="M6 12h12"/><path d="M10 18h4"/>
+                </svg>
+              </button>
+              <button type="button" class="history-header-btn" data-action="history-edit-toggle" aria-label="Bearbeiten" title="Bearbeiten">
+                <span data-bind="edit-mode-label">Bearbeiten</span>
+              </button>
+              <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
+            </div>
           </header>
+
+          <!-- Hinweis-Banner bei capture_enabled=false. idle.js
+               toggelt is-visible bei history-load. -->
+          <div class="mode-history-capture-off" data-bind="capture-off-banner" hidden>
+            Verlauf-Erfassung ist deaktiviert. Aktiviere sie in den Einstellungen um Anrufe zu sehen.
+          </div>
+
           <div class="mode-history" data-bind="history-list" role="list">
             <div class="mode-history-empty" data-bind="history-empty">Lade...</div>
+          </div>
+
+          <button type="button" class="mode-history-load-more" data-action="history-load-more" hidden>
+            Mehr laden
+          </button>
+
+          <!-- Filter-Modal (Saison 14-04-Phase2). Slidet hoch
+               wenn aktiv; ueberlagert die Liste. -->
+          <div class="mode-history-filter-modal" data-bind="history-filter-modal" hidden>
+            <div class="modal-glass">
+              <h3>Verlauf filtern</h3>
+              <div class="filter-quick-row">
+                <button type="button" data-filter-range="today">Heute</button>
+                <button type="button" data-filter-range="yesterday">Gestern</button>
+                <button type="button" data-filter-range="7days">7 Tage</button>
+                <button type="button" data-filter-range="30days">30 Tage</button>
+              </div>
+              <label>Von: <input type="date" data-bind="filter-from"></label>
+              <label>Bis: <input type="date" data-bind="filter-to"></label>
+              <div class="filter-actions">
+                <button type="button" class="btn-secondary" data-action="history-filter-reset">Zuruecksetzen</button>
+                <button type="button" class="btn-primary" data-action="history-filter-apply">Anwenden</button>
+              </div>
+            </div>
           </div>
         </div>
 

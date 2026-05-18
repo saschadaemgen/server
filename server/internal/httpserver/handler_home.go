@@ -39,6 +39,9 @@ type viewerHomeData struct {
 	// the persisted timer (0 = disabled); the browser runtime
 	// promotes the setting into the slide-up modes container.
 	AutoScreensaverSeconds int
+	// Saison 14-04-Phase2: hydrates the inline settings-mode
+	// "Verlauf-Erfassung" radio group. True = capture aktiv.
+	HistoryCaptureEnabled bool
 }
 
 // viewerHistoryRow matches the design-library shape for one
@@ -113,6 +116,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		IdleViewMode:           info.ResolveIdleViewMode(),
 		Weather:                s.fetchHomeWeather(r),
 		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
+		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderViewer(w, "home", data); err != nil {

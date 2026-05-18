@@ -555,16 +555,66 @@
   }
 
   // -------------------------------------------------------------
-  // Inline history: GET /webviewer/history.json on first open and
-  // on every subsequent open so the list stays fresh. Server-side
-  // mark-read happens asynchronously after the JSON ships, so the
-  // "NEU" badges in this payload still render the first time.
+  // Inline history (Saison 14-03 + 14-04-Phase2).
+  //
+  // 14-04-Phase2 erweitert die einfache "alle Eintraege laden"
+  // Logik um:
+  //   - Pagination via offset/limit + Mehr-Laden-Button
+  //   - Datums-Filter modal (From/To + Schnellfilter)
+  //   - capture_enabled=false: Banner statt Liste
+  //   - Edit-Mode (X-Buttons sichtbar/unsichtbar) mit Per-Item-
+  //     Soft-Delete (DELETE /webviewer/history/{id})
+  //
+  // historyState haelt den aktuellen Filter und das pagination-
+  // Offset. Jeder Re-Render setzt es zurueck; Mehr-Laden inkrementiert.
   var historyList = container.querySelector('[data-bind="history-list"]');
   var historyEmpty = container.querySelector('[data-bind="history-empty"]');
-  function loadHistory() {
+  var historyCaptureBanner = container.querySelector('[data-bind="capture-off-banner"]');
+  var historyLoadMoreBtn = container.querySelector('[data-action="history-load-more"]');
+  var historyEditBtn = container.querySelector('[data-action="history-edit-toggle"]');
+  var historyEditLabel = container.querySelector('[data-bind="edit-mode-label"]');
+  var historyFilterBtn = container.querySelector('[data-action="history-filter-open"]');
+  var historyFilterModal = container.querySelector('[data-bind="history-filter-modal"]');
+  var historyLayer = container.querySelector('[data-mode="history"]');
+
+  var HISTORY_LIMIT = 20;
+  var historyState = {
+    offset: 0,
+    from: null,
+    to: null,
+    editMode: false,
+  };
+
+  function setHistoryEditMode(on) {
+    historyState.editMode = !!on;
+    if (historyLayer) historyLayer.classList.toggle('is-edit-mode', historyState.editMode);
+    if (historyEditLabel) {
+      historyEditLabel.textContent = historyState.editMode ? 'Fertig' : 'Bearbeiten';
+    }
+    if (historyEditBtn) {
+      historyEditBtn.classList.toggle('is-active', historyState.editMode);
+    }
+  }
+
+  function loadHistory(append) {
     if (!historyList) return;
-    if (historyEmpty) historyEmpty.textContent = 'Lade ...';
-    fetch('/webviewer/history.json', {
+    if (!append) {
+      historyState.offset = 0;
+      while (historyList.firstChild) historyList.removeChild(historyList.firstChild);
+      var empty = document.createElement('div');
+      empty.className = 'mode-history-empty';
+      empty.setAttribute('data-bind', 'history-empty');
+      empty.textContent = 'Lade ...';
+      historyList.appendChild(empty);
+      historyEmpty = empty;
+    }
+    var params = new URLSearchParams();
+    params.set('offset', String(historyState.offset));
+    params.set('limit', String(HISTORY_LIMIT));
+    if (historyState.from) params.set('from', historyState.from);
+    if (historyState.to)   params.set('to',   historyState.to);
+
+    fetch('/webviewer/history.json?' + params.toString(), {
       headers: { 'Accept': 'application/json' },
       credentials: 'same-origin',
     })
@@ -573,13 +623,45 @@
         return r.json();
       })
       .then(function (resp) {
-        renderHistory((resp && resp.events) || []);
+        if (resp.capture_enabled === false) {
+          // Banner statt Liste. Mehr-Laden + Edit ausgeblendet,
+          // damit der Mieter keinen leeren List-Eindruck bekommt.
+          if (historyCaptureBanner) historyCaptureBanner.hidden = false;
+          if (historyLoadMoreBtn) historyLoadMoreBtn.hidden = true;
+          while (historyList.firstChild) historyList.removeChild(historyList.firstChild);
+          return;
+        }
+        if (historyCaptureBanner) historyCaptureBanner.hidden = true;
+
+        if (!append) {
+          while (historyList.firstChild) historyList.removeChild(historyList.firstChild);
+        } else if (historyEmpty && historyEmpty.parentNode === historyList) {
+          historyList.removeChild(historyEmpty);
+          historyEmpty = null;
+        }
+
+        var events = (resp && resp.events) || [];
+        if (!append && events.length === 0) {
+          var emptyEl = document.createElement('div');
+          emptyEl.className = 'mode-history-empty';
+          emptyEl.setAttribute('data-bind', 'history-empty');
+          emptyEl.textContent = 'Noch keine Klingel-Ereignisse.';
+          historyList.appendChild(emptyEl);
+          historyEmpty = emptyEl;
+        } else {
+          events.forEach(function (ev) {
+            historyList.appendChild(renderHistoryRow(ev));
+          });
+        }
+
+        if (historyLoadMoreBtn) {
+          historyLoadMoreBtn.hidden = !resp.has_more;
+        }
+        historyState.offset = resp.next_offset || (historyState.offset + events.length);
+
         // S14-03-FIX03 Sub-2: opening history marks rows read on
-        // the server (handler_mieter_history.go does it
-        // asynchronously after the JSON ships), so the badge can
-        // drop to 0 right away. SSE will reaffirm with a
-        // unread_count frame.
-        updateUnreadBadge(0);
+        // the server, also wenn Pagination genutzt wird.
+        if (!append) updateUnreadBadge(0);
       })
       .catch(function () {
         if (historyEmpty) {
@@ -587,39 +669,188 @@
         }
       });
   }
-  function renderHistory(events) {
-    if (!historyList) return;
-    // Clear everything except the empty-state placeholder.
-    while (historyList.firstChild) historyList.removeChild(historyList.firstChild);
-    if (!events.length) {
-      var empty = document.createElement('div');
-      empty.className = 'mode-history-empty';
-      empty.setAttribute('data-bind', 'history-empty');
-      empty.textContent = 'Noch keine Klingel-Ereignisse.';
-      historyList.appendChild(empty);
-      historyEmpty = empty;
-      return;
+
+  function renderHistoryRow(ev) {
+    var row = document.createElement('div');
+    row.className = 'mode-history-row';
+    row.setAttribute('role', 'listitem');
+    row.setAttribute('data-event-id', String(ev.id));
+    if (ev.unread) row.classList.add('is-unread');
+
+    var where = document.createElement('span');
+    where.className = 'mode-history-where';
+    where.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang';
+    row.appendChild(where);
+
+    var when = document.createElement('span');
+    when.className = 'mode-history-when';
+    when.textContent = ev.when || '';
+    row.appendChild(when);
+
+    if (ev.unread) {
+      var badge = document.createElement('span');
+      badge.className = 'mode-history-badge';
+      badge.textContent = 'NEU';
+      row.appendChild(badge);
     }
-    events.forEach(function (ev) {
-      var row = document.createElement('div');
-      row.className = 'mode-history-row';
-      row.setAttribute('role', 'listitem');
-      if (ev.unread) row.classList.add('is-unread');
-      var where = document.createElement('span');
-      where.className = 'mode-history-where';
-      where.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang';
-      var when = document.createElement('span');
-      when.className = 'mode-history-when';
-      when.textContent = ev.when || '';
-      row.appendChild(where);
-      row.appendChild(when);
-      if (ev.unread) {
-        var badge = document.createElement('span');
-        badge.className = 'mode-history-badge';
-        badge.textContent = 'NEU';
-        row.appendChild(badge);
+
+    // Edit-Mode-Loesch-Button. CSS macht ihn nur sichtbar wenn
+    // .is-edit-mode auf dem Layer liegt; wir rendern ihn immer,
+    // damit der Toggle keinen Re-Render brauch.
+    var deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'history-delete-btn';
+    deleteBtn.setAttribute('data-action', 'history-delete-one');
+    deleteBtn.setAttribute('data-event-id', String(ev.id));
+    deleteBtn.setAttribute('aria-label', 'Eintrag verstecken');
+    deleteBtn.textContent = '×';
+    row.appendChild(deleteBtn);
+    return row;
+  }
+
+  // Mehr-Laden Trigger.
+  if (historyLoadMoreBtn) {
+    historyLoadMoreBtn.addEventListener('click', function () {
+      loadHistory(true);
+    });
+  }
+  // Edit-Mode-Toggle Trigger.
+  if (historyEditBtn) {
+    historyEditBtn.addEventListener('click', function () {
+      setHistoryEditMode(!historyState.editMode);
+    });
+  }
+  // Per-Item-Soft-Delete (DELETE /webviewer/history/{id}).
+  if (historyList) {
+    historyList.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="history-delete-one"]');
+      if (!btn) return;
+      var row = btn.closest('.mode-history-row');
+      var id = btn.getAttribute('data-event-id');
+      if (!id || !row) return;
+      // Fade-out vor Server-Call damit der Klick instant
+      // feedback gibt; bei Fehler rollen wir die Animation zurueck.
+      row.style.transition = 'opacity 200ms, max-height 200ms';
+      row.style.opacity = '0';
+      row.style.maxHeight = '0';
+      fetch('/webviewer/history/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('delete http ' + r.status);
+          setTimeout(function () {
+            if (row.parentNode) row.parentNode.removeChild(row);
+          }, 220);
+        })
+        .catch(function () {
+          row.style.opacity = '1';
+          row.style.maxHeight = '';
+          showToast('Loeschen fehlgeschlagen', 'error', 3000);
+        });
+    });
+  }
+
+  // Filter-Modal Mechanik.
+  function openHistoryFilter() {
+    if (!historyFilterModal) return;
+    historyFilterModal.hidden = false;
+    syncFilterModalInputs();
+  }
+  function closeHistoryFilter() {
+    if (!historyFilterModal) return;
+    historyFilterModal.hidden = true;
+  }
+  function syncFilterModalInputs() {
+    var fromInput = container.querySelector('[data-bind="filter-from"]');
+    var toInput   = container.querySelector('[data-bind="filter-to"]');
+    if (fromInput) fromInput.value = historyState.from || '';
+    if (toInput)   toInput.value   = historyState.to   || '';
+  }
+  function applyQuickRange(range) {
+    var today = new Date();
+    function iso(d) { return d.toISOString().slice(0, 10); }
+    function start(d, daysBack) {
+      var x = new Date(d);
+      x.setDate(d.getDate() - daysBack);
+      return x;
+    }
+    var ranges = {
+      'today':     [today, today],
+      'yesterday': [start(today, 1), start(today, 1)],
+      '7days':     [start(today, 7), today],
+      '30days':    [start(today, 30), today],
+    };
+    var pair = ranges[range];
+    if (!pair) return;
+    historyState.from = iso(pair[0]);
+    historyState.to   = iso(pair[1]);
+    syncFilterModalInputs();
+  }
+  if (historyFilterBtn) {
+    historyFilterBtn.addEventListener('click', openHistoryFilter);
+  }
+  if (historyFilterModal) {
+    historyFilterModal.addEventListener('click', function (e) {
+      var quick = e.target.closest('[data-filter-range]');
+      if (quick) {
+        applyQuickRange(quick.getAttribute('data-filter-range'));
+        return;
       }
-      historyList.appendChild(row);
+      var apply = e.target.closest('[data-action="history-filter-apply"]');
+      if (apply) {
+        var fromInput = container.querySelector('[data-bind="filter-from"]');
+        var toInput   = container.querySelector('[data-bind="filter-to"]');
+        historyState.from = fromInput && fromInput.value || null;
+        historyState.to   = toInput   && toInput.value   || null;
+        closeHistoryFilter();
+        loadHistory(false);
+        return;
+      }
+      var reset = e.target.closest('[data-action="history-filter-reset"]');
+      if (reset) {
+        historyState.from = null;
+        historyState.to = null;
+        syncFilterModalInputs();
+        closeHistoryFilter();
+        loadHistory(false);
+        return;
+      }
+    });
+  }
+
+  // Reset-Button im Settings-Modus (Zwei-Klick-Bestaetigung).
+  var resetBtn = container.querySelector('[data-action="reset-history"]');
+  var resetPendingTimer = null;
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function () {
+      if (!resetBtn.classList.contains('is-pending')) {
+        resetBtn.classList.add('is-pending');
+        resetBtn.textContent = 'Wirklich? Nochmal klicken';
+        resetPendingTimer = setTimeout(function () {
+          resetBtn.classList.remove('is-pending');
+          resetBtn.textContent = 'Verlauf leeren';
+        }, 5000);
+        return;
+      }
+      clearTimeout(resetPendingTimer);
+      resetBtn.classList.remove('is-pending');
+      resetBtn.textContent = 'Verlauf leeren';
+      fetch('/webviewer/history', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('delete-all http ' + r.status);
+          showToast('Verlauf geleert', 'success', 1500);
+          updateUnreadBadge(0);
+          loadHistory(false);
+        })
+        .catch(function () {
+          showToast('Loeschen fehlgeschlagen', 'error', 3000);
+        });
     });
   }
 
