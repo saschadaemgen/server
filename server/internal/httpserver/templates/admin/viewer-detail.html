@@ -274,6 +274,295 @@
       border-color: rgba(255, 255, 255, 0.16);
     }
     .btn-load-more[hidden] { display: none; }
+
+    /* Saison 14-04-Phase2-FIX02: Stammdaten Edit-Mode.
+       Section-Header hat rechts einen Bearbeiten-Button; im
+       Edit-Mode wird die <dl> ausgeblendet und ein <form> mit
+       Inputs + Selects + Save/Cancel-Buttons gezeigt. */
+    .viewer-detail-section h2 .section-actions {
+      margin-left: auto;
+      display: inline-flex;
+      gap: 8px;
+    }
+    .btn-edit {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--color-text-secondary, #94a3b8);
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: normal;
+      text-transform: none;
+    }
+    .btn-edit:hover { background: rgba(255, 255, 255, 0.08); color: var(--color-text-primary, #f0f4ff); }
+    .btn-edit.is-active {
+      background: var(--color-accent);
+      color: #ffffff;
+      border-color: var(--color-accent);
+    }
+    .inline-action {
+      margin-left: 12px;
+      background: transparent;
+      color: var(--color-accent);
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      text-decoration: underline;
+    }
+    .inline-action:hover { filter: brightness(1.15); }
+
+    .stammdaten-edit-form {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      row-gap: 14px;
+      column-gap: 24px;
+      margin: 0;
+    }
+    .stammdaten-edit-form[hidden] { display: none; }
+    .stammdaten-edit-form label {
+      display: contents;
+      font-size: 14px;
+      color: var(--color-text-secondary, #94a3b8);
+    }
+    .stammdaten-edit-form label > span,
+    .stammdaten-edit-form label > input,
+    .stammdaten-edit-form label > select { display: block; }
+    .stammdaten-edit-form input[type="text"],
+    .stammdaten-edit-form select {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--color-text-primary, #f0f4ff);
+      font: inherit;
+      font-size: 14px;
+      color-scheme: dark;
+    }
+    .stammdaten-edit-form input[type="text"]:focus,
+    .stammdaten-edit-form select:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+    .stammdaten-edit-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 4px;
+    }
+    .stammdaten-edit-actions .btn-primary {
+      background: var(--color-accent);
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 500;
+    }
+    .stammdaten-edit-actions .btn-primary:hover { filter: brightness(1.08); }
+    .stammdaten-edit-actions .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--color-text-primary, #f0f4ff);
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .stammdaten-edit-actions .btn-secondary:hover { background: rgba(255, 255, 255, 0.06); }
+
+    /* Settings-Fieldsets (Auto-Save). */
+    .settings-field {
+      border: 0;
+      padding: 0;
+      margin: 0 0 18px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .settings-field legend {
+      font-family: 'Manrope', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--color-text-tertiary, #94a3b8);
+      margin-bottom: 6px;
+      padding: 0;
+    }
+    .settings-field label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--color-text-primary, #f0f4ff);
+    }
+    .settings-field label:hover { background: rgba(255, 255, 255, 0.04); }
+    .settings-field input[type="radio"] { accent-color: var(--color-accent); }
+    .brightness-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 8px;
+    }
+    .brightness-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--color-accent);
+    }
+    .brightness-row span {
+      min-width: 48px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      color: var(--color-text-secondary, #94a3b8);
+    }
+
+    /* Modal-Overlay (Password + Token-Confirm + Token-Display). */
+    .admin-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 24px;
+    }
+    .admin-modal.is-open { display: flex; }
+    .admin-modal-glass {
+      background: #0b1220;
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 24px 28px;
+      width: min(460px, 92vw);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .admin-modal-glass h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--color-text-primary, #f0f4ff);
+    }
+    .modal-hint {
+      margin: 0;
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .modal-warning {
+      margin: 0;
+      color: #facc15;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 10px 14px;
+      background: rgba(250, 204, 21, 0.06);
+      border: 0.5px solid rgba(250, 204, 21, 0.20);
+      border-radius: 8px;
+    }
+    .admin-modal-glass form { display: flex; flex-direction: column; gap: 14px; }
+    .admin-modal-glass form label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-secondary, #94a3b8);
+    }
+    .admin-modal-glass input[type="password"] {
+      background: rgba(255, 255, 255, 0.04);
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--color-text-primary, #f0f4ff);
+      font: inherit;
+      font-size: 14px;
+    }
+    .admin-modal-glass input[type="password"]:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .modal-actions .btn-primary {
+      background: var(--color-accent);
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 500;
+    }
+    .modal-actions .btn-primary:hover { filter: brightness(1.08); }
+    .modal-actions .btn-primary.btn-danger-confirm {
+      background: rgb(239, 68, 68);
+    }
+    .modal-actions .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--color-text-primary, #f0f4ff);
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .token-value {
+      margin: 0;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', 'Menlo', monospace;
+      font-size: 13px;
+      color: var(--color-text-primary, #f0f4ff);
+      word-break: break-all;
+      white-space: pre-wrap;
+    }
+
+    /* Toast (1.5s fade). */
+    .admin-toast {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translate(-50%, -8px);
+      padding: 10px 18px;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.96);
+      color: var(--color-text-primary, #f0f4ff);
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      font-size: 13px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease, transform 200ms ease;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    .admin-toast.is-visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .admin-toast.kind-error {
+      background: rgba(127, 29, 29, 0.96);
+      border-color: rgba(239, 68, 68, 0.40);
+    }
   </style>
 </head>
 <body class="admin-shell">
@@ -293,23 +582,146 @@
       </div>
     </header>
 
-    <section class="viewer-detail-section">
-      <h2>Stammdaten</h2>
-      <dl class="viewer-meta">
+    <!-- Toast (Saison 14-04-Phase2-FIX02). Globaler Slot, von
+         allen Form-Pfaden gefuettert via showToast(). -->
+    <div class="admin-toast" data-bind="toast" role="status" aria-live="polite"></div>
+
+    <section class="viewer-detail-section" id="stammdaten-section"
+             data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
+      <h2>
+        Stammdaten
+        <span class="section-actions">
+          <button type="button" class="btn-edit" data-action="edit-stammdaten">Bearbeiten</button>
+        </span>
+      </h2>
+
+      <!-- READ-Mode (default). Nicht-editierbare Felder bleiben
+           hier auch im Edit-Mode (MAC, Online, Type, ESP-Modell,
+           Firmware), die editierbaren werden ueber das Display-
+           Toggle ausgeblendet. -->
+      <dl class="viewer-meta" data-bind="stammdaten-read">
         {{if eq .Page.Type "esp"}}
           <dt>ESP-Modell</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
           <dt>Firmware</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
-          <dt>Bearer-Token gesetzt</dt><dd>{{if .Page.HasESPToken}}ja{{else}}nein{{end}}</dd>
+          <dt>Bearer-Token gesetzt</dt><dd>
+            {{if .Page.HasESPToken}}ja{{else}}nein{{end}}
+            <button type="button" class="inline-action" data-action="regen-token">Token neu generieren</button>
+          </dd>
         {{else}}
-          <dt>Passwort gesetzt</dt><dd>{{if .Page.HasPassword}}ja{{else}}nein{{end}}</dd>
+          <dt>Passwort gesetzt</dt><dd>
+            {{if .Page.HasPassword}}ja{{else}}nein{{end}}
+            <button type="button" class="inline-action" data-action="reset-password">Passwort neu setzen</button>
+          </dd>
         {{end}}
-        <dt>Verknuepfte Klingel</dt><dd>{{if .Page.PairedIntercomMAC}}{{.Page.PairedIntercomMAC}}{{else}}-{{end}}</dd>
-        <dt>Stream-Profil</dt><dd>{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
-        <dt>UA-User-Verknuepfung</dt><dd>{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
-        <dt>Idle-Ansicht</dt><dd>{{.Page.IdleViewMode}}</dd>
-        <dt>Auto-Bildschirmschoner</dt><dd>{{if eq .Page.AutoScreensaverSeconds 0}}aus{{else}}{{.Page.AutoScreensaverSeconds}} Sekunden{{end}}</dd>
-        <dt>Verlauf-Erfassung</dt><dd>{{if .Page.HistoryCaptureEnabled}}aktiv{{else}}vom Mieter deaktiviert{{end}}</dd>
+        <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
+        <dt>Verknuepfte Klingel</dt><dd data-bind="read-paired">{{if .Page.PairedIntercomMAC}}{{.Page.PairedIntercomMAC}}{{else}}-{{end}}</dd>
+        <dt>Stream-Profil</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
+        <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
       </dl>
+
+      <!-- EDIT-Mode (versteckt by default). Aktiviert via
+           data-action="edit-stammdaten". Dropdowns werden lazy
+           per fetch befuellt damit die Initial-Page ohne extra
+           Roundtrips rendert. -->
+      <form class="stammdaten-edit-form" data-bind="stammdaten-edit" hidden>
+        <label>
+          Mieter-Name
+          <input type="text" name="name" value="{{.Page.Name}}" required maxlength="64">
+        </label>
+        <label>
+          Verknuepfte Klingel
+          <select name="paired_intercom_mac" data-current="{{.Page.PairedIntercomMAC}}">
+            <option value="">-</option>
+          </select>
+        </label>
+        <label>
+          Stream-Profil
+          <select name="stream_profile" data-current="{{.Page.StreamProfile}}">
+            <option value="">Convention-Fallback</option>
+          </select>
+        </label>
+        <label>
+          UA-User-Verknuepfung
+          <select name="linked_ua_user_id" data-current="{{.Page.LinkedUAUserID}}">
+            <option value="">-</option>
+          </select>
+        </label>
+        <div class="stammdaten-edit-actions">
+          <button type="button" class="btn-secondary" data-action="cancel-stammdaten">Abbrechen</button>
+          <button type="submit" class="btn-primary">Speichern</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Saison 14-04-Phase2-FIX02 Settings-Auto-Save-Section.
+         Sichtbar fuer beide Typen; ESP-spezifische Fields nur
+         wenn Type=esp. Aenderung an einem Radio/Slider feuert
+         sofort fetch -> POST /a/viewers/{mac}/settings. -->
+    <section class="viewer-detail-section" id="settings-section">
+      <h2>Einstellungen</h2>
+
+      <fieldset class="settings-field">
+        <legend>Idle-Ansicht</legend>
+        <label>
+          <input type="radio" name="idle_view_mode" value="screensaver"
+                 {{if eq .Page.IdleViewMode "screensaver"}}checked{{end}}>
+          Bildschirmschoner (Uhr &amp; Wetter)
+        </label>
+        <label>
+          <input type="radio" name="idle_view_mode" value="livestream"
+                 {{if eq .Page.IdleViewMode "livestream"}}checked{{end}}>
+          Live-Stream (Tuerkamera)
+        </label>
+        {{if eq .Page.Type "esp"}}
+          <label>
+            <input type="radio" name="idle_view_mode" value="screen_off"
+                   {{if eq .Page.IdleViewMode "screen_off"}}checked{{end}}>
+            Bildschirm aus
+          </label>
+        {{end}}
+      </fieldset>
+
+      <fieldset class="settings-field">
+        <legend>Auto-Bildschirmschoner</legend>
+        <label><input type="radio" name="auto_screensaver_seconds" value="0"   {{if eq .Page.AutoScreensaverSeconds 0}}checked{{end}}> aus</label>
+        <label><input type="radio" name="auto_screensaver_seconds" value="30"  {{if eq .Page.AutoScreensaverSeconds 30}}checked{{end}}> 30 Sekunden</label>
+        <label><input type="radio" name="auto_screensaver_seconds" value="60"  {{if eq .Page.AutoScreensaverSeconds 60}}checked{{end}}> 1 Minute</label>
+        <label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq .Page.AutoScreensaverSeconds 300}}checked{{end}}> 5 Minuten</label>
+        <label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq .Page.AutoScreensaverSeconds 600}}checked{{end}}> 10 Minuten</label>
+      </fieldset>
+
+      <fieldset class="settings-field">
+        <legend>Verlauf-Erfassung</legend>
+        <label><input type="radio" name="history_capture" value="1" {{if .Page.HistoryCaptureEnabled}}checked{{end}}> Aktiv</label>
+        <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
+      </fieldset>
+
+      {{if eq .Page.Type "esp"}}
+        <fieldset class="settings-field">
+          <legend>Bildschirm aus nach (ESP)</legend>
+          <label><input type="radio" name="screen_off_after_sec" value="0"    {{if eq .Page.ScreenOffAfterSec 0}}checked{{end}}> nie</label>
+          <label><input type="radio" name="screen_off_after_sec" value="30"   {{if eq .Page.ScreenOffAfterSec 30}}checked{{end}}> 30 Sekunden</label>
+          <label><input type="radio" name="screen_off_after_sec" value="60"   {{if eq .Page.ScreenOffAfterSec 60}}checked{{end}}> 1 Minute</label>
+          <label><input type="radio" name="screen_off_after_sec" value="300"  {{if eq .Page.ScreenOffAfterSec 300}}checked{{end}}> 5 Minuten</label>
+          <label><input type="radio" name="screen_off_after_sec" value="600"  {{if eq .Page.ScreenOffAfterSec 600}}checked{{end}}> 10 Minuten</label>
+          <label><input type="radio" name="screen_off_after_sec" value="1800" {{if eq .Page.ScreenOffAfterSec 1800}}checked{{end}}> 30 Minuten</label>
+        </fieldset>
+
+        <fieldset class="settings-field">
+          <legend>Helligkeit (ESP)</legend>
+          <div class="brightness-row">
+            <input type="range" name="brightness_idle" min="0" max="100" step="1"
+                   value="{{.Page.BrightnessIdle}}" data-bind="brightness-slider">
+            <span data-bind="brightness-value">{{.Page.BrightnessIdle}}%</span>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-field">
+          <legend>Sprache (ESP)</legend>
+          <label><input type="radio" name="language" value="de" {{if eq .Page.Language "de"}}checked{{end}}> Deutsch</label>
+          <label><input type="radio" name="language" value="en" {{if eq .Page.Language "en"}}checked{{end}}> English</label>
+        </fieldset>
+      {{end}}
     </section>
 
     <section class="viewer-detail-section viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
@@ -342,9 +754,365 @@
 
       <button type="button" class="btn-load-more" id="history-load-more" hidden>Mehr laden</button>
     </section>
+
+    <!-- Saison 14-04-Phase2-FIX02 Modals.
+         Custom modal-overlay statt <dialog>-Element damit das
+         Design konsistent zur restlichen Admin-UI bleibt. Alle
+         Modals haben dieselbe Hide/Show-Mechanik via .is-open. -->
+
+    {{if ne .Page.Type "esp"}}
+      <!-- Password-Reset (Web-Viewer only). -->
+      <div class="admin-modal" id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+        <div class="admin-modal-glass">
+          <h3 id="password-modal-title">Passwort fuer {{.Page.Name}} neu setzen</h3>
+          <p class="modal-hint">Mindestens 8 Zeichen. Der Mieter wird sich neu anmelden muessen.</p>
+          <form data-bind="password-form">
+            <label>
+              Neues Passwort
+              <input type="password" name="new_password" required minlength="8" autocomplete="new-password">
+            </label>
+            <label>
+              Wiederholen
+              <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password">
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
+              <button type="submit" class="btn-primary">Setzen</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {{end}}
+
+    {{if eq .Page.Type "esp"}}
+      <!-- ESP-Token-Regenerate Bestaetigung. -->
+      <div class="admin-modal" id="token-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="token-confirm-title">
+        <div class="admin-modal-glass">
+          <h3 id="token-confirm-title">Bearer-Token neu generieren?</h3>
+          <p class="modal-warning">
+            Das alte Token wird sofort ungueltig. Der ESP-Viewer
+            muss neu provisioniert werden.
+          </p>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
+            <button type="button" class="btn-primary btn-danger-confirm" data-action="token-regen-confirm">
+              Token neu generieren
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ESP-Token-Display (one-shot reveal). -->
+      <div class="admin-modal" id="token-display-modal" role="dialog" aria-modal="true" aria-labelledby="token-display-title">
+        <div class="admin-modal-glass">
+          <h3 id="token-display-title">Neues Bearer-Token (einmalig sichtbar)</h3>
+          <p class="modal-warning">
+            Speichere das Token jetzt - es kann nicht erneut
+            angezeigt werden.
+          </p>
+          <pre class="token-value" data-bind="token-value"></pre>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" data-action="token-copy">Kopieren</button>
+            <button type="button" class="btn-primary" data-action="modal-cancel">Verstanden</button>
+          </div>
+        </div>
+      </div>
+    {{end}}
   </main>
 
   <script>
+    // Saison 14-04-Phase2-FIX02: Admin-Inline-Edit-Runtime.
+    //
+    // Drei Blocks:
+    //   1. Globaler Toast + Modal-Open/Close-Helper
+    //   2. Stammdaten Edit-Mode (Lazy-Dropdown-Hydrate + Save-
+    //      Form + Modals fuer Password/Token)
+    //   3. Settings Auto-Save (Radio-Change + Brightness-Debounce)
+    (function () {
+      var stammdatenSection = document.getElementById('stammdaten-section');
+      if (!stammdatenSection) return;
+      var viewerMAC  = stammdatenSection.getAttribute('data-viewer-mac');
+      var viewerType = stammdatenSection.getAttribute('data-viewer-type');
+
+      // ---- Toast ----
+      var toastEl = document.querySelector('[data-bind="toast"]');
+      var toastTimer = null;
+      function showToast(msg, kind, durationMs) {
+        if (!toastEl) return;
+        toastEl.textContent = msg;
+        toastEl.classList.remove('kind-error');
+        if (kind === 'error') toastEl.classList.add('kind-error');
+        toastEl.classList.add('is-visible');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+          toastEl.classList.remove('is-visible');
+        }, durationMs || 1500);
+      }
+
+      // ---- Modal-Helpers ----
+      function openModal(id) {
+        var modal = document.getElementById(id);
+        if (modal) modal.classList.add('is-open');
+      }
+      function closeModal(modal) {
+        if (modal) modal.classList.remove('is-open');
+      }
+      // ESC schliesst offenes Modal.
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        document.querySelectorAll('.admin-modal.is-open').forEach(closeModal);
+      });
+      // Klick auf den dunklen Backdrop (nicht auf .admin-modal-glass)
+      // schliesst.
+      document.querySelectorAll('.admin-modal').forEach(function (m) {
+        m.addEventListener('click', function (e) {
+          if (e.target === m) closeModal(m);
+        });
+      });
+      // Universeller "Abbrechen"/"Verstanden"-Button im Modal-Footer.
+      document.querySelectorAll('.admin-modal [data-action="modal-cancel"]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          closeModal(btn.closest('.admin-modal'));
+        });
+      });
+
+      // ---- Stammdaten Edit-Mode ----
+      var readEl = stammdatenSection.querySelector('[data-bind="stammdaten-read"]');
+      var editForm = stammdatenSection.querySelector('[data-bind="stammdaten-edit"]');
+      var editBtn = stammdatenSection.querySelector('[data-action="edit-stammdaten"]');
+      var cancelBtn = stammdatenSection.querySelector('[data-action="cancel-stammdaten"]');
+      var dropdownsHydrated = false;
+
+      function setEditMode(on) {
+        if (on) {
+          readEl.hidden = true;
+          editForm.hidden = false;
+          editBtn.classList.add('is-active');
+          editBtn.textContent = 'Bearbeiten aktiv';
+          if (!dropdownsHydrated) hydrateDropdowns();
+        } else {
+          readEl.hidden = false;
+          editForm.hidden = true;
+          editBtn.classList.remove('is-active');
+          editBtn.textContent = 'Bearbeiten';
+        }
+      }
+      editBtn.addEventListener('click', function () { setEditMode(editForm.hidden); });
+      cancelBtn.addEventListener('click', function () {
+        // Reset auf die initialen Werte (HTMLFormElement.reset
+        // setzt jeden Eintrag auf sein defaultValue / defaultSelected).
+        editForm.reset();
+        setEditMode(false);
+      });
+
+      // Dropdowns lazy hydraten: erst beim ersten Klick auf
+      // "Bearbeiten" feuern wir drei parallele fetches gegen die
+      // existierenden JSON-Endpoints. data-current auf jedem
+      // <select> ist der serverseitig gerenderte Ist-Wert; wir
+      // markieren die passende Option dann als selected.
+      function hydrateDropdowns() {
+        dropdownsHydrated = true;
+        Promise.all([
+          fetch('/a/intercoms.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { intercoms: [] }; }).catch(function () { return { intercoms: [] }; }),
+          fetch('/a/streams.json',   { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] };  }).catch(function () { return { profiles: [] }; }),
+          fetch('/a/users.json',     { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { users: [] };     }).catch(function () { return { users: [] }; }),
+        ]).then(function (results) {
+          // intercomJSON hat JSON-Tags (mac, name); streamRow + userRow
+          // serialisieren mit Go-Defaults (PascalCase), daher hier
+          // unterschiedliche Key-Cases.
+          populateSelect(editForm.elements['paired_intercom_mac'], results[0].intercoms || [], 'mac',  'name');
+          populateSelect(editForm.elements['stream_profile'],      results[1].profiles  || [], 'Name', 'Name');
+          populateSelect(editForm.elements['linked_ua_user_id'],   results[2].users     || [], 'ID',   'DisplayName');
+        });
+      }
+      function populateSelect(selectEl, items, valueKey, labelKey) {
+        if (!selectEl) return;
+        var current = selectEl.getAttribute('data-current') || '';
+        // Erste Option (placeholder "-" oder "Convention-Fallback")
+        // bleibt; alles dahinter raus + neu fuellen.
+        while (selectEl.options.length > 1) selectEl.remove(1);
+        items.forEach(function (it) {
+          var opt = document.createElement('option');
+          opt.value = String(it[valueKey] || '');
+          opt.textContent = String(it[labelKey] || it[valueKey] || '');
+          if (opt.value === current) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+      }
+
+      editForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var body = {
+          name:                editForm.elements['name'].value,
+          paired_intercom_mac: editForm.elements['paired_intercom_mac'].value,
+          stream_profile:      editForm.elements['stream_profile'].value,
+          linked_ua_user_id:   editForm.elements['linked_ua_user_id'].value,
+        };
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/stammdaten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(body),
+        })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (msg) { throw new Error(msg || ('http ' + r.status)); });
+            return r.json();
+          })
+          .then(function () {
+            showToast('Gespeichert');
+            // Volle Page reloaden damit Read-Mode-Felder, Title-
+            // Bar und Verlauf-Section die neuen Werte zeigen.
+            setTimeout(function () { location.reload(); }, 600);
+          })
+          .catch(function (err) {
+            var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
+            showToast(msg.split('\n')[0], 'error', 3000);
+          });
+      });
+
+      // ---- Password-Reset (Web only) ----
+      var pwBtn = stammdatenSection.querySelector('[data-action="reset-password"]');
+      if (pwBtn) {
+        pwBtn.addEventListener('click', function () { openModal('password-modal'); });
+        var pwForm = document.querySelector('[data-bind="password-form"]');
+        if (pwForm) {
+          pwForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var newPw = pwForm.elements['new_password'].value;
+            var confirmPw = pwForm.elements['confirm_password'].value;
+            if (newPw !== confirmPw) {
+              showToast('Passwoerter stimmen nicht ueberein', 'error', 3000);
+              return;
+            }
+            if (newPw.length < 8) {
+              showToast('Mindestens 8 Zeichen', 'error', 3000);
+              return;
+            }
+            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({ new_password: newPw }),
+            })
+              .then(function (r) {
+                if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
+                return r.json();
+              })
+              .then(function () {
+                pwForm.reset();
+                closeModal(document.getElementById('password-modal'));
+                showToast('Passwort gesetzt - Mieter-Sessions invalidiert');
+              })
+              .catch(function (err) {
+                var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
+                showToast(msg.split('\n')[0], 'error', 3000);
+              });
+          });
+        }
+      }
+
+      // ---- ESP-Token-Regenerate ----
+      var tokenBtn = stammdatenSection.querySelector('[data-action="regen-token"]');
+      if (tokenBtn) {
+        tokenBtn.addEventListener('click', function () { openModal('token-confirm-modal'); });
+        var confirmBtn = document.querySelector('[data-action="token-regen-confirm"]');
+        if (confirmBtn) {
+          confirmBtn.addEventListener('click', function () {
+            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/regenerate-token', {
+              method: 'POST',
+              headers: { 'Accept': 'application/json' },
+            })
+              .then(function (r) {
+                if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
+                return r.json();
+              })
+              .then(function (resp) {
+                closeModal(document.getElementById('token-confirm-modal'));
+                var displayEl = document.querySelector('[data-bind="token-value"]');
+                if (displayEl) displayEl.textContent = resp.new_token || '';
+                openModal('token-display-modal');
+              })
+              .catch(function (err) {
+                var msg = (err && err.message) ? String(err.message).trim() : 'Token-Regeneration fehlgeschlagen';
+                showToast(msg.split('\n')[0], 'error', 3000);
+              });
+          });
+        }
+        // Copy-Button auf dem Display-Modal.
+        var copyBtn = document.querySelector('[data-action="token-copy"]');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', function () {
+            var displayEl = document.querySelector('[data-bind="token-value"]');
+            if (!displayEl) return;
+            var text = displayEl.textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(function () {
+                showToast('Token in Zwischenablage');
+              }).catch(function () {
+                showToast('Kopieren fehlgeschlagen', 'error', 2500);
+              });
+            } else {
+              // Fallback: text in temp-textarea + execCommand.
+              var ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              try { document.execCommand('copy'); showToast('Token in Zwischenablage'); }
+              catch (_) { showToast('Kopieren fehlgeschlagen', 'error', 2500); }
+              document.body.removeChild(ta);
+            }
+          });
+        }
+      }
+
+      // ---- Settings Auto-Save ----
+      var settingsSection = document.getElementById('settings-section');
+      if (settingsSection) {
+        var brightnessTimer = null;
+        function saveSetting(name, value) {
+          var body = {};
+          if (name === 'idle_view_mode' || name === 'language') {
+            body[name] = String(value);
+          } else if (name === 'history_capture') {
+            body[name] = (value === '1' || value === 'true' || value === true);
+          } else {
+            body[name] = parseInt(value, 10);
+          }
+          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
+          })
+            .then(function (r) {
+              if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
+              return r.json();
+            })
+            .then(function () { showToast('Gespeichert'); })
+            .catch(function (err) {
+              var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
+              showToast(msg.split('\n')[0], 'error', 3000);
+            });
+        }
+        settingsSection.querySelectorAll('input[type="radio"]').forEach(function (input) {
+          input.addEventListener('change', function () {
+            saveSetting(input.name, input.value);
+          });
+        });
+        var slider = settingsSection.querySelector('[data-bind="brightness-slider"]');
+        var sliderValue = settingsSection.querySelector('[data-bind="brightness-value"]');
+        if (slider) {
+          slider.addEventListener('input', function () {
+            if (sliderValue) sliderValue.textContent = slider.value + '%';
+            if (brightnessTimer) clearTimeout(brightnessTimer);
+            brightnessTimer = setTimeout(function () {
+              saveSetting('brightness_idle', slider.value);
+            }, 300);
+          });
+        }
+      }
+      // viewerType wird im JS aktuell nur fuer kuenftige Branches
+      // gebraucht; hier referenzieren um Linter ruhig zu stellen.
+      void viewerType;
+    })();
+
     (function () {
       var section = document.getElementById('history-section');
       var viewerMAC = section.getAttribute('data-viewer-mac');

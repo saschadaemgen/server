@@ -355,6 +355,139 @@ func TestAdminViewerRegenerateToken_RejectsOnWebViewer(t *testing.T) {
 	}
 }
 
+// ---------- Detail-Page Markup ----------
+
+// detailPageMarkup returns the HTML INSIDE <main>...</main> minus
+// the trailing <script>-Block. Lets markup-only assertions ignore
+// admin-nav-Scripts (vor <main>) und das History/Edit-JS (am Ende).
+// Both JS-Bereiche enthalten Selector-Strings die in beiden
+// {{if eq .Type ...}}-Branches vorkommen und das naive
+// contains(body, "...")-Pattern verfaelschen wuerden.
+func detailPageMarkup(body string) string {
+	mainStart := indexOf(body, "<main")
+	if mainStart < 0 {
+		return body
+	}
+	scriptInMain := indexOfFrom(body, "<script", mainStart)
+	mainEnd := indexOfFrom(body, "</main>", mainStart)
+	end := mainEnd
+	if scriptInMain >= 0 && (mainEnd < 0 || scriptInMain < mainEnd) {
+		end = scriptInMain
+	}
+	if end < 0 {
+		return body[mainStart:]
+	}
+	return body[mainStart:end]
+}
+
+// indexOfFrom liefert die erste Position von needle ab offset, -1
+// wenn nicht gefunden.
+func indexOfFrom(haystack, needle string, offset int) int {
+	if offset < 0 || offset >= len(haystack) {
+		return -1
+	}
+	idx := indexOf(haystack[offset:], needle)
+	if idx < 0 {
+		return -1
+	}
+	return idx + offset
+}
+
+func TestAdminViewerDetail_WebShowsPasswordSection(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + testViewerMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, `data-action="edit-stammdaten"`) {
+		t.Errorf("Edit-Stammdaten-Button fehlt")
+	}
+	if !contains(markup, `data-action="reset-password"`) {
+		t.Errorf("Password-Reset-Button fehlt (Web-Viewer)")
+	}
+	if !contains(markup, `id="password-modal"`) {
+		t.Errorf("Password-Modal fehlt (Web-Viewer)")
+	}
+	if contains(markup, `data-action="regen-token"`) {
+		t.Errorf("Token-Regen-Button auf Web-Viewer sichtbar (sollte nur bei ESP)")
+	}
+	if contains(markup, `id="token-confirm-modal"`) {
+		t.Errorf("Token-Confirm-Modal auf Web-Viewer sichtbar (sollte nur bei ESP)")
+	}
+	if !contains(markup, `id="settings-section"`) {
+		t.Errorf("Settings-Section fehlt")
+	}
+}
+
+func TestAdminViewerDetail_ESPShowsTokenSection(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	adoptESPForTest(t, env, espTestMAC, "Wohnung ESP Detail")
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + espTestMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, `data-action="regen-token"`) {
+		t.Errorf("Token-Regen-Button fehlt (ESP-Viewer)")
+	}
+	if !contains(markup, `id="token-confirm-modal"`) {
+		t.Errorf("Token-Confirm-Modal fehlt (ESP-Viewer)")
+	}
+	if !contains(markup, `id="token-display-modal"`) {
+		t.Errorf("Token-Display-Modal fehlt (ESP-Viewer)")
+	}
+	if contains(markup, `data-action="reset-password"`) {
+		t.Errorf("Password-Button auf ESP-Viewer sichtbar (sollte nur bei Web)")
+	}
+	if contains(markup, `id="password-modal"`) {
+		t.Errorf("Password-Modal auf ESP-Viewer sichtbar (sollte nur bei Web)")
+	}
+	// ESP-spezifische Settings-Fields.
+	if !contains(markup, `name="brightness_idle"`) {
+		t.Errorf("Brightness-Slider fehlt (ESP-Viewer)")
+	}
+	if !contains(markup, `name="screen_off_after_sec"`) {
+		t.Errorf("Screen-Off-Radios fehlen (ESP-Viewer)")
+	}
+	if !contains(markup, `name="language"`) {
+		t.Errorf("Sprach-Radios fehlen (ESP-Viewer)")
+	}
+}
+
+func TestAdminViewerDetail_WebHidesESPSettings(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + testViewerMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	for _, espField := range []string{
+		`name="brightness_idle"`,
+		`name="screen_off_after_sec"`,
+		`name="language"`,
+	} {
+		if contains(markup, espField) {
+			t.Errorf("ESP-Settings-Field %q ist im Web-Viewer-Markup sichtbar", espField)
+		}
+	}
+	// Web-Viewer hat NICHT screen_off als idle_view_mode Option.
+	if contains(markup, `value="screen_off"`) {
+		t.Errorf("idle_view_mode=screen_off Option im Web-Viewer sichtbar (sollte nur bei ESP)")
+	}
+}
+
 func TestAdminViewerRegenerateToken_InvalidatesOldToken(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

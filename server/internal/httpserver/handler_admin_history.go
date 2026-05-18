@@ -46,8 +46,13 @@ type adminViewerDetailData struct {
 	HistoryCaptureEnabled bool
 	ESPModel              string
 	ESPFwVersion          string
-	BackHref              string // "/a/web-viewers" oder "/a/esp-viewers"
-	BackLabel             string
+	// Saison 14-04-Phase2-FIX02: ESP-spezifische Settings fuer
+	// das Settings-Auto-Save-Form. Nur sinnvoll wenn Type == "esp".
+	ScreenOffAfterSec int
+	BrightnessIdle    int
+	Language          string
+	BackHref          string // "/a/web-viewers" oder "/a/esp-viewers"
+	BackLabel         string
 }
 
 func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +87,9 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
 		ESPModel:               info.ESPModel,
 		ESPFwVersion:           info.ESPFwVersion,
+		ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
+		BrightnessIdle:         info.ResolveBrightnessIdle(),
+		Language:               info.ResolveLanguage(),
 	}
 	if info.Type == mockmanager.TypeESP {
 		data.BackHref = "/a/esp-viewers"
