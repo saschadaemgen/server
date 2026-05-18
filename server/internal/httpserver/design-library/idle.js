@@ -72,11 +72,18 @@
   }
 
   var clockEl = container.querySelector('.screensaver-clock');
+  // Saison 14-04-Phase2-FIX04 Pixel-Style: Stunden + Minuten als
+  // zwei eigenstaendige Elemente uebereinander. tickClock setzt
+  // beide separat - kein Doppelpunkt-String mehr.
+  var clockHoursEl = container.querySelector('.screensaver-clock-hours');
+  var clockMinutesEl = container.querySelector('.screensaver-clock-minutes');
   var dateEl = container.querySelector('.screensaver-date');
   var weatherEl = container.querySelector('.screensaver-weather');
   var tempEl = container.querySelector('.screensaver-temp');
   var descEl = container.querySelector('.screensaver-desc');
   var iconEl = container.querySelector('.screensaver-weather-icon');
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
   // -------------------------------------------------------------
   // Clock + date ticker. Always running so the screensaver stays
@@ -84,11 +91,8 @@
   function tickClock() {
     if (!clockEl && !dateEl) return;
     var now = new Date();
-    if (clockEl) {
-      clockEl.textContent = now.toLocaleTimeString('de-DE', {
-        hour: '2-digit', minute: '2-digit',
-      });
-    }
+    if (clockHoursEl)   clockHoursEl.textContent   = pad2(now.getHours());
+    if (clockMinutesEl) clockMinutesEl.textContent = pad2(now.getMinutes());
     if (dateEl) {
       dateEl.textContent = now.toLocaleDateString('de-DE', {
         weekday: 'long', day: 'numeric',

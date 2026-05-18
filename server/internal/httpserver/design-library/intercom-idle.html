@@ -110,7 +110,14 @@
         <!-- 1. Screensaver: clock + date + weather. Default unless
              the operator persisted livestream as their default. -->
         <div class="mode-layer {{if eq .IdleViewMode "livestream"}}below hidden{{else}}active{{end}}" data-mode="screensaver">
-          <div class="screensaver-clock">{{.Now}}</div>
+          <!-- Saison 14-04-Phase2-FIX04 Pixel-Style stacked clock.
+               Initial-Paint via Template-Slice (HH und MM aus
+               .Now "HH:MM:SS"); idle.js hydratisiert die beiden
+               Elemente alle 1s via tickClock. -->
+          <div class="screensaver-clock">
+            <div class="screensaver-clock-hours">{{slice .Now 0 2}}</div>
+            <div class="screensaver-clock-minutes">{{slice .Now 3 5}}</div>
+          </div>
           <div class="screensaver-date">{{.NowDate}}</div>
           {{if .Weather}}
             <div class="screensaver-weather">
