@@ -304,16 +304,29 @@ func (s *SQLStore) ListForMock(ctx context.Context, mockMAC string, limit int) (
 	return out, nil
 }
 
-// UnreadCount counts door_events with read_at IS NULL for mockMAC.
-// Hot path (called on every /m/ render), so the dedicated partial
-// index idx_door_events_unread keeps this cheap.
+// UnreadCount counts door_events with read_at IS NULL for mockMAC
+// that the mieter has NOT soft-hidden via viewer_hidden_events.
+// Hot path (called on every /webviewer/ render); the LEFT JOIN +
+// partial index combination keeps this cheap.
+//
+// Saison 14-04-Phase2: vor diesem Patch zaehlte UnreadCount auch
+// hidden-Reihen; das war pre-Soft-Delete-Welt noch korrekt, aber
+// mit Mieter-Soft-Delete wuerde ein "Eintrag-Loeschen"-Klick den
+// Badge nicht runterziehen. Jetzt respektiert die Abfrage den
+// hidden-Marker.
 func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error) {
 	if mockMAC == "" {
 		return 0, nil
 	}
 	var n int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM door_events WHERE viewer_mac = ? AND read_at IS NULL`,
+		`SELECT COUNT(*)
+		   FROM door_events de
+		   LEFT JOIN viewer_hidden_events vhe
+		          ON vhe.viewer_mac = de.viewer_mac AND vhe.event_id = de.id
+		  WHERE de.viewer_mac = ?
+		    AND de.read_at IS NULL
+		    AND vhe.event_id IS NULL`,
 		mockMAC,
 	).Scan(&n)
 	if err != nil {

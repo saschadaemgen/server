@@ -200,6 +200,87 @@ func writeMieterHistoryJSON(w http.ResponseWriter, resp mieterHistoryResponse) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// handleMieterHistoryHideOne soft-deletes a single door_events
+// row for the calling viewer. event_id stems from the path; the
+// doorhistory layer enforces the mock-scope so a stray id from
+// another viewer returns 404.
+//
+// Route: DELETE /webviewer/history/{event_id}
+//
+// Saison 14-04-Phase2.
+func (s *Server) handleMieterHistoryHideOne(w http.ResponseWriter, r *http.Request) {
+	mac := ViewerMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no session", http.StatusUnauthorized)
+		return
+	}
+	if s.history == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	idRaw := r.PathValue("event_id")
+	id, err := strconv.ParseInt(idRaw, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "event_id muss eine positive Zahl sein", http.StatusBadRequest)
+		return
+	}
+	if err := s.history.HideEvent(r.Context(), mac, id); err != nil {
+		if errors.Is(err, doorhistory.ErrNotFound) {
+			http.Error(w, "Eintrag nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("hide event", "err", err, "mac_prefix", safePrefix(mac), "event_id", id)
+		http.Error(w, "Verstecken fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":     true,
+		"hidden": true,
+	})
+}
+
+// handleMieterHistoryHideAll soft-deletes every currently-visible
+// row for the caller. Idempotent: a second call right after this
+// one returns hidden_count=0. We do NOT trigger config.changed -
+// the change is purely visible-history-state, not config; the
+// SSE unread-count broadcast (because the count might drop) is
+// handled inside the doorbellhub-Layer ueberlegt fuer einen
+// spaeteren Sub-Briefing - der heutige Mieter-UI-Reload nach
+// "Verlauf leeren" reicht.
+//
+// Route: DELETE /webviewer/history
+//
+// Saison 14-04-Phase2.
+func (s *Server) handleMieterHistoryHideAll(w http.ResponseWriter, r *http.Request) {
+	mac := ViewerMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no session", http.StatusUnauthorized)
+		return
+	}
+	if s.history == nil {
+		http.Error(w, "history not configured", http.StatusServiceUnavailable)
+		return
+	}
+	n, err := s.history.HideAllEvents(r.Context(), mac)
+	if err != nil {
+		s.log.Error("hide all events", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "Loeschen fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	// Unread-Count broadcast: nach HideAll sind keine sichtbaren
+	// ungelesenen Reihen mehr da. Der Browser kann das Badge
+	// gleich auf 0 ziehen ohne erneut zu pollen.
+	if s.hub != nil {
+		s.hub.BroadcastUnreadCount(r.Context(), mac)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":           true,
+		"hidden_count": n,
+	})
+}
+
 // parseHistoryListOpts validates the four query parameters and
 // translates them into a doorhistory.ListOpts. Invalid input
 // returns a deutsche-Fehlermeldung; the handler maps that to 400.

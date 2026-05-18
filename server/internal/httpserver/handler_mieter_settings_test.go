@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -580,6 +581,168 @@ func TestMieterHistoryJSON_CaptureDisabledReturnsEmpty(t *testing.T) {
 	}
 	if got.HasMore {
 		t.Errorf("HasMore = true, want false")
+	}
+}
+
+// ---------- Saison 14-04-Phase2 DELETE /webviewer/history* ----------
+
+func TestMieterHistoryDeleteOne_SoftHidesAndDropsOutOfList(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	id, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		env.ts.URL+"/webviewer/history/"+strconv.FormatInt(id, 10), nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+
+	// Mieter-Liste leer.
+	resp2, err := env.client.Get(env.ts.URL + "/webviewer/history.json")
+	if err != nil {
+		t.Fatalf("GET history: %v", err)
+	}
+	var got mieterHistoryResponse
+	_ = json.NewDecoder(resp2.Body).Decode(&got)
+	resp2.Body.Close()
+	if len(got.Events) != 0 {
+		t.Errorf("event still visible after DELETE (len=%d)", len(got.Events))
+	}
+	// door_events bleibt fuer Admin-Audit-Trail.
+	visible, _ := env.history.CountVisible(t.Context(), testViewerMAC, doorhistory.ListOpts{})
+	if visible != 0 {
+		t.Errorf("CountVisible = %d, want 0", visible)
+	}
+}
+
+func TestMieterHistoryDeleteOne_RejectsBogusID(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		env.ts.URL+"/webviewer/history/abc", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestMieterHistoryDeleteOne_OtherViewerCannotHide(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	// Seed an event for ANOTHER viewer.
+	env.seedViewerAs(t, "0c:ea:14:bb:cc:dd", "Other Viewer", "TestPw-1234567X")
+	id, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    "0c:ea:14:bb:cc:dd",
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		env.ts.URL+"/webviewer/history/"+strconv.FormatInt(id, 10), nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (cross-viewer hide)", resp.StatusCode)
+	}
+}
+
+func TestMieterHistoryDeleteAll_HidesEverythingForMieter(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+	for i := 0; i < 3; i++ {
+		if _, err := env.history.Insert(t.Context(), doorhistory.Event{
+			MockMAC:    testViewerMAC,
+			EventType:  doorhistory.TypeDoorbellStart,
+			OccurredAt: time.Now().Add(time.Duration(-i) * time.Hour),
+		}, nil); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, env.ts.URL+"/webviewer/history", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE all: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	var out struct {
+		OK          bool `json:"ok"`
+		HiddenCount int  `json:"hidden_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK || out.HiddenCount != 3 {
+		t.Errorf("response = %+v, want ok=true hidden_count=3", out)
+	}
+	// Admin-Side bleibt unangetastet.
+	res, _ := env.history.AdminListAll(t.Context(), testViewerMAC, doorhistory.ListOpts{})
+	if res.TotalCount != 3 {
+		t.Errorf("admin TotalCount = %d, want 3 (unaffected)", res.TotalCount)
+	}
+	if res.HiddenCount != 3 {
+		t.Errorf("admin HiddenCount = %d, want 3 (all flagged)", res.HiddenCount)
+	}
+}
+
+func TestMieterHistoryDeleteOne_DropsUnreadCount(t *testing.T) {
+	env := newTestServer(t)
+	loginMieterForTest(t, env)
+
+	id, err := env.history.Insert(t.Context(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: time.Now(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Vorab: 1 unread.
+	before, _ := env.history.UnreadCount(t.Context(), testViewerMAC)
+	if before != 1 {
+		t.Fatalf("seeded UnreadCount = %d, want 1", before)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		env.ts.URL+"/webviewer/history/"+strconv.FormatInt(id, 10), nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	resp.Body.Close()
+
+	after, _ := env.history.UnreadCount(t.Context(), testViewerMAC)
+	if after != 0 {
+		t.Errorf("UnreadCount after hide = %d, want 0", after)
 	}
 }
 
