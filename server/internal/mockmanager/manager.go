@@ -141,6 +141,11 @@ type ViewerInfo struct {
 	BrightnessIdle    *int // 0..100; nil = use DefaultBrightnessIdle
 	ScreenOffAfterSec *int // seconds; nil/0 = backlight stays on
 	Language          string // "de"/"en"; "" = use DefaultLanguage
+	// Saison 14-04-Phase2 history-capture toggle. nil = treat as
+	// true (default); explicit false comes from the mieter
+	// settings page. ResolveHistoryCaptureEnabled hides the NULL
+	// detail from callers.
+	HistoryCaptureEnabled *bool
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -242,6 +247,18 @@ func (v *ViewerInfo) ResolveLanguage() string {
 		return DefaultLanguage
 	}
 	return v.Language
+}
+
+// ResolveHistoryCaptureEnabled returns the persisted toggle or
+// true when the column is NULL (= legacy row that pre-dates
+// Saison 14-04-Phase2). The mieter UI hides the whole history
+// section when false; the server still writes door_events rows
+// so the admin trail remains complete.
+func (v *ViewerInfo) ResolveHistoryCaptureEnabled() bool {
+	if v == nil || v.HistoryCaptureEnabled == nil {
+		return true
+	}
+	return *v.HistoryCaptureEnabled
 }
 
 // ResolveStreamProfile picks the go2rtc stream profile name for
@@ -602,7 +619,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
-		        COALESCE(language, '')
+		        COALESCE(language, ''),
+		        history_capture_enabled
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -622,12 +640,13 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			autoSec    sql.NullInt64
 			brightness sql.NullInt64
 			screenOff  sql.NullInt64
+			capture    sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language); err != nil {
+			&brightness, &screenOff, &info.Language, &capture); err != nil {
 			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -641,6 +660,10 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		if screenOff.Valid {
 			v := int(screenOff.Int64)
 			info.ScreenOffAfterSec = &v
+		}
+		if capture.Valid {
+			v := capture.Int64 != 0
+			info.HistoryCaptureEnabled = &v
 		}
 		if NormalizeName(info.Name) != target {
 			continue
@@ -727,6 +750,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		autoSec    sql.NullInt64
 		brightness sql.NullInt64
 		screenOff  sql.NullInt64
+		capture    sql.NullInt64
 	)
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
@@ -735,12 +759,13 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
-		        COALESCE(language, '')
+		        COALESCE(language, ''),
+		        history_capture_enabled
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language)
+			&brightness, &screenOff, &info.Language, &capture)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -776,6 +801,10 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		v := int(screenOff.Int64)
 		info.ScreenOffAfterSec = &v
 	}
+	if capture.Valid {
+		v := capture.Int64 != 0
+		info.HistoryCaptureEnabled = &v
+	}
 	return &info, nil
 }
 
@@ -790,7 +819,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
 		        brightness_idle, screen_off_after_sec,
-		        COALESCE(language, '')
+		        COALESCE(language, ''),
+		        history_capture_enabled
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("mockmanager: list: %w", err)
@@ -809,12 +839,13 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			autoSec    sql.NullInt64
 			brightness sql.NullInt64
 			screenOff  sql.NullInt64
+			capture    sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
-			&brightness, &screenOff, &info.Language); err != nil {
+			&brightness, &screenOff, &info.Language, &capture); err != nil {
 			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -828,6 +859,10 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		if screenOff.Valid {
 			v := int(screenOff.Int64)
 			info.ScreenOffAfterSec = &v
+		}
+		if capture.Valid {
+			v := capture.Int64 != 0
+			info.HistoryCaptureEnabled = &v
 		}
 		info.ServicePort = uint16(port)
 		if hash.Valid {
@@ -1064,6 +1099,32 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 		stored, now, mac)
 	if err != nil {
 		return fmt.Errorf("mockmanager: set screen off after sec: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// SetHistoryCaptureEnabled persistiert den Mieter-Datenschutz-
+// Toggle. true = Mieter sieht den Verlauf wieder; false = die
+// Mieter-API liefert eine leere Liste (mit capture_enabled-Flag).
+// Admin-Pfade sind unbeeinflusst - der Toggle aendert nur was
+// die Mieter-UI rendert.
+//
+// Saison 14-04-Phase2.
+func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enabled bool) error {
+	var stored int64
+	if enabled {
+		stored = 1
+	}
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET history_capture_enabled = ?, updated_at = ? WHERE mac = ?`,
+		stored, now, mac)
+	if err != nil {
+		return fmt.Errorf("mockmanager: set history capture: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {

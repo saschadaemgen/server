@@ -692,6 +692,50 @@ func TestSetLanguage_RoundTripAndDefault(t *testing.T) {
 	}
 }
 
+func TestHistoryCaptureEnabled_DefaultsTrueWhenNull(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	// Saison-14-04-Phase2-Migration setzt DEFAULT 1; ein neu
+	// angelegter Viewer hat damit immer capture=true.
+	if !info.ResolveHistoryCaptureEnabled() {
+		t.Errorf("ResolveHistoryCaptureEnabled() = false, want true (default)")
+	}
+}
+
+func TestSetHistoryCaptureEnabled_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetHistoryCaptureEnabled(context.Background(), spec.MAC, false); err != nil {
+		t.Fatalf("Set false: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.ResolveHistoryCaptureEnabled() {
+		t.Errorf("after Set(false) = true, want false")
+	}
+	if err := mgr.SetHistoryCaptureEnabled(context.Background(), spec.MAC, true); err != nil {
+		t.Fatalf("Set true: %v", err)
+	}
+	info, _ = mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if !info.ResolveHistoryCaptureEnabled() {
+		t.Errorf("after Set(true) = false, want true")
+	}
+}
+
+func TestSetHistoryCaptureEnabled_UnknownViewer(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	err := mgr.SetHistoryCaptureEnabled(context.Background(), "0c:ea:14:00:00:00", false)
+	if !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("err = %v, want ErrViewerNotFound", err)
+	}
+}
+
 func TestSetLanguage_RejectsUnknown(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
