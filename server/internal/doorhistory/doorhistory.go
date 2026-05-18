@@ -118,7 +118,7 @@ type Store interface {
 	MarkRead(ctx context.Context, mockMAC string, eventIDs []int64) error
 	MarkAllRead(ctx context.Context, mockMAC string, readAt time.Time) error
 	ListForMock(ctx context.Context, mockMAC string, limit int) ([]Event, error)
-	ListRecent(ctx context.Context, limit int) ([]Event, error)
+	ListRecent(ctx context.Context, limit int, filterMACs ...string) ([]Event, error)
 	UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	AggregateAdmin(ctx context.Context, now time.Time) (AdminStats, error)
@@ -338,21 +338,35 @@ func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error)
 // ListRecent returns up to limit most-recent doorbell_start
 // events across ALL viewers, newest first. Used by the admin
 // dashboard's global activity list (Saison 13-02-FIX4-a-HOTFIX3).
-func (s *SQLStore) ListRecent(ctx context.Context, limit int) ([]Event, error) {
+//
+// Saison 14-04-Phase2: filterMACs ist eine optionale Whitelist.
+// Nil oder leerer Slice -> alle Viewer (Verhalten wie vorher).
+// Mit Whitelist filtert die WHERE-Klausel auf
+// viewer_mac IN (...) - SQL-Injection-sicher per ?-placeholder.
+func (s *SQLStore) ListRecent(ctx context.Context, limit int, filterMACs ...string) ([]Event, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, viewer_mac, event_type, intercom_mac, occurred_at,
-		        cancelled_at, answered_at, ended_at,
-		        cancel_token, room_id, read_at,
-		        prev_hash, entry_hash
-		   FROM door_events
-		  WHERE event_type = ?
-		  ORDER BY occurred_at DESC, id DESC
-		  LIMIT ?`,
-		TypeDoorbellStart, limit,
-	)
+
+	args := []any{TypeDoorbellStart}
+	q := `SELECT id, viewer_mac, event_type, intercom_mac, occurred_at,
+	             cancelled_at, answered_at, ended_at,
+	             cancel_token, room_id, read_at,
+	             prev_hash, entry_hash
+	        FROM door_events
+	       WHERE event_type = ?`
+	if len(filterMACs) > 0 {
+		placeholders := make([]string, len(filterMACs))
+		for i, mac := range filterMACs {
+			placeholders[i] = "?"
+			args = append(args, mac)
+		}
+		q += " AND viewer_mac IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	q += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("doorhistory: query recent: %w", err)
 	}

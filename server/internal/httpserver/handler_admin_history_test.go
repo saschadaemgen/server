@@ -236,6 +236,83 @@ func TestAdminViewerHistory_PaginationAcrossPages(t *testing.T) {
 	}
 }
 
+// ---------- Saison 14-04-Phase2 dashboard viewer-filter ----------
+
+func TestAdminDashboard_FilterByViewerMACs(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+	env.seedViewerAs(t, "0c:ea:14:bb:cc:dd", "Wohnung B", "TestPw-1234567X")
+	now := time.Now()
+	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
+		MockMAC:    testViewerMAC,
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: now,
+	}, nil); err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
+		MockMAC:    "0c:ea:14:bb:cc:dd",
+		EventType:  doorhistory.TypeDoorbellStart,
+		OccurredAt: now,
+	}, nil); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+
+	// Ohne Filter: beide Events sichtbar.
+	resp, err := env.client.Get(env.ts.URL + "/a/")
+	if err != nil {
+		t.Fatalf("GET dashboard: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !contains(body, testViewerName) {
+		t.Errorf("dashboard missing %q", testViewerName)
+	}
+	if !contains(body, "Wohnung B") {
+		t.Errorf("dashboard missing Wohnung B")
+	}
+
+	// Filter auf nur A: B ist weg.
+	resp2, err := env.client.Get(env.ts.URL + "/a/?viewer_macs=" + testViewerMAC)
+	if err != nil {
+		t.Fatalf("GET filtered dashboard: %v", err)
+	}
+	defer resp2.Body.Close()
+	body2 := readBody(t, resp2)
+	// A muss in der Recent-Events-Liste oder in der Filter-Auswahl
+	// auftauchen (beide leben in body2).
+	if !contains(body2, testViewerName) {
+		t.Errorf("filtered dashboard missing A %q", testViewerName)
+	}
+	// Wir koennen nicht hart "Wohnung B" verbieten, weil sie auch
+	// in der "Alle Viewer"-Filter-Auswahl steht. Aber in der
+	// recent-events-table darf B nicht erscheinen. Da wir hier nur
+	// String-Match haben, pruefen wir die Anzahl der dashRecentEvent-
+	// Rows ueber den DB-Query separat.
+	filterArg := []string{testViewerMAC}
+	rows, err := env.history.ListRecent(context.Background(), 20, filterArg...)
+	if err != nil {
+		t.Fatalf("ListRecent: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("ListRecent filtered len = %d, want 1", len(rows))
+	}
+}
+
+func TestAdminDashboard_FilterRejectsBogusButDoesNotError(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/?viewer_macs=garbage,not-a-mac")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (bogus MACs silently dropped)", resp.StatusCode)
+	}
+}
+
 // contains is a thin strings.Contains wrapper that keeps the
 // test files free of the extra import for one-shot checks.
 func contains(haystack, needle string) bool {

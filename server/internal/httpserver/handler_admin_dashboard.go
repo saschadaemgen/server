@@ -21,6 +21,11 @@ type adminUser struct {
 // alle Zahlen kommen aus der DB, keine Fake-Werte mehr.
 // Saison 13-02-FIX4-a-HOTFIX5: ESP-Viewer-Kachel (Live-Stats)
 // plus ESP-Pager-Platzhalter.
+// Saison 14-04-Phase2: AllViewers + SelectedMACs + AnyFilter
+// versorgen das Filter-Dropdown im Dashboard-Header. AllViewers
+// ist die Liste fuer das Multi-Select, SelectedMACs ist der aktuell
+// aktive Filter, AnyFilter true wenn mindestens ein Viewer
+// abgewaehlt wurde.
 type adminDashboardData struct {
 	User              adminUser
 	WebViewersTotal   int
@@ -39,6 +44,17 @@ type adminDashboardData struct {
 	RecentEventsEmpty bool
 	RecentAudit       []dashAuditRow
 	RecentAuditEmpty  bool
+
+	AllViewers    []dashViewerOption
+	SelectedMACs  map[string]bool
+	AnyFilter     bool
+}
+
+// dashViewerOption ist ein Eintrag im Filter-Dropdown.
+type dashViewerOption struct {
+	MAC      string
+	Name     string
+	Selected bool
 }
 
 type dashRecentEvent struct {
@@ -68,8 +84,17 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 
 	data := adminDashboardData{
-		User: adminUser{Name: username, Initials: initialsOf(username)},
+		User:         adminUser{Name: username, Initials: initialsOf(username)},
+		SelectedMACs: map[string]bool{},
 	}
+
+	// Saison 14-04-Phase2: ?viewer_macs=mac1,mac2 filtert die
+	// "Letzte 20 Klingel-Anrufe"-Liste. Unbekannte / falsch-
+	// formatierte MACs werden still verworfen (kein 400 - das
+	// Filter-UI ist eine Bequemlichkeit, kein Auth-Surface).
+	selectedSet := parseViewerMACsFilter(r.URL.Query().Get("viewer_macs"))
+	data.SelectedMACs = selectedSet
+	data.AnyFilter = len(selectedSet) > 0
 
 	now := time.Now()
 	infos, _ := s.mockMgr.ListViewers(r.Context())
@@ -88,6 +113,11 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 				data.ESPWithToken++
 			}
 		}
+		data.AllViewers = append(data.AllViewers, dashViewerOption{
+			MAC:      info.MAC,
+			Name:     info.Name,
+			Selected: selectedSet[info.MAC] || !data.AnyFilter,
+		})
 	}
 
 	// ESP-Pending-Statistik plus juengster Discovery-Zeitstempel
@@ -127,7 +157,18 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		if n, err := s.history.CountSince(r.Context(), now.Add(-7*24*time.Hour)); err == nil {
 			data.Events7d = n
 		}
-		recent, _ := s.history.ListRecent(r.Context(), recentEventsLimit)
+		// Filter weiterreichen wenn der Admin ein Subset ausgewaehlt
+		// hat. AnyFilter=false (= "alle Viewer") laesst den
+		// variadic-Slice leer; ListRecent verhaelt sich dann wie
+		// pre-Saison-14-04-Phase2.
+		var filterArg []string
+		if data.AnyFilter {
+			filterArg = make([]string, 0, len(selectedSet))
+			for mac := range selectedSet {
+				filterArg = append(filterArg, mac)
+			}
+		}
+		recent, _ := s.history.ListRecent(r.Context(), recentEventsLimit, filterArg...)
 		for _, ev := range recent {
 			row := dashRecentEvent{
 				When:      formatRelativeGerman(ev.OccurredAt, now),
@@ -225,6 +266,26 @@ func doorNameFromIntercom(mac string) string {
 		return "Hauseingang"
 	}
 	return mac
+}
+
+// parseViewerMACsFilter validiert und kanonisiert das
+// ?viewer_macs=mac1,mac2 Query-Parameter. Liefert ein Set zum
+// schnellen Lookup. Unbekannte / fehlerhafte MACs werden still
+// gedroppt - das Filter-UI ist eine Bequemlichkeit, kein
+// Sicherheits-Gate; der Admin sieht so oder so alles.
+func parseViewerMACsFilter(raw string) map[string]bool {
+	out := map[string]bool{}
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	for _, p := range strings.Split(raw, ",") {
+		mac := strings.ToLower(strings.TrimSpace(p))
+		if !macFormat.MatchString(mac) {
+			continue
+		}
+		out[mac] = true
+	}
+	return out
 }
 
 // initialsOf takes "Sascha Daemgen" -> "SD".
