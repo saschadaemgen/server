@@ -336,6 +336,15 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /a/viewers/{mac}/history/{event_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteOne)))
 	s.mux.Handle("DELETE /a/viewers/{mac}/history", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteAll)))
 
+	// Saison 14-04-Phase2-FIX02: Admin-Inline-Edit-Endpoints fuer
+	// die Detail-Seite. Stammdaten + Settings triggern
+	// config.changed; Password ist web-only, Regen-Token ist
+	// esp-only. Beide Pruefungen leben in den Handlern.
+	s.mux.Handle("POST /a/viewers/{mac}/stammdaten", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerStammdaten)))
+	s.mux.Handle("POST /a/viewers/{mac}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerSettings)))
+	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
+	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))
+
 	// Benutzer-CRUD (Saison 13-02-FIX4-b). UA-Access-Developer-API
 	// ist die Source-of-Truth; alle Zugriffe gehen ueber das
 	// access.UserStore-Interface.
