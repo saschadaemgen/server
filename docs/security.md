@@ -1,13 +1,20 @@
 # carvilon Security Plan
 
-**Status:** Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
+**Status:** Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU).
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Stand:** Strategische Eckpunkte gesetzt. Saison 12 hat den
 Auth-Backbone (Magic-Link plus Mieter- und Admin-Session), die
 TLS-Schicht im Server-Prozess, das AES-256-GCM-Verschluesseln
 von UA-API-Tokens (platform_config) und den FK-CASCADE-Datenpfad
-fuer Mock-zu-Sessions/Tokens umgesetzt; Hardware-Bindung und
-Lizenz-Server-TLS bleiben Saison 14+.
+fuer Mock-zu-Sessions/Tokens umgesetzt. Saison 13 hat den
+ESP-Bearer-Token, den Stream-Reverse-Proxy mit Header-Strip und
+die Hub-Door-Audit-Vorbereitung dazu gestellt. Saison 14 hat
+das Settings-Surface mit Allow-Listen gehaertet, Mieter-Soft-
+Delete vom Admin-Audit-Trail entkoppelt, `config.changed`-SSE-
+Broadcasts mit per-viewer_mac-Filter eingefuehrt und Admin-
+Inline-Edit-Endpoints (Stammdaten, Settings, Passwort, ESP-
+Token-Regen) freigeschaltet. Hardware-Bindung und Lizenz-
+Server-TLS bleiben Saison 15+.
 **Geltungsbereich:** intern, Geschaeftsgeheimnis.
 
 ## 1. Sicherheits-Philosophie
@@ -638,3 +645,217 @@ Konsequenz:
 Eine spaetere Saison kann go2rtc hinter Tailscale oder einer
 carvilon-eigenen AES-Wrapper-Schicht legen; fuer S14-01 reicht das
 Loopback-Binding.
+
+---
+
+## 10. Saison-14-Settings-Sicherheit
+
+### 10.1 Allow-Lists fuer alle Settings-Felder
+
+Saison 14 hat die Mieter- und ESP-Settings stark erweitert.
+Alle Felder werden serverseitig gegen Allow-Lists geprueft.
+Klient-seitige Validierung ist Convenience, nicht Sicherheit;
+ein Curl-Klient kommt am Browser-UI vorbei und muss am Server
+geblockt werden.
+
+| Feld | Konstante | Erlaubte Werte | Storage |
+| --- | --- | --- | --- |
+| `idle_view_mode` | `IdleViewModeAllowed` (implizit, switch im Setter) | `"screensaver"`, `"livestream"`, `"screen_off"` | TEXT NULL, Resolver-Default `screensaver` |
+| `auto_screensaver_seconds` | `mockmanager.AutoScreensaverSecondsAllowed` | `{0, 30, 60, 300, 600}` | INTEGER NULL, 0 = off |
+| `screen_off_after_sec` | `mockmanager.ScreenOffAfterSecAllowed` | `{0, 30, 60, 300, 600, 1800}` | INTEGER NULL, 0 = off, ESP-only |
+| `brightness_idle` | Range-Check `0..100` | jede Integer | INTEGER NULL, Resolver-Default 70, ESP-only |
+| `language` | `mockmanager.LanguageAllowed` | `"de"`, `"en"` | TEXT NULL, Resolver-Default `de`, ESP-only |
+| `clock_layout` | `mockmanager.ClockLayoutAllowed` | `"vertical"`, `"horizontal"` | TEXT NULL, Resolver-Default `vertical` |
+| `history_capture` | bool (true/false oder "1"/"0") | nur die zwei Werte | INTEGER NULL, Resolver-Default true |
+| `name` (Stammdaten) | Trim + Length-Check | 1..64 Zeichen, nicht leer | TEXT NOT NULL |
+| `paired_intercom_mac` | `macFormat`-Regex + lowercase | leer oder `xx:xx:xx:xx:xx:xx` | TEXT NULL |
+| `stream_profile` | Free-Form (von Admin gesetzt) | jeder String, Trim | TEXT NULL |
+| `linked_ua_user_id` | UA-User-Existenz NICHT validiert | jeder String, Trim | TEXT NULL |
+
+Der `linked_ua_user_id`-Eintrag ist bewusst nicht gegen die
+UA-API gegengeprueft - das wuerde einen synchronen UA-Call pro
+Stammdaten-Save bedeuten. Saison 15+ kann ein Async-Validate-
+Pattern dazu legen, wenn falsche User-IDs in der Praxis Probleme
+machen.
+
+### 10.2 ESP-only-Felder
+
+`screen_off_after_sec`, `brightness_idle` und `language` sind
+ESP-Hardware-Konzepte. Die Server-Validierung lehnt sie auf
+`type='web'`-Viewer mit 400 ab (siehe
+`handleAdminViewerSettings` und `handleESPSettings`). Damit
+kann ein Curl-Klient nicht ueber das Mieter-Surface
+ESP-Settings auf einem Web-Viewer setzen die fuer die Mieter-
+UI bedeutungslos waeren und das `/esp/config`-JSON
+verwirren wuerden.
+
+### 10.3 Skip-Echo im Web-Viewer-Tab
+
+Saison 14-04-Phase2-FIX03 hat einen Echo-Race im
+config.changed-Broadcast aufgedeckt:
+
+```
+Mieter klickt Settings-Radio
+   -> POST /webviewer/settings
+   -> Server speichert + broadcastet config.changed
+   -> Web-Viewer-Tab faengt sein eigenes config.changed
+   -> location.reload() reisst User aus Settings-Mode
+```
+
+Fix in `home.html`:
+
+```javascript
+window.carvilonIdle.lastOwnSaveAt = Date.now();   // vor POST
+// ...
+es.addEventListener('config.changed', function () {
+  if (Date.now() - lastOwnSaveAt < 1000) return;  // Skip-Echo
+  location.reload();
+});
+```
+
+Cross-Device-Sync bleibt intakt: ein zweiter Browser-Tab oder
+ein Admin-Edit kommt typisch >1000ms nach dem letzten Eigen-
+Save und faellt deshalb durch den Skip-Filter durch. Skip-
+Pattern gehoert in CLAUDE.md unter Lessons.
+
+### 10.4 Pagination-DoS-Schutz
+
+Die `parseHistoryListOpts` in `handler_mieter_history.go`
+validiert die Query-Parameter strict:
+
+```
+offset  0..10000   Sanity-Bound (mieterHistoryMaxOffset)
+limit   1..50      doorhistory.ListOptsMaxLimit ist die Obergrenze
+from    YYYY-MM-DD strikt; ungueltig -> 400
+to      YYYY-MM-DD end-of-day-inklusiv via endOfDayUnix
+        plus From > To -> 400
+```
+
+Damit kann ein Klient nicht via `?limit=99999999` versuchen
+die Tabelle durch eine grosse Query zu blockieren oder via
+`?offset=10000000` der DB-Engine ein lineares Skip-Pattern
+aufzwingen. Bei AdminListAll gilt dasselbe Limit (50);
+Default ist 50 vs 20 beim Mieter.
+
+### 10.5 Soft-Delete entkoppelt vom Audit-Trail
+
+Mieter koennen einzelne Eintraege oder den kompletten Verlauf
+soft-loeschen (S14-04-Phase 2). Das Datenmodell:
+
+```
+door_events (Migration 005)          unveraendert, alle Rows
+                                      bleiben fuer immer (bis
+                                      Speicherdauer-Cleanup
+                                      kommt, siehe Halde)
+viewer_hidden_events (Migration 016) Mieter-Marker
+                                      (viewer_mac, event_id,
+                                       hidden_at)
+                                      FK CASCADE auf viewers.mac
+                                      FK CASCADE auf door_events.id
+```
+
+`ListVisible` macht LEFT JOIN gegen `viewer_hidden_events` und
+filtert raus wo `vhe.event_id IS NOT NULL`. `AdminListAll`
+macht denselben Join, filtert NICHT raus, sondern setzt nur
+das `HiddenByViewer`-Flag.
+
+```
+Konsequenz:
+- Mieter-API zeigt seine Soft-Delete-Ansicht
+- Admin-API zeigt den vollstaendigen Audit-Trail mit
+  Eye-Off-Icon fuer hidden Rows
+- Hard-Delete (AdminDeleteEvent) entfernt door_events.id;
+  FK CASCADE traegt viewer_hidden_events automatisch mit
+- Mieter kann den Audit-Trail NICHT verstecken
+```
+
+Das ist die zentrale Sicherheits-Aussage: ein boswilliger
+Mieter (oder ein Mieter unter Zwang) kann seine Klingel-
+Historie nicht vor dem Hausverwalter verbergen.
+
+### 10.6 history_capture-Toggle und Audit-Trail
+
+`history_capture_enabled = false` (S14-04-Phase 2) blendet die
+Mieter-API leer (mit `capture_enabled: false`-Flag im JSON-
+Envelope) und blockiert die UnreadCount-Anzeige. Server-seitig
+fliessen die door_events trotzdem weiter; die Toggle aendert
+nur was die Mieter-UI rendert.
+
+Datenschutz-Wirkung: aus Mieter-Sicht "es wird nicht
+mitgeschnitten". Aus Anlagen-Compliance-Sicht: weiterhin
+voller Audit. Diese Dual-Lese ist absichtlich (Sasch-Beschluss
+S14-04-Phase 2): das Datenschutz-Signal ist UI-only, der
+Hausverwalter behaelt den lueckenlosen Trail. Wuerden wir
+die Inserts wirklich blocken, koennten Mieter den Trail
+aushebeln und die Anlage haftet.
+
+### 10.7 Admin-Inline-Edit-Endpoints
+
+Saison 14-04-Phase 2-FIX02 hat vier neue Admin-Endpoints
+freigeschaltet:
+
+```
+POST /a/viewers/{mac}/stammdaten         JSON-Body Partial
+POST /a/viewers/{mac}/settings           JSON-Body Partial
+POST /a/viewers/{mac}/password           Web-only, min 8 Zeichen,
+                                          Argon2id-Hash via
+                                          storePasswordForViewer
+                                          plus sessions.RevokeAllForViewer
+POST /a/viewers/{mac}/regenerate-token   ESP-only, esptoken.Generate
+                                          plus SetESPTokenHash plus
+                                          One-Shot-Klartext-Reveal
+                                          im Response
+```
+
+Alle vier sitzen hinter `requireAdminSession`. Type-Scoping
+(Password nur Web, Token-Regen nur ESP) lebt im Handler.
+Die Settings + Stammdaten triggern doorbellhub.
+BroadcastConfigChanged damit Cross-Device-Sync greift.
+
+ESP-Token-Regenerate-Spec: der frische Klartext-Token wird
+EINMAL im JSON-Response geliefert (`{"ok": true,
+"new_token": "...", "mac": "..."}`) und parallel im
+`esp_pending_devices.adopted_token_cleartext`-Handoff-Slot
+geparkt damit ein laufender ESP-Status-Poll den Token
+automatisch uebernimmt. Ein zweiter GET liefert den Token NIE
+wieder - das Modal hat einen Copy-Button und einen "Verstanden"-
+Button, danach ist der Klartext aus Admin-Sicht weg. Der alte
+Bearer-Token ist sofort ungueltig (Hash wurde ueberschrieben).
+
+### 10.8 config.changed-Broadcast pro viewer_mac
+
+`doorbellhub.BroadcastConfigChanged(viewerMAC)` fanout an:
+
+1. Alle Web-SSE-Subscriber auf diesem viewer_mac
+   (`/webviewer/events`).
+2. Alle ESP-Eventbus-Subscriber auf diesem viewer_mac
+   (`/esp/events`).
+
+Filter: pro viewer_mac, kein Cross-Tenant-Leak. Ein Settings-
+Save auf Viewer A reicht NIE an Subscriber von Viewer B durch.
+Tests `TestBroadcastConfigChanged_FilteredByViewerMAC` und
+`TestAdminViewerSettings_TriggersConfigChanged` bewachen das.
+
+Payload ist absichtlich leer (`{}`); Receiver refetchen ihre
+Config aus dem zustaendigen GET-Endpoint statt Felder auf dem
+Event selbst zu lesen. Verhindert Drift wenn das Event-Schema
+sich aendert.
+
+---
+
+## 11. Saison-14-Updates am Bedrohungsmodell
+
+| Bedrohung | Schutz | Saison |
+| --- | --- | --- |
+| Mieter setzt ungueltigen idle_view_mode | Allow-List, Server-400 | 14 |
+| Web-Klient versucht ESP-Settings auf Web-Viewer | Type-Check, Server-400 | 14 |
+| Klient pumpt /webviewer/history.json mit limit=99999 | Pagination-Clamp 50 | 14 |
+| Klient skip't 99 Millionen Rows mit offset=... | Sanity-Bound 10000 | 14 |
+| Mieter versucht Audit-Trail zu verstecken | Admin-AdminListAll sieht alle Rows, FK CASCADE schuetzt Konsistenz | 14 |
+| Mieter aendert paired_intercom_mac eines anderen Mieters | requireSession matched auf viewer_mac aus Cookie, Pfad-Param ist nicht beeinflussbar | 14 |
+| Admin-Token-Regen lecked alter Token an ESP zurueck | Hash-Ueberschreibung im SetESPTokenHash macht den alten Token sofort ungueltig | 14 |
+| Eigener config.changed-Echo loest Reload im Tab aus | Skip-Echo-Heuristik im Web-Viewer (1000ms) | 14 |
+
+---
+
+Zuletzt aktualisiert: 2026-05-19 (Saison-14-Abschluss-Doku).

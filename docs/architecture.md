@@ -1,16 +1,38 @@
 # carvilon Architecture
 
-**Status:** Saison 14 laufend, 16. Mai 2026. S14-01 (Stream-
-Backend go2rtc), S14-01b (Idle-View-Modus mit Bildschirmschoner,
-open-meteo-Wetter, Mieter-Settings), S14-01-FIX01 bis FIX04
-(Stream-Proxy URL-Hardening, ESP-Unlock-Auto-Resolution,
-Hijack-no-chunked, Source-Validator), S14-02 (Mieter-Tree-
-Split /login + /webviewer/) und S14-03 (Stream-Slot-Modi
-mit Slide-Up-Animation + Auto-Screensaver-Timer) abgeschlossen.
-Vorheriger Stand: Saison 13 abgeschlossen 14. Mai 2026 (S13-DOC).
-Lebendes Dokument, wird pro Saison ergaenzt.
-**Geltungsbereich:** Interne Architektur-Entscheidungen, strategische
-Eckpunkte. KEIN Marketing-Material, KEIN Open-Source-Hinweis.
+**Status:** Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU).
+Saison 14 hat die Plattform vom "Klingel-Streamer mit Web-UI"
+zur "Klingel-Anlage mit Mieter-, Admin- und ESP-Erlebnis"
+weiter entwickelt. Sub-Briefings:
+
+- S14-01 / S14-01b / FIX01-FIX04: Stream-Backend go2rtc
+  produktiv, Idle-View-Modus mit Bildschirmschoner und open-
+  meteo-Wetter, Stream-Proxy Hardening, ESP-Unlock-Auto-
+  Resolution, Hijack-no-chunked, Source-Validator.
+- S14-02: Mieter-Tree-Split `/login` (Form) + `/webviewer/`
+  (Session).
+- S14-03 + FIX01-FIX06: vier Slide-Up-Modi im Stream-Slot
+  (Screensaver / Livestream / Inline-Settings / Inline-
+  History) plus optionaler Auto-Screensaver-Timer und Unread-
+  Badge-Pipeline.
+- S14-XX (ESP-Settings + Weather + Unread + config.changed):
+  `POST /esp/settings`, `GET /esp/weather`,
+  `GET /esp/unread-count`; `/esp/config` mit kompletten ESP-
+  UI-Block; doorbellhub bekommt `TypeConfigChanged` plus
+  `BroadcastConfigChanged`.
+- S14-04 Phase 2: Verlauf-Erweiterung Mieter + Admin
+  (Pagination + Datums-Filter + Mieter-Soft-Delete + Admin-
+  Hard-Delete + Capture-Toggle).
+- S14-04 Phase 2 FIX01-FIX05: Dashboard-Filter-Polish, Admin-
+  Inline-Edit-Endpoints (Stammdaten, Settings, Passwort, ESP-
+  Token-Regenerate), Skip-Echo bei config.changed, Pixel-Style
+  vertikale Uhr (FIX04) plus Clock-Layout-Setting (FIX05).
+
+Vorheriger Stand: Saison 13 abgeschlossen 14. Mai 2026
+(S13-DOC). Lebendes Dokument, wird pro Saison ergaenzt.
+**Geltungsbereich:** Interne Architektur-Entscheidungen,
+strategische Eckpunkte. KEIN Marketing-Material, KEIN
+Open-Source-Hinweis.
 
 ## 1. Drei-Schichten-Plattform
 
@@ -1440,3 +1462,247 @@ Keine neuen Env-Vars. `weather.Client` wird unbedingt in
 einfach `ErrUnavailable` und die UI degradiert sauber. Operator
 muss nichts setzen, kein API-Key, keine Konfiguration ausserhalb
 des Admin-UI.
+
+---
+
+## 18. Saison 14-XX bis 14-04 Phase 2 (Settings + Verlauf + Admin-Edit)
+
+Saison 14 hat nach S14-03 noch eine grosse zweite Welle
+durchgezogen, die das Mieter-, ESP- und Admin-Surface stark
+erweitert hat. Vier Themen-Bloecke teilen sich neue
+Endpoint-Familien, neue SSE-Events und einen erweiterten
+Datenmodell-Stack.
+
+### 18.1 ESP-Settings + Cross-Device-Sync (S14-XX)
+
+Briefing-Trigger: ESP-Hardware soll dieselben Settings sehen
+wie der Mieter-Browser, plus Display-Hardware-Settings
+(Helligkeit, Backlight-Off-Timer, Sprache). Konsequenzen:
+
+```
+Neue Migration 015_esp_settings.sql
+   viewers.brightness_idle       INTEGER NULL
+   viewers.screen_off_after_sec  INTEGER NULL
+   viewers.language              TEXT NULL
+   plus idle_view_mode bekommt 'screen_off' als dritten Wert
+
+mockmanager:
+   ViewerInfo.BrightnessIdle, ScreenOffAfterSec, Language
+   Resolve* mit Defaults (70 / 0 / "de")
+   SetBrightnessIdle, SetScreenOffAfterSec, SetLanguage
+   Allow-Lists ScreenOffAfterSecAllowed, LanguageAllowed
+   IdleViewMode-Setter akzeptiert screen_off
+
+doorbellhub:
+   TypeConfigChanged = "config.changed"
+   BroadcastConfigChanged(viewerMAC):
+     1. h.broadcast SSE an /webviewer/events-Subscriber
+     2. h.bus.Publish an /esp/events-Subscriber
+   Filter pro viewer_mac, kein Cross-Tenant-Leak
+
+Neue Endpoints:
+   POST /esp/settings        Partial-Update mit Allow-Lists
+   GET  /esp/weather         Bearer-gated Reuse von /webviewer/weather
+   GET  /esp/unread-count    Bearer-gated Reuse
+   /esp/config-Response erweitert um ui.brightness_idle,
+     screen_off_after_sec, language, idle_view_mode,
+     auto_screensaver_seconds, plus screensaver_after_sec als
+     Legacy-Alias
+```
+
+### 18.2 Verlauf-Erweiterung (S14-04 Phase 2)
+
+Briefing-Trigger: Mieter brauchen Pagination + Datums-Filter,
+plus Datenschutz-Toggle. Admin behaelt Audit-Trail.
+
+```
+Migration 016_history_soft_delete.sql
+   viewer_hidden_events (viewer_mac, event_id, hidden_at)
+     FK CASCADE auf viewers.mac UND door_events.id
+     PK (viewer_mac, event_id) idempotent
+   viewers.history_capture_enabled INTEGER DEFAULT 1
+
+doorhistory neue Methoden:
+   HideEvent / HideAllEvents             Mieter-Soft-Delete
+   ListVisible(mac, opts)                LEFT JOIN gegen
+                                          viewer_hidden_events
+   CountVisible(mac, opts)               fuer Pagination-has_more
+   AdminListAll(mac, opts)                LEFT JOIN aber NICHT
+                                          filtern; HiddenByViewer-
+                                          Flag setzen
+   AdminDeleteEvent / AdminDeleteAllForViewer
+                                          Hard-Delete (Cascade)
+   UnreadCount mit LEFT JOIN              hidden zaehlt nicht mehr
+   ListOpts: Limit / Offset / From / To
+   ListOptsMaxLimit = 50
+
+Neue Mieter-Endpoints:
+   GET    /webviewer/history.json   pagination + date-filter +
+                                     capture_enabled-Flag
+   DELETE /webviewer/history/{id}   Soft-Delete einzeln
+   DELETE /webviewer/history        Soft-Delete alle (idempotent)
+
+Erweitertes Settings:
+   POST /webviewer/settings akzeptiert history_capture (0/1)
+
+UI:
+   intercom-idle.html Inline-History-Mode bekommt:
+     Filter-Modal mit From/To + Schnellfilter (Heute / Gestern /
+       7 Tage / 30 Tage)
+     Mehr-Laden-Button (offset += 20)
+     Edit-Mode-Toggle mit X-Buttons (Per-Item-Soft-Delete)
+     Verlauf-Erfassung-Toggle in den Inline-Settings
+     Reset-Knopf "Verlauf leeren" mit Zwei-Klick-Bestaetigung
+```
+
+### 18.3 Admin-Detail-Seite + Inline-Edit (S14-04 Phase 2 + FIX02)
+
+Briefing-Trigger: Admin soll alle Viewer-Felder direkt im
+Browser editieren koennen. Heute war alles SQL-Direktzugriff.
+
+```
+Neue Routen:
+   GET    /a/viewers/{mac}                  HTML-Detail-Seite
+   GET    /a/viewers/{mac}/history          Admin-paged JSON
+                                              mit HiddenByViewer-
+                                              Flag (Eye-Off-Icon)
+   DELETE /a/viewers/{mac}/history/{id}     Hard-Delete einzeln
+   DELETE /a/viewers/{mac}/history          Hard-Delete alle
+   POST   /a/viewers/{mac}/stammdaten       Stammdaten-Edit
+                                              (name + paired +
+                                               stream + linked-ua)
+   POST   /a/viewers/{mac}/settings         Auto-Save Settings
+                                              (alle Mieter-Felder
+                                               + ESP-Hardware-
+                                               Felder bei
+                                               type='esp')
+   POST   /a/viewers/{mac}/password         Web-only Password-Reset
+                                              (Argon2id + Revoke)
+   POST   /a/viewers/{mac}/regenerate-token ESP-only Token-Regen
+                                              mit One-Shot-Klartext-
+                                              Reveal
+
+Plus erweiterte Dashboard-Filter:
+   GET /a/dashboard?viewer_macs=mac1,mac2   Filter "Letzte 20
+                                              Klingel-Anrufe"
+
+Templates:
+   templates/admin/viewer-detail.html       neue Detail-Seite mit
+                                              Card-Layout, Inline-
+                                              Edit-Form (Save +
+                                              Cancel), Auto-Save-
+                                              Settings, Modals
+                                              fuer Password und
+                                              Token-Regen
+```
+
+### 18.4 Clock-Layout + Pixel-Style Uhr (S14-04 Phase 2 FIX04 + FIX05)
+
+```
+Migration 017_clock_layout.sql
+   viewers.clock_layout TEXT NULL
+   Resolver-Default "vertical" (FIX04 Pixel-Style)
+
+mockmanager:
+   ClockLayoutHorizontal = "horizontal"
+   ClockLayoutVertical   = "vertical"
+   DefaultClockLayout    = ClockLayoutVertical
+   ClockLayoutAllowed    = []{horizontal, vertical}
+   SetClockLayout + ResolveClockLayout
+
+UI:
+   intercom-idle.html: .screensaver-clock kriegt data-layout-
+     Attribut; zwei CSS-Regelsaetze fuer vertical (FIX04 144px
+     Pixel-Style) und horizontal (96px klassisch mit ":" via
+     ::after-Pseudo).
+   Initial-Paint via Go-Template-Slice {{slice .Now 0 2}} und
+     {{slice .Now 3 5}}.
+   idle.js tickClock setzt clockHoursEl + clockMinutesEl
+     getrennt; saveSettings-Echo patcht data-layout live ohne
+     Reload.
+
+Akzeptiert in allen Settings-Endpoints:
+   POST /webviewer/settings (form)
+   POST /esp/settings (JSON)
+   POST /a/viewers/{mac}/settings (JSON)
+   /esp/config-Response liefert ui.clock_layout
+```
+
+### 18.5 Skip-Echo bei config.changed (Phase 2 FIX03)
+
+Live-Test-Befund: der eigene config.changed-Echo eines
+Settings-Saves im Mieter-Tab loest location.reload() aus und
+reisst den User aus dem Settings-Mode. Skip-Echo-Heuristik:
+
+```
+idle.js saveSettings():
+   window.carvilonIdle.lastOwnSaveAt = Date.now();  // vor POST
+
+home.html SSE-Listener:
+   es.addEventListener('config.changed', function () {
+     if (Date.now() - lastOwnSaveAt < 1000) return;
+     location.reload();
+   });
+```
+
+Cross-Device-Sync intakt: Admin-Edit / zweiter Tab kommt
+typisch >1000ms nach dem letzten Eigen-Save und greift normal
+durch. Siehe docs/security.md Sektion 10.3 fuer den
+Sicherheits-Aspekt und CLAUDE.md Lessons-Sektion fuer die
+generelle Regel.
+
+### 18.6 Migrations-Liste bis 017
+
+| Nr | Datei | Inhalt |
+| -- | ----- | ------ |
+| 001 | init | schema_version + magic_link_tokens + sessions |
+| 002 | mock_viewers | erste Mock-Viewer-Tabelle |
+| 003 | admin | admin_users + platform_config |
+| 004 | mock_centric_routing | ua_user_id-Routing weg, mock_mac als Schluessel |
+| 005 | door_events | doorbell-history-Tabelle |
+| 006 | viewers_table | mock_viewers -> viewers, type-Spalte, esp_token_hash |
+| 007 | normalize_viewer_usernames | name-Normalisierung |
+| 008 | drop_username | username-Spalte raus |
+| 009 | esp_pending_devices | Adoptions-Handoff |
+| 010 | doorbell_calls | Lifecycle-Tabelle fuer aktive Anrufe |
+| 011 | viewers_paired_intercom | Standby-Pairing |
+| 012 | stream_profile | go2rtc-Profil pro Viewer |
+| 013 | idle_view_mode | screensaver/livestream + station_lat/lon |
+| 014 | auto_screensaver | viewers.auto_screensaver_seconds |
+| 015 | esp_settings | brightness_idle, screen_off_after_sec, language |
+| 016 | history_soft_delete | viewer_hidden_events + history_capture_enabled |
+| 017 | clock_layout | viewers.clock_layout |
+
+Aktuelle `schema_version = 17`.
+
+### 18.7 SSE-Event-Inventar
+
+| Event | Sender | Subscriber | Payload |
+| ----- | ------ | ---------- | ------- |
+| `doorbell_start` | doorbellhub Insert-Pfad | `/webviewer/events`, `/esp/events` | `{door, ts, raw{...}}` |
+| `doorbell_cancel` | doorbellhub Cancel-Pfad | `/webviewer/events`, `/esp/events` | `{door, ts, raw{...}}` |
+| `unread_count` | doorbellhub broadcast nach Insert / Mark-Read | beide | `{count: int}` |
+| `config.changed` | doorbellhub.BroadcastConfigChanged | beide | `{}` (leer) |
+
+Plus die Heartbeat- und Connection-Frames (`: connected`,
+`: keepalive`) die kein eigenes Event darstellen.
+
+Cross-Device-Sync greift fuer `config.changed`: Settings-Save
+in einem Mieter-Tab erreicht alle anderen Tabs + die ESP-
+Hardware desselben Viewers. Skip-Echo im Sender-Tab verhindert
+den Self-Refresh-Race.
+
+### 18.8 Adapter-Pattern-Status (S12-Mandat)
+
+Saison 12 hat ein Adapter-Pattern in `internal/access`
+skizziert (UserStore-Interface ueber UA-Developer-API-Client).
+Saison 14 hat das Pattern nicht erweitert; mockmanager,
+doorhistory und doorbellhub bleiben direkt in `httpserver`
+verankert. Wenn carvilon in einer spaeteren Saison einen
+Cloud-Tier oder einen non-UA-Adapter (z.B. eigene
+ESP32-Intercom-Hardware) bekommt, muss das Adapter-Pattern auf
+diese drei Layer erweitert werden. Heute kein Druck.
+
+---
+
+Zuletzt aktualisiert: 2026-05-19 (Saison-14-Abschluss-Doku).
