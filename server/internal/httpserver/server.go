@@ -317,6 +317,13 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /esp/weather", s.requireESPBearer(http.HandlerFunc(s.handleESPWeather)))
 	s.mux.Handle("GET /esp/unread-count", s.requireESPBearer(http.HandlerFunc(s.handleESPUnreadCount)))
 
+	// Saison 14-04-Phase2-FIX06: ESP-Pendant zu /webviewer/history*.
+	// Bearer-gated Soft-Delete + Paged-List. Delegieren intern an
+	// die serveHistory*-Helfer aus handler_mieter_history.go.
+	s.mux.Handle("GET /esp/history.json", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryList)))
+	s.mux.Handle("DELETE /esp/history/{event_id}", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteOne)))
+	s.mux.Handle("DELETE /esp/history", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteAll)))
+
 	// ESP-Viewer-Admin-Tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
 	s.mux.Handle("GET /a/esp-viewers.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersListJSON)))
