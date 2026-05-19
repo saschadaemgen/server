@@ -14,6 +14,13 @@
 // Triggert doorbellhub.BroadcastConfigChanged damit Mieter-
 // Browser (auf demselben viewer_mac via /webviewer/events) und
 // andere ESP-Geraete (via /esp/events) ihre Config neu holen.
+//
+// Saison 14-04-Phase2-FIX06: history_capture (boolean) kommt
+// dazu. Toggle den Datenschutz-Schalter fuer die Verlauf-Liste
+// (deaktiviert blendet die Mieter-/ESP-API leer, der Server-
+// Audit-Trail bleibt intakt; Admin sieht weiter alles). Boolean
+// statt Allow-Liste; bei false UND true wird config.changed
+// broadcastet.
 package httpserver
 
 import (
@@ -27,12 +34,13 @@ import (
 )
 
 type espSettingsRequest struct {
-	IdleViewMode             *string `json:"idle_view_mode,omitempty"`
-	AutoScreensaverSeconds   *int    `json:"auto_screensaver_seconds,omitempty"`
-	ScreenOffAfterSec        *int    `json:"screen_off_after_sec,omitempty"`
-	BrightnessIdle           *int    `json:"brightness_idle,omitempty"`
-	Language                 *string `json:"language,omitempty"`
-	ClockLayout              *string `json:"clock_layout,omitempty"`
+	IdleViewMode           *string `json:"idle_view_mode,omitempty"`
+	AutoScreensaverSeconds *int    `json:"auto_screensaver_seconds,omitempty"`
+	ScreenOffAfterSec      *int    `json:"screen_off_after_sec,omitempty"`
+	BrightnessIdle         *int    `json:"brightness_idle,omitempty"`
+	Language               *string `json:"language,omitempty"`
+	ClockLayout            *string `json:"clock_layout,omitempty"`
+	HistoryCapture         *bool   `json:"history_capture,omitempty"`
 }
 
 // idleViewModeAllowed mirrors the mockmanager.SetIdleViewMode
@@ -149,6 +157,19 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		applied["clock_layout"] = v
+	}
+
+	// Saison 14-04-Phase2-FIX06: Datenschutz-Toggle. Boolean,
+	// keine Allow-Liste. SetHistoryCaptureEnabled persistiert,
+	// danach loest config.changed im SSE-Block den Refetch in
+	// allen Tabs + auf der ESP-Hardware aus.
+	if body.HistoryCapture != nil {
+		v := *body.HistoryCapture
+		if err := s.mockMgr.SetHistoryCaptureEnabled(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "history_capture", err)
+			return
+		}
+		applied["history_capture"] = v
 	}
 
 	// Broadcast config.changed sobald mindestens ein Feld
