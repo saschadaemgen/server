@@ -16,6 +16,14 @@
 // Route: GET /webviewer/history.json (requireSession)
 // Auth:  Mieter-Session-Cookie. MAC comes from the context.
 // Body:  see mieterHistoryResponse.
+//
+// Saison 14-04-Phase2-FIX06: the actual list/hide logic moved to
+// MAC-parametrised serveHistory* helpers so the ESP-Bearer-tree
+// (/esp/history*) can reuse them. The Mieter wrappers below just
+// pull the MAC from the session context and delegate; the ESP
+// wrappers in handler_esp_history.go pull from the bearer context.
+// Shared validation lives in parseHistoryListOpts so both surfaces
+// reject identical bogus offset/limit/from/to inputs.
 package httpserver
 
 import (
@@ -86,7 +94,18 @@ func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
+	s.serveHistoryList(w, r, mac)
+}
 
+// serveHistoryList implements the GET history list flow shared by
+// the Mieter-Session-Cookie and the ESP-Bearer-Token surfaces. The
+// MAC argument is whatever the caller's auth middleware verified;
+// the helper itself does no auth.
+//
+// Validation, capture-toggle, pagination, mark-read fan-out and
+// the response shape are identical across both surfaces - the only
+// thing that differs is the auth gate.
+func (s *Server) serveHistoryList(w http.ResponseWriter, r *http.Request, mac string) {
 	opts, err := parseHistoryListOpts(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -217,6 +236,17 @@ func (s *Server) handleMieterHistoryHideOne(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
+	s.serveHistoryHideOne(w, r, mac)
+}
+
+// serveHistoryHideOne soft-hides a single event for the given mac.
+// Shared between the Mieter (cookie-auth) and ESP (bearer-auth)
+// surfaces; the event_id arrives via PathValue("event_id"), which
+// both surfaces register with the same wildcard name. After a
+// successful hide we re-broadcast the unread-count so the
+// screensaver badge tracks the change live on every connected
+// device (web + esp) instead of polling.
+func (s *Server) serveHistoryHideOne(w http.ResponseWriter, r *http.Request, mac string) {
 	if s.history == nil {
 		http.Error(w, "history not configured", http.StatusServiceUnavailable)
 		return
@@ -235,6 +265,12 @@ func (s *Server) handleMieterHistoryHideOne(w http.ResponseWriter, r *http.Reque
 		s.log.Error("hide event", "err", err, "mac_prefix", safePrefix(mac), "event_id", id)
 		http.Error(w, "Verstecken fehlgeschlagen.", http.StatusInternalServerError)
 		return
+	}
+	// Unread-count koennte gerade gesunken sein, wenn der ver-
+	// steckte Eintrag noch read_at IS NULL hatte. Broadcast laesst
+	// alle Tabs + die ESP-Hardware das Badge synchron nachziehen.
+	if s.hub != nil {
+		s.hub.BroadcastUnreadCount(r.Context(), mac)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -261,6 +297,13 @@ func (s *Server) handleMieterHistoryHideAll(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
+	s.serveHistoryHideAll(w, r, mac)
+}
+
+// serveHistoryHideAll soft-hides every currently-visible event
+// for the given mac. Shared between the Mieter and ESP surfaces.
+// Idempotent: a second call returns hidden_count=0.
+func (s *Server) serveHistoryHideAll(w http.ResponseWriter, r *http.Request, mac string) {
 	if s.history == nil {
 		http.Error(w, "history not configured", http.StatusServiceUnavailable)
 		return
