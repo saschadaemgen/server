@@ -12,13 +12,22 @@ import (
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
-// Source pulls an H.264 video track from an RTSP/RTSPS endpoint and exposes
-// it as a single shared pion track that any number of [Server] peers can
-// attach to.
+// Source pulls an H.264 video track from an RTSP/RTSPS endpoint, reassembles
+// it into access units, and exposes them to pion as a single shared sample
+// track that any number of [Server] peers can attach to.
+//
+// We deliberately go through samples rather than forwarding raw RTP. The
+// UA-Intercom packs its RTP payload in a way pion's writer cannot
+// round-trip (S1-02 failed when forwarding the raw packets). By repacketizing
+// the H.264 access units ourselves through pion, the upstream RTP layout is
+// irrelevant — pion produces a clean wire format and handles SRTP without
+// surprises.
 //
 // The concrete type is what callers hold today. A future revision will lift
 // a VideoSource interface above it (so MJPEG/file/test sources can plug in
@@ -34,7 +43,7 @@ type Source struct {
 
 	mu     sync.Mutex
 	client *gortsplib.Client
-	track  *webrtc.TrackLocalStaticRTP
+	track  *webrtc.TrackLocalStaticSample
 
 	drops *forwardDropCounter
 }
@@ -70,22 +79,23 @@ func NewSource(opts SourceOptions) (*Source, error) {
 	}, nil
 }
 
-// Track returns the shared pion video track. Safe to call after [Source.Start]
-// returns successfully. Multiple PeerConnections may attach the same track.
-func (s *Source) Track() *webrtc.TrackLocalStaticRTP {
+// Track returns the shared pion sample track. Safe to call after
+// [Source.Start] returns successfully. Multiple PeerConnections may attach
+// the same track.
+func (s *Source) Track() *webrtc.TrackLocalStaticSample {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.track
 }
 
 // Start connects to the RTSP source, negotiates the H.264 track, and begins
-// forwarding RTP packets into the internal pion track. It returns once
-// playback has been requested; packets continue flowing in background
+// reassembling access units into samples for the pion track. It returns
+// once playback has been requested; samples continue flowing in background
 // goroutines owned by gortsplib until [Source.Close] is called or ctx is
 // cancelled.
 func (s *Source) Start(ctx context.Context) error {
-	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: h264ClockRate},
 		"video",
 		"carvilon-intercom",
 	)
@@ -116,38 +126,89 @@ func (s *Source) Start(ctx context.Context) error {
 		return fmt.Errorf("stream: rtsp describe: %w", err)
 	}
 
-	var h264 *format.H264
-	medi := desc.FindFormat(&h264)
+	var h264Fmt *format.H264
+	medi := desc.FindFormat(&h264Fmt)
 	if medi == nil {
 		client.Close()
 		return errors.New("stream: no H.264 track in media description")
 	}
-	s.logger.Printf("stream: found H.264 track (payload type %d)", h264.PayloadType())
+	s.logger.Printf("stream: found H.264 track (payload type %d, packetization-mode %d)",
+		h264Fmt.PayloadType(), h264Fmt.PacketizationMode)
+
+	rtpDec, err := h264Fmt.CreateDecoder()
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("stream: create H.264 RTP decoder: %w", err)
+	}
 
 	if _, err := client.Setup(desc.BaseURL, medi, 0, 0); err != nil {
 		client.Close()
 		return fmt.Errorf("stream: rtsp setup: %w", err)
 	}
 
-	client.OnPacketRTP(medi, h264, func(pkt *rtp.Packet) {
-		// The UniFi Intercom emits an RTP header extension (typically an
-		// RFC3550-style profile-specific extension) that pion's RTP writer
-		// cannot round-trip — every forward then trips io.ErrShortBuffer
-		// inside pion's MarshalTo, and no frame reaches the browser. The
-		// extension carries no information the WebRTC viewer needs, so we
-		// strip it on a shallow per-packet copy. Header is a value type,
-		// so the assignment copies it; clearing Extensions on the copy
-		// does NOT mutate gortsplib's buffer.
-		fwd := *pkt
-		fwd.Header.Extension = false
-		fwd.Header.ExtensionProfile = 0
-		fwd.Header.Extensions = nil
+	// Forward-loop state. The OnPacketRTP callback runs in a single gortsplib
+	// goroutine, so these are touched from one thread — no mutex needed.
+	var (
+		seenIDR    bool
+		prevPTSSet bool
+		prevPTS    int64
+	)
 
-		// TrackLocalStaticRTP.WriteRTP rewrites SSRC/payload-type per binding.
-		// With no peers attached the write is a no-op — drop-statt-buffer
-		// falls out for free. On error we drop the frame and keep going;
-		// the loop must never die on a single packet.
-		if err := track.WriteRTP(&fwd); err != nil {
+	client.OnPacketRTP(medi, h264Fmt, func(pkt *rtp.Packet) {
+		// gortsplib reassembles FU-A fragments and STAP-A bundles for us and
+		// returns a complete access unit (or one of the two expected
+		// "waiting" sentinels) per call.
+		au, err := rtpDec.Decode(pkt)
+		if err != nil {
+			if errors.Is(err, rtph264.ErrMorePacketsNeeded) ||
+				errors.Is(err, rtph264.ErrNonStartingPacketAndNoPrevious) {
+				// Normal during fragmentation / mid-stream connect; not a drop.
+				return
+			}
+			s.drops.record(err)
+			return
+		}
+
+		pts, ok := client.PacketPTS(medi, pkt)
+		if !ok {
+			// Timestamp not yet synchronised — drop quietly until rtptime
+			// has anchored to a leading track.
+			return
+		}
+
+		// Wait for the first IDR-containing AU. Anything before that is a
+		// P-frame that cannot be decoded standalone; sending it would just
+		// give the browser garbage until the next keyframe arrives anyway.
+		isKeyframe := auContainsIDR(au)
+		if !seenIDR {
+			if !isKeyframe {
+				return
+			}
+			seenIDR = true
+			s.logger.Printf("stream: first IDR received, starting sample output")
+		}
+
+		// Be defensive about SPS/PPS. Some cameras ship them only in the SDP
+		// (gortsplib stashes those into h264Fmt.SPS/PPS); some emit them
+		// inline at every IDR. We prepend the SDP copies on every IDR that
+		// lacks them — the browser decoder needs them to lock on.
+		if isKeyframe {
+			au = prependParamSets(au, h264Fmt)
+		}
+
+		// Sample.Duration tells pion how much to advance the outbound RTP
+		// timestamp BEFORE the *next* sample. Using the gap to the previous
+		// AU as a proxy is exact for constant frame rate and good enough for
+		// variable rate — the alternative (buffer one frame to know the real
+		// gap) would add a frame of latency we do not need today.
+		dur := frameDuration(pts, prevPTS, prevPTSSet)
+		prevPTS = pts
+		prevPTSSet = true
+
+		if err := track.WriteSample(media.Sample{
+			Data:     annexBMarshal(au),
+			Duration: dur,
+		}); err != nil {
 			s.drops.record(err)
 		}
 	})
@@ -219,7 +280,102 @@ func (d *forwardDropCounter) record(err error) {
 	if time.Since(d.lastAt) < time.Second {
 		return
 	}
-	d.logger.Printf("stream: forward rtp dropped %d frame(s); last err: %v", d.pending, err)
+	d.logger.Printf("stream: forward dropped %d frame(s); last err: %v", d.pending, err)
 	d.lastAt = time.Now()
 	d.pending = 0
+}
+
+// --- H.264 helpers (Annex-B framing, NAL type checks) ---
+//
+// We intentionally roll these by hand rather than pulling in mediacommon
+// directly. The dependency doctrine for the streaming-server keeps only
+// pion/* and gortsplib at the top level; mediacommon is an indirect dep we
+// don't want to promote. The actual logic is a few lines of trivial byte
+// manipulation.
+
+const h264ClockRate = 90000
+
+const (
+	h264NALTypeIDR byte = 5
+	h264NALTypeSPS byte = 7
+	h264NALTypePPS byte = 8
+)
+
+func h264NALType(nalu []byte) byte {
+	if len(nalu) == 0 {
+		return 0
+	}
+	return nalu[0] & 0x1F
+}
+
+func auContainsIDR(au [][]byte) bool {
+	for _, nalu := range au {
+		if h264NALType(nalu) == h264NALTypeIDR {
+			return true
+		}
+	}
+	return false
+}
+
+func auHasType(au [][]byte, want byte) bool {
+	for _, nalu := range au {
+		if h264NALType(nalu) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// prependParamSets ensures the AU starts with SPS and PPS so a fresh decoder
+// (or a viewer that just connected and is keyframing from this AU) can lock
+// on. If the AU already contains SPS/PPS, or gortsplib does not have a copy
+// from the SDP, nothing is prepended for that NAL type.
+func prependParamSets(au [][]byte, h264Fmt *format.H264) [][]byte {
+	sps, pps := h264Fmt.SafeParams()
+	var prepend [][]byte
+	if len(sps) > 0 && !auHasType(au, h264NALTypeSPS) {
+		prepend = append(prepend, sps)
+	}
+	if len(pps) > 0 && !auHasType(au, h264NALTypePPS) {
+		prepend = append(prepend, pps)
+	}
+	if len(prepend) == 0 {
+		return au
+	}
+	out := make([][]byte, 0, len(prepend)+len(au))
+	out = append(out, prepend...)
+	out = append(out, au...)
+	return out
+}
+
+// annexBMarshal serialises an access unit (slice of raw NALs without start
+// codes) into the Annex-B byte stream pion's H.264 payloader expects:
+// each NAL prefixed with 0x00 0x00 0x00 0x01.
+func annexBMarshal(au [][]byte) []byte {
+	size := 0
+	for _, nalu := range au {
+		size += 4 + len(nalu)
+	}
+	buf := make([]byte, 0, size)
+	for _, nalu := range au {
+		buf = append(buf, 0x00, 0x00, 0x00, 0x01)
+		buf = append(buf, nalu...)
+	}
+	return buf
+}
+
+// frameDuration returns the gap between the previous and current PTS as a
+// time.Duration. The first frame (or a non-monotonic / suspiciously large
+// gap caused by a stream hiccup) falls back to 33 ms, i.e. a 30 fps default.
+func frameDuration(pts, prev int64, prevSet bool) time.Duration {
+	var dur time.Duration
+	if prevSet {
+		if delta := pts - prev; delta > 0 {
+			dur = time.Duration(delta) * time.Second / h264ClockRate
+		}
+	}
+	if dur <= 0 || dur > 200*time.Millisecond {
+		dur = 33 * time.Millisecond
+	}
+	return dur
 }
