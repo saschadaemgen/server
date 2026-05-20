@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
@@ -34,6 +35,8 @@ type Source struct {
 	mu     sync.Mutex
 	client *gortsplib.Client
 	track  *webrtc.TrackLocalStaticRTP
+
+	drops *forwardDropCounter
 }
 
 // SourceOptions configures a [Source].
@@ -63,6 +66,7 @@ func NewSource(opts SourceOptions) (*Source, error) {
 		rtspURL:     opts.RTSPURL,
 		logger:      logger,
 		insecureTLS: opts.InsecureSkipTLSVerify,
+		drops:       &forwardDropCounter{logger: logger},
 	}, nil
 }
 
@@ -126,13 +130,25 @@ func (s *Source) Start(ctx context.Context) error {
 	}
 
 	client.OnPacketRTP(medi, h264, func(pkt *rtp.Packet) {
-		// TrackLocalStaticRTP.WriteRTP rewrites SSRC/payload-type per binding,
-		// so we forward the gortsplib packet as-is. With no peers attached the
-		// write is a no-op — drop-statt-buffer falls out for free.
-		if err := track.WriteRTP(pkt); err != nil && !errors.Is(err, errClosedTrack) {
-			// In single-viewer-spike scope: log and keep going. Audible at
-			// console if something is structurally wrong, but never fatal.
-			s.logger.Printf("stream: forward rtp: %v", err)
+		// The UniFi Intercom emits an RTP header extension (typically an
+		// RFC3550-style profile-specific extension) that pion's RTP writer
+		// cannot round-trip — every forward then trips io.ErrShortBuffer
+		// inside pion's MarshalTo, and no frame reaches the browser. The
+		// extension carries no information the WebRTC viewer needs, so we
+		// strip it on a shallow per-packet copy. Header is a value type,
+		// so the assignment copies it; clearing Extensions on the copy
+		// does NOT mutate gortsplib's buffer.
+		fwd := *pkt
+		fwd.Header.Extension = false
+		fwd.Header.ExtensionProfile = 0
+		fwd.Header.Extensions = nil
+
+		// TrackLocalStaticRTP.WriteRTP rewrites SSRC/payload-type per binding.
+		// With no peers attached the write is a no-op — drop-statt-buffer
+		// falls out for free. On error we drop the frame and keep going;
+		// the loop must never die on a single packet.
+		if err := track.WriteRTP(&fwd); err != nil {
+			s.drops.record(err)
 		}
 	})
 
@@ -180,7 +196,30 @@ func (s *Source) wait(ctx context.Context, c *gortsplib.Client) {
 	}
 }
 
-// errClosedTrack is a sentinel for "track has no bindings yet" / "track was
-// closed" — pion does not currently surface a typed error here, but we keep
-// the name so we can swap in the typed value later without touching callers.
-var errClosedTrack = errors.New("track closed")
+// forwardDropCounter rate-limits "frame dropped on forward" log lines.
+//
+// Live video prefers freshness over completeness: drop the frame, never the
+// loop. We still want one line in the log when something is structurally
+// wrong, but per-packet spam buries everything else. So: count drops
+// silently and emit at most one summary per second, including the last
+// error seen.
+type forwardDropCounter struct {
+	logger *log.Logger
+
+	mu      sync.Mutex
+	lastAt  time.Time
+	pending int
+}
+
+func (d *forwardDropCounter) record(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.pending++
+	if time.Since(d.lastAt) < time.Second {
+		return
+	}
+	d.logger.Printf("stream: forward rtp dropped %d frame(s); last err: %v", d.pending, err)
+	d.lastAt = time.Now()
+	d.pending = 0
+}
