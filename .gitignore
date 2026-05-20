@@ -1,0 +1,24 @@
+# Secrets / local config
+.env
+.env.local
+*.env
+secrets.yaml
+secrets.yml
+
+# Built binaries
+/spike
+/spike.exe
+/bin/
+/dist/
+
+# Go build / test artifacts
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
