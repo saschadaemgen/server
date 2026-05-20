@@ -229,12 +229,19 @@ func safePrefix(mac string) string {
 // client is wired or the backend is unreachable. The template
 // hides its weather block on nil so a degraded screensaver still
 // shows clock + date.
+//
+// Saison 14-FIX07: the language is resolved from the calling
+// tenant (session or bearer context). The shared
+// resolveTenantLanguage helper falls back to German if no MAC is
+// on the context, which keeps the admin /a/weather pre-FIX07
+// behavior intact.
 func (s *Server) fetchHomeWeather(r *http.Request) *weather.Snapshot {
 	if s.weather == nil {
 		return nil
 	}
 	lat, lon := s.stationCoords(r)
-	snap, err := s.weather.Get(r.Context(), lat, lon)
+	lang := s.resolveTenantLanguage(r.Context())
+	snap, err := s.weather.Get(r.Context(), lat, lon, lang)
 	if err != nil {
 		return nil
 	}

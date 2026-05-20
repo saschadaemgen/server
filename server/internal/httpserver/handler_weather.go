@@ -15,11 +15,13 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"carvilon.local/server/internal/mockmanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/weather"
 )
@@ -33,6 +35,32 @@ const (
 	defaultStationLat = 51.6144
 	defaultStationLon = 7.1959
 )
+
+// resolveTenantLanguage figures out the UI language for the calling
+// surface so weather descriptions can be localized per viewer
+// (Saison 14-FIX07). The Mieter-Web-Viewer hands us a viewer MAC
+// via the session context, the /esp/-tree via the bearer context;
+// the admin /a/weather surface has no tenant association and gets
+// the default (German) fallback. Errors from the lookup degrade
+// to the default - the screensaver should never break just
+// because the language column had a hiccup.
+func (s *Server) resolveTenantLanguage(ctx context.Context) string {
+	if s.mockMgr == nil {
+		return mockmanager.DefaultLanguage
+	}
+	mac := ViewerMACFromContext(ctx)
+	if mac == "" {
+		mac = ESPMACFromContext(ctx)
+	}
+	if mac == "" {
+		return mockmanager.DefaultLanguage
+	}
+	info, err := s.mockMgr.GetViewerInfo(ctx, mac)
+	if err != nil {
+		return mockmanager.DefaultLanguage
+	}
+	return info.ResolveLanguage()
+}
 
 func (s *Server) stationCoords(r *http.Request) (lat, lon float64) {
 	lat, lon = defaultStationLat, defaultStationLon
@@ -62,7 +90,8 @@ func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lat, lon := s.stationCoords(r)
-	snap, err := s.weather.Get(r.Context(), lat, lon)
+	lang := s.resolveTenantLanguage(r.Context())
+	snap, err := s.weather.Get(r.Context(), lat, lon, lang)
 	if err != nil {
 		if errors.Is(err, weather.ErrUnavailable) {
 			s.log.Debug("weather unavailable", "lat", lat, "lon", lon, "err", err)

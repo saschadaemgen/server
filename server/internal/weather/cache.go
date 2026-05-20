@@ -30,8 +30,14 @@ func newCacheKey(lat, lon float64) cacheKey {
 	}
 }
 
+// cacheEntry stores the language-neutral payload plus the wall-
+// clock time of insertion. Saison 14-FIX07 split out the
+// localization step so a single cache row can serve every viewer
+// language; previously the cache held a fully-rendered Snapshot,
+// which would have required per-language duplication once
+// resolveWeather grew the EN strings.
 type cacheEntry struct {
-	snap  Snapshot
+	raw   rawSnapshot
 	saved time.Time
 }
 
@@ -53,42 +59,42 @@ func newCache(now func() time.Time) *cache {
 	}
 }
 
-// fresh returns the cached snapshot if it is younger than
+// fresh returns the cached raw payload if it is younger than
 // freshTTL. The caller uses this to skip the network call
 // entirely.
-func (c *cache) fresh(key cacheKey) (Snapshot, bool) {
+func (c *cache) fresh(key cacheKey) (rawSnapshot, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	entry, ok := c.rows[key]
 	if !ok {
-		return Snapshot{}, false
+		return rawSnapshot{}, false
 	}
 	if c.now().Sub(entry.saved) > freshTTL {
-		return Snapshot{}, false
+		return rawSnapshot{}, false
 	}
-	return entry.snap, true
+	return entry.raw, true
 }
 
-// stale returns the cached snapshot if it exists and is younger
-// than staleTTL, regardless of freshness. The caller uses this
-// as a fallback after a failed network call.
-func (c *cache) stale(key cacheKey) (Snapshot, bool) {
+// stale returns the cached raw payload if it exists and is
+// younger than staleTTL, regardless of freshness. The caller uses
+// this as a fallback after a failed network call.
+func (c *cache) stale(key cacheKey) (rawSnapshot, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	entry, ok := c.rows[key]
 	if !ok {
-		return Snapshot{}, false
+		return rawSnapshot{}, false
 	}
 	if c.now().Sub(entry.saved) > staleTTL {
-		return Snapshot{}, false
+		return rawSnapshot{}, false
 	}
-	return entry.snap, true
+	return entry.raw, true
 }
 
 // store overwrites the cache entry for key. Both fresh and stale
 // reads go through this single slot per location.
-func (c *cache) store(key cacheKey, snap Snapshot) {
+func (c *cache) store(key cacheKey, raw rawSnapshot) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rows[key] = cacheEntry{snap: snap, saved: c.now()}
+	c.rows[key] = cacheEntry{raw: raw, saved: c.now()}
 }

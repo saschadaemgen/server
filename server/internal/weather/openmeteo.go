@@ -23,12 +23,39 @@ var ErrUnavailable = errors.New("weather: no fresh or stale snapshot available")
 
 // Snapshot is what the screensaver renders and the /esp/config
 // JSON ships. All fields are populated from one open-meteo call.
+//
+// Saison 14-FIX07: Description + Icon are filled at Get-time from
+// the per-tenant language; the cache only stores the language-
+// neutral fields below (TempC, WeatherCode, FetchedAt).
 type Snapshot struct {
 	TempC       float64   `json:"temp_c"`
 	WeatherCode int       `json:"weather_code"`
 	Description string    `json:"description"`
 	Icon        string    `json:"icon"`
 	FetchedAt   time.Time `json:"fetched_at"`
+}
+
+// rawSnapshot is the language-neutral payload that lives in the
+// cache. Get adds the localized Description + Icon on top of it
+// before returning to the caller.
+type rawSnapshot struct {
+	TempC       float64
+	WeatherCode int
+	FetchedAt   time.Time
+}
+
+// localize converts the language-neutral rawSnapshot into a
+// Snapshot the handler can ship. lang is "de" / "en"; empty falls
+// back to German via resolveWeather.
+func (r rawSnapshot) localize(lang string) Snapshot {
+	icon, desc := resolveWeather(r.WeatherCode, lang)
+	return Snapshot{
+		TempC:       r.TempC,
+		WeatherCode: r.WeatherCode,
+		Description: desc,
+		Icon:        icon,
+		FetchedAt:   r.FetchedAt,
+	}
 }
 
 // Client is the open-meteo-facing facade. Construct with New;
@@ -76,24 +103,30 @@ func New(opts ...Option) *Client {
 	return c
 }
 
-// Get returns the current snapshot for the given coordinates.
-// The cache is consulted first; on miss the open-meteo API is
-// called and the result stored. On API failure a stale snapshot
-// is returned if one is available; otherwise ErrUnavailable.
-func (c *Client) Get(ctx context.Context, lat, lon float64) (Snapshot, error) {
+// Get returns the current snapshot for the given coordinates,
+// localized into lang ("de" / "en"; empty -> German). The cache
+// is consulted first; on miss the open-meteo API is called and
+// the result stored. On API failure a stale snapshot is returned
+// if one is available; otherwise ErrUnavailable.
+//
+// Saison 14-FIX07: lang was added as the trailing argument. The
+// cache stores the language-neutral rawSnapshot so a second call
+// in another language gets the right text from the same cache
+// row (no per-language cache duplication).
+func (c *Client) Get(ctx context.Context, lat, lon float64, lang string) (Snapshot, error) {
 	key := newCacheKey(lat, lon)
-	if snap, ok := c.cache.fresh(key); ok {
-		return snap, nil
+	if raw, ok := c.cache.fresh(key); ok {
+		return raw.localize(lang), nil
 	}
 
-	snap, err := c.fetch(ctx, lat, lon)
+	raw, err := c.fetch(ctx, lat, lon)
 	if err == nil {
-		c.cache.store(key, snap)
-		return snap, nil
+		c.cache.store(key, raw)
+		return raw.localize(lang), nil
 	}
 
 	if stale, ok := c.cache.stale(key); ok {
-		return stale, nil
+		return stale.localize(lang), nil
 	}
 	return Snapshot{}, fmt.Errorf("weather: %w (last fetch error: %v)", ErrUnavailable, err)
 }
@@ -102,7 +135,7 @@ func (c *Client) Get(ctx context.Context, lat, lon float64) (Snapshot, error) {
 // current.temperature_2m + weather_code in Europe/Berlin time, so
 // the FetchedAt timestamp matches whatever the operator's site
 // considers "now" without timezone gymnastics on our end.
-func (c *Client) fetch(ctx context.Context, lat, lon float64) (Snapshot, error) {
+func (c *Client) fetch(ctx context.Context, lat, lon float64) (rawSnapshot, error) {
 	q := url.Values{}
 	q.Set("latitude", strconv.FormatFloat(lat, 'f', 4, 64))
 	q.Set("longitude", strconv.FormatFloat(lon, 'f', 4, 64))
@@ -111,36 +144,33 @@ func (c *Client) fetch(ctx context.Context, lat, lon float64) (Snapshot, error) 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"?"+q.Encode(), nil)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("build request: %w", err)
+		return rawSnapshot{}, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpC.Do(req)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("http: %w", err)
+		return rawSnapshot{}, fmt.Errorf("http: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return Snapshot{}, fmt.Errorf("open-meteo HTTP %d: %s",
+		return rawSnapshot{}, fmt.Errorf("open-meteo HTTP %d: %s",
 			resp.StatusCode, string(msg))
 	}
 
-	var raw struct {
+	var rawJSON struct {
 		Current struct {
 			TemperatureC float64 `json:"temperature_2m"`
 			WeatherCode  int     `json:"weather_code"`
 		} `json:"current"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return Snapshot{}, fmt.Errorf("decode: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&rawJSON); err != nil {
+		return rawSnapshot{}, fmt.Errorf("decode: %w", err)
 	}
-	icon, desc := describeWMO(raw.Current.WeatherCode)
-	return Snapshot{
-		TempC:       raw.Current.TemperatureC,
-		WeatherCode: raw.Current.WeatherCode,
-		Description: desc,
-		Icon:        icon,
+	return rawSnapshot{
+		TempC:       rawJSON.Current.TemperatureC,
+		WeatherCode: rawJSON.Current.WeatherCode,
 		FetchedAt:   c.now(),
 	}, nil
 }
