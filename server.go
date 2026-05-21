@@ -16,7 +16,7 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 
 	"carvilon.local/stream/internal/droplog"
-	"carvilon.local/stream/internal/source"
+	"carvilon.local/stream/internal/hub"
 )
 
 //go:embed web
@@ -25,34 +25,36 @@ var webFS embed.FS
 // h264ClockRate is the RTP clock rate for H.264 (90 kHz, RFC 6184).
 const h264ClockRate = 90000
 
-// Server is the CARVILON streaming kernel: a tiny WebRTC signaling
-// endpoint, an embedded test page, and a frame-consumer that turns
-// upstream access units into pion samples for any number of viewers
-// (today: single-viewer spike).
+// Server is the CARVILON streaming kernel. It hosts a small WebRTC
+// signaling endpoint plus an embedded test page, and fans out a single
+// upstream source pull to N concurrent browser viewers.
 //
-// The kernel knows nothing about how frames are acquired — it accepts a
-// [source.VideoSource] and only ever calls its interface methods. UniFi,
-// generic RTSP, ESP32 etc. plug in through the same shape.
+// Each /offer request becomes its own [hub.Subscriber] with its own
+// [webrtc.TrackLocalStaticSample] and its own feeder goroutine. A slow
+// viewer can only ever delay itself — the source pull and the other
+// viewers are isolated through the hub's non-blocking distribution.
 //
-// Signaling protocol: POST the browser's offer SDP to /offer with
-// Content-Type application/sdp, receive the answer SDP in the response
-// body. No trickle ICE, no auth — spike scope only.
+// Source lifecycle is managed by the hub: the first connecting viewer
+// triggers a fresh source build via [hub.SourceFactory] and Start; when
+// the last viewer leaves, the source is Closed. The next connection
+// rebuilds. This keeps the camera idle when no one is watching.
 type Server struct {
-	src    source.VideoSource
+	hub    *hub.Hub
 	addr   string
 	logger *log.Logger
 
-	api   *webrtc.API
-	track *webrtc.TrackLocalStaticSample
-	srv   *http.Server
-
-	drops *droplog.Counter
+	api *webrtc.API
+	srv *http.Server
 }
 
 // ServerOptions configures a [Server].
 type ServerOptions struct {
-	// Source is the video producer. Must already be Started.
-	Source source.VideoSource
+	// SourceFactory builds a fresh, un-Started [source.VideoSource] on
+	// demand. The hub invokes it at first Subscribe and again after the
+	// subscriber count drops back to zero. The factory is invoked
+	// without arguments — capture whatever configuration the source
+	// needs in a closure (see cmd/spike/main.go for the pattern).
+	SourceFactory hub.SourceFactory
 
 	// Addr is the HTTP listen address, e.g. ":8555". Avoid 9080
 	// (carvilon-server) and 1984 (go2rtc).
@@ -60,12 +62,17 @@ type ServerOptions struct {
 
 	// Logger receives diagnostic output. If nil, the default logger.
 	Logger *log.Logger
+
+	// SubscriberBuffer is forwarded to [hub.Options.SubscriberBuffer].
+	// Zero means hub default (30).
+	SubscriberBuffer int
 }
 
-// NewServer builds a Server.
+// NewServer builds a Server. The underlying hub is started here and
+// torn down by [Server.Run]'s shutdown path.
 func NewServer(opts ServerOptions) (*Server, error) {
-	if opts.Source == nil {
-		return nil, errors.New("stream: Source is required")
+	if opts.SourceFactory == nil {
+		return nil, errors.New("stream: SourceFactory is required")
 	}
 	if opts.Addr == "" {
 		return nil, errors.New("stream: Addr is required")
@@ -80,22 +87,16 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
-	track, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: h264ClockRate},
-		"video",
-		"carvilon-stream",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("stream: create track: %w", err)
-	}
+	h := hub.New(opts.SourceFactory, hub.Options{
+		Logger:           opts.Logger,
+		SubscriberBuffer: opts.SubscriberBuffer,
+	})
 
 	s := &Server{
-		src:    opts.Source,
+		hub:    h,
 		addr:   opts.Addr,
 		logger: opts.Logger,
 		api:    api,
-		track:  track,
-		drops:  &droplog.Counter{Logger: opts.Logger, Label: "stream: writesample"},
 	}
 
 	mux := http.NewServeMux()
@@ -118,14 +119,14 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return s, nil
 }
 
-// Run starts the frame consumer (source → pion samples) and the HTTP
-// signaling server. It blocks until ctx is cancelled or the HTTP server
-// errors out. On clean shutdown (ctx cancelled) it returns ctx.Err().
+// Run starts the HTTP signaling server and blocks until ctx is cancelled
+// or the server errors out. On clean shutdown (ctx cancelled) it tears
+// the hub down (closing source and all subscribers) and returns
+// ctx.Err().
 func (s *Server) Run(ctx context.Context) error {
-	go s.consumeFrames(ctx)
-
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
+		_ = s.hub.Close()
 		return fmt.Errorf("stream: listen %s: %w", s.addr, err)
 	}
 	s.logger.Printf("stream: signaling + test page on http://%s", ln.Addr())
@@ -138,8 +139,10 @@ func (s *Server) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.srv.Shutdown(shutdownCtx)
+		_ = s.hub.Close()
 		return ctx.Err()
 	case err := <-serveDone:
+		_ = s.hub.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -147,43 +150,17 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// consumeFrames pulls AUs from the source, turns each into a pion
-// media.Sample (Annex-B body + duration from PTS delta), and writes it
-// to the shared video track. Drops on write error are counted into the
-// shared rate-limited logger; the loop never dies on a single sample.
-func (s *Server) consumeFrames(ctx context.Context) {
-	var (
-		prevPTS    int64
-		prevPTSSet bool
-	)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case au, ok := <-s.src.Frames():
-			if !ok {
-				s.logger.Printf("stream: source frames channel closed; consumer exiting")
-				return
-			}
-
-			dur := frameDuration(au.PTS, prevPTS, prevPTSSet)
-			prevPTS = au.PTS
-			prevPTSSet = true
-
-			if err := s.track.WriteSample(media.Sample{
-				Data:     annexBMarshal(au.NALUs),
-				Duration: dur,
-			}); err != nil {
-				s.drops.Record(err)
-			}
-		}
-	}
-}
-
-// handleOffer implements POST /offer: parse the browser's SDP offer,
-// attach the shared track to a fresh PeerConnection, gather ICE, return
-// the answer SDP.
+// handleOffer implements POST /offer:
+//   - Subscribes a new viewer at the hub (may start the source on the
+//     very first viewer; that step blocks for the RTSP/Protect-API
+//     bring-up, typically 1–3 s).
+//   - Builds a per-viewer [webrtc.TrackLocalStaticSample] H.264 track.
+//   - Spawns a feeder goroutine that drains the subscriber's frames
+//     into the track.
+//   - Performs the standard WebRTC offer/answer exchange.
+//
+// On peer-connection close/fail/disconnect the subscriber is removed
+// and, if it was the last one, the hub will close the source.
 func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -200,30 +177,67 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sub, err := s.hub.Subscribe()
+	if err != nil {
+		http.Error(w, "subscribe: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: h264ClockRate},
+		fmt.Sprintf("video-%d", sub.ID()),
+		fmt.Sprintf("carvilon-viewer-%d", sub.ID()),
+	)
+	if err != nil {
+		sub.Close()
+		http.Error(w, "create track: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	pc, err := s.api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
+		sub.Close()
 		http.Error(w, "create peer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Wire down-edge cleanup: any non-success terminal state on the
+	// PC closes our subscriber. The hub then cleans up the channel
+	// and (if this was the last viewer) stops the source.
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
-		s.logger.Printf("stream: peer %p state=%s", pc, st)
+		s.logger.Printf("stream: viewer %d state=%s", sub.ID(), st)
 		switch st {
 		case webrtc.PeerConnectionStateFailed,
 			webrtc.PeerConnectionStateClosed,
 			webrtc.PeerConnectionStateDisconnected:
+			sub.Close()
 			_ = pc.Close()
 		}
 	})
 
-	if _, err := pc.AddTrack(s.track); err != nil {
+	if _, err := pc.AddTrack(track); err != nil {
+		sub.Close()
 		_ = pc.Close()
 		http.Error(w, "add track: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Feeder goroutine: drains the subscriber's frames into the track.
+	// Exits when the subscriber channel closes (subscriber Close, hub
+	// shutdown, source end). On exit we close the PC defensively so a
+	// source-side failure tears the viewer connection down too.
+	feedDrops := &droplog.Counter{
+		Logger: s.logger,
+		Label:  fmt.Sprintf("stream: viewer %d writesample", sub.ID()),
+	}
+	go func() {
+		defer func() { _ = pc.Close() }()
+		s.feedTrack(sub, track, feedDrops)
+	}()
+
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: string(body)}
 	if err := pc.SetRemoteDescription(offer); err != nil {
+		sub.Close()
 		_ = pc.Close()
 		http.Error(w, "set remote: "+err.Error(), http.StatusBadRequest)
 		return
@@ -231,6 +245,7 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
+		sub.Close()
 		_ = pc.Close()
 		http.Error(w, "create answer: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -238,6 +253,7 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	gathered := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
+		sub.Close()
 		_ = pc.Close()
 		http.Error(w, "set local: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -247,6 +263,28 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/sdp")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, pc.LocalDescription().SDP)
+}
+
+// feedTrack pumps access units from a subscriber into a pion sample
+// track. Per-viewer PTS tracking lives here — pion's WriteSample wants
+// a delta (Duration) per sample, not absolute timestamps.
+func (s *Server) feedTrack(sub *hub.Subscriber, track *webrtc.TrackLocalStaticSample, drops *droplog.Counter) {
+	var (
+		prevPTS    int64
+		prevPTSSet bool
+	)
+	for au := range sub.Frames() {
+		dur := frameDuration(au.PTS, prevPTS, prevPTSSet)
+		prevPTS = au.PTS
+		prevPTSSet = true
+
+		if err := track.WriteSample(media.Sample{
+			Data:     annexBMarshal(au.NALUs),
+			Duration: dur,
+		}); err != nil {
+			drops.Record(err)
+		}
+	}
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -273,6 +311,14 @@ func annexBMarshal(au [][]byte) []byte {
 // this is exact, for variable rate it is off by at most one frame. The
 // first frame and any suspicious gap (zero / negative / > 200 ms) falls
 // back to 33 ms (~30 fps).
+//
+// When a new viewer joins, the hub pre-feeds the cached IDR before any
+// fresh AUs. That cached IDR has the old camera-side PTS, so the first
+// subsequent fresh AU produces a "huge gap" that this safety cap quietly
+// clamps to 33 ms. Net effect: the per-viewer RTP stream stays monotonic
+// with reasonable frame spacing from the very first sample. The fact that
+// the absolute pion timestamps differ from the camera's PTS is fine —
+// only relative spacing matters to the browser decoder.
 func frameDuration(pts, prev int64, prevSet bool) time.Duration {
 	var dur time.Duration
 	if prevSet {
@@ -285,3 +331,4 @@ func frameDuration(pts, prev int64, prevSet bool) time.Duration {
 	}
 	return dur
 }
+

@@ -1,10 +1,10 @@
-// Command spike is the S1, Schritt 1 feasibility binary.
+// Command spike is the S1+S2 feasibility binary.
 //
-// It pulls the configured UniFi Protect camera via the integration API
-// and the camera's RTSPS endpoint, runs the H.264 stream through the
-// in-tree RFC-6184 depacketizer, and serves a tiny HTML page plus a
-// /offer signaling endpoint so a single browser tab can view the live
-// feed over WebRTC.
+// It hosts a tiny WebRTC signaling endpoint at the configured listen
+// address and fans out a single UniFi Protect camera pull to any number
+// of concurrent browser viewers (Fan-Out, see S2-01). The first
+// connecting viewer triggers the camera bring-up; the last leaving viewer
+// shuts it down again so the camera is idle when nobody is watching.
 //
 // Usage (PowerShell):
 //
@@ -16,6 +16,9 @@
 //	go run .\cmd\spike
 //
 // Then open http://<host>:8555/ in a LAN browser and click "Connect".
+// Open it in several tabs / browsers to exercise fan-out — they should
+// all see the same live feed without the camera being pulled more than
+// once.
 package main
 
 import (
@@ -28,6 +31,7 @@ import (
 	"syscall"
 
 	"carvilon.local/stream"
+	"carvilon.local/stream/internal/source"
 	"carvilon.local/stream/internal/source/unifi"
 )
 
@@ -62,29 +66,28 @@ func main() {
 		logger.Fatalf("missing one of %s / %s / %s — see .env.example", envNVRHost, envAPIKey, envCameraID)
 	}
 
+	// Source factory: invoked lazily by the hub on first viewer and again
+	// after every down-to-zero cycle, so each lifetime gets a fresh
+	// gortsplib client (the previous one's channels are closed and not
+	// reusable).
+	srcFactory := func() (source.VideoSource, error) {
+		return unifi.NewSource(unifi.Options{
+			NVRHost:    nvrHost,
+			APIKey:     apiKey,
+			CameraID:   cameraID,
+			Quality:    quality,
+			Encryption: unifi.Encryption(encryption),
+			Logger:     logger,
+		})
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	src, err := unifi.NewSource(unifi.Options{
-		NVRHost:    nvrHost,
-		APIKey:     apiKey,
-		CameraID:   cameraID,
-		Quality:    quality,
-		Encryption: unifi.Encryption(encryption),
-		Logger:     logger,
-	})
-	if err != nil {
-		logger.Fatalf("unifi source: %v", err)
-	}
-	if err := src.Start(ctx); err != nil {
-		logger.Fatalf("unifi start: %v", err)
-	}
-	defer func() { _ = src.Close() }()
-
 	srv, err := stream.NewServer(stream.ServerOptions{
-		Source: src,
-		Addr:   addr,
-		Logger: logger,
+		SourceFactory: srcFactory,
+		Addr:          addr,
+		Logger:        logger,
 	})
 	if err != nil {
 		logger.Fatalf("server: %v", err)

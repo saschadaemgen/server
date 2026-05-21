@@ -7,14 +7,17 @@ CARVILON streaming-server. Go-Library plus eine spike-Binary.
 
 ## Saison
 
-- **S1, Schritt 1 (jetzt):** Multi-Source-Architektur + ein WebRTC-Viewer
-  im Browser. UniFi Protect-Quelle (RTSPS, mit eigenem RFC-6184-
-  Depacketizer) ist die erste konkrete Implementierung des `VideoSource`-
-  Interfaces. Erfolg = Live-Bild der UA-Intercom auf der Testseite mit
-  subjektiv niedriger Latenz, ohne Decoder-Fehler im Server-Log.
-- **Schritt 2+** (Fan-Out, MJPEG-Output, GenericRTSPSource, ESP32-Quelle,
-  Andocken an carvilon-server, Audio) sind explizit **nicht** Teil dieser
-  Stufe.
+- **S1 (durch):** Multi-Source-Architektur, UniFi Protect-Quelle (RTSPS,
+  eigener RFC-6184-Depacketizer), Live-Bild auf der Testseite.
+- **S2, Schritt 2 (jetzt):** Fan-Out — EINE Kamera, N WebRTC-Viewer.
+  Erster Viewer triggert den Kamera-Pull; letzter Viewer beendet ihn.
+  Slow Subscribers können den Bus oder andere Viewer nicht blockieren
+  (drop-statt-buffer pro Subscriber, gedrosseltes Logging). Neue
+  Subscriber bekommen sofort ein gecachtes IDR vorab in den Channel —
+  Bild startet ohne auf den nächsten Live-Keyframe zu warten.
+- **Schritt 3+** (MJPEG-Output, GenericRTSPSource, ESP32-Quelle,
+  Andocken an carvilon-server, Audio) sind explizit **nicht** Teil
+  dieser Stufe.
 
 ## Voraussetzungen
 
@@ -73,6 +76,12 @@ IDR durch den Depacketizer geflossen ist, sollte das `<video>`-Element das
 Live-Bild der Intercom-Kamera zeigen (typisch 1–5 s nach Connect, abhängig
 vom GoP-Intervall der Kamera).
 
+**Fan-Out testen:** dieselbe URL in mehreren Browser-Tabs / Geräten
+öffnen und Connect drücken. Der Server-Log sollte genau **EIN**
+`unifi: got RTSPS URL ...` und **EIN** `unifi: first IDR ...` zeigen,
+egal wie viele Viewer dazukommen. Beim Schließen des letzten Tabs:
+`hub: source stopped (last subscriber left)`.
+
 ## Cross-Compile für Raspberry Pi (arm64)
 
 ```sh
@@ -99,7 +108,7 @@ Stream-Kern (carvilon.local/stream)
         └── (weitere)
 ```
 
-Im Spike (heute):
+Im Spike (heute, mit Fan-Out):
 
 ```
 UA-Intercom (RTSPS:7441)
@@ -110,26 +119,44 @@ internal/h264.Depacketizer
    │  (FU-A/B, STAP-A/B, MTAP-16/24, Single NAL)
    ▼
 UniFiProtectSource (AU-Assembly per Marker/Timestamp)
-   │  Frames-Channel (drop-statt-buffer)
+   │  Frames-Channel
    ▼
-stream.Server (consumer-loop)
-   │  Annex-B-Marshal + Sample.Duration aus PTS-Delta
+internal/hub.Hub  ─────────────────────────────────  (Fan-Out, S2-01)
+   │  - genau EIN Source-Pull, egal wie viele Viewer
+   │  - Source-Lifecycle: Start@1st-Subscriber, Stop@last
+   │  - letztes IDR gecached fuer Pre-Feed an neue Subscriber
+   │  - drop-statt-buffer pro Subscriber (1x/s gedrosseltes Log)
+   │
+   ├──────────────┬──────────────┬──────────────┬───  ...
+   ▼              ▼              ▼              ▼
+Subscriber 1   Subscriber 2   Subscriber 3   Subscriber N
+(eigene PC,    (eigene PC,    (eigene PC,    (eigene PC,
+ eigener        eigener        eigener        eigener
+ Track)         Track)         Track)         Track)
+   │              │              │              │
+   ▼              ▼              ▼              ▼
+pion TrackLocalStaticSample.WriteSample (pro Viewer)
+   │  Annex-B + Duration aus PTS-Delta
+   │  Packetisierung + DTLS-SRTP raus zum Browser
    ▼
-pion TrackLocalStaticSample.WriteSample
-   │  pion packetisiert + SRTP fuer den Browser
-   ▼
-Browser-Tab  →  <video>
+Browser-Tab    Browser-Tab    Browser-Tab    Browser-Tab
 ```
+
+Ein langsamer Subscriber kann **niemals** Source oder andere Viewer
+ausbremsen — der Bus verteilt non-blocking pro Subscriber-Channel.
+Backpressure endet beim einzelnen Subscriber-Buffer (Default 30 AUs,
+≈1 s bei 30 fps).
 
 ### Package-Layout
 
 ```
 streaming-server/
-├── cmd/spike/         (Binary)
-├── server.go          (Stream-Kern: HTTP-Signaling, sample-Writer)
-├── web/index.html     (Testseite)
+├── cmd/spike/         (Binary; baut SourceFactory)
+├── server.go          (HTTP-Signaling, pro Viewer eine PC+Track+Feeder)
+├── web/index.html     (Testseite — in N Tabs öffnen für Fan-Out-Test)
 ├── internal/
 │   ├── h264/          (RFC-6184-Depacketizer + Unit-Tests)
+│   ├── hub/           (Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
 │   ├── droplog/       (rate-limited drop-counter)
 │   └── source/
 │       ├── source.go  (VideoSource-Interface)
@@ -210,18 +237,20 @@ und um unabhängig zu sein davon, was eine Fremd-Lib zufällig kann.
 
 ## Tests
 
-Drei Test-Suites, alle stdlib-`testing`, keine zusätzlichen Deps:
+Vier Test-Suites, alle stdlib-`testing`, keine zusätzlichen Deps:
 
 ```sh
 go test ./...
+go test -race ./internal/hub/...   # zusätzlich: race-detector
 ```
 
 | Paket | Was getestet wird | Zweck |
 | --- | --- | --- |
 | `internal/h264` | RFC-6184-Depacketizer (18 Tests, alle sechs Packetization-Typen, Edge-Cases wie Seq-Gap, Start+End in einem Paket, STAP-A-Padding-Toleranz) | Wenn das Live-Bild fehlt, aber diese Tests grün sind, liegt der Fehler in Quelle/Verdrahtung — nicht im Depacketizer. |
+| `internal/hub` | Fan-Out-Bus (17 Tests, alle Lifecycle-Pfade, Slow-Subscriber-Isolation, IDR-Pre-Feed, Source-Restart, Concurrency-Stress mit `-race`) | Beweist die Properties, die go2rtc bei UniFi nie ganz hingekriegt hat: ein Pull für viele, drop-statt-buffer, kein Source-Block durch einen langsamen Viewer. |
 | `internal/source/unifi` SDP-Tests | `sdpSecurityReport` redaktiert Inline-Keys und MIKEY-Payloads | Geheimnisse dürfen NIE im Log landen — Tests prüfen das aktiv (5 Tests). |
 | `internal/source/unifi` Encryption-Tests | `stripEnableSrtp` und `NewSource`-Encryption-Validierung | Sicherstellt: `enableSrtp` weg, andere Query-Felder bleiben, `srtp`-Modus kommt mit klarem Fehler raus (10 Tests). |
 
-Insgesamt 33 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
+Insgesamt 50 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
 einem Live-Problem zeigen die Tests, ob das Problem im Code oder in
 der Verdrahtung liegt.
