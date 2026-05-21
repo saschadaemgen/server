@@ -278,6 +278,36 @@
       object-fit: cover;
       display: block;
     }
+    /* Saison 15-01: WebRTC video sibling. Same dimensions as
+       the MJPEG <img>. Visibility is driven by
+       data-stream-mode on the wrapping mode-layer (or ringing
+       overlay):
+         data-stream-mode="webrtc"      -> video shown, img hidden
+         data-stream-mode="mjpeg"       -> img shown,   video hidden
+         data-stream-mode="connecting"  -> video hidden until
+                                            ontrack lands;
+                                            img shown (warm-up)
+         data-stream-mode="idle" (or unset) -> img shown
+                                            (default fallback)
+       The MJPEG <img> stays for ESP-style consumers and as the
+       graceful fallback when /webviewer/offer returns 503.        */
+    .mieter-stream-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: var(--color-bg-stream-slot, #0a0e16);
+    }
+    [data-stream-slot]:not([data-stream-mode="webrtc"]) .mieter-stream-video {
+      display: none;
+    }
+    [data-stream-slot="ringing"]:not([data-stream-mode="webrtc"]) video.ring-stream {
+      display: none;
+    }
+    [data-stream-slot][data-stream-mode="webrtc"] .mieter-stream-img,
+    [data-stream-slot][data-stream-mode="webrtc"] img.ring-stream {
+      display: none;
+    }
 
     /* Inline settings + history shared chrome (saison 14-03). */
     .mode-layer[data-mode="settings"],
@@ -757,6 +787,10 @@
     {{template "intercom-ringing.html" .}}
   </div>
 
+  <!-- Saison 15-01: WebRTC client loads BEFORE interactions.js
+       and idle.js so window.carvilonWebRTC is already on the
+       page when those modules wire their lifecycle hooks. -->
+  <script src="/static/webrtc-stream.js"></script>
   <script src="/static/interactions.js"></script>
   <script src="/static/idle.js"></script>
   <script src="/static/carvilon-brand.js" defer></script>

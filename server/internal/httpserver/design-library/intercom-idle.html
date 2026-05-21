@@ -150,11 +150,28 @@
           </div>
         </div>
 
-        <!-- 2. Livestream: MJPEG img. Saison 14-03-FIX-1b: src is
+        <!-- 2. Livestream: WebRTC video (Saison 15-01) primary,
+             MJPEG <img> as feature-flagged fallback.
+
+             The slot wrapper carries `data-stream-slot` so
+             webrtc-stream.js can locate it and flip
+             `data-stream-mode` between "webrtc" (video shown,
+             img hidden), "mjpeg" (img shown, video hidden), and
+             "idle" (neither). CSS picks up the attribute via
+             attribute selectors on `.mieter-stream-img` /
+             `.mieter-stream-video`.
+
+             Saison 14-03-FIX-1b: src on the MJPEG img stays
              EMPTY at render-time; idle.js fills it from
-             data-stream-src on DOMContentLoaded, so the multipart
-             response never blocks page paint. -->
-        <div class="mode-layer {{if eq .IdleViewMode "livestream"}}active{{else}}below hidden{{end}}" data-mode="livestream">
+             data-stream-src on DOMContentLoaded, so the
+             multipart response never blocks page paint.
+             Saison 15-01: same lazy-load pattern for the video
+             - webrtc-stream.js handles the connect, no src
+             attribute needed at render-time. -->
+        <div class="mode-layer {{if eq .IdleViewMode "livestream"}}active{{else}}below hidden{{end}}" data-mode="livestream" data-stream-slot="livestream" data-stream-mode="idle">
+          <video class="mieter-stream-video"
+                 data-webrtc-target="livestream"
+                 autoplay muted playsinline></video>
           <img alt="Live-Bild"
                class="mieter-stream-img"
                data-stream-src="/webviewer/stream.mjpeg"

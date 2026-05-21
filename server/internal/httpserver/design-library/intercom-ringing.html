@@ -15,15 +15,23 @@
     .DoorName       — Tür-Bezeichnung, e.g. "Hauseingang"
 -->
 
-<div class="ringing is-open" data-overlay="ringing" data-screen="ringing">
+<div class="ringing is-open" data-overlay="ringing" data-screen="ringing" data-stream-slot="ringing" data-stream-mode="idle">
 
-  <!-- Saison 14-01: live MJPEG slot. The src lazy-loads when the
-       overlay markup is rendered; the browser tears the stream
-       down automatically when the element is hidden via
-       .ringing:not(.is-open) display:none. If the backend is
-       unreachable (503 or network failure) the onerror handler
-       removes the element so the bell hero + buttons stay
-       usable. -->
+  <!-- Saison 15-01: WebRTC primary, MJPEG fallback. The video
+       element is the WebRTC target; webrtc-stream.js attaches
+       the live MediaStream on connect (interactions.js opens
+       the overlay on doorbell_start and triggers connect).
+
+       Saison 14-01: live MJPEG fallback. Browser tears the
+       MJPEG response down automatically when the element is
+       hidden via .ringing:not(.is-open) display:none. If the
+       backend is unreachable (503 or network failure) the
+       onerror handler removes the img so the bell hero + buttons
+       stay usable. -->
+  <video class="ring-stream"
+         data-webrtc-target="ringing"
+         autoplay muted playsinline
+         style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; z-index:-1; opacity:0.45;"></video>
   <img class="ring-stream"
        src="/webviewer/stream.mjpeg"
        alt="Live-Bild"

@@ -267,6 +267,23 @@
       loadHistory();
     }
 
+    // Saison 15-01: hook the WebRTC lifecycle into the slide.
+    // Entering livestream -> connect (best-effort, falls back to
+    // MJPEG inside webrtc-stream.js on 503/error). Leaving
+    // livestream -> disconnect so the backend can release the
+    // consumer slot. Triggered in parallel with the slide; the
+    // visual transition does not wait for the WebRTC handshake.
+    if (window.carvilonWebRTC) {
+      if (target === 'livestream' && activeMode !== 'livestream') {
+        var nextVideo = layers.livestream
+          ? layers.livestream.querySelector('video[data-webrtc-target="livestream"]')
+          : null;
+        if (nextVideo) window.carvilonWebRTC.connect(nextVideo);
+      } else if (activeMode === 'livestream' && target !== 'livestream') {
+        window.carvilonWebRTC.disconnect();
+      }
+    }
+
     setTimeout(function () {
       currentEl.classList.add('hidden');
       activeMode = target;
@@ -904,6 +921,25 @@
     document.addEventListener('DOMContentLoaded', hydrateLivestream);
   } else {
     hydrateLivestream();
+  }
+
+  // Saison 15-01: when livestream is the persisted default, the
+  // page renders with that layer .active from the start - setMode
+  // never fires for it. Kick the WebRTC connect manually so the
+  // first-paint experience matches the post-toggle one.
+  if (defaultMode === 'livestream' && window.carvilonWebRTC) {
+    var firstVideo = layers.livestream
+      ? layers.livestream.querySelector('video[data-webrtc-target="livestream"]')
+      : null;
+    if (firstVideo) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+          window.carvilonWebRTC.connect(firstVideo);
+        });
+      } else {
+        window.carvilonWebRTC.connect(firstVideo);
+      }
+    }
   }
 
   // -------------------------------------------------------------

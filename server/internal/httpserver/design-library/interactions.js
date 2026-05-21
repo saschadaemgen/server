@@ -128,8 +128,29 @@
     applyOpen('[data-modal="' + name + '"]', false);
   }
 
-  function openOverlay(name)  { applyOpen('[data-overlay="' + name + '"]', true);  }
-  function closeOverlay(name) { applyOpen('[data-overlay="' + name + '"]', false); }
+  // Saison 15-01: WebRTC lifecycle hook for the ringing overlay.
+  // openOverlay('ringing') -> webrtc.connect on the overlay's
+  // <video data-webrtc-target="ringing">. closeOverlay('ringing')
+  // -> disconnect. We only react to the ringing overlay; other
+  // overlays (data-overlay attribute names) have no stream slot.
+  function hookRingingWebRTC(name, open) {
+    if (name !== 'ringing' || !window.carvilonWebRTC) return;
+    if (open) {
+      var video = document.querySelector('[data-overlay="ringing"] video[data-webrtc-target="ringing"]');
+      if (video) window.carvilonWebRTC.connect(video);
+    } else {
+      window.carvilonWebRTC.disconnect();
+    }
+  }
+
+  function openOverlay(name)  {
+    applyOpen('[data-overlay="' + name + '"]', true);
+    hookRingingWebRTC(name, true);
+  }
+  function closeOverlay(name) {
+    applyOpen('[data-overlay="' + name + '"]', false);
+    hookRingingWebRTC(name, false);
+  }
 
 
   // --------------------------------------------------------------
@@ -350,7 +371,13 @@
     var openSheetEl = document.querySelector('[data-sheet].is-open');
     if (openSheetEl) { closeSheet(openSheetEl.getAttribute('data-sheet')); return; }
     var openOverlayEl = document.querySelector('[data-overlay].is-open');
-    if (openOverlayEl) { openOverlayEl.classList.remove('is-open'); }
+    if (openOverlayEl) {
+      var name = openOverlayEl.getAttribute('data-overlay');
+      openOverlayEl.classList.remove('is-open');
+      // Saison 15-01: keep the WebRTC lifecycle in sync when
+      // ESC bypasses the closeOverlay helper.
+      hookRingingWebRTC(name, false);
+    }
   });
 
   // Theme-radio inside settings forms (segment buttons with data-theme)
