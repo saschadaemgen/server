@@ -99,6 +99,10 @@ type Hub struct {
 	subBufSize int
 	encFactory EncoderFactory
 
+	// S6-04 source-measurement hooks. Nil is fine (no-op).
+	onSourceAU     func(profileName string)
+	onSessionStart func(profileName string)
+
 	mu       sync.Mutex
 	sessions map[string]*session
 
@@ -133,6 +137,21 @@ type HubOptions struct {
 	// EncoderFactory overrides how encoders are built. Default: real
 	// ffmpeg-subprocess encoder. Tests inject a fake here.
 	EncoderFactory EncoderFactory
+
+	// OnSourceAU (S6-04, optional) is invoked from the per-session
+	// forwarder ONCE for every upstream Access Unit that arrives from
+	// the shared camera hub — i.e. the rate at which the camera is
+	// feeding THIS profile's transcoder. The server wires it to
+	// stats.Registry.RecordSourceFrame so /stream/stats can show
+	// "Quelle vs Output"-fps for the S6-04 measurement loop.
+	OnSourceAU func(profileName string)
+
+	// OnSessionStart (S6-04, optional) is invoked once when a new
+	// encoder session starts (= first subscriber arrives, ffmpeg
+	// about to launch). The server wires it to
+	// stats.Registry.ResetSourceCounter so each measurement run sees
+	// a fresh source-fps window.
+	OnSessionStart func(profileName string)
 }
 
 // NewHub validates options and returns a ready-to-use Hub. No encoder
@@ -157,12 +176,14 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	return &Hub{
-		entryFor:   opts.EntryFor,
-		logger:     opts.Logger,
-		subBufSize: opts.SubscriberBuffer,
-		encFactory: encFactory,
-		sessions:   make(map[string]*session),
-		closed:     make(chan struct{}),
+		entryFor:       opts.EntryFor,
+		logger:         opts.Logger,
+		subBufSize:     opts.SubscriberBuffer,
+		encFactory:     encFactory,
+		onSourceAU:     opts.OnSourceAU,
+		onSessionStart: opts.OnSessionStart,
+		sessions:       make(map[string]*session),
+		closed:         make(chan struct{}),
 	}, nil
 }
 
@@ -225,7 +246,14 @@ func (h *Hub) Close() error {
 // startSessionLocked must be called with h.mu held. It resolves the
 // profile name to its Entry, subscribes to the upstream source, spawns
 // an encoder, and starts the session goroutines.
+//
+// S6-04: fires onSessionStart BEFORE the encoder launches so the
+// observer (stats.Registry) can reset its per-profile source counter
+// before the forwarder's first onSourceAU call lands.
 func (h *Hub) startSessionLocked(name string) (*session, error) {
+	if h.onSessionStart != nil {
+		h.onSessionStart(name)
+	}
 	entry, err := h.entryFor(name)
 	if err != nil {
 		return nil, err
@@ -314,6 +342,12 @@ type addSubResp struct {
 // runForwarder pumps AUs from the upstream subscriber into the encoder.
 // Non-blocking send: if ffmpeg can't keep up the AU is dropped so the
 // upstream hub (and other subscribers attached to it) keeps flowing.
+//
+// S6-04: every AU received from upstream notifies onSourceAU before
+// being passed to the encoder. The notification is unconditional
+// (also when the encoder drops) — what matters for source_fps is the
+// rate at which the CAMERA is delivering, not what the encoder makes
+// of it.
 func (s *session) runForwarder() {
 	dc := &droplog.Counter{
 		Logger: s.hub.logger,
@@ -328,6 +362,9 @@ func (s *session) runForwarder() {
 				// Upstream ended. Tear the session down.
 				s.cancel()
 				return
+			}
+			if s.hub.onSourceAU != nil {
+				s.hub.onSourceAU(s.name)
 			}
 			select {
 			case s.encoder.Input() <- au:

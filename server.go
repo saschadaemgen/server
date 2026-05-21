@@ -190,11 +190,28 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 
 	if opts.EnableMJPEG {
+		// S6-04: source-measurement callbacks. Both hubs share the
+		// same stats.Registry; the closures box the optional stats
+		// pointer so callers without a Stats config still get the
+		// nil-safe path.
+		onSourceAU := func(p string) {
+			if s.stats != nil {
+				s.stats.RecordSourceFrame(p)
+			}
+		}
+		onSessionStart := func(p string) {
+			if s.stats != nil {
+				s.stats.ResetSourceCounter(p)
+			}
+		}
+
 		mh, err := mjpeg.NewHub(mjpeg.HubOptions{
 			EntryFor:         s.mjpegEntryFor,
 			FFmpegPath:       opts.FFmpegPath,
 			Logger:           opts.Logger,
 			SubscriberBuffer: opts.SubscriberBuffer,
+			OnSourceAU:       onSourceAU,
+			OnSessionStart:   onSessionStart,
 		})
 		if err != nil {
 			_ = srcReg.Close()
@@ -212,6 +229,8 @@ func NewServer(opts ServerOptions) (*Server, error) {
 			FFmpegPath:       opts.FFmpegPath,
 			Logger:           opts.Logger,
 			SubscriberBuffer: opts.SubscriberBuffer,
+			OnSourceAU:       onSourceAU,
+			OnSessionStart:   onSessionStart,
 		})
 		if err != nil {
 			_ = mh.Close()
@@ -928,8 +947,14 @@ func (s *Server) runStatsLogger(ctx context.Context) {
 				cpuPart,
 			)
 			for name, ps := range snap.Profiles {
-				s.logger.Printf("stats:   profile=%s codec=%s viewers=%d fps=%.1f kbps=%.1f bytes=%d",
-					name, ps.Codec, ps.Clients, ps.AvgFPS, ps.AvgBitrateKbps, ps.BytesSent)
+				// S6-04: show source_fps alongside output fps so the
+				// log line tells you immediately where rate is lost.
+				srcPart := ""
+				if ps.SourceFPS > 0 {
+					srcPart = fmt.Sprintf(" src=%.1ffps", ps.SourceFPS)
+				}
+				s.logger.Printf("stats:   profile=%s codec=%s viewers=%d fps=%.1f kbps=%.1f bytes=%d%s",
+					name, ps.Codec, ps.Clients, ps.AvgFPS, ps.AvgBitrateKbps, ps.BytesSent, srcPart)
 			}
 		}
 	}

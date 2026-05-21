@@ -160,7 +160,10 @@ um das Dropdown zu füllen.
    z.B. `curl -o /dev/null http://host:8555/api/stream.mjpeg?src=mjpeg_bal`.
 3. **Messen.** `curl http://host:8555/stream/stats | jq`. Pro Client
    sieht man `frames_sent`, `bytes_sent`, `avg_fps`, `avg_bitrate_kbps`;
-   global zusätzlich `transcoder_cpu_percent` (nur Linux).
+   pro Profil zusätzlich `source_fps` (was die Kamera in den Encoder
+   liefert) und `source_frames` — die Differenz zu `avg_fps` lokalisiert
+   sofort, ob Bilder im Encoder, im Pipe oder auf der Wire verloren
+   gehen; global `transcoder_cpu_percent` (nur Linux).
 4. **Tunen.** Encode-Parameter via `PUT /api/profiles/{name}` ändern:
    ```sh
    curl -X PUT http://host:8555/api/profiles/mjpeg_bal \

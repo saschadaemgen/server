@@ -136,6 +136,14 @@ func (c *Client) snapshot(now time.Time) ClientSnapshot {
 // admin UI uses this for the per-profile rows; the JSON tags match the
 // per-client shape where the semantic is identical so a renderer can
 // share code.
+//
+// SourceFrames / SourceFPS are S6-04: how many upstream Access Units
+// reached the encoder for this profile, and at what rate. The
+// /stream/stats consumer compares them against the per-client AvgFPS
+// to localise where frames are lost — Kamera vs Encoder vs Wire.
+// Both fields are populated only while a session is active; cleared
+// at session start (= first subscriber arrives), so each measurement
+// run sees a clean window.
 type ProfileSnapshot struct {
 	Profile        string  `json:"profile"`
 	Codec          string  `json:"codec"`
@@ -145,6 +153,8 @@ type ProfileSnapshot struct {
 	BytesSent      int64   `json:"bytes_sent"`
 	AvgFPS         float64 `json:"avg_fps"`
 	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+	SourceFrames   int64   `json:"source_frames,omitempty"`
+	SourceFPS      float64 `json:"source_fps,omitempty"`
 }
 
 // GlobalSnapshot is the server-wide aggregate. TranscoderCPUPercent
@@ -175,11 +185,29 @@ type Registry struct {
 	mu      sync.RWMutex
 	clients map[uint64]*Client
 	nextID  uint64
+
+	// S6-04: per-profile source counters, tracked independently of
+	// the per-client output counters. The hubs (mjpeg / h264esp) call
+	// RecordSourceFrame as upstream AUs arrive and ResetSourceCounter
+	// when a fresh encoder session starts.
+	profMu          sync.Mutex
+	profileCounters map[string]*profileCounter
+}
+
+// profileCounter is the per-profile source-side state. Pointer
+// receivers + atomic fields so the hot RecordSourceFrame path stays
+// lock-free once the counter is created.
+type profileCounter struct {
+	sourceFrames   atomic.Int64
+	sessionStartNs atomic.Int64
 }
 
 // New returns a ready-to-use Registry.
 func New() *Registry {
-	return &Registry{clients: make(map[uint64]*Client)}
+	return &Registry{
+		clients:         make(map[uint64]*Client),
+		profileCounters: make(map[string]*profileCounter),
+	}
 }
 
 // Register creates a Client and adds it to the registry. The returned
@@ -270,6 +298,27 @@ func (r *Registry) Snapshot() Snapshot {
 		profiles[name] = ps
 	}
 
+	// S6-04: enrich existing per-profile snapshots with source-side
+	// counters. We only attach to profiles that already have clients
+	// (and therefore an active encoder session) — a counter that
+	// outlived its session would otherwise show stale data.
+	r.profMu.Lock()
+	for name, pc := range r.profileCounters {
+		ps, ok := profiles[name]
+		if !ok {
+			continue
+		}
+		ps.SourceFrames = pc.sourceFrames.Load()
+		if startNs := pc.sessionStartNs.Load(); startNs > 0 {
+			elapsedSec := float64(now.UnixNano()-startNs) / 1e9
+			if elapsedSec > 0 {
+				ps.SourceFPS = float64(ps.SourceFrames) / elapsedSec
+			}
+		}
+		profiles[name] = ps
+	}
+	r.profMu.Unlock()
+
 	return Snapshot{
 		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
 		Global: GlobalSnapshot{
@@ -288,4 +337,53 @@ func (r *Registry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.clients)
+}
+
+// RecordSourceFrame counts one upstream Access Unit for the given
+// profile — call once per AU the per-codec hub's session forwarder
+// receives from the shared camera bus. Cheap (one atomic increment
+// once the counter exists). Nil-safe.
+//
+// The counter is created lazily on first call. The session-start
+// timestamp is also set on first call; subsequent calls leave it
+// alone so the rate calculation in Snapshot uses a stable window.
+func (r *Registry) RecordSourceFrame(profile string) {
+	if r == nil || profile == "" {
+		return
+	}
+	pc := r.profileCounter(profile)
+	if pc.sessionStartNs.Load() == 0 {
+		pc.sessionStartNs.CompareAndSwap(0, time.Now().UnixNano())
+	}
+	pc.sourceFrames.Add(1)
+}
+
+// ResetSourceCounter clears the source counter for the given profile.
+// Called by the per-codec hubs at session start (= first subscriber
+// arrives, encoder is about to launch) so each measurement run sees
+// a fresh rate window — otherwise a long-idle counter would drag the
+// avg_source_fps down and confuse the operator.
+//
+// Nil-safe; calling with an unknown profile is a no-op.
+func (r *Registry) ResetSourceCounter(profile string) {
+	if r == nil || profile == "" {
+		return
+	}
+	pc := r.profileCounter(profile)
+	pc.sourceFrames.Store(0)
+	pc.sessionStartNs.Store(0)
+}
+
+// profileCounter looks up the per-profile counter, creating it on
+// first use. Holds profMu only for the (typically once-per-profile)
+// map insert.
+func (r *Registry) profileCounter(profile string) *profileCounter {
+	r.profMu.Lock()
+	defer r.profMu.Unlock()
+	pc, ok := r.profileCounters[profile]
+	if !ok {
+		pc = &profileCounter{}
+		r.profileCounters[profile] = pc
+	}
+	return pc
 }

@@ -83,6 +83,10 @@ type Hub struct {
 	subBufSize int
 	encFactory EncoderFactory
 
+	// S6-04 source-measurement hooks.
+	onSourceAU     func(profileName string)
+	onSessionStart func(profileName string)
+
 	mu       sync.Mutex
 	sessions map[string]*session
 
@@ -115,6 +119,12 @@ type HubOptions struct {
 	// EncoderFactory overrides how encoders are built. Default: real
 	// ffmpeg-subprocess encoder. Tests inject a fake.
 	EncoderFactory EncoderFactory
+
+	// OnSourceAU / OnSessionStart (S6-04, optional): see
+	// internal/mjpeg.HubOptions for the rationale. Same hooks, same
+	// semantics — the per-codec hub doesn't import stats directly.
+	OnSourceAU     func(profileName string)
+	OnSessionStart func(profileName string)
 }
 
 // NewHub validates options and returns a ready-to-use Hub. No encoder
@@ -139,12 +149,14 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	return &Hub{
-		entryFor:   opts.EntryFor,
-		logger:     opts.Logger,
-		subBufSize: opts.SubscriberBuffer,
-		encFactory: encFactory,
-		sessions:   make(map[string]*session),
-		closed:     make(chan struct{}),
+		entryFor:       opts.EntryFor,
+		logger:         opts.Logger,
+		subBufSize:     opts.SubscriberBuffer,
+		encFactory:     encFactory,
+		onSourceAU:     opts.OnSourceAU,
+		onSessionStart: opts.OnSessionStart,
+		sessions:       make(map[string]*session),
+		closed:         make(chan struct{}),
 	}, nil
 }
 
@@ -202,6 +214,11 @@ func (h *Hub) Close() error {
 }
 
 func (h *Hub) startSessionLocked(name string) (*session, error) {
+	// S6-04: notify before the encoder spawns so the source-counter
+	// gets reset before the forwarder's first frame lands.
+	if h.onSessionStart != nil {
+		h.onSessionStart(name)
+	}
 	entry, err := h.entryFor(name)
 	if err != nil {
 		return nil, err
@@ -298,6 +315,12 @@ func (s *session) runForwarder() {
 			if !ok {
 				s.cancel()
 				return
+			}
+			// S6-04: count the camera-side AU even if the encoder
+			// drops it — source_fps measures what the camera is
+			// delivering, not what the encoder makes of it.
+			if s.hub.onSourceAU != nil {
+				s.hub.onSourceAU(s.name)
 			}
 			select {
 			case s.encoder.Input() <- au:

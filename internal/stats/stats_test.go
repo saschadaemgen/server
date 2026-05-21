@@ -239,6 +239,120 @@ func TestRecordFrame_ConcurrentSafe(t *testing.T) {
 	}
 }
 
+// --- S6-04 source counter -----------------------------------------------------
+
+func TestRecordSourceFrame_NilSafe(t *testing.T) {
+	var r *Registry
+	r.RecordSourceFrame("anything") // must not panic
+	r.ResetSourceCounter("anything")
+}
+
+func TestRecordSourceFrame_EmptyProfileIsNoOp(t *testing.T) {
+	r := New()
+	r.RecordSourceFrame("") // must not panic, must not allocate counter
+	// Counter table should still be empty; check via Snapshot — no
+	// client => no profile entries => source data absent.
+	snap := r.Snapshot()
+	if len(snap.Profiles) != 0 {
+		t.Errorf("Profiles len = %d, want 0", len(snap.Profiles))
+	}
+}
+
+func TestSourceFPS_ShowsInSnapshotWhenProfileHasClient(t *testing.T) {
+	// A profile only shows source data in the snapshot if it has at
+	// least one client (matching the encoder-session-is-active
+	// invariant the hubs honor).
+	r := New()
+	c := r.Register("mjpeg_bal", "mjpeg", "")
+	// Pin ConnectedAt 1 s ago so avg_fps calc is stable.
+	c.ConnectedAt = time.Now().Add(-time.Second)
+	// Manually backdate the source-counter session-start to 1s ago
+	// (in production the hub would have called RecordSourceFrame once
+	// per upstream AU; we simulate 15 of them).
+	for i := 0; i < 15; i++ {
+		r.RecordSourceFrame("mjpeg_bal")
+	}
+	// Backdate sessionStartNs so source_fps comes out predictable.
+	pc := r.profileCounter("mjpeg_bal")
+	pc.sessionStartNs.Store(time.Now().Add(-time.Second).UnixNano())
+
+	snap := r.Snapshot()
+	ps, ok := snap.Profiles["mjpeg_bal"]
+	if !ok {
+		t.Fatalf("profile missing from snapshot")
+	}
+	if ps.SourceFrames != 15 {
+		t.Errorf("SourceFrames = %d, want 15", ps.SourceFrames)
+	}
+	if ps.SourceFPS < 13 || ps.SourceFPS > 17 {
+		t.Errorf("SourceFPS = %v, want ~15", ps.SourceFPS)
+	}
+}
+
+func TestSourceFPS_DoesNotAppearWithoutClient(t *testing.T) {
+	r := New()
+	// Source frames recorded without any client. The Snapshot must
+	// NOT surface this — there's no active session to attribute the
+	// counter to from the consumer's perspective.
+	r.RecordSourceFrame("ghost_profile")
+	r.RecordSourceFrame("ghost_profile")
+	snap := r.Snapshot()
+	if _, ok := snap.Profiles["ghost_profile"]; ok {
+		t.Errorf("orphaned source counter leaked into snapshot")
+	}
+}
+
+func TestResetSourceCounter_ClearsBothFieldsForNextSession(t *testing.T) {
+	r := New()
+	c := r.Register("h264_cbp", "h264_cbp", "")
+	c.ConnectedAt = time.Now().Add(-2 * time.Second)
+	for i := 0; i < 30; i++ {
+		r.RecordSourceFrame("h264_cbp")
+	}
+	if pc := r.profileCounter("h264_cbp"); pc.sourceFrames.Load() != 30 {
+		t.Fatalf("pre-reset SourceFrames = %d, want 30", pc.sourceFrames.Load())
+	}
+
+	r.ResetSourceCounter("h264_cbp")
+	pc := r.profileCounter("h264_cbp")
+	if pc.sourceFrames.Load() != 0 {
+		t.Errorf("post-reset SourceFrames = %d, want 0", pc.sourceFrames.Load())
+	}
+	if pc.sessionStartNs.Load() != 0 {
+		t.Errorf("post-reset sessionStartNs = %d, want 0", pc.sessionStartNs.Load())
+	}
+
+	// First subsequent RecordSourceFrame re-arms the counter.
+	r.RecordSourceFrame("h264_cbp")
+	if pc.sourceFrames.Load() != 1 {
+		t.Errorf("post-reset+record SourceFrames = %d, want 1", pc.sourceFrames.Load())
+	}
+	if pc.sessionStartNs.Load() == 0 {
+		t.Errorf("post-reset+record sessionStartNs still zero")
+	}
+}
+
+func TestRecordSourceFrame_ConcurrentSafe(t *testing.T) {
+	r := New()
+	const goroutines = 8
+	const each = 1000
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < each; j++ {
+				r.RecordSourceFrame("p")
+			}
+		}()
+	}
+	wg.Wait()
+	pc := r.profileCounter("p")
+	if got := pc.sourceFrames.Load(); got != goroutines*each {
+		t.Errorf("SourceFrames = %d, want %d", got, goroutines*each)
+	}
+}
+
 func TestRegister_ConcurrentSafe(t *testing.T) {
 	// 50 goroutines each Register+Unregister. The registry's nextID
 	// must end up at >=50 and the final Count must be 0.
