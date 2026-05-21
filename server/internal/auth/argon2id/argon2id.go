@@ -1,13 +1,13 @@
 // Package argon2id wraps golang.org/x/crypto/argon2 with the PHC
-// string format and OWASP-2024-empfohlenen Parametern (m=64MB,
-// t=3, p=4). Saison 13-02-FIX4-a fuehrt Argon2id als Ersatz fuer
-// bcrypt ein; der Admin-Login migriert beim ersten Argon2id-
-// Verify den vorhandenen bcrypt-Hash automatisch (Rehash-on-Login).
+// string format and OWASP-2024-recommended parameters (m=64MB,
+// t=3, p=4). Argon2id replaced bcrypt as the platform's password
+// hash; the admin login migrates legacy bcrypt hashes on the
+// first successful verify (rehash-on-login).
 //
-// Pepper: alle Hashes werden mit einem in platform_config
-// (AES-256-GCM-verschluesselt) abgelegten 32-Byte-Pepper
-// konkateniert, damit ein gestohlenes SQLite-File ohne Server-
-// Kontext nicht offline brute-forced werden kann.
+// Pepper: every hash is concatenated with a 32-byte pepper stored
+// in platform_config (AES-256-GCM-encrypted), so a stolen SQLite
+// file cannot be brute-forced offline without the server-side
+// context.
 package argon2id
 
 import (
@@ -22,9 +22,9 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// OWASP-2024-Parameter fuer Argon2id (siehe Cheat Sheet).
-// 64 MiB Speicher, 3 Iterationen, 4 paralleler Lanes; das ist
-// auch auf einem RPi 4 unter 250ms.
+// OWASP-2024 parameters for Argon2id (see Cheat Sheet).
+// 64 MiB memory, 3 iterations, 4 parallel lanes; stays under
+// 250ms even on an RPi 4.
 const (
 	Memory      uint32 = 64 * 1024
 	Iterations  uint32 = 3
@@ -33,17 +33,17 @@ const (
 	KeyLength   uint32 = 32
 )
 
-// ErrInvalidHash flaggt einen Hash-String, der nicht das PHC-
-// Format hat oder einen unbekannten Algorithmus deklariert.
+// ErrInvalidHash flags a hash string that is not in the PHC
+// format or declares an unknown algorithm.
 var ErrInvalidHash = errors.New("argon2id: invalid hash format")
 
-// HashWithPepper hasht password+pepper und liefert den PHC-String:
+// HashWithPepper hashes password+pepper and returns the PHC string:
 //
 //	$argon2id$v=19$m=65536,t=3,p=4$<base64-salt>$<base64-hash>
 //
-// Pepper darf leer sein (z.B. in Tests die ohne platform_config
-// auskommen); das ist explizit erlaubt, das Verfahren bleibt
-// dann nur die Standard-Argon2id-Variante ohne Pepper.
+// An empty pepper is allowed (e.g. for tests that run without
+// platform_config); the result is then plain Argon2id without the
+// pepper-concatenation step.
 func HashWithPepper(password, pepper string) (string, error) {
 	salt := make([]byte, SaltLength)
 	if _, err := rand.Read(salt); err != nil {
@@ -58,8 +58,8 @@ func HashWithPepper(password, pepper string) (string, error) {
 		argon2.Version, Memory, Iterations, Parallelism, b64Salt, b64Hash), nil
 }
 
-// VerifyWithPepper prueft password+pepper gegen einen PHC-String.
-// Constant-time-Vergleich via crypto/subtle.
+// VerifyWithPepper checks password+pepper against a PHC string.
+// Constant-time compare via crypto/subtle.
 func VerifyWithPepper(password, pepper, encodedHash string) (bool, error) {
 	params, salt, hash, err := decodeHash(encodedHash)
 	if err != nil {
@@ -74,10 +74,9 @@ func VerifyWithPepper(password, pepper, encodedHash string) (bool, error) {
 	return false, nil
 }
 
-// LooksLikeArgon2id ist ein billiger Test ob ein gespeicherter
-// Hash-String im Argon2id-PHC-Format ist. Der Admin-Login nutzt
-// das um zu entscheiden ob ein Bcrypt-Hash vorliegt der re-hashed
-// werden soll.
+// LooksLikeArgon2id is a cheap check whether a stored hash string
+// is in the Argon2id PHC format. The admin login uses it to
+// decide whether a bcrypt hash is present and needs rehashing.
 func LooksLikeArgon2id(s string) bool {
 	return strings.HasPrefix(s, "$argon2id$")
 }
