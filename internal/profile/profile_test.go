@@ -12,6 +12,25 @@ var goodProfile = Profile{
 	Quality:     QualityHigh,
 	Usage:       UsageBrowser,
 	Description: "Intercom (browser)",
+	// S6-01: h264_passthrough doesn't require encode params (the camera
+	// dictates the wire shape); the field still has to be set explicitly,
+	// the empty string is rejected.
+	Codec: CodecH264Passthrough,
+}
+
+// goodMJPEGProfile is the canonical S6-01 transcoded-codec fixture used
+// in tests that need a profile with encode parameters set.
+var goodMJPEGProfile = Profile{
+	Name:          "intercom_esp_mjpeg",
+	CameraID:      "679573e101080b03e4000424",
+	Quality:       QualityHigh,
+	Usage:         UsageESP,
+	Description:   "Intercom (ESP, MJPEG)",
+	Codec:         CodecMJPEG,
+	Width:         800,
+	Height:        1280,
+	FPS:           12,
+	EncodeQuality: 6,
 }
 
 func TestProfile_Validate_Good(t *testing.T) {
@@ -32,6 +51,8 @@ func TestProfile_Validate_BadFields(t *testing.T) {
 		{"bad Quality", func(p *Profile) { p.Quality = "ultra" }, "Quality"},
 		{"empty Usage", func(p *Profile) { p.Usage = "" }, "Usage"},
 		{"bad Usage", func(p *Profile) { p.Usage = "fridge" }, "Usage"},
+		{"empty Codec", func(p *Profile) { p.Codec = "" }, "Codec"},
+		{"bad Codec", func(p *Profile) { p.Codec = "av1" }, "Codec"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -216,5 +237,77 @@ func TestRegistry_EmptyIsOK(t *testing.T) {
 	}
 	if _, err := r.Get("anything"); !errors.Is(err, ErrUnknownProfile) {
 		t.Errorf("Get on empty: %v, want ErrUnknownProfile", err)
+	}
+}
+
+// TestProfile_Validate_Passthrough_IgnoresEncodeParams asserts that the
+// camera dictates wire shape for h264_passthrough: leaving Width/Height/
+// FPS/EncodeQuality at zero is intentional and must NOT error.
+func TestProfile_Validate_Passthrough_IgnoresEncodeParams(t *testing.T) {
+	p := goodProfile // Codec = CodecH264Passthrough, zeroed encode params
+	if p.Width != 0 || p.Height != 0 || p.FPS != 0 || p.EncodeQuality != 0 {
+		t.Fatalf("test premise broken: goodProfile already has encode params: %+v", p)
+	}
+	if err := p.Validate(); err != nil {
+		t.Errorf("h264_passthrough with zero encode params should validate; got %v", err)
+	}
+}
+
+// TestProfile_Validate_MJPEG_Good is the analogue for the transcoded
+// codec — encode params populated, validates clean.
+func TestProfile_Validate_MJPEG_Good(t *testing.T) {
+	if err := goodMJPEGProfile.Validate(); err != nil {
+		t.Errorf("good mjpeg profile failed validate: %v", err)
+	}
+}
+
+// TestProfile_Validate_TranscodedCodecs_RequireEncodeParams covers the
+// other half of the codec/encode-param coupling: for mjpeg and h264_cbp
+// the four encode fields are required and range-checked. The matrix
+// exercises each field separately for both transcoded codecs.
+func TestProfile_Validate_TranscodedCodecs_RequireEncodeParams(t *testing.T) {
+	type mutateFn func(*Profile)
+	codecs := []Codec{CodecMJPEG, CodecH264CBP}
+	cases := []struct {
+		name   string
+		mutate mutateFn
+		want   string
+	}{
+		{"Width=0", func(p *Profile) { p.Width = 0 }, "Width"},
+		{"Width too big", func(p *Profile) { p.Width = 99999 }, "Width"},
+		{"Height=0", func(p *Profile) { p.Height = 0 }, "Height"},
+		{"Height too big", func(p *Profile) { p.Height = 99999 }, "Height"},
+		{"FPS=0", func(p *Profile) { p.FPS = 0 }, "FPS"},
+		{"FPS too big", func(p *Profile) { p.FPS = 200 }, "FPS"},
+		{"EncodeQuality=0", func(p *Profile) { p.EncodeQuality = 0 }, "EncodeQuality"},
+		{"EncodeQuality too big", func(p *Profile) { p.EncodeQuality = 99 }, "EncodeQuality"},
+	}
+	for _, codec := range codecs {
+		for _, c := range cases {
+			t.Run(string(codec)+"/"+c.name, func(t *testing.T) {
+				p := goodMJPEGProfile
+				p.Codec = codec
+				c.mutate(&p)
+				err := p.Validate()
+				if err == nil {
+					t.Fatalf("expected error for %s with %s", codec, c.name)
+				}
+				if !strings.Contains(err.Error(), c.want) {
+					t.Errorf("error %q should mention %q", err.Error(), c.want)
+				}
+			})
+		}
+	}
+}
+
+// TestProfile_Validate_H264CBP_Good — symmetric coverage for the new
+// constrained-baseline H.264 codec.
+func TestProfile_Validate_H264CBP_Good(t *testing.T) {
+	p := goodMJPEGProfile
+	p.Name = "h264_cbp"
+	p.Codec = CodecH264CBP
+	p.EncodeQuality = 26 // CRF
+	if err := p.Validate(); err != nil {
+		t.Errorf("good h264_cbp profile failed validate: %v", err)
 	}
 }

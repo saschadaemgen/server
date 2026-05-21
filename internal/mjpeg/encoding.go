@@ -60,6 +60,31 @@ func (s EncodeSpec) OutputArgs() []string {
 // back to a hard error or a sane default of their own.
 var ErrUnknownUsage = errors.New("mjpeg: no default EncodeSpec for usage")
 
+// ErrWrongCodec is returned by [SpecFromProfile] when the caller passes
+// a profile whose Codec is not [profile.CodecMJPEG] — typically caught
+// at the endpoint gate (/api/stream.mjpeg only serves MJPEG profiles).
+var ErrWrongCodec = errors.New("mjpeg: profile codec is not mjpeg")
+
+// SpecFromProfile reads the encode parameters straight off the profile.
+// This is the S6-01 primary path: profiles persist their own Width /
+// Height / FPS / EncodeQuality, so the encoder no longer needs a
+// per-usage lookup table.
+//
+// Only profiles with Codec=[profile.CodecMJPEG] are accepted. The four
+// fields are required by [profile.Profile.Validate] for that codec, so
+// they are guaranteed to be set by the time we get here.
+func SpecFromProfile(p profile.Profile) (EncodeSpec, error) {
+	if p.Codec != profile.CodecMJPEG {
+		return EncodeSpec{}, fmt.Errorf("%w: profile %q has codec %q", ErrWrongCodec, p.Name, p.Codec)
+	}
+	return EncodeSpec{
+		Width:   p.Width,
+		Height:  p.Height,
+		FPS:     p.FPS,
+		Quality: p.EncodeQuality,
+	}, nil
+}
+
 // DefaultSpecForUsage maps a [profile.Usage] to the encoder defaults
 // that the CARVILON ESP / browser pipeline has used in production.
 // These are the values that ESP-Saison-2 and the go2rtc.yaml.example
@@ -68,10 +93,10 @@ var ErrUnknownUsage = errors.New("mjpeg: no default EncodeSpec for usage")
 //   - browser → 640x1024 @ 12 fps, q:v 5
 //   - esp     → 800x1280 @  9 fps, q:v 6
 //
-// "Hinter der Naht" (ADR-STREAM-01): the admin will eventually be able
-// to override these per profile, but the public Profile struct shape
-// is independent of the encoder details — usage-based defaults remain
-// the fallback. Any future android/iOS usages get added here.
+// Deprecated (S6-01): prefer [SpecFromProfile]. Profiles now persist
+// their own encode parameters; this lookup table only survives as a
+// safety net for callers that haven't migrated yet and is exercised
+// by the legacy tests.
 func DefaultSpecForUsage(usage profile.Usage) (EncodeSpec, error) {
 	switch usage {
 	case profile.UsageBrowser:

@@ -24,6 +24,28 @@ Master-Chat can drop it in with zero ambiguity.
   `carvilon-server`. Without the tag, only the public unconfigured
   default is wired and `carvilon-server` compiles + runs on its own.
 
+### Profile wire shape (S6-01)
+
+The `Profile` struct on both sides carries:
+
+| Field             | JSON tag           | Notes                                       |
+| ----------------- | ------------------ | ------------------------------------------- |
+| `Name`            | `name`             | client `?src=` key                          |
+| `CameraID`        | `camera_id`        | Protect camera identifier                   |
+| `Quality`         | `quality`          | `high` / `medium` / `low`                   |
+| `Usage`           | `usage`            | `browser` / `esp`                           |
+| `Description`     | `description`      | admin UI                                    |
+| `Consumers`       | `consumers`        | runtime; live hub subscriber count          |
+| `Codec`           | `codec`            | `h264_passthrough` / `mjpeg` / `h264_cbp`   |
+| `Width`           | `width`            | required for `mjpeg` / `h264_cbp`           |
+| `Height`          | `height`           | required for `mjpeg` / `h264_cbp`           |
+| `FPS`             | `fps`              | required for `mjpeg` / `h264_cbp`           |
+| `EncodeQuality`   | `encode_quality`   | `mjpeg`: `-q:v`; `h264_cbp`: CRF            |
+
+The public `streams.Profile` on the carvilon side MUST carry the same
+fields with the same JSON tags (the wrapper does field-by-field copy).
+If you add a field on one side, add it on the other in the same commit.
+
 ## The wrapper (place in `carvilon-server`)
 
 `server/internal/streams/backend_carvilon_stream.go`:
@@ -117,22 +139,32 @@ func (w *CarvilonStreamBackend) Configured() bool { return w.b.Configured() }
 
 func fromPrivateProfile(p private.Profile) Profile {
 	return Profile{
-		Name:        p.Name,
-		CameraID:    p.CameraID,
-		Quality:     p.Quality,
-		Usage:       p.Usage,
-		Description: p.Description,
-		Consumers:   p.Consumers,
+		Name:          p.Name,
+		CameraID:      p.CameraID,
+		Quality:       p.Quality,
+		Usage:         p.Usage,
+		Description:   p.Description,
+		Consumers:     p.Consumers,
+		Codec:         p.Codec,
+		Width:         p.Width,
+		Height:        p.Height,
+		FPS:           p.FPS,
+		EncodeQuality: p.EncodeQuality,
 	}
 }
 
 func toPrivateProfile(p Profile) private.Profile {
 	return private.Profile{
-		Name:        p.Name,
-		CameraID:    p.CameraID,
-		Quality:     p.Quality,
-		Usage:       p.Usage,
-		Description: p.Description,
+		Name:          p.Name,
+		CameraID:      p.CameraID,
+		Quality:       p.Quality,
+		Usage:         p.Usage,
+		Description:   p.Description,
+		Codec:         p.Codec,
+		Width:         p.Width,
+		Height:        p.Height,
+		FPS:           p.FPS,
+		EncodeQuality: p.EncodeQuality,
 	}
 }
 

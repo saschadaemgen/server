@@ -160,22 +160,27 @@ func NewServer(opts ServerOptions) (*Server, error) {
 // profile name into an Entry (encode spec + source hub).
 //
 //   - Unknown name → propagate [profile.ErrUnknownProfile] for 404.
-//   - Wrong usage (not "esp") → explicit error so the caller learns
-//     they hit the wrong endpoint.
-//   - Otherwise: resolve the camera-side hub via the source registry
-//     and the encode spec via the usage-default. The source hub for a
-//     given (CameraID, Quality) is shared by ALL MJPEG profiles AND
-//     by /offer subscribers — a single upstream pull serves everyone.
+//   - Wrong codec (not "mjpeg") → explicit error so the caller learns
+//     they hit the wrong endpoint. S6-01 changed the gate from
+//     usage=esp to codec=mjpeg: /offer handles h264_passthrough and a
+//     future /stream/h264 endpoint handles h264_cbp. Same profile
+//     registry, three different output endpoints.
+//   - Otherwise: derive the encode spec from the profile's own
+//     Width/Height/FPS/EncodeQuality (S6-01 SpecFromProfile path) and
+//     resolve the camera-side hub via the source registry. The source
+//     hub for a given (CameraID, Quality) is shared by ALL MJPEG
+//     profiles AND by /offer subscribers — a single upstream pull
+//     serves everyone.
 func (s *Server) mjpegEntryFor(name string) (mjpeg.Entry, error) {
 	p, err := s.profiles.Get(name)
 	if err != nil {
 		return mjpeg.Entry{}, err
 	}
-	if p.Usage != profile.UsageESP {
-		return mjpeg.Entry{}, fmt.Errorf("profile %q has usage=%q, not %q (use /offer for browser usage)",
-			p.Name, p.Usage, profile.UsageESP)
+	if p.Codec != profile.CodecMJPEG {
+		return mjpeg.Entry{}, fmt.Errorf("profile %q has codec=%q, not %q (use the matching endpoint: /offer for h264_passthrough, /stream/h264 for h264_cbp)",
+			p.Name, p.Codec, profile.CodecMJPEG)
 	}
-	spec, err := mjpeg.DefaultSpecForUsage(p.Usage)
+	spec, err := mjpeg.SpecFromProfile(p)
 	if err != nil {
 		return mjpeg.Entry{}, err
 	}
@@ -253,9 +258,13 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if p.Usage != profile.UsageBrowser {
-		http.Error(w, fmt.Sprintf("profile %q is usage=%q, not %q (use /api/stream.mjpeg)",
-			p.Name, p.Usage, profile.UsageBrowser), http.StatusBadRequest)
+	// S6-01: gate /offer on Codec, not Usage. h264_passthrough is the
+	// only codec /offer can serve — the WebRTC payload IS the camera's
+	// H.264 stream, no transcode. mjpeg and h264_cbp have their own
+	// endpoints (/api/stream.mjpeg and /stream/h264 respectively).
+	if p.Codec != profile.CodecH264Passthrough {
+		http.Error(w, fmt.Sprintf("profile %q has codec=%q, not %q (use /api/stream.mjpeg for mjpeg, /stream/h264 for h264_cbp)",
+			p.Name, p.Codec, profile.CodecH264Passthrough), http.StatusBadRequest)
 		return
 	}
 
@@ -459,15 +468,20 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// Hand-roll JSON to avoid pulling encoding/json into the mainline
-	// hot path. Five fields, all string. The output is stable, ordered
-	// by profile name.
+	// hot path. The output is stable, ordered by profile name. S6-01
+	// adds the codec quintet so the admin UI can show / edit the encode
+	// parameters that drive the ESP measurement campaign.
 	_, _ = io.WriteString(w, "[")
 	for i, p := range all {
 		if i > 0 {
 			_, _ = io.WriteString(w, ",")
 		}
-		fmt.Fprintf(w, `{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q}`,
-			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description)
+		fmt.Fprintf(w,
+			`{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q,`+
+				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encodeQuality":%d}`,
+			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
+			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+		)
 	}
 	_, _ = io.WriteString(w, "]")
 }

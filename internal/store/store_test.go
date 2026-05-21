@@ -16,6 +16,27 @@ func mkProfile(name string) profile.Profile {
 		Quality:     profile.QualityHigh,
 		Usage:       profile.UsageBrowser,
 		Description: "test " + name,
+		// S6-01: h264_passthrough doesn't require encode params, so the
+		// default test profile stays terse. Tests that need a transcoded
+		// codec use mkMJPEGProfile below.
+		Codec: profile.CodecH264Passthrough,
+	}
+}
+
+// mkMJPEGProfile is the transcoded-codec counterpart to mkProfile, used
+// where the codec column matters (round-trip, list, seed).
+func mkMJPEGProfile(name string) profile.Profile {
+	return profile.Profile{
+		Name:          name,
+		CameraID:      "cam-" + name,
+		Quality:       profile.QualityHigh,
+		Usage:         profile.UsageESP,
+		Description:   "test " + name,
+		Codec:         profile.CodecMJPEG,
+		Width:         800,
+		Height:        1280,
+		FPS:           12,
+		EncodeQuality: 6,
 	}
 }
 
@@ -242,6 +263,93 @@ func TestPut_RejectsInvalidProfile(t *testing.T) {
 	if err := s.Put(context.Background(), bad); err == nil {
 		t.Fatal("expected validation error")
 	}
+}
+
+// TestPutGetRoundTrip_TranscodedCodec covers the S6-01 columns: a profile
+// with codec=mjpeg + width/height/fps/encode_quality must round-trip
+// byte-identical through the DB.
+func TestPutGetRoundTrip_TranscodedCodec(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+	in := mkMJPEGProfile("intercom_esp")
+	if err := s.Put(ctx, in); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	out, err := s.Get(ctx, in.Name)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if out != in {
+		t.Errorf("round-trip mismatch:\ngot:  %+v\nwant: %+v", out, in)
+	}
+}
+
+// TestMigration_BackfillsPreS6Rows asserts the upgrade path: if a row
+// exists from the S5 schema (no codec column populated, simulated by
+// inserting via raw SQL into an already-migrated DB and clearing the
+// codec) — actually we just confirm the backfill statements run on
+// re-Open and turn a codec='' row into the right codec.
+func TestMigration_BackfillsPreS6Rows(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+
+	// Simulate a pre-S6 row by inserting directly with empty codec / zero
+	// encode params (bypassing Put which would Validate). This mirrors
+	// the state of any row that existed when the columns were ADDed.
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO profiles (name, camera_id, quality, usage, description,
+		                      codec, width, height, fps, encode_quality)
+		VALUES ('legacy_browser', 'cam-x', 'high', 'browser', '', '', 0, 0, 0, 0),
+		       ('legacy_esp',     'cam-y', 'high', 'esp',     '', '', 0, 0, 0, 0)
+	`); err != nil {
+		t.Fatalf("seed legacy rows: %v", err)
+	}
+
+	// Re-run migrations: the UPDATE statements should backfill codec
+	// based on usage. This is the same code path Open() runs.
+	if err := runMigrations(s.db); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+
+	br, err := s.Get(ctx, "legacy_browser")
+	if err != nil {
+		t.Fatalf("Get legacy_browser: %v", err)
+	}
+	if br.Codec != profile.CodecH264Passthrough {
+		t.Errorf("legacy_browser codec = %q, want %q", br.Codec, profile.CodecH264Passthrough)
+	}
+
+	esp, err := s.Get(ctx, "legacy_esp")
+	if err != nil {
+		t.Fatalf("Get legacy_esp: %v", err)
+	}
+	if esp.Codec != profile.CodecMJPEG {
+		t.Errorf("legacy_esp codec = %q, want %q", esp.Codec, profile.CodecMJPEG)
+	}
+	if esp.Width != 800 || esp.Height != 1280 || esp.FPS != 12 || esp.EncodeQuality != 6 {
+		t.Errorf("legacy_esp encode params not backfilled: %+v", esp)
+	}
+}
+
+// TestMigration_Idempotent ensures running Open twice in the same
+// process — and therefore the migrations twice — is a no-op the second
+// time. Specifically the ALTER TABLE statements must not surface the
+// "duplicate column" SQLite error.
+func TestMigration_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "idem.db")
+	s1, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open 1: %v", err)
+	}
+	if err := s1.Close(); err != nil {
+		t.Fatalf("Close 1: %v", err)
+	}
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open 2 (migrations should be idempotent): %v", err)
+	}
+	_ = s2.Close()
 }
 
 func TestPersistenceAcrossOpens(t *testing.T) {

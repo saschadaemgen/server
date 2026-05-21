@@ -8,24 +8,27 @@
 //
 // As of S5, profiles persist in a SQLite database. The startup chain
 // is: open the DB → if empty, seed from CARVILON_PROFILES_JSON
-// (or the single-camera default built from UNIFI_CAMERA_ID) → load the
+// (or the S6 default-set built from UNIFI_CAMERA_ID) → load the
 // in-memory registry from the DB → run. After the first start the DB
 // is the source of truth; subsequent env changes to PROFILES_JSON are
 // ignored (and the spike logs that fact explicitly).
 //
-// Single-camera quick-start:
+// Single-camera quick-start (seeds five profiles on that camera: one
+// browser/h264_passthrough plus the four ESP measurement profiles —
+// mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp):
 //
 //	$env:UNIFI_NVR_HOST   = '192.168.1.1'
 //	$env:UNIFI_API_KEY    = '<protect-integration-key>'
 //	$env:UNIFI_CAMERA_ID  = '<camera-id>'
 //	go run .\cmd\spike
 //
-// Multi-camera quick-start (only takes effect when the DB is empty):
+// Multi-camera quick-start (only takes effect when the DB is empty;
+// CARVILON_PROFILES_JSON overrides the default-set):
 //
 //	$env:CARVILON_PROFILES_JSON = '[
-//	  {"name":"intercom_browser","cameraID":"abc","quality":"high","usage":"browser","description":"Intercom"},
-//	  {"name":"intercom_esp",    "cameraID":"abc","quality":"high","usage":"esp"},
-//	  {"name":"ai360_browser",   "cameraID":"def","quality":"high","usage":"browser","description":"AI 360"}
+//	  {"name":"intercom_browser","cameraID":"abc","quality":"high","usage":"browser","codec":"h264_passthrough","description":"Intercom"},
+//	  {"name":"intercom_mjpeg",  "cameraID":"abc","quality":"high","usage":"esp","codec":"mjpeg","width":800,"height":1280,"fps":12,"encodeQuality":6},
+//	  {"name":"ai360_browser",   "cameraID":"def","quality":"high","usage":"browser","codec":"h264_passthrough","description":"AI 360"}
 //	]'
 //	go run .\cmd\spike
 package main
@@ -222,10 +225,17 @@ func seedSource() string {
 // only if) the DB is currently empty. Preference order:
 //
 //  1. CARVILON_PROFILES_JSON: the explicit multi-camera config.
-//  2. UNIFI_CAMERA_ID: builds the historical browser+esp default pair
-//     on that single camera (backward-compat with the S1..S3 spike).
+//  2. UNIFI_CAMERA_ID: builds the S6 default-set for that single
+//     camera — one browser profile plus the four ESP measurement
+//     profiles (mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp). The admin
+//     can edit / delete any of them through the CRUD surface.
 //  3. Empty: no profiles to seed. The DB stays empty until the admin
 //     creates profiles through the CRUD surface.
+//
+// S6-01 rationale for the default-set: shipping four ESP profiles out
+// of the box means the measurement campaign starts the moment the
+// binary is up — no manual config required to compare mjpeg vs.
+// h264_cbp on the same camera.
 func loadSeedProfiles() ([]profile.Profile, error) {
 	if raw := os.Getenv(envProfilesJSON); raw != "" {
 		var ps []profile.Profile
@@ -239,19 +249,73 @@ func loadSeedProfiles() ([]profile.Profile, error) {
 		return nil, nil
 	}
 	return []profile.Profile{
+		// Browser fallback: WebRTC-passthrough, no transcode.
 		{
 			Name:        "intercom_browser",
 			CameraID:    cam,
 			Quality:     profile.QualityHigh,
 			Usage:       profile.UsageBrowser,
-			Description: "Intercom (browser)",
+			Description: "Intercom (browser, H.264 passthrough via WebRTC)",
+			Codec:       profile.CodecH264Passthrough,
+		},
+
+		// MJPEG measurement triplet — covers the bandwidth / framerate
+		// extremes the ESP can plausibly handle. The 'bal' profile
+		// mirrors the S5 default so existing measurements stay
+		// comparable.
+		{
+			Name:          "mjpeg_hq",
+			CameraID:      cam,
+			Quality:       profile.QualityHigh,
+			Usage:         profile.UsageESP,
+			Description:   "ESP: MJPEG, 800x1280 @ 9 fps, q:v 4 (high quality)",
+			Codec:         profile.CodecMJPEG,
+			Width:         800,
+			Height:        1280,
+			FPS:           9,
+			EncodeQuality: 4,
 		},
 		{
-			Name:        "intercom_esp",
-			CameraID:    cam,
-			Quality:     profile.QualityHigh,
-			Usage:       profile.UsageESP,
-			Description: "Intercom (ESP)",
+			Name:          "mjpeg_bal",
+			CameraID:      cam,
+			Quality:       profile.QualityHigh,
+			Usage:         profile.UsageESP,
+			Description:   "ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced — S5 default)",
+			Codec:         profile.CodecMJPEG,
+			Width:         800,
+			Height:        1280,
+			FPS:           12,
+			EncodeQuality: 6,
+		},
+		{
+			Name:          "mjpeg_fast",
+			CameraID:      cam,
+			Quality:       profile.QualityHigh,
+			Usage:         profile.UsageESP,
+			Description:   "ESP: MJPEG, 640x1024 @ 15 fps, q:v 8 (fast)",
+			Codec:         profile.CodecMJPEG,
+			Width:         640,
+			Height:        1024,
+			FPS:           15,
+			EncodeQuality: 8,
+		},
+
+		// H.264 Constrained Baseline — the S6-01 experiment. ESP32-P4
+		// + tinyH264 can decode this; we want to see whether the byte
+		// budget per frame beats MJPEG at similar visual quality.
+		// CRF 26 is the libx264 sweet-spot start for low-latency
+		// streaming; tune via CRUD as the measurements come in.
+		{
+			Name:          "h264_cbp",
+			CameraID:      cam,
+			Quality:       profile.QualityHigh,
+			Usage:         profile.UsageESP,
+			Description:   "ESP: H.264 Constrained Baseline, 800x1280 @ 12 fps, CRF 26",
+			Codec:         profile.CodecH264CBP,
+			Width:         800,
+			Height:        1280,
+			FPS:           12,
+			EncodeQuality: 26,
 		},
 	}, nil
 }

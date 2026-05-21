@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -80,6 +81,16 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: schema: %w", err)
 	}
 
+	// Run the additive migrations. Each statement is idempotent on the
+	// "already applied" axis: ALTER TABLE ADD COLUMN errors with
+	// "duplicate column" the second time, which we tolerate. UPDATEs
+	// are guarded by `WHERE codec = ''` so they only touch rows that
+	// were inserted before the column existed.
+	if err := runMigrations(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store: migrate: %w", err)
+	}
+
 	return &Store{db: db, path: path}, nil
 }
 
@@ -92,6 +103,83 @@ CREATE TABLE IF NOT EXISTS profiles (
 	description TEXT NOT NULL DEFAULT ''
 );
 `
+
+// migrations are additive DDL/DML statements applied after the base
+// schema. They MUST be idempotent — every start runs the full list.
+//
+// S6-01 adds the codec + encode-parameter columns. The backfill rules
+// turn pre-S6 rows (which have codec='' after ALTER TABLE) into the
+// closest S6 equivalent so the upgrade path is invisible:
+//
+//   - usage=browser  -> codec=h264_passthrough (the camera dictates
+//                       wire shape, no encode params needed)
+//   - usage=esp      -> codec=mjpeg with the S5-era defaults
+//                       (800x1280 @ 12 fps, ffmpeg -q:v 6)
+//
+// The defaults match what DefaultSpecForUsage produced before S6-01 so
+// behaviour is preserved across the migration.
+var migrations = []string{
+	`ALTER TABLE profiles ADD COLUMN codec          TEXT    NOT NULL DEFAULT ''`,
+	`ALTER TABLE profiles ADD COLUMN width          INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE profiles ADD COLUMN height         INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE profiles ADD COLUMN fps            INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE profiles ADD COLUMN encode_quality INTEGER NOT NULL DEFAULT 0`,
+
+	// Backfill: pre-S6 rows arrive with codec=''. Map by usage.
+	`UPDATE profiles
+	    SET codec='h264_passthrough'
+	  WHERE codec=''
+	    AND usage='browser'`,
+
+	`UPDATE profiles
+	    SET codec='mjpeg',
+	        width=800,
+	        height=1280,
+	        fps=12,
+	        encode_quality=6
+	  WHERE codec=''
+	    AND usage='esp'`,
+}
+
+// runMigrations applies the migrations slice top-to-bottom. ALTER
+// TABLE ADD COLUMN errors with "duplicate column name" once the column
+// is in place; we treat that as success so restarts are clean.
+func runMigrations(db *sql.DB) error {
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			if isDuplicateColumnErr(err) {
+				continue
+			}
+			return fmt.Errorf("migration %q: %w", firstLine(stmt), err)
+		}
+	}
+	return nil
+}
+
+// isDuplicateColumnErr returns true if err is the modernc.org/sqlite
+// "duplicate column" error produced by re-running ALTER TABLE ADD
+// COLUMN. The driver doesn't expose a typed error here so we sniff the
+// message — narrow enough that a real bug still surfaces.
+func isDuplicateColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate column")
+}
+
+// firstLine returns the first non-empty trimmed line of s. Used to
+// keep migration error messages short — the full statement is multi-
+// line and noisy in logs.
+func firstLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln != "" {
+			return ln
+		}
+	}
+	return s
+}
 
 // Path returns the configured filesystem path. ":memory:" for tests.
 func (s *Store) Path() string { return s.path }
@@ -113,14 +201,24 @@ func (s *Store) Put(ctx context.Context, p profile.Profile) error {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO profiles (name, camera_id, quality, usage, description)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO profiles (
+			name, camera_id, quality, usage, description,
+			codec, width, height, fps, encode_quality
+		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
-			camera_id   = excluded.camera_id,
-			quality     = excluded.quality,
-			usage       = excluded.usage,
-			description = excluded.description
-	`, p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description)
+			camera_id      = excluded.camera_id,
+			quality        = excluded.quality,
+			usage          = excluded.usage,
+			description    = excluded.description,
+			codec          = excluded.codec,
+			width          = excluded.width,
+			height         = excluded.height,
+			fps            = excluded.fps,
+			encode_quality = excluded.encode_quality
+	`,
+		p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
+		string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+	)
 	if err != nil {
 		return fmt.Errorf("store: put %q: %w", p.Name, err)
 	}
@@ -130,12 +228,16 @@ func (s *Store) Put(ctx context.Context, p profile.Profile) error {
 // Get returns the profile with the given name, or [ErrNotFound].
 func (s *Store) Get(ctx context.Context, name string) (profile.Profile, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT name, camera_id, quality, usage, description
+		SELECT name, camera_id, quality, usage, description,
+		       codec, width, height, fps, encode_quality
 		FROM profiles WHERE name = ?
 	`, name)
 	var p profile.Profile
-	var q, u string
-	if err := row.Scan(&p.Name, &p.CameraID, &q, &u, &p.Description); err != nil {
+	var q, u, c string
+	if err := row.Scan(
+		&p.Name, &p.CameraID, &q, &u, &p.Description,
+		&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return profile.Profile{}, ErrNotFound
 		}
@@ -143,6 +245,7 @@ func (s *Store) Get(ctx context.Context, name string) (profile.Profile, error) {
 	}
 	p.Quality = profile.Quality(q)
 	p.Usage = profile.Usage(u)
+	p.Codec = profile.Codec(c)
 	return p, nil
 }
 
@@ -166,7 +269,8 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 // List returns all profiles sorted by name.
 func (s *Store) List(ctx context.Context) ([]profile.Profile, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT name, camera_id, quality, usage, description
+		SELECT name, camera_id, quality, usage, description,
+		       codec, width, height, fps, encode_quality
 		FROM profiles ORDER BY name
 	`)
 	if err != nil {
@@ -176,12 +280,16 @@ func (s *Store) List(ctx context.Context) ([]profile.Profile, error) {
 	var out []profile.Profile
 	for rows.Next() {
 		var p profile.Profile
-		var q, u string
-		if err := rows.Scan(&p.Name, &p.CameraID, &q, &u, &p.Description); err != nil {
+		var q, u, c string
+		if err := rows.Scan(
+			&p.Name, &p.CameraID, &q, &u, &p.Description,
+			&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality,
+		); err != nil {
 			return nil, fmt.Errorf("store: list scan: %w", err)
 		}
 		p.Quality = profile.Quality(q)
 		p.Usage = profile.Usage(u)
+		p.Codec = profile.Codec(c)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -224,8 +332,10 @@ func (s *Store) SeedIfEmpty(ctx context.Context, ps []profile.Profile) (int, err
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO profiles (name, camera_id, quality, usage, description)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO profiles (
+			name, camera_id, quality, usage, description,
+			codec, width, height, fps, encode_quality
+		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("store: seed prepare: %w", err)
@@ -237,7 +347,10 @@ func (s *Store) SeedIfEmpty(ctx context.Context, ps []profile.Profile) (int, err
 		if err := p.Validate(); err != nil {
 			return 0, fmt.Errorf("store: seed validate %q: %w", p.Name, err)
 		}
-		if _, err := stmt.ExecContext(ctx, p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description); err != nil {
+		if _, err := stmt.ExecContext(ctx,
+			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
+			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+		); err != nil {
 			return 0, fmt.Errorf("store: seed insert %q: %w", p.Name, err)
 		}
 		inserted++

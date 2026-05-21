@@ -62,6 +62,26 @@ func wireProfile(name string) Profile {
 		Quality:     "high",
 		Usage:       "browser",
 		Description: "test " + name,
+		// S6-01: browser profiles default to h264_passthrough; no encode
+		// params required.
+		Codec: "h264_passthrough",
+	}
+}
+
+// wireMJPEGProfile is the transcoded-codec test fixture: usage=esp with
+// MJPEG encode params populated.
+func wireMJPEGProfile(name string) Profile {
+	return Profile{
+		Name:          name,
+		CameraID:      "cam-" + name,
+		Quality:       "high",
+		Usage:         "esp",
+		Description:   "test " + name,
+		Codec:         "mjpeg",
+		Width:         800,
+		Height:        1280,
+		FPS:           12,
+		EncodeQuality: 6,
 	}
 }
 
@@ -179,8 +199,9 @@ func TestDelete_RemovesFromBothLayers(t *testing.T) {
 	b := freshBackend(t, nil)
 	ctx := context.Background()
 
-	p := wireProfile("intercom_esp")
-	p.Usage = "esp"
+	// S6-01: an ESP profile uses MJPEG (or H.264-CBP); use the
+	// transcoded-codec fixture so the test mirrors a realistic profile.
+	p := wireMJPEGProfile("intercom_esp")
 	_ = b.Put(ctx, p)
 
 	if err := b.Delete(ctx, p.Name); err != nil {
@@ -313,6 +334,7 @@ func TestSeedSemantics_DBWinsOverJSON(t *testing.T) {
 		Name: "from-seed-A", CameraID: "cam-a",
 		Quality: profile.QualityHigh, Usage: profile.UsageBrowser,
 		Description: "from first JSON",
+		Codec:       profile.CodecH264Passthrough,
 	}}
 	if n, err := s.SeedIfEmpty(ctx, seedA); err != nil || n != 1 {
 		t.Fatalf("first SeedIfEmpty: n=%d err=%v, want (1, nil)", n, err)
@@ -322,6 +344,7 @@ func TestSeedSemantics_DBWinsOverJSON(t *testing.T) {
 	seedB := []profile.Profile{{
 		Name: "would-have-been-seeded-B", CameraID: "cam-b",
 		Quality: profile.QualityHigh, Usage: profile.UsageBrowser,
+		Codec: profile.CodecH264Passthrough,
 	}}
 	if n, err := s.SeedIfEmpty(ctx, seedB); err != nil || n != 0 {
 		t.Fatalf("second SeedIfEmpty: n=%d err=%v, want (0, nil)", n, err)
@@ -405,28 +428,59 @@ func TestNew_RequiresBaseURL(t *testing.T) {
 // convert field-by-field without surprises.
 func TestProfile_WireTags(t *testing.T) {
 	in := Profile{
-		Name:        "intercom_browser",
-		CameraID:    "abc",
-		Quality:     "high",
-		Usage:       "browser",
-		Description: "desc",
-		Consumers:   3,
+		Name:          "intercom_esp",
+		CameraID:      "abc",
+		Quality:       "high",
+		Usage:         "esp",
+		Description:   "desc",
+		Consumers:     3,
+		Codec:         "mjpeg",
+		Width:         800,
+		Height:        1280,
+		FPS:           12,
+		EncodeQuality: 6,
 	}
 	buf, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	for _, want := range []string{
-		`"name":"intercom_browser"`,
+		`"name":"intercom_esp"`,
 		`"camera_id":"abc"`,
 		`"quality":"high"`,
-		`"usage":"browser"`,
+		`"usage":"esp"`,
 		`"description":"desc"`,
 		`"consumers":3`,
+		`"codec":"mjpeg"`,
+		`"width":800`,
+		`"height":1280`,
+		`"fps":12`,
+		`"encode_quality":6`,
 	} {
 		if !strings.Contains(string(buf), want) {
 			t.Errorf("Profile JSON missing %q: %s", want, buf)
 		}
+	}
+}
+
+// TestProfile_RoundTripsTranscodedCodec asserts that a wire-shape MJPEG
+// profile survives a CRUD round-trip with all codec fields intact —
+// proving the toWire/fromWire mapping covers the new S6 columns.
+func TestProfile_RoundTripsTranscodedCodec(t *testing.T) {
+	b := freshBackend(t, nil)
+	ctx := context.Background()
+
+	in := wireMJPEGProfile("intercom_esp")
+	if err := b.Put(ctx, in); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	out, err := b.Get(ctx, in.Name)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	out.Consumers = 0
+	if out != in {
+		t.Errorf("MJPEG profile round-trip:\ngot:  %+v\nwant: %+v", out, in)
 	}
 }
 

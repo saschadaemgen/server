@@ -61,13 +61,24 @@ import (
 //
 // Consumers is a runtime figure (not persisted) — it is filled in by
 // [Backend.List] / [Backend.Get] from the live per-camera hub state.
+//
+// S6-01 adds the codec + encode-parameter quintet. These are persisted
+// fields (DB columns), not runtime state. The browser side typically
+// addresses h264_passthrough profiles (no encode params); the ESP side
+// addresses mjpeg / h264_cbp (encode params required). Validation is
+// codec-specific — see profile.Profile.Validate for the rules.
 type Profile struct {
-	Name        string `json:"name"`
-	CameraID    string `json:"camera_id"`
-	Quality     string `json:"quality"`
-	Usage       string `json:"usage"`
-	Description string `json:"description"`
-	Consumers   int    `json:"consumers"`
+	Name          string `json:"name"`
+	CameraID      string `json:"camera_id"`
+	Quality       string `json:"quality"`
+	Usage         string `json:"usage"`
+	Description   string `json:"description"`
+	Consumers     int    `json:"consumers"`
+	Codec         string `json:"codec"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	EncodeQuality int    `json:"encode_quality"`
 }
 
 // Camera mirrors carvilon-server streams.Camera field-by-field
@@ -299,12 +310,17 @@ func (b *Backend) toWire(p profile.Profile) Profile {
 		consumers = h.SubscriberCount()
 	}
 	return Profile{
-		Name:        p.Name,
-		CameraID:    p.CameraID,
-		Quality:     string(p.Quality),
-		Usage:       string(p.Usage),
-		Description: p.Description,
-		Consumers:   consumers,
+		Name:          p.Name,
+		CameraID:      p.CameraID,
+		Quality:       string(p.Quality),
+		Usage:         string(p.Usage),
+		Description:   p.Description,
+		Consumers:     consumers,
+		Codec:         string(p.Codec),
+		Width:         p.Width,
+		Height:        p.Height,
+		FPS:           p.FPS,
+		EncodeQuality: p.EncodeQuality,
 	}
 }
 
@@ -312,11 +328,16 @@ func (b *Backend) toWire(p profile.Profile) Profile {
 // profile.Profile, validating along the way.
 func (b *Backend) fromWire(in Profile) (profile.Profile, error) {
 	p := profile.Profile{
-		Name:        in.Name,
-		CameraID:    in.CameraID,
-		Quality:     profile.Quality(in.Quality),
-		Usage:       profile.Usage(in.Usage),
-		Description: in.Description,
+		Name:          in.Name,
+		CameraID:      in.CameraID,
+		Quality:       profile.Quality(in.Quality),
+		Usage:         profile.Usage(in.Usage),
+		Description:   in.Description,
+		Codec:         profile.Codec(in.Codec),
+		Width:         in.Width,
+		Height:        in.Height,
+		FPS:           in.FPS,
+		EncodeQuality: in.EncodeQuality,
 	}
 	if err := p.Validate(); err != nil {
 		return profile.Profile{}, err
