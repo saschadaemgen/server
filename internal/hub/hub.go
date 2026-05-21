@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	"carvilon.local/stream/internal/droplog"
 	"carvilon.local/stream/internal/source"
@@ -75,10 +76,20 @@ type Hub struct {
 	subCh   chan subscribeReq
 	unsubCh chan uint64
 
+	// subCount is the current number of subscribers attached to this
+	// hub, maintained by the run goroutine. Exposed via
+	// [Hub.SubscriberCount] for admin-UI consumer counts.
+	subCount atomic.Int64
+
 	ctx     context.Context
 	cancel  context.CancelFunc
 	runDone chan struct{}
 }
+
+// SubscriberCount returns the number of subscribers currently attached
+// to the hub. Used by the streambackend layer to fill in the admin-
+// UI's "N active viewers" column. Cheap (atomic load).
+func (h *Hub) SubscriberCount() int { return int(h.subCount.Load()) }
 
 // Subscriber represents one connected viewer. Obtain one from
 // [Hub.Subscribe]; release with [Subscriber.Close] when the viewer
@@ -206,6 +217,7 @@ func (h *Hub) run() {
 			close(sub.frames)
 			delete(subscribers, id)
 		}
+		h.subCount.Store(0)
 	}
 
 	// stopSource closes the source and clears the local state.
@@ -253,6 +265,7 @@ func (h *Hub) run() {
 				hub:    h,
 			}
 			subscribers[nextID] = sub
+			h.subCount.Store(int64(len(subscribers)))
 
 			// Pre-feed the cached IDR if we have one. The channel is
 			// empty (just allocated), so the non-blocking send always
@@ -275,6 +288,7 @@ func (h *Hub) run() {
 			}
 			delete(subscribers, id)
 			close(sub.frames)
+			h.subCount.Store(int64(len(subscribers)))
 			h.logger.Printf("hub: subscriber %d left (total=%d)", id, len(subscribers))
 
 			if len(subscribers) == 0 {

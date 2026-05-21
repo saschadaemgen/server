@@ -224,6 +224,49 @@ func TestHub_LastUnsubscribeStopsSource(t *testing.T) {
 	}
 }
 
+func TestHub_SubscriberCountTracksSubscribers(t *testing.T) {
+	src := newFakeSource(10)
+	h := New(func() (source.VideoSource, error) { return src, nil }, Options{Logger: quietLogger()})
+	defer h.Close()
+
+	if got := h.SubscriberCount(); got != 0 {
+		t.Errorf("fresh hub count = %d, want 0", got)
+	}
+
+	subA, _ := h.Subscribe()
+	if got := h.SubscriberCount(); got != 1 {
+		t.Errorf("after 1 sub count = %d, want 1", got)
+	}
+
+	subB, _ := h.Subscribe()
+	subC, _ := h.Subscribe()
+	if got := h.SubscriberCount(); got != 3 {
+		t.Errorf("after 3 subs count = %d, want 3", got)
+	}
+
+	subB.Close()
+	// wait for unsub to process
+	deadline := time.After(time.Second)
+	for h.SubscriberCount() != 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("count never dropped to 2; got %d", h.SubscriberCount())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	subA.Close()
+	subC.Close()
+	deadline = time.After(time.Second)
+	for h.SubscriberCount() != 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("count never dropped to 0; got %d", h.SubscriberCount())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func TestHub_ResubscribeBuildsFreshSource(t *testing.T) {
 	var builds atomic.Int64
 	factory := func() (source.VideoSource, error) {

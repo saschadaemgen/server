@@ -151,6 +151,61 @@ func TestRegistry_AllSortedByName(t *testing.T) {
 	}
 }
 
+func TestRegistry_Put_InsertsAndOverwrites(t *testing.T) {
+	r, _ := NewRegistry(nil)
+	p := goodProfile
+
+	// Insert
+	if err := r.Put(p); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := r.Get(p.Name)
+	if err != nil || got != p {
+		t.Errorf("after first Put: got %+v err=%v, want %+v", got, err, p)
+	}
+
+	// Overwrite
+	p2 := p
+	p2.Description = "updated description"
+	if err := r.Put(p2); err != nil {
+		t.Fatalf("Put 2: %v", err)
+	}
+	got, _ = r.Get(p.Name)
+	if got.Description != "updated description" {
+		t.Errorf("upsert did not update Description: %+v", got)
+	}
+	if len(r.Names()) != 1 {
+		t.Errorf("Names count = %d, want 1 after upsert", len(r.Names()))
+	}
+}
+
+func TestRegistry_Put_RejectsInvalid(t *testing.T) {
+	r, _ := NewRegistry(nil)
+	bad := goodProfile
+	bad.Quality = "bogus"
+	if err := r.Put(bad); err == nil {
+		t.Fatal("expected validation error")
+	}
+	// And the bad profile must NOT have been inserted.
+	if len(r.Names()) != 0 {
+		t.Errorf("invalid Put leaked into Registry: Names()=%v", r.Names())
+	}
+}
+
+func TestRegistry_Delete_RemovesAndErrorsOnSecond(t *testing.T) {
+	r, _ := NewRegistry([]Profile{goodProfile})
+
+	if err := r.Delete(goodProfile.Name); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := r.Get(goodProfile.Name); !errors.Is(err, ErrUnknownProfile) {
+		t.Errorf("after Delete Get err = %v, want ErrUnknownProfile", err)
+	}
+	if err := r.Delete(goodProfile.Name); !errors.Is(err, ErrUnknownProfile) {
+		t.Errorf("re-delete err = %v, want ErrUnknownProfile", err)
+	}
+}
+
 func TestRegistry_EmptyIsOK(t *testing.T) {
 	r, err := NewRegistry(nil)
 	if err != nil {

@@ -116,6 +116,33 @@ func NewRegistry(initial []Profile) (*Registry, error) {
 	return r, nil
 }
 
+// Put inserts or replaces a profile. Validated before the map is
+// mutated; on error nothing changes. Safe for concurrent calls; the
+// admin-CRUD layer holds no extra locks.
+func (r *Registry) Put(p Profile) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.profiles[p.Name] = p
+	return nil
+}
+
+// Delete removes a profile by name. Returns [ErrUnknownProfile] if
+// the name was not registered. Idempotent only in the absence-after-
+// success sense; double-deletes return ErrUnknownProfile on the second
+// call so callers can distinguish "already gone".
+func (r *Registry) Delete(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.profiles[name]; !ok {
+		return fmt.Errorf("%w: %q", ErrUnknownProfile, name)
+	}
+	delete(r.profiles, name)
+	return nil
+}
+
 // Get looks a profile up by name. Returns [ErrUnknownProfile] if not
 // found.
 func (r *Registry) Get(name string) (Profile, error) {
