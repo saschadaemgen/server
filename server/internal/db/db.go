@@ -1,9 +1,15 @@
 // Package db opens the carvilon-server sqlite database and applies
 // pending schema migrations. The database stores platform data:
-// admin users, mock viewers, magic-link tokens, and the two session
-// tables (mieter_sessions, admin_sessions). Since Saison 12-06 the
-// tenant routing key is the mock viewer's MAC; tenant identity in
-// the UniFi Access Developer API is administered separately.
+// admin users, viewers (web + ESP, the table is `viewers` since
+// Migration 006; before that it was `mock_viewers`), and the two
+// session tables (viewer_sessions, admin_sessions; the former was
+// renamed from `mieter_sessions` by Migration 006). The magic-
+// link feature was retired with Migration 006 and the
+// `magic_link_tokens` table is gone with it.
+//
+// Since Saison 12-06 the tenant routing key is the viewer's MAC;
+// tenant identity in the UniFi Access Developer API is
+// administered separately.
 package db
 
 import (

@@ -1,15 +1,18 @@
 // Package adminsession owns the lifecycle of admin (Hausverwalter)
-// sessions. Mirrors the mieter session package but stores rows in
-// admin_sessions with a FK on admin_users instead of mock_viewers.
+// sessions. Mirrors the viewer session package but stores rows
+// in admin_sessions with a FK on admin_users instead of the
+// viewers table.
 //
 // Saison 12-06 refactor: admin sessions used to live in the
 // shared sessions table with the ua_user_id surrogate
-// "_admin_<username>". With sessions now hard-FK'd to mock_viewers,
-// admin sessions need their own home.
+// "_admin_<username>". With viewer sessions now hard-FK'd to the
+// viewers table (renamed from mock_viewers by Migration 006),
+// admin sessions live in their own admin_sessions table (created
+// in Migration 003, FK kept on admin_users).
 //
 // Session ids are 32 random bytes encoded base64url-without-
 // padding (43 characters). Validate performs the same rolling
-// renewal as the mieter session service.
+// renewal as the viewer session service.
 package adminsession
 
 import (

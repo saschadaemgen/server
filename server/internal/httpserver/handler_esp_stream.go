@@ -1,10 +1,10 @@
 // Saison 14-01: real MJPEG passthrough.
 // Saison 14-01-FIX01: switch URL construction to url.Parse so a
-// trailing slash on UNIFIX_STREAM_BACKEND_URL or a stray query
-// fragment cannot break the path, and add structured logging
-// per request (route + profile + backend + viewer_mac) so the
-// operator can see in /tmp/carvilon.log what each stream request
-// resolved to.
+// trailing slash on CARVILON_STREAM_BACKEND_URL (legacy alias:
+// UNIFIX_STREAM_BACKEND_URL) or a stray query fragment cannot
+// break the path, and add structured logging per request
+// (route + profile + backend + viewer_mac) so the operator can
+// see in /tmp/carvilon.log what each stream request resolved to.
 //
 // The ESP firmware pulls an MJPEG stream from /esp/stream.mjpeg
 // after authenticating with its bearer token. Saison 13-08 shipped
@@ -17,16 +17,17 @@
 //   - resolve the calling viewer's stream profile name via the
 //     ResolveStreamProfile helper (per-viewer override > type
 //     default > "intercom_default")
-//   - build the backend URL by parsing UNIFIX_STREAM_BACKEND_URL
-//     and overwriting Path + Query, never by string concatenation:
-//     <UNIFIX_STREAM_BACKEND_URL>/api/stream.mjpeg?src=<profile>
+//   - build the backend URL by parsing
+//     CARVILON_STREAM_BACKEND_URL and overwriting Path + Query,
+//     never by string concatenation:
+//     <CARVILON_STREAM_BACKEND_URL>/api/stream.mjpeg?src=<profile>
 //   - copy headers + status, then stream the body with an explicit
 //     http.Flusher.Flush per chunk so the ESP/browser sees frames
 //     immediately instead of waiting for io.Copy's buffer drain.
 //   - drop the inbound Authorization header before forwarding so
 //     the bearer token never leaves the carvilon process.
 //
-// When UNIFIX_STREAM_BACKEND_URL is empty (DevMode bootstrap)
+// When CARVILON_STREAM_BACKEND_URL is empty (DevMode bootstrap)
 // every request gets 503 with an explicit log warn at startup; no
 // crash, no per-request log spam.
 package httpserver
@@ -219,10 +220,12 @@ func (s *Server) proxyMJPEGStream(w http.ResponseWriter, r *http.Request, profil
 	}
 }
 
-// buildBackendStreamURL takes the operator's go2rtc base URL
-// (the value of UNIFIX_STREAM_BACKEND_URL, expected shape
-// "scheme://host[:port][/some/prefix]") and turns it into the
-// absolute MJPEG passthrough URL the proxy GETs. The function:
+// buildBackendStreamURL takes the operator's stream backend base
+// URL (the value of CARVILON_STREAM_BACKEND_URL; legacy alias
+// UNIFIX_STREAM_BACKEND_URL is still accepted by config.lookupEnv,
+// expected shape "scheme://host[:port][/some/prefix]") and turns
+// it into the absolute MJPEG passthrough URL the proxy GETs.
+// The function:
 //
 //   - parses the base URL (rejects empty / malformed input)
 //   - overwrites Path with "/api/stream.mjpeg", preserving any

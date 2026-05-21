@@ -124,39 +124,63 @@ Klartext-Logs:    Tokens und Session-IDs werden NIE im Klartext
 
 S12-06-Refactor:  magic_link_tokens und mieter_sessions haengen
                   beide per Foreign-Key mit ON DELETE CASCADE
-                  an mock_viewers.mac. Loescht der Admin einen
-                  Mock-Viewer, verschwinden alle aktiven
-                  Mieter-Sessions UND alle ausstehenden Magic-
-                  Link-Tokens dieses Mocks automatisch mit.
+                  an mock_viewers.mac (alle drei Objekte spaeter
+                  durch Migration 006 umbenannt: viewers,
+                  viewer_sessions; magic_link_tokens komplett
+                  entfernt mit dem Magic-Link-Feature). Loescht
+                  der Admin einen Mock-Viewer, verschwinden alle
+                  aktiven Mieter-Sessions UND alle ausstehenden
+                  Magic-Link-Tokens dieses Mocks automatisch mit.
                   Das ist gewollt: ein Mock-Viewer ist der
                   Routing-Endpunkt, ohne ihn gibt es keinen
                   legitimen Zugang. admin_sessions haengt analog
                   per FK CASCADE an admin_users.
 ```
 
-#### 2.2.6 Cookie-Sicherheit (Saison 12)
+#### 2.2.6 Cookie-Sicherheit (Saison 12, Saison 13-02-FIX4-a)
 
-Session-Cookies sind defensiv konfiguriert:
+Session-Cookies sind defensiv konfiguriert; die exakte Form
+unterscheidet sich zwischen Production und DevMode, weil der
+__Host-Prefix nur ueber HTTPS funktioniert.
 
 ```
-Name:       carvilon_m_session  (Mieter)
-            carvilon_a_session  (Admin)
-Pfad:       /m/  bzw.  /a/    (Pfad-Scoping verhindert dass das
-                              Admin-Cookie unter /m/ gesendet wird
-                              und umgekehrt; strikt seit dem
-                              S12-06-Refactor mit getrennten
-                              mieter_sessions- und admin_sessions-
-                              Tabellen)
-HttpOnly:   true              (immer, kein JavaScript-Zugriff)
-Secure:     true in Production, false in DevMode
-SameSite:   Strict            (immer, kein Cross-Site-Sending)
-MaxAge:     30 Tage           (passend zu Session-Rolling-TTL)
+Production (Secure=true):
+   Viewer-Cookie: __Host-carvilon_viewer  Path=/
+   Admin-Cookie:  __Host-carvilon_admin   Path=/
+   Trennung ueber den Cookie-NAMEN, nicht den Pfad - der
+   __Host-Prefix verlangt Path=/ und Domain-Pinning per RFC
+   6265bis. Beide Cookies liegen daher unter /, der Browser
+   kann sie aber nicht verwechseln, weil sie unter
+   unterschiedlichen Namen gespeichert werden.
+
+DevMode (Secure=false, plain HTTP):
+   Viewer-Cookie: carvilon_viewer        Path=/
+   Admin-Cookie:  carvilon_a_session     Path=/a/
+   Kein __Host-Prefix moeglich (verlangt Secure). Trennung
+   ueber den Namen wie in Production, plus zusaetzliche
+   Pfad-Trennung beim Admin (Path=/a/). Akzeptierter Trade-
+   off; DevMode laeuft nur lokal auf dem Entwickler-Rechner.
+
+In beiden Modi gilt:
+   HttpOnly:   true              (immer, kein JavaScript-Zugriff)
+   SameSite:   Strict            (immer, kein Cross-Site-Sending)
+   MaxAge:     1 Jahr            (DB-Rolling-Renewal in
+                                  session.Validate macht die
+                                  effektiven 30 Tage Idle-Loesung)
 ```
+
+Hintergrund S12-06-Refactor: die Mieter- und Admin-Sessions
+leben in getrennten DB-Tabellen (viewer_sessions, admin_sessions;
+Migration 006 hat mieter_sessions in viewer_sessions umbenannt).
+Das Cookie ist die transportierte ID; die Tabellenwahl entscheidet
+ueber die ausgelesene Identitaet. Cookie-Name und Tabelle gehoeren
+zusammen - admin_sessions-Validate prueft niemals einen Mieter-
+Cookie und umgekehrt.
 
 `SameSite=Strict` ist die maximale Stufe. Wir akzeptieren bewusst,
 dass externe Links zu carvilon-Seiten den Klienten nicht
-automatisch eingeloggt zeigen (er muss erst ueber /m/login mit
-Magic-Link reinkommen).
+automatisch eingeloggt zeigen (er muss erst ueber /login mit
+seinen Mieter-Credentials reinkommen).
 
 #### 2.2.7 DevMode-Schalter
 

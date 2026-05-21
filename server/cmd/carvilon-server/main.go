@@ -45,12 +45,12 @@ func main() {
 		os.Exit(1)
 	}
 	if cfg.ServerIPv4 == "" {
-		log.Warn("UNIFIX_SERVER_IPV4 not set; mock viewers will not be reachable by UDM")
+		log.Warn("CARVILON_SERVER_IPV4 not set (legacy alias UNIFIX_SERVER_IPV4 also accepted); mock viewers will not be reachable by UDM")
 	}
 
 	secretsSvc, err := secrets.New()
 	if err != nil {
-		log.Error("secrets init failed (set UNIFIX_SECRETS_KEY; use cmd/genkey to generate one)",
+		log.Error("secrets init failed (set CARVILON_SECRETS_KEY; legacy alias UNIFIX_SECRETS_KEY also accepted; use cmd/genkey to generate one)",
 			"err", err)
 		os.Exit(1)
 	}
@@ -66,8 +66,9 @@ func main() {
 
 	// Saison 13-02-FIX4-a: ein 32-Byte Pepper fuer Argon2id wird
 	// beim ersten Boot generiert und ab dann persistent benutzt.
-	// Der Master-Key (UNIFIX_SECRETS_KEY) verschluesselt den Pepper
-	// im platform_config-Eintrag.
+	// Der Master-Key (CARVILON_SECRETS_KEY; legacy alias
+	// UNIFIX_SECRETS_KEY) verschluesselt den Pepper im
+	// platform_config-Eintrag.
 	if err := ensurePepper(context.Background(), platformCfg, log); err != nil {
 		log.Error("ensure viewer pepper failed", "err", err)
 		os.Exit(1)
@@ -268,11 +269,12 @@ func ensurePepper(ctx context.Context, cfg *platformconfig.Service, log *slog.Lo
 
 // startMDNSIfPossible parses listenAddr (":8080" or "0.0.0.0:8080")
 // for the port and starts an mDNS advertisement. If serverIPv4 is
-// empty (no UNIFIX_SERVER_IPV4 set), returns (nil, nil) - the
-// caller logs a warning and continues without mDNS.
+// empty (no CARVILON_SERVER_IPV4 set; legacy alias UNIFIX_SERVER_IPV4
+// also accepted), returns (nil, nil) - the caller logs a warning
+// and continues without mDNS.
 func startMDNSIfPossible(serverIPv4, listenAddr string, log *slog.Logger) (*mdns.Service, error) {
 	if serverIPv4 == "" {
-		return nil, errors.New("UNIFIX_SERVER_IPV4 not set")
+		return nil, errors.New("CARVILON_SERVER_IPV4 not set")
 	}
 	_, portStr, err := net.SplitHostPort(listenAddr)
 	if err != nil {

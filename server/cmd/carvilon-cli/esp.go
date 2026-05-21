@@ -55,7 +55,7 @@ func runESPAdopt(args []string, out io.Writer) error {
 	name := fs.String("name", "", "Wohnungs-Name (display name)")
 	intercom := fs.String("intercom", "", "paired intercom MAC (optional)")
 	mieter := fs.String("mieter", "", "linked UA-User ID (optional)")
-	dbPath := fs.String("db", "", "SQLite DB path (default: $UNIFIX_DB_PATH or ./state/carvilon.db)")
+	dbPath := fs.String("db", "", "SQLite DB path (default: $CARVILON_DB_PATH or legacy $UNIFIX_DB_PATH or ./state/carvilon.db)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

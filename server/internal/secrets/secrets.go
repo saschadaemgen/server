@@ -1,6 +1,7 @@
 // Package secrets encrypts and decrypts platform secrets with
 // AES-256-GCM. The 32-byte master key is read from the
-// UNIFIX_SECRETS_KEY environment variable as 64 hex characters.
+// CARVILON_SECRETS_KEY environment variable as 64 hex characters
+// (legacy alias: UNIFIX_SECRETS_KEY).
 //
 // The encrypted form is hex(nonce || ciphertext_with_tag).
 // GCM appends a 16-byte authentication tag to the ciphertext,

@@ -115,7 +115,8 @@ Aktueller Lebenszyklus eines Mock-Viewers:
 1. Admin im carvilon-Admin-UI (`/a/mocks`): "Neuen Mock-Viewer anlegen"
    (Name vom Admin frei vergeben, MAC optional; bei leer wird eine
    Ubiquiti-OUI-MAC generiert)
-2. `mockmanager.AddViewer` persistiert in `mock_viewers`-Tabelle und
+2. `mockmanager.AddViewer` persistiert in der `viewers`-Tabelle
+   (vormals `mock_viewers`; umbenannt durch Migration 006) und
    reserviert einen freien Service-Port (Default-Start 8100)
 3. `mockmanager` spawnt `mock.Viewer`-Goroutine mit Stages 1 und 4
 4. Mock-Viewer antwortet auf UDM-Multicast-Discovery (Stage 1)
@@ -1804,7 +1805,7 @@ generelle Regel.
 | 003 | admin | admin_users + platform_config |
 | 004 | mock_centric_routing | ua_user_id-Routing weg, mock_mac als Schluessel |
 | 005 | door_events | doorbell-history-Tabelle |
-| 006 | viewers_table | mock_viewers -> viewers, type-Spalte, esp_token_hash |
+| 006 | viewers_table | mock_viewers -> viewers, mieter_sessions -> viewer_sessions (Spalte mock_mac -> viewer_mac), door_events.mock_mac -> viewer_mac, magic_link_tokens DROP, type-Spalte, esp_token_hash. admin_sessions bleibt unter dem Namen aus Migration 003. |
 | 007 | normalize_viewer_usernames | name-Normalisierung |
 | 008 | drop_username | username-Spalte raus |
 | 009 | esp_pending_devices | Adoptions-Handoff |
