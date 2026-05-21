@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -131,12 +130,6 @@ func (c *Client) LookupDoorForIntercom(ctx context.Context, intercomMAC string) 
 // Saison 13-05-HOTFIX: same array-of-arrays tolerance as
 // ListDevices; UA appears to group doors per hub on at least
 // the firmware on Sascha's UDM.
-//
-// Saison 13-05-HOTFIX4: raw-dump the envelope.Data once per
-// call. Devices needed three field-tag fixes after the dump
-// surfaced the real schema (type/alias/is_online); doors is
-// likely in the same boat. Truncate at 800 bytes to keep the
-// log line scannable. Removed once the door-side fix lands.
 func (c *Client) ListDoors(ctx context.Context) ([]Door, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.baseURL+"/api/v1/developer/doors", nil)
@@ -146,13 +139,6 @@ func (c *Client) ListDoors(ctx context.Context) ([]Door, error) {
 	env, err := c.do(req)
 	if err != nil {
 		return nil, err
-	}
-	if len(env.Data) > 0 {
-		raw := string(env.Data)
-		if len(raw) > 800 {
-			raw = raw[:800] + "...[truncated]"
-		}
-		slog.Info("uaapi: ListDoors raw data", "json", raw)
 	}
 	doors, err := decodeList[Door](env.Data)
 	if err != nil {
