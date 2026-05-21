@@ -43,13 +43,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"carvilon.local/stream"
 	"carvilon.local/stream/internal/mjpeg"
+	"carvilon.local/stream/internal/proccpu"
 	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
 	"carvilon.local/stream/internal/source/unifi"
 	"carvilon.local/stream/internal/sourcereg"
+	"carvilon.local/stream/internal/stats"
 	"carvilon.local/stream/internal/store"
 	"carvilon.local/stream/internal/unifiapi"
 	"carvilon.local/stream/streambackend"
@@ -186,17 +189,33 @@ func main() {
 		logger.Printf("mjpeg: disabled via %s; only /offer (WebRTC) is served", envDisableMJPEG)
 	}
 
+	// --- S6 Stats + CPU sampler --------------------------------------------
+	//
+	// Stats counts frames/bytes per client at the HTTP write boundary —
+	// the wire-level half of the ESP measurement campaign. proccpu adds
+	// the transcoder cost (Linux only; stub returns 0 on Windows/macOS
+	// so dev builds compile and the JSON simply omits the field).
+	statsReg := stats.New()
+	cpuSampler, err := proccpu.NewSampler()
+	if err != nil {
+		logger.Printf("proccpu: disabled (%v); /stream/stats will omit CPU", err)
+		cpuSampler = nil
+	}
+
 	// --- HTTP signaling server ---------------------------------------------
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	srv, err := stream.NewServer(stream.ServerOptions{
-		Profiles:      reg,
-		SourceFactory: srcFactory,
-		Addr:          addr,
-		Logger:        logger,
-		FFmpegPath:    ffmpegPath,
-		EnableMJPEG:   enableMJPEG,
+		Profiles:         reg,
+		SourceFactory:    srcFactory,
+		Addr:             addr,
+		Logger:           logger,
+		FFmpegPath:       ffmpegPath,
+		EnableMJPEG:      enableMJPEG,
+		Stats:            statsReg,
+		CPU:              cpuSampler,
+		StatsLogInterval: 30 * time.Second,
 	})
 	if err != nil {
 		logger.Fatalf("server: %v", err)

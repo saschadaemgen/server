@@ -1,0 +1,291 @@
+// Package stats accumulates per-client and global throughput metrics
+// for the streaming-server.
+//
+// Purpose (S6-01): the ESP measurement campaign needs apples-to-apples
+// numbers across MJPEG variants and the new H.264-CBP transcode on the
+// same camera. Two questions drive every measurement:
+//
+//   - How many bytes per frame does the wire actually carry?
+//     (frames_sent + bytes_sent on a real client, observed at the HTTP
+//     write boundary — NOT estimated from encoder configuration.)
+//   - How expensive is the transcoder for the chosen settings?
+//     (handled by internal/proccpu; surfaced here as global.cpu_percent
+//     for symmetry.)
+//
+// The registry is intentionally append-only on the hot path: every
+// per-frame call is an [atomic.Int64.Add] on the Client's own counters,
+// no lock. The map lock is only taken on Register / Unregister /
+// Snapshot — the connect/disconnect rate is low enough that an
+// RWMutex is the right tool.
+//
+// Cumulative-since-connect averages: avg_fps and avg_bitrate_kbps are
+// computed at Snapshot time from total_frames / uptime and
+// total_bytes*8 / uptime. We deliberately do NOT keep a sliding window
+// in this first cut — the measurement workflow is "PUT new tuning,
+// reconnect, watch fresh numbers", so cumulative numbers map cleanly
+// onto a measurement run. A rolling window can be added later without
+// breaking the JSON shape (the field semantics would just sharpen).
+package stats
+
+import (
+	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// Client is one tracked viewer — typically one HTTP connection
+// (handleMJPEG / handleH264 / ...). Obtain via [Registry.Register];
+// release with [Registry.Unregister] (typically `defer`) once the HTTP
+// response is over.
+//
+// All counter fields are atomic; concurrent RecordFrame / RecordDrop
+// calls from any goroutine are safe.
+type Client struct {
+	// Immutable identification — populated by Register, never written
+	// again.
+	ID          uint64
+	Profile     string
+	Codec       string
+	RemoteAddr  string
+	ConnectedAt time.Time
+
+	// Hot-path counters.
+	framesSent    atomic.Int64
+	framesDropped atomic.Int64
+	bytesSent     atomic.Int64
+	lastFrameNs   atomic.Int64 // unix-nano of most recent RecordFrame
+}
+
+// RecordFrame is the per-frame instrumentation call. Increment by one
+// frame, add the byte count, and remember the wall-clock so the
+// snapshot can show staleness if the client is wedged.
+//
+// Safe to call from multiple goroutines (only one HTTP handler writes
+// per Client today, but the lock-free counters make this future-proof).
+func (c *Client) RecordFrame(bytes int) {
+	if c == nil {
+		return
+	}
+	c.framesSent.Add(1)
+	c.bytesSent.Add(int64(bytes))
+	c.lastFrameNs.Store(time.Now().UnixNano())
+}
+
+// RecordDrop counts a frame that was prepared but could not be
+// delivered to this client (e.g. HTTP write error, full subscriber
+// buffer at the hub layer). The current handleMJPEG calls this when
+// the HTTP write returns an error and the connection is torn down;
+// the per-viewer hub drops are still logged separately via droplog.
+func (c *Client) RecordDrop() {
+	if c == nil {
+		return
+	}
+	c.framesDropped.Add(1)
+}
+
+// ClientSnapshot is the JSON shape returned by /stream/stats per
+// connected client. Times are RFC3339 strings so they survive JSON
+// round-trips without timezone games; uptime / averages are scalar
+// numbers so an admin UI doesn't have to do its own arithmetic.
+type ClientSnapshot struct {
+	ID             uint64  `json:"id"`
+	Profile        string  `json:"profile"`
+	Codec          string  `json:"codec"`
+	RemoteAddr     string  `json:"remote_addr"`
+	ConnectedAt    string  `json:"connected_at"`
+	UptimeSec      float64 `json:"uptime_sec"`
+	FramesSent     int64   `json:"frames_sent"`
+	FramesDropped  int64   `json:"frames_dropped"`
+	BytesSent      int64   `json:"bytes_sent"`
+	AvgFPS         float64 `json:"avg_fps"`
+	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+	LastFrameAt    string  `json:"last_frame_at,omitempty"`
+}
+
+// snapshot captures the Client's current counter values into the
+// JSON-friendly snapshot. Called under Registry.mu (read lock).
+func (c *Client) snapshot(now time.Time) ClientSnapshot {
+	frames := c.framesSent.Load()
+	bytes := c.bytesSent.Load()
+	uptime := now.Sub(c.ConnectedAt).Seconds()
+	if uptime <= 0 {
+		uptime = 0.000001 // avoid div-by-zero on the first sample
+	}
+	var lastFrame string
+	if ns := c.lastFrameNs.Load(); ns > 0 {
+		lastFrame = time.Unix(0, ns).UTC().Format(time.RFC3339Nano)
+	}
+	return ClientSnapshot{
+		ID:             c.ID,
+		Profile:        c.Profile,
+		Codec:          c.Codec,
+		RemoteAddr:     c.RemoteAddr,
+		ConnectedAt:    c.ConnectedAt.UTC().Format(time.RFC3339Nano),
+		UptimeSec:      uptime,
+		FramesSent:     frames,
+		FramesDropped:  c.framesDropped.Load(),
+		BytesSent:      bytes,
+		AvgFPS:         float64(frames) / uptime,
+		AvgBitrateKbps: float64(bytes) * 8 / 1000 / uptime,
+		LastFrameAt:    lastFrame,
+	}
+}
+
+// ProfileSnapshot aggregates all clients of one profile name. The
+// admin UI uses this for the per-profile rows; the JSON tags match the
+// per-client shape where the semantic is identical so a renderer can
+// share code.
+type ProfileSnapshot struct {
+	Profile        string  `json:"profile"`
+	Codec          string  `json:"codec"`
+	Clients        int     `json:"clients"`
+	FramesSent     int64   `json:"frames_sent"`
+	FramesDropped  int64   `json:"frames_dropped"`
+	BytesSent      int64   `json:"bytes_sent"`
+	AvgFPS         float64 `json:"avg_fps"`
+	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+}
+
+// GlobalSnapshot is the server-wide aggregate. TranscoderCPUPercent
+// is filled in by the server from internal/proccpu — stats itself
+// doesn't sample CPU.
+type GlobalSnapshot struct {
+	Clients              int     `json:"clients"`
+	FramesSentTotal      int64   `json:"frames_sent_total"`
+	BytesSentTotal       int64   `json:"bytes_sent_total"`
+	TranscoderCPUPercent float64 `json:"transcoder_cpu_percent,omitempty"`
+}
+
+// Snapshot is the full /stream/stats document. The server marshals
+// this directly via encoding/json.
+type Snapshot struct {
+	GeneratedAt string                     `json:"generated_at"`
+	Global      GlobalSnapshot             `json:"global"`
+	Profiles    map[string]ProfileSnapshot `json:"profiles"`
+	Clients     []ClientSnapshot           `json:"clients"`
+}
+
+// Registry is the central client tracker. Pass one into the server;
+// every HTTP handler that streams frames registers / unregisters / and
+// calls RecordFrame on the returned Client.
+//
+// The zero value is NOT ready — use [New].
+type Registry struct {
+	mu      sync.RWMutex
+	clients map[uint64]*Client
+	nextID  uint64
+}
+
+// New returns a ready-to-use Registry.
+func New() *Registry {
+	return &Registry{clients: make(map[uint64]*Client)}
+}
+
+// Register creates a Client and adds it to the registry. The returned
+// pointer is the handle the caller uses for RecordFrame / RecordDrop;
+// call [Registry.Unregister] once the HTTP response is over.
+//
+// Allocating one *Client per HTTP connection is intentional: it keeps
+// the hot-path counters on a cache line owned by the connection's
+// goroutine.
+func (r *Registry) Register(profileName, codec, remoteAddr string) *Client {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID++
+	c := &Client{
+		ID:          r.nextID,
+		Profile:     profileName,
+		Codec:       codec,
+		RemoteAddr:  remoteAddr,
+		ConnectedAt: time.Now(),
+	}
+	r.clients[c.ID] = c
+	return c
+}
+
+// Unregister removes a client from the registry. Idempotent — calling
+// twice (or with a Client from a different Registry) is a no-op so
+// `defer reg.Unregister(c)` is always safe.
+func (r *Registry) Unregister(c *Client) {
+	if c == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.clients, c.ID)
+}
+
+// Snapshot returns the JSON-ready view of the current state. Safe to
+// call concurrently with Register / Unregister / RecordFrame.
+//
+// The Clients slice is sorted by ID (= connection order) so the
+// admin UI gets a stable ordering across snapshots. The Profiles map
+// uses the profile name as key.
+func (r *Registry) Snapshot() Snapshot {
+	now := time.Now()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	clientSnaps := make([]ClientSnapshot, 0, len(r.clients))
+	for _, c := range r.clients {
+		clientSnaps = append(clientSnaps, c.snapshot(now))
+	}
+	sort.Slice(clientSnaps, func(i, j int) bool {
+		return clientSnaps[i].ID < clientSnaps[j].ID
+	})
+
+	// Aggregate per profile + globally.
+	profiles := make(map[string]ProfileSnapshot)
+	var globalFrames, globalBytes int64
+	for _, cs := range clientSnaps {
+		ps := profiles[cs.Profile]
+		ps.Profile = cs.Profile
+		ps.Codec = cs.Codec
+		ps.Clients++
+		ps.FramesSent += cs.FramesSent
+		ps.FramesDropped += cs.FramesDropped
+		ps.BytesSent += cs.BytesSent
+		profiles[cs.Profile] = ps
+
+		globalFrames += cs.FramesSent
+		globalBytes += cs.BytesSent
+	}
+	// Profile-level averages: weighted by per-client uptime would be
+	// most accurate, but the per-client uptimes are already in the
+	// ClientSnapshot. Here we use a simple aggregate: total frames /
+	// total client-seconds, total bytes*8 / total client-seconds. This
+	// converges to "average per client" if all clients have similar
+	// uptime, which is the common case during a measurement run.
+	clientSeconds := make(map[string]float64)
+	for _, cs := range clientSnaps {
+		clientSeconds[cs.Profile] += cs.UptimeSec
+	}
+	for name, ps := range profiles {
+		secs := clientSeconds[name]
+		if secs > 0 {
+			ps.AvgFPS = float64(ps.FramesSent) / secs
+			ps.AvgBitrateKbps = float64(ps.BytesSent) * 8 / 1000 / secs
+		}
+		profiles[name] = ps
+	}
+
+	return Snapshot{
+		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
+		Global: GlobalSnapshot{
+			Clients:         len(clientSnaps),
+			FramesSentTotal: globalFrames,
+			BytesSentTotal:  globalBytes,
+		},
+		Profiles: profiles,
+		Clients:  clientSnaps,
+	}
+}
+
+// Count returns the number of currently registered clients. Cheap;
+// uses the registry's read lock only.
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.clients)
+}

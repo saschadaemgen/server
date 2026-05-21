@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,9 +19,11 @@ import (
 	"carvilon.local/stream/internal/droplog"
 	"carvilon.local/stream/internal/hub"
 	"carvilon.local/stream/internal/mjpeg"
+	"carvilon.local/stream/internal/proccpu"
 	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
 	"carvilon.local/stream/internal/sourcereg"
+	"carvilon.local/stream/internal/stats"
 )
 
 //go:embed web
@@ -49,6 +52,13 @@ type Server struct {
 	mjpegHub *mjpeg.Hub
 	addr     string
 	logger   *log.Logger
+
+	// S6-01 measurement apparatus. Both nil-safe: if unset, the
+	// /stream/stats endpoint returns zeros and the periodic log is
+	// silenced.
+	stats     *stats.Registry
+	cpu       *proccpu.Sampler
+	statsLog  time.Duration // 0 = no periodic log
 
 	api *webrtc.API
 	srv *http.Server
@@ -85,6 +95,24 @@ type ServerOptions struct {
 	// active. Defaults to true. Set to false for WebRTC-only dev runs
 	// on machines without ffmpeg.
 	EnableMJPEG bool
+
+	// Stats (optional) is the per-client throughput tracker that
+	// powers /stream/stats. If nil, /stream/stats reports an empty
+	// snapshot and the per-frame instrumentation in handleMJPEG is a
+	// no-op — the same code path runs, so the production binary's
+	// behaviour matches a Stats-less unit-test setup byte-for-byte.
+	Stats *stats.Registry
+
+	// CPU (optional) supplies the global.transcoder_cpu_percent field.
+	// On non-Linux builds this is the stub Sampler that always returns
+	// (0, false), so the field stays out of the JSON.
+	CPU *proccpu.Sampler
+
+	// StatsLogInterval, if non-zero, makes Run() spawn a goroutine
+	// that prints a human-readable line every interval. 0 (default)
+	// silences the periodic log. /stream/stats remains available
+	// regardless.
+	StatsLogInterval time.Duration
 }
 
 // NewServer builds a Server. Hubs and the source registry start here
@@ -117,6 +145,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		addr:     opts.Addr,
 		logger:   opts.Logger,
 		api:      api,
+		stats:    opts.Stats,
+		cpu:      opts.CPU,
+		statsLog: opts.StatsLogInterval,
 	}
 
 	if opts.EnableMJPEG {
@@ -137,6 +168,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/offer", s.handleOffer)
 	mux.HandleFunc("/api/stream.mjpeg", s.handleMJPEG)
 	mux.HandleFunc("/api/profiles", s.handleProfiles)
+	mux.HandleFunc("/stream/stats", s.handleStats)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -198,6 +230,12 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("stream: listen %s: %w", s.addr, err)
 	}
 	s.logger.Printf("stream: signaling + test page on http://%s", ln.Addr())
+
+	// S6-01: periodic stats logger. Starts only when StatsLogInterval
+	// was configured AND a Stats registry is wired; otherwise it's a
+	// no-op goroutine that returns immediately. The shared ctx makes
+	// shutdown automatic.
+	go s.runStatsLogger(ctx)
 
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- s.srv.Serve(ln) }()
@@ -433,6 +471,18 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// S6-01: register with the stats tracker so /stream/stats sees this
+	// client. The Profile lookup we already did above gave us the
+	// codec; reuse it so the tracker doesn't have to re-resolve. Nil
+	// stats registry → RecordFrame is a no-op (Client method on nil),
+	// so the production code path matches a stats-less unit test.
+	var sc *stats.Client
+	if s.stats != nil {
+		p, _ := s.profiles.Get(profName)
+		sc = s.stats.Register(profName, string(p.Codec), r.RemoteAddr)
+		defer s.stats.Unregister(sc)
+	}
+
 	writer := mjpeg.NewWriter(w)
 	ctx := r.Context()
 	for {
@@ -444,11 +494,15 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 				// Session ended (encoder died, server shutting down, …).
 				return
 			}
-			if _, err := writer.Write(frame); err != nil {
-				// Client gone, or proxy upstream closed. Either way we
-				// just exit; defer sub.Close() handles cleanup.
+			n, err := writer.Write(frame)
+			if err != nil {
+				// Client gone, or proxy upstream closed. Count the
+				// undelivered frame as a drop (so the snapshot shows
+				// where the stream stopped) and exit.
+				sc.RecordDrop()
 				return
 			}
+			sc.RecordFrame(n)
 			flusher.Flush()
 		}
 	}
@@ -484,6 +538,92 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	_, _ = io.WriteString(w, "]")
+}
+
+// handleStats implements GET /stream/stats — the JSON snapshot of the
+// per-client and global throughput counters that drive the S6-01
+// measurement campaign.
+//
+// Empty-Stats safe: if no stats.Registry is wired in, the response is a
+// minimal `{global:{clients:0,...}, profiles:{}, clients:[]}` shape so
+// admin UIs can poll the endpoint unconditionally.
+//
+// The endpoint is read-only and cheap (a slice of atomic Loads under a
+// short read lock); we intentionally do NOT cache it — every GET sees
+// a fresh sample so an admin manually refreshing the page can watch
+// the bitrate react to a tuning PUT.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	snap := s.collectStats()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(snap); err != nil {
+		// The header is already out; just log and move on. The admin
+		// UI will retry on the next poll.
+		s.logger.Printf("stream: stats encode: %v", err)
+	}
+}
+
+// collectStats builds the [stats.Snapshot] for /stream/stats AND for
+// the periodic logger. Pulling it into its own helper keeps the two
+// call sites in sync (same shape, same CPU sampling logic).
+func (s *Server) collectStats() stats.Snapshot {
+	var snap stats.Snapshot
+	if s.stats != nil {
+		snap = s.stats.Snapshot()
+	} else {
+		snap = stats.Snapshot{
+			GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			Profiles:    map[string]stats.ProfileSnapshot{},
+			Clients:     []stats.ClientSnapshot{},
+		}
+	}
+	if s.cpu != nil {
+		if pct, ok := s.cpu.Sample(); ok {
+			snap.Global.TranscoderCPUPercent = pct
+		}
+	}
+	return snap
+}
+
+// runStatsLogger emits a human-readable summary line every
+// s.statsLog interval. Off when statsLog == 0. The goroutine
+// terminates when ctx is cancelled (Server.Run's shutdown path).
+func (s *Server) runStatsLogger(ctx context.Context) {
+	if s.statsLog <= 0 {
+		return
+	}
+	t := time.NewTicker(s.statsLog)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			snap := s.collectStats()
+			// One concise summary line, plus one indented line per
+			// profile that currently has viewers. Empty system → one
+			// line, easy to grep.
+			cpuPart := ""
+			if snap.Global.TranscoderCPUPercent > 0 {
+				cpuPart = fmt.Sprintf(" cpu=%.1f%%", snap.Global.TranscoderCPUPercent)
+			}
+			s.logger.Printf("stats: clients=%d frames=%d bytes=%d%s",
+				snap.Global.Clients,
+				snap.Global.FramesSentTotal,
+				snap.Global.BytesSentTotal,
+				cpuPart,
+			)
+			for name, ps := range snap.Profiles {
+				s.logger.Printf("stats:   profile=%s codec=%s viewers=%d fps=%.1f kbps=%.1f bytes=%d",
+					name, ps.Codec, ps.Clients, ps.AvgFPS, ps.AvgBitrateKbps, ps.BytesSent)
+			}
+		}
+	}
 }
 
 // --- helpers ---------------------------------------------------------------
