@@ -17,6 +17,7 @@ import (
 
 	"carvilon.local/stream/internal/droplog"
 	"carvilon.local/stream/internal/hub"
+	"carvilon.local/stream/internal/mjpeg"
 )
 
 //go:embed web
@@ -39,9 +40,10 @@ const h264ClockRate = 90000
 // the last viewer leaves, the source is Closed. The next connection
 // rebuilds. This keeps the camera idle when no one is watching.
 type Server struct {
-	hub    *hub.Hub
-	addr   string
-	logger *log.Logger
+	hub      *hub.Hub
+	mjpegHub *mjpeg.Hub
+	addr     string
+	logger   *log.Logger
 
 	api *webrtc.API
 	srv *http.Server
@@ -66,6 +68,16 @@ type ServerOptions struct {
 	// SubscriberBuffer is forwarded to [hub.Options.SubscriberBuffer].
 	// Zero means hub default (30).
 	SubscriberBuffer int
+
+	// MJPEGProfiles registers MJPEG output profiles. If empty, the
+	// /api/stream.mjpeg endpoint returns 503 for every request — the
+	// server still serves WebRTC viewers fine, only MJPEG is disabled.
+	MJPEGProfiles []mjpeg.Profile
+
+	// FFmpegPath is the path to the ffmpeg binary used by the MJPEG
+	// encoder. Defaults to "ffmpeg" (resolved via $PATH). Ignored if
+	// MJPEGProfiles is empty.
+	FFmpegPath string
 }
 
 // NewServer builds a Server. The underlying hub is started here and
@@ -92,15 +104,32 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		SubscriberBuffer: opts.SubscriberBuffer,
 	})
 
+	var mh *mjpeg.Hub
+	if len(opts.MJPEGProfiles) > 0 {
+		var err error
+		mh, err = mjpeg.NewHub(mjpeg.HubOptions{
+			StreamHub:  h,
+			Profiles:   opts.MJPEGProfiles,
+			FFmpegPath: opts.FFmpegPath,
+			Logger:     opts.Logger,
+		})
+		if err != nil {
+			_ = h.Close()
+			return nil, fmt.Errorf("stream: mjpeg hub: %w", err)
+		}
+	}
+
 	s := &Server{
-		hub:    h,
-		addr:   opts.Addr,
-		logger: opts.Logger,
-		api:    api,
+		hub:      h,
+		mjpegHub: mh,
+		addr:     opts.Addr,
+		logger:   opts.Logger,
+		api:      api,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/offer", s.handleOffer)
+	mux.HandleFunc("/api/stream.mjpeg", s.handleMJPEG)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -139,9 +168,15 @@ func (s *Server) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.srv.Shutdown(shutdownCtx)
+		if s.mjpegHub != nil {
+			_ = s.mjpegHub.Close()
+		}
 		_ = s.hub.Close()
 		return ctx.Err()
 	case err := <-serveDone:
+		if s.mjpegHub != nil {
+			_ = s.mjpegHub.Close()
+		}
 		_ = s.hub.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -283,6 +318,79 @@ func (s *Server) feedTrack(sub *hub.Subscriber, track *webrtc.TrackLocalStaticSa
 			Duration: dur,
 		}); err != nil {
 			drops.Record(err)
+		}
+	}
+}
+
+// handleMJPEG implements GET /api/stream.mjpeg?src=<profile>.
+//
+// The endpoint is intentionally drop-in compatible with go2rtc — the
+// carvilon-proxy forwards bytes verbatim, so the wire format must match
+// to the byte. See [mjpeg.HeaderContentType] / [mjpeg.FramePrefix] for
+// the locked-in layout.
+//
+// The handler keeps a single [mjpeg.Subscriber] for the duration of the
+// HTTP response; closing the response (client disconnect or server
+// shutdown) closes the subscriber, which triggers the per-profile
+// session's last-viewer teardown if appropriate.
+func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.mjpegHub == nil {
+		http.Error(w, "mjpeg not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	profile := r.URL.Query().Get("src")
+	if profile == "" {
+		http.Error(w, "missing src parameter", http.StatusBadRequest)
+		return
+	}
+
+	sub, err := s.mjpegHub.Subscribe(profile)
+	if err != nil {
+		if errors.Is(err, mjpeg.ErrUnknownProfile) {
+			http.Error(w, "unknown profile", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "subscribe: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer sub.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	mjpeg.SetResponseHeaders(w)
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	writer := mjpeg.NewWriter(w)
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case frame, ok := <-sub.Frames():
+			if !ok {
+				// Session ended (encoder died, server shutting down, …).
+				return
+			}
+			if _, err := writer.Write(frame); err != nil {
+				// Client gone, or proxy upstream closed. Either way we
+				// just exit; defer sub.Close() handles cleanup.
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

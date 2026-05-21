@@ -9,13 +9,16 @@ CARVILON streaming-server. Go-Library plus eine spike-Binary.
 
 - **S1 (durch):** Multi-Source-Architektur, UniFi Protect-Quelle (RTSPS,
   eigener RFC-6184-Depacketizer), Live-Bild auf der Testseite.
-- **S2, Schritt 2 (jetzt):** Fan-Out — EINE Kamera, N WebRTC-Viewer.
-  Erster Viewer triggert den Kamera-Pull; letzter Viewer beendet ihn.
-  Slow Subscribers können den Bus oder andere Viewer nicht blockieren
-  (drop-statt-buffer pro Subscriber, gedrosseltes Logging). Neue
-  Subscriber bekommen sofort ein gecachtes IDR vorab in den Channel —
-  Bild startet ohne auf den nächsten Live-Keyframe zu warten.
-- **Schritt 3+** (MJPEG-Output, GenericRTSPSource, ESP32-Quelle,
+- **S2 (durch):** Fan-Out — EINE Kamera, N WebRTC-Viewer. Erster Viewer
+  triggert den Kamera-Pull; letzter Viewer beendet ihn. Drop-statt-buffer
+  pro Subscriber. Neue Subscriber bekommen ein gecachtes IDR vorab.
+- **S3, Schritt 3 (jetzt):** MJPEG-Output für ESP/Browser. ffmpeg als
+  Subprozess (kein cgo, kein Linken) macht decode+scale+JPEG-encode.
+  Eigener Fan-Out-Hub pro Profil; mehrere MJPEG-Clients teilen sich
+  einen Encoder. Byte-Schnitt 1:1 wie go2rtc — der carvilon-Proxy
+  kann von go2rtc auf streaming-server umgebogen werden ohne Änderung
+  am Proxy oder am ESP. **Nach diesem Schritt ist go2rtc ersetzbar.**
+- **Schritt 4+** (Profil-Admin-UI, GenericRTSPSource, ESP32-Quelle,
   Andocken an carvilon-server, Audio) sind explizit **nicht** Teil
   dieser Stufe.
 
@@ -44,6 +47,8 @@ cp .env.example .env
 | `UNIFI_QUALITY`            | nein    | `high`  | Stream-Tier (`high` / `medium` / `low`)                                                 |
 | `UNIFI_ENCRYPTION`         | nein    | `tls`   | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)      |
 | `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                                             |
+| `CARVILON_FFMPEG`          | nein    | `ffmpeg`| Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                    |
+| `CARVILON_DISABLE_MJPEG`   | nein    | —       | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                       |
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 
@@ -81,6 +86,14 @@ vom GoP-Intervall der Kamera).
 `unifi: got RTSPS URL ...` und **EIN** `unifi: first IDR ...` zeigen,
 egal wie viele Viewer dazukommen. Beim Schließen des letzten Tabs:
 `hub: source stopped (last subscriber left)`.
+
+**MJPEG testen:** Browser direkt auf
+`http://<host>:8555/api/stream.mjpeg?src=intercom_browser` (oder
+`?src=intercom_esp`) — Bewegtbild im Tab. Format ist byte-identisch
+zu go2rtc, daher kann der carvilon-Proxy seinen `STREAM_BACKEND_URL`
+auf diesen Server umbiegen ohne Änderung am ESP. Mehrere MJPEG-Clients
+am selben Profil teilen einen ffmpeg-Encoder (Log:
+`mjpeg: session "intercom_browser" viewer N joined (total=…)`).
 
 ## Cross-Compile für Raspberry Pi (arm64)
 
@@ -151,17 +164,50 @@ Backpressure endet beim einzelnen Subscriber-Buffer (Default 30 AUs,
 
 ```
 streaming-server/
-├── cmd/spike/         (Binary; baut SourceFactory)
-├── server.go          (HTTP-Signaling, pro Viewer eine PC+Track+Feeder)
+├── cmd/spike/         (Binary; baut SourceFactory + MJPEG-Profile)
+├── server.go          (HTTP-Signaling /offer + /api/stream.mjpeg)
 ├── web/index.html     (Testseite — in N Tabs öffnen für Fan-Out-Test)
 ├── internal/
 │   ├── h264/          (RFC-6184-Depacketizer + Unit-Tests)
-│   ├── hub/           (Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
+│   ├── hub/           (H.264-Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
+│   ├── mjpeg/         (ffmpeg-Encoder + JPEG-Fan-Out + go2rtc-Multipart)
 │   ├── droplog/       (rate-limited drop-counter)
 │   └── source/
 │       ├── source.go  (VideoSource-Interface)
 │       └── unifi/     (UniFiProtectSource)
 ```
+
+### MJPEG-Pipeline (S3)
+
+```
+H.264-Hub  ──Subscriber──►  mjpeg-Session (per Profil)
+                                    │
+                            forwarder Goroutine
+                                    │ AU → Annex-B → ffmpeg stdin
+                                    ▼
+                            ffmpeg-Subprozess
+                                    │ decode → scale → JPEG-encode
+                                    ▼ stdout (concat. JPEGs, FF D8 ... FF D9)
+                            FrameSplitter (SOI/EOI scan)
+                                    │
+                                    ▼
+                          mjpeg-Fan-Out → N HTTP-Clients
+                                            │
+                                            ▼
+                                  multipart/x-mixed-replace
+                                  (byte-exakt wie go2rtc)
+```
+
+Pro Profil ein eigener ffmpeg-Encoder. Wenn beide `intercom_esp` und
+`intercom_browser` gleichzeitig aktiv sind, laufen zwei ffmpegs (jeder
+mit eigenem Decode). Briefing-akzeptierter Trade-off — Optimierung
+"ein Decode, zwei Encodes" via `-filter_complex` ist ein späteres
+Briefing, kein Code-Strukturwechsel.
+
+**ffmpeg-Voraussetzung:** ein installiertes `ffmpeg` im `$PATH` (auf
+dem RPi via go2rtc ohnehin vorhanden). Startup prüft via
+`ffmpeg -version` und bricht hart ab wenn fehlt. `CARVILON_DISABLE_MJPEG=1`
+für reine WebRTC-Runs.
 
 ## Sicherheitsmodell
 
@@ -247,10 +293,13 @@ go test -race ./internal/hub/...   # zusätzlich: race-detector
 | Paket | Was getestet wird | Zweck |
 | --- | --- | --- |
 | `internal/h264` | RFC-6184-Depacketizer (18 Tests, alle sechs Packetization-Typen, Edge-Cases wie Seq-Gap, Start+End in einem Paket, STAP-A-Padding-Toleranz) | Wenn das Live-Bild fehlt, aber diese Tests grün sind, liegt der Fehler in Quelle/Verdrahtung — nicht im Depacketizer. |
-| `internal/hub` | Fan-Out-Bus (17 Tests, alle Lifecycle-Pfade, Slow-Subscriber-Isolation, IDR-Pre-Feed, Source-Restart, Concurrency-Stress mit `-race`) | Beweist die Properties, die go2rtc bei UniFi nie ganz hingekriegt hat: ein Pull für viele, drop-statt-buffer, kein Source-Block durch einen langsamen Viewer. |
+| `internal/hub` | H.264-Fan-Out-Bus (17 Tests, alle Lifecycle-Pfade, Slow-Subscriber-Isolation, IDR-Pre-Feed, Source-Restart, Concurrency-Stress mit `-race`) | Beweist die Properties, die go2rtc bei UniFi nie ganz hingekriegt hat: ein Pull für viele, drop-statt-buffer, kein Source-Block durch einen langsamen Viewer. |
+| `internal/mjpeg` multipart + splitter | go2rtc-byte-kompatibler Multipart-Writer + JPEG-SOI/EOI-Splitter (13 Tests, byte-exact, Edge-Cases wie Pre-SOI-Banner) | Lockt den Wire-Schnitt fest — der carvilon-Proxy forwarded verbatim. |
+| `internal/mjpeg` profiles + encoder | Strukturiertes Profil-Modell + ffmpeg-Args-Construction (8 Tests, alle Felder validate, Args-Layout korrekt, CheckFFmpeg-Fehlerpfad) | Profile sind editierbar ohne Code-Change, ffmpeg-Misconfig schlägt fail-fast. |
+| `internal/mjpeg` hub | JPEG-Fan-Out (14 Tests, Per-Profil-Lifecycle, Single-Encoder-für-N, Crash-Kaskade, race-clean) | EIN ffmpeg pro Profil, egal wie viele Clients. |
 | `internal/source/unifi` SDP-Tests | `sdpSecurityReport` redaktiert Inline-Keys und MIKEY-Payloads | Geheimnisse dürfen NIE im Log landen — Tests prüfen das aktiv (5 Tests). |
 | `internal/source/unifi` Encryption-Tests | `stripEnableSrtp` und `NewSource`-Encryption-Validierung | Sicherstellt: `enableSrtp` weg, andere Query-Felder bleiben, `srtp`-Modus kommt mit klarem Fehler raus (10 Tests). |
 
-Insgesamt 50 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
+Insgesamt 87 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
 einem Live-Problem zeigen die Tests, ob das Problem im Code oder in
 der Verdrahtung liegt.
