@@ -143,11 +143,42 @@
     }
 
     async function disconnect() {
+      // CARVILON-Doktrin: der Browser-Viewer macht EIGENEN
+      // WebRTC-Teardown (track.stop + pc.close) und verlaesst sich
+      // NICHT auf Server-/UA-Teardown. Ohne track.stop() haengen die
+      // empfangenen MediaStreamTracks weiter — bei vielen Connect/
+      // Disconnect-Zyklen sammeln sich Ressourcen an.
+      //
+      // Robust gegen Doppelaufruf: alle Operationen sind null-guarded
+      // und in try/catch gekapselt, weil disconnect sowohl vom Button
+      // als auch aus dem Fehlerpfad in connect() gerufen werden kann.
       if (pc) {
+        try {
+          pc.getReceivers().forEach((r) => {
+            if (r.track) {
+              try { r.track.stop(); } catch {}
+            }
+          });
+        } catch {}
         try { pc.close(); } catch {}
         pc = null;
       }
-      $video.srcObject = null;
+      // Belt-and-suspenders: stoppe auch die Tracks an der MediaStream
+      // im <video>-Element. Konzeptuell dieselben Tracks wie an den
+      // Receivern; das zweite Stop ist idempotent und schadet nichts,
+      // schuetzt aber gegen Edge-Cases (z.B. Track wurde vor pc.close
+      // schon vom Server stillgelegt).
+      if ($video.srcObject) {
+        try {
+          const ms = $video.srcObject;
+          if (ms && typeof ms.getTracks === 'function') {
+            ms.getTracks().forEach((t) => {
+              try { t.stop(); } catch {}
+            });
+          }
+        } catch {}
+        $video.srcObject = null;
+      }
       $disconnect.disabled = true;
       $connect.disabled = false;
       setStatus('idle');
@@ -168,6 +199,17 @@
 
     $connect.addEventListener('click', connect);
     $disconnect.addEventListener('click', disconnect);
+
+    // Bei Tab-Schliessung sauber abbauen, ohne auf Server-Timeout zu
+    // warten. pagehide ist der modernere Hook (verlaesslich auf Mobile,
+    // wo beforeunload manchmal nicht feuert); beforeunload ist als
+    // Belt-and-suspenders fuer aeltere Browser/Desktops dabei.
+    // Beide Handler nehmen die synchrone Pfad von disconnect() (alle
+    // WebRTC-Calls sind fire-and-forget); auf den Promise warten wir
+    // bewusst nicht — bei unload waere das ohnehin sinnlos.
+    window.addEventListener('pagehide', () => { disconnect(); });
+    window.addEventListener('beforeunload', () => { disconnect(); });
+
     loadProfiles();
   </script>
 </body>
