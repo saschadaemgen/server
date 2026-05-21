@@ -1,11 +1,14 @@
-// Saison 14-01: admin CRUD for go2rtc stream profiles.
+// Saison 14-01: admin CRUD for stream profiles.
+// Saison 15-01: surface migrated behind the streams.StreamBackend
+// seam; profile CRUD is transitional.
 //
-// The page lives under /a/streams and proxies the go2rtc REST API
-// through the regular admin-session middleware. Calls into
-// internal/streams; the actual YAML editing happens server-side
-// inside go2rtc, which means changes take effect live (existing
-// consumers reconnect on the next chunk; new viewers immediately
-// hit the new pipeline).
+// The page lives under /a/streams and renders against whichever
+// backend the operator has wired. With the public-build default
+// (Unconfigured), the page renders a "kein Stream-Backend wired"
+// banner. With the transitional go2rtc client, List/Get/Delete
+// still work; Put returns ErrNotConfigured because profile CRUD
+// moves to the carvilon-streaming-server (a structured form
+// lands once that backend is plugged in).
 //
 // Routes (registered in server.go):
 //
@@ -94,18 +97,31 @@ func validateStreamSource(src string) error {
 	return nil
 }
 
-// rewriteStreamBackendError converts the most common go2rtc REST
-// error messages into a German-language hint so the admin UI
-// flash is useful out of the box. The biggest one is the "source
-// with spaces may be insecure" 400 that go2rtc raises on its PUT
-// /api/streams endpoint - the only known workaround on the
-// go2rtc side is to edit go2rtc.yaml directly and restart.
+// rewriteStreamBackendError converts the most common stream-
+// backend error messages into a German-language hint so the
+// admin UI flash is useful out of the box.
+//
+// Saison 15-01: ErrNotConfigured from Put is the migration
+// signal. The transitional go2rtc client stubs Put because
+// profile CRUD moves to the carvilon-streaming-server; the new
+// structured form lands once that backend is wired. Until then
+// the operator gets a clear hint instead of a generic 502.
+//
+// The legacy "source with spaces may be insecure" mapping from
+// the go2rtc PUT path stays in place for the historical Update
+// surface even though Put itself no longer reaches go2rtc - the
+// rule still applies for any backend that accepts free-form
+// source URLs.
 func rewriteStreamBackendError(err error) string {
+	if errors.Is(err, streams.ErrNotConfigured) {
+		return "Profil-CRUD ist auf den eigenen carvilon-streaming-server umgezogen; " +
+			"das strukturierte Formular (Kamera, Qualitaet, Nutzung) kommt mit dem naechsten Update."
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "source with spaces may be insecure") {
-		return "go2rtc lehnt Source-URLs mit Leerzeichen ueber die REST-API ab " +
-			"(Backend-Sicherheits-Check). Workaround: go2rtc.yaml auf dem RPi " +
-			"manuell editieren und den go2rtc-Dienst neu starten."
+		return "Stream-Backend lehnt Source-URLs mit Leerzeichen ueber die REST-API ab " +
+			"(Sicherheits-Check). Workaround: Backend-Config manuell editieren und den " +
+			"Dienst neu starten."
 	}
 	return msg
 }
@@ -174,6 +190,22 @@ func adminStreamDefaults() []streamDefault {
 	}
 }
 
+// streamBackendBaseURL is a soft accessor for the operator-facing
+// "API: <url>" hint. The StreamBackend interface intentionally
+// has no BaseURL method (the seam exposes URLs only via
+// MJPEGURL/WebRTCSignalURL); the admin UI just wants a display
+// string for the banner. We type-assert against the concrete
+// go2rtc Client for now; the future commercial backend can grow
+// the same accessor when it lands. Unknown backends return "".
+type baseURLer interface{ BaseURL() string }
+
+func streamBackendBaseURL(b streams.StreamBackend) string {
+	if u, ok := b.(baseURLer); ok {
+		return u.BaseURL()
+	}
+	return ""
+}
+
 func (s *Server) handleAdminStreamsList(w http.ResponseWriter, r *http.Request) {
 	data := s.buildStreamsData(r)
 	s.renderAdminPage(w, "streams", data)
@@ -194,7 +226,7 @@ func (s *Server) handleAdminStreamsListJSON(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAdminStreamsCreate(w http.ResponseWriter, r *http.Request) {
-	if s.streams == nil {
+	if !s.streams.Configured() {
 		http.Error(w, "stream backend not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -212,9 +244,21 @@ func (s *Server) handleAdminStreamsCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
-	if err := s.streams.Put(r.Context(), name, []string{source}); err != nil {
-		s.log.Error("admin streams create", "err", err, "name", name)
-		http.Error(w, "Anlegen fehlgeschlagen: "+rewriteStreamBackendError(err), http.StatusBadGateway)
+	// Saison 15-01: the new Put signature takes a structured
+	// Profile. Until the structured admin form lands (follow-up
+	// briefing), we park the legacy source string in Description
+	// so the new streaming server can later parse it back. The
+	// transitional go2rtc client returns ErrNotConfigured here -
+	// rewriteStreamBackendError surfaces the migration hint.
+	prof := streams.Profile{Name: name, Description: source}
+	if err := s.streams.Put(r.Context(), prof); err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, streams.ErrNotConfigured) {
+			status = http.StatusServiceUnavailable
+		} else {
+			s.log.Error("admin streams create", "err", err, "name", name)
+		}
+		http.Error(w, "Anlegen fehlgeschlagen: "+rewriteStreamBackendError(err), status)
 		return
 	}
 	s.log.Info("admin stream profile created", "name", name)
@@ -231,14 +275,14 @@ func (s *Server) handleAdminStreamsEdit(w http.ResponseWriter, r *http.Request) 
 	data := adminStreamEditData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 	}
-	if s.streams == nil {
+	if !s.streams.Configured() {
 		data.Configured = false
 		data.Profile = streamRow{Name: name}
 		s.renderAdminPage(w, "stream-edit", data)
 		return
 	}
 	data.Configured = true
-	data.BackendURL = s.streams.BaseURL()
+	data.BackendURL = streamBackendBaseURL(s.streams)
 	prof, err := s.streams.Get(r.Context(), name)
 	if err != nil {
 		if errors.Is(err, streams.ErrProfileNotFound) {
@@ -251,14 +295,14 @@ func (s *Server) handleAdminStreamsEdit(w http.ResponseWriter, r *http.Request) 
 	}
 	data.Profile = streamRow{
 		Name:      prof.Name,
-		Source:    firstSource(prof.Sources),
+		Source:    prof.Description,
 		Consumers: prof.Consumers,
 	}
 	s.renderAdminPage(w, "stream-edit", data)
 }
 
 func (s *Server) handleAdminStreamsUpdate(w http.ResponseWriter, r *http.Request) {
-	if s.streams == nil {
+	if !s.streams.Configured() {
 		http.Error(w, "stream backend not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -276,9 +320,18 @@ func (s *Server) handleAdminStreamsUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
-	if err := s.streams.Put(r.Context(), name, []string{source}); err != nil {
-		s.log.Error("admin streams update", "err", err, "name", name)
-		http.Error(w, "Speichern fehlgeschlagen: "+rewriteStreamBackendError(err), http.StatusBadGateway)
+	// Saison 15-01: same transitional pattern as Create. Once the
+	// structured form lands, the source string is replaced by the
+	// CameraID/Quality/Usage triple.
+	prof := streams.Profile{Name: name, Description: source}
+	if err := s.streams.Put(r.Context(), prof); err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, streams.ErrNotConfigured) {
+			status = http.StatusServiceUnavailable
+		} else {
+			s.log.Error("admin streams update", "err", err, "name", name)
+		}
+		http.Error(w, "Speichern fehlgeschlagen: "+rewriteStreamBackendError(err), status)
 		return
 	}
 	s.log.Info("admin stream profile updated", "name", name)
@@ -286,7 +339,7 @@ func (s *Server) handleAdminStreamsUpdate(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAdminStreamsDelete(w http.ResponseWriter, r *http.Request) {
-	if s.streams == nil {
+	if !s.streams.Configured() {
 		http.Error(w, "stream backend not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -326,31 +379,24 @@ func (s *Server) buildStreamsData(r *http.Request) adminStreamsData {
 		User:     adminUser{Name: username, Initials: initialsOf(username)},
 		Defaults: adminStreamDefaults(),
 	}
-	if s.streams == nil {
+	if !s.streams.Configured() {
 		return data
 	}
 	data.Configured = true
-	data.BackendURL = s.streams.BaseURL()
+	data.BackendURL = streamBackendBaseURL(s.streams)
 	profiles, err := s.streams.List(r.Context())
 	if err != nil {
 		s.log.Warn("admin streams list", "err", err)
-		data.Flash = "go2rtc nicht erreichbar: " + err.Error()
+		data.Flash = "Stream-Backend nicht erreichbar: " + err.Error()
 		data.FlashType = "red"
 		return data
 	}
 	for _, p := range profiles {
 		data.Profiles = append(data.Profiles, streamRow{
 			Name:      p.Name,
-			Source:    firstSource(p.Sources),
+			Source:    p.Description,
 			Consumers: p.Consumers,
 		})
 	}
 	return data
-}
-
-func firstSource(s []string) string {
-	if len(s) == 0 {
-		return ""
-	}
-	return s[0]
 }

@@ -25,13 +25,23 @@ var ErrNotConfigured = errors.New("streams: backend URL not configured")
 var ErrProfileNotFound = errors.New("streams: profile not found")
 
 // Client wraps the go2rtc REST API at <baseURL>/api/.
+//
+// Saison 15-01: Client is now a transitional implementation of
+// the StreamBackend interface. Stream URLs (MJPEG + WebRTC) and
+// the List/Get/Delete surface still talk to go2rtc; Put returns
+// ErrNotConfigured because profile CRUD is moving to the carvilon
+// streaming server. ListCameras returns empty because go2rtc has
+// no Protect connection.
 type Client struct {
 	baseURL string
 	http    *http.Client
 }
 
+// Compile-time guarantee that Client satisfies StreamBackend.
+var _ StreamBackend = (*Client)(nil)
+
 // New builds a Client against the given go2rtc base URL (the same
-// value the operator put in UNIFIX_STREAM_BACKEND_URL). The URL
+// value the operator put in CARVILON_STREAM_BACKEND_URL). The URL
 // must NOT include /api/stream.mjpeg or any other path; the
 // client appends its own paths.
 //
@@ -45,7 +55,7 @@ func New(baseURL string) (*Client, error) {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		http: &http.Client{
 			// REST calls finish in milliseconds in practice; cap so
-			// a hung go2rtc cannot block admin UI threads.
+			// a hung backend cannot block admin UI threads.
 			Timeout: 5 * time.Second,
 		},
 	}, nil
@@ -53,20 +63,49 @@ func New(baseURL string) (*Client, error) {
 
 // BaseURL exposes the configured root URL. Used by stream-proxy
 // handlers to build the MJPEG passthrough URL without having to
-// re-parse UNIFIX_STREAM_BACKEND_URL themselves.
+// re-parse the env var themselves.
 func (c *Client) BaseURL() string { return c.baseURL }
+
+// Configured satisfies StreamBackend. A constructed Client is
+// always wired to a backend (New rejects empty URLs).
+func (c *Client) Configured() bool { return true }
 
 // MJPEGURL renders the canonical MJPEG-passthrough URL for the
 // given profile name. The handlers consume this directly with a
 // plain http.Get so they can stream the body to the caller with
 // http.Flusher.
+//
+// The path matches go2rtc's REST surface. When the proxy is moved
+// to the carvilon-streaming-server (env URL flip 1984 -> 8555)
+// the same path stays valid; the new server mirrors go2rtc's
+// /api/stream.mjpeg endpoint on purpose so the proxy code does
+// not have to change.
 func (c *Client) MJPEGURL(profile string) string {
 	return c.baseURL + "/api/stream.mjpeg?src=" + url.QueryEscape(profile)
+}
+
+// WebRTCSignalURL builds the absolute URL the browser POSTs its
+// SDP offer to. Form: <base>/offer?src=<profile>. The carvilon-
+// streaming-server exposes this endpoint; go2rtc itself does not
+// (the transitional Client cannot serve real WebRTC, but the
+// caller still gets a well-formed URL it can wave at the env-var
+// flip to 8555).
+//
+// Saison 15-01: reserved seam. The /webviewer/offer proxy handler
+// is the only caller today.
+func (c *Client) WebRTCSignalURL(profile string) string {
+	return c.baseURL + "/offer?src=" + url.QueryEscape(profile)
 }
 
 // List asks go2rtc for every configured stream. The wire format
 // is {"<name>": {"producers": [...], "consumers": [...]}, ...};
 // we flatten it into a sorted []Profile slice for the admin UI.
+//
+// Saison 15-01: the structured Profile fields (CameraID, Quality,
+// Usage, Description) stay empty because go2rtc has no concept
+// of them. The admin UI renders only Name + Consumers off this
+// transitional response; the structured form lands once the
+// carvilon-streaming-server is wired.
 func (c *Client) List(ctx context.Context) ([]Profile, error) {
 	body, err := c.do(ctx, http.MethodGet, "/api/streams", nil)
 	if err != nil {
@@ -86,6 +125,7 @@ func (c *Client) List(ctx context.Context) ([]Profile, error) {
 }
 
 // Get returns one profile by name. Maps a 404 to ErrProfileNotFound.
+// Same caveat as List: structured fields stay empty.
 func (c *Client) Get(ctx context.Context, name string) (Profile, error) {
 	if strings.TrimSpace(name) == "" {
 		return Profile{}, fmt.Errorf("streams: get: empty name")
@@ -103,39 +143,25 @@ func (c *Client) Get(ctx context.Context, name string) (Profile, error) {
 	return r.toProfile(name), nil
 }
 
-// Put creates or replaces a profile. Multiple source URLs are
-// allowed; the admin UI passes them as a slice. Empty sources is
-// rejected by go2rtc with a 400; we mirror that.
+// Put is intentionally a stub during the saison-15-01 transition.
+// Profile CRUD moves to the carvilon-streaming-server; the public
+// build returns ErrNotConfigured so the admin UI can flash the
+// migration hint without crashing.
 //
-// go2rtc accepts the source URL as the value of repeated src
-// query parameters (?src=<url>&src=<url>...). The body is empty.
-// On success it returns 200 with an empty body.
-func (c *Client) Put(ctx context.Context, name string, sources []string) error {
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("streams: put: empty name")
-	}
-	if len(sources) == 0 {
-		return fmt.Errorf("streams: put: at least one source URL required")
-	}
-	q := url.Values{}
-	q.Set("name", name)
-	for _, src := range sources {
-		s := strings.TrimSpace(src)
-		if s == "" {
-			continue
-		}
-		q.Add("src", s)
-	}
-	body, err := c.do(ctx, http.MethodPut, "/api/streams?"+q.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	_ = body.Close()
-	return nil
+// The old (name, sources) signature was replaced by Put(Profile)
+// when the seam landed. go2rtc cannot represent the structured
+// fields (CameraID/Quality/Usage/Description) anyway, so even a
+// best-effort fallback would silently lose data; better to fail
+// loudly and direct the operator at the upcoming structured form.
+func (c *Client) Put(_ context.Context, _ Profile) error {
+	return ErrNotConfigured
 }
 
 // Delete removes a profile. Maps 404 to ErrProfileNotFound so the
 // admin UI can render "schon weg" instead of a generic error.
+//
+// Kept functional during the transition because pruning a stale
+// go2rtc profile is still useful even after Put has moved.
 func (c *Client) Delete(ctx context.Context, name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("streams: delete: empty name")
@@ -147,6 +173,13 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 	}
 	_ = body.Close()
 	return nil
+}
+
+// ListCameras is a no-op stub during the transition: go2rtc has
+// no Protect connection. The admin UI's camera-dropdown stays
+// empty until the carvilon-streaming-server takes over.
+func (c *Client) ListCameras(_ context.Context) ([]Camera, error) {
+	return []Camera{}, nil
 }
 
 // do issues a request to <baseURL><path> and returns the response
@@ -185,15 +218,8 @@ type rawProfile struct {
 }
 
 func (r rawProfile) toProfile(name string) Profile {
-	srcs := make([]string, 0, len(r.Producers))
-	for _, p := range r.Producers {
-		if p.URL != "" {
-			srcs = append(srcs, p.URL)
-		}
-	}
 	return Profile{
 		Name:      name,
-		Sources:   srcs,
 		Consumers: len(r.Consumers),
 	}
 }

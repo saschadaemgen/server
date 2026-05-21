@@ -93,10 +93,14 @@ type Deps struct {
 	// answer/reject/end-call endpoints arbitrate against. Nil
 	// disables the lifecycle path entirely (calls return 503).
 	DoorbellCalls *doorbellcalls.Service
-	// Streams is the go2rtc admin client (saison-14-01). Nil when
-	// UNIFIX_STREAM_BACKEND_URL is empty; the /a/streams page
-	// then renders a "go2rtc nicht konfiguriert"-Hinweis.
-	Streams *streams.Client
+	// Streams is the video backend seam (saison-15-01). Pass any
+	// streams.StreamBackend implementation; nil falls back to
+	// streams.Unconfigured() inside New so handler code never has
+	// to nil-check, only Configured(). The transitional go2rtc
+	// client lives at carvilon.local/server/internal/streams.New;
+	// the commercial carvilon-streaming-server will plug in via a
+	// build tag in a later season.
+	Streams streams.StreamBackend
 	// Weather is the open-meteo client used by the mieter
 	// screensaver (saison-14-01b). Nil disables /webviewer/weather
 	// and /a/weather with 503; the screensaver hides its weather
@@ -123,7 +127,7 @@ type Server struct {
 	eventsHeartbeat time.Duration
 	eventBus        *eventbus.Bus
 	calls           *doorbellcalls.Service
-	streams         *streams.Client
+	streams         streams.StreamBackend
 	weather         *weather.Client
 	log             *slog.Logger
 	mux             *http.ServeMux
@@ -154,6 +158,11 @@ func New(deps Deps) (*Server, error) {
 	}
 	if deps.EventBus == nil {
 		deps.EventBus = eventbus.New()
+	}
+	// Saison 15-01: drop nil-checks at every call site by falling
+	// back to the 503-default Unconfigured backend.
+	if deps.Streams == nil {
+		deps.Streams = streams.Unconfigured()
 	}
 	srv := &Server{
 		cfg:             deps.Config,
@@ -210,6 +219,11 @@ func (s *Server) routes() {
 	// Saison 14-01: live MJPEG passthrough for the ringing overlay
 	// (and optionally the idle stream slot).
 	s.mux.Handle("GET /webviewer/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
+	// Saison 15-01: WebRTC signalling proxy. Browser POSTs SDP
+	// offer; we forward to streams.StreamBackend.WebRTCSignalURL
+	// for the viewer's resolved profile and stream the SDP answer
+	// back. 503 when no backend is configured.
+	s.mux.Handle("POST /webviewer/offer", s.requireSession(http.HandlerFunc(s.handleMieterOffer)))
 	// Saison 14-01b: tenant settings (idle-view-mode) and weather
 	// pull for the screensaver.
 	s.mux.Handle("GET /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))

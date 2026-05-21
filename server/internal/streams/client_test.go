@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strings"
 	"testing"
 )
 
@@ -25,6 +23,32 @@ func TestMJPEGURLEncodesProfile(t *testing.T) {
 	want := "http://127.0.0.1:1984/api/stream.mjpeg?src=intercom+esp"
 	if got != want {
 		t.Fatalf("MJPEGURL: got %q want %q", got, want)
+	}
+}
+
+// Saison 15-01: the seam reserved /offer?src=<profile> for the
+// browser WebRTC signalling POST. WebRTCSignalURL must build the
+// same path against the backend so the proxy handler can copy the
+// body straight through.
+func TestWebRTCSignalURLEncodesProfile(t *testing.T) {
+	c, _ := New("http://127.0.0.1:8555/")
+	got := c.WebRTCSignalURL("browser hd")
+	want := "http://127.0.0.1:8555/offer?src=browser+hd"
+	if got != want {
+		t.Fatalf("WebRTCSignalURL: got %q want %q", got, want)
+	}
+}
+
+// Configured() always returns true for a constructed Client; the
+// unconfiguredBackend in backend.go returns false. Handlers gate
+// on this instead of nil-checking the Client.
+func TestConfiguredReportsTrue(t *testing.T) {
+	c, _ := New("http://127.0.0.1:1984/")
+	if !c.Configured() {
+		t.Fatalf("Configured() = false, want true for a constructed Client")
+	}
+	if u := Unconfigured(); u.Configured() {
+		t.Fatalf("Unconfigured().Configured() = true, want false")
 	}
 }
 
@@ -56,39 +80,37 @@ func TestListDecodesGo2RTCShape(t *testing.T) {
 	if profiles[1].Consumers != 2 {
 		t.Fatalf("intercom_esp consumers: want 2, got %d", profiles[1].Consumers)
 	}
+	// Saison 15-01: structured fields stay empty for the
+	// transitional go2rtc backend.
+	if profiles[0].CameraID != "" || profiles[0].Quality != "" || profiles[0].Usage != "" {
+		t.Errorf("transitional Profile should leave structured fields empty, got %+v", profiles[0])
+	}
 }
 
-func TestPutSendsRepeatedSrcQuery(t *testing.T) {
-	var captured *http.Request
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		captured = r.Clone(context.Background())
+// Saison 15-01: Put returns ErrNotConfigured because profile CRUD
+// is migrating to the carvilon-streaming-server. The admin UI
+// flashes the migration message; no go2rtc REST call is made.
+func TestPutIsTransitionalStub(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
 	c, _ := New(srv.URL)
-	err := c.Put(context.Background(), "intercom_esp", []string{
-		"ffmpeg:intercom_high#video=mjpeg#raw=-r 9 -q:v 6",
+	err := c.Put(context.Background(), Profile{
+		Name:        "intercom_esp",
+		CameraID:    "cam-1",
+		Quality:     "low",
+		Usage:       "esp",
+		Description: "ESP profile",
 	})
-	if err != nil {
-		t.Fatalf("put: %v", err)
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("Put: want ErrNotConfigured, got %v", err)
 	}
-	if captured == nil {
-		t.Fatal("server did not receive the request")
-	}
-	if captured.Method != http.MethodPut {
-		t.Fatalf("want PUT, got %s", captured.Method)
-	}
-	q, err := url.ParseQuery(captured.URL.RawQuery)
-	if err != nil {
-		t.Fatalf("parse query: %v", err)
-	}
-	if q.Get("name") != "intercom_esp" {
-		t.Fatalf("want name=intercom_esp, got %q", q.Get("name"))
-	}
-	src := q.Get("src")
-	if !strings.HasPrefix(src, "ffmpeg:intercom_high") {
-		t.Fatalf("missing ffmpeg src: %q", src)
+	if hit {
+		t.Error("Put hit go2rtc REST; should be a local stub")
 	}
 }
 
@@ -120,5 +142,51 @@ func TestDeleteRequestsBackend(t *testing.T) {
 	want := "/api/streams?src=intercom_high"
 	if calledPath != want {
 		t.Fatalf("delete path: want %q got %q", want, calledPath)
+	}
+}
+
+// Saison 15-01: go2rtc has no Protect connection; ListCameras
+// returns an empty slice so the admin UI's camera-dropdown can
+// render an "Quelle waehlbar ab Stream-Server"-Hinweis.
+func TestListCamerasIsEmpty(t *testing.T) {
+	c, _ := New("http://127.0.0.1:1984/")
+	cams, err := c.ListCameras(context.Background())
+	if err != nil {
+		t.Fatalf("ListCameras: %v", err)
+	}
+	if len(cams) != 0 {
+		t.Errorf("ListCameras returned %d entries, want 0", len(cams))
+	}
+}
+
+// Saison 15-01: backend.go's unconfiguredBackend covers the
+// public-build default. Verify the empty-URL + ErrNotConfigured
+// surface so main.go can wire it without nil-checks.
+func TestUnconfiguredBackend(t *testing.T) {
+	b := Unconfigured()
+	if b.MJPEGURL("x") != "" {
+		t.Errorf("MJPEGURL: want empty, got %q", b.MJPEGURL("x"))
+	}
+	if b.WebRTCSignalURL("x") != "" {
+		t.Errorf("WebRTCSignalURL: want empty, got %q", b.WebRTCSignalURL("x"))
+	}
+	if _, err := b.List(context.Background()); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("List: want ErrNotConfigured, got %v", err)
+	}
+	if _, err := b.Get(context.Background(), "x"); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("Get: want ErrNotConfigured, got %v", err)
+	}
+	if err := b.Put(context.Background(), Profile{Name: "x"}); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("Put: want ErrNotConfigured, got %v", err)
+	}
+	if err := b.Delete(context.Background(), "x"); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("Delete: want ErrNotConfigured, got %v", err)
+	}
+	cams, err := b.ListCameras(context.Background())
+	if err != nil {
+		t.Errorf("ListCameras: %v", err)
+	}
+	if len(cams) != 0 {
+		t.Errorf("ListCameras: want 0 entries, got %d", len(cams))
 	}
 }

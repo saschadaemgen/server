@@ -10,6 +10,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"carvilon.local/server/internal/streams"
 )
 
 func TestStreamSourceValidation_FFmpegSyntaxWithSpaces(t *testing.T) {
@@ -69,19 +71,38 @@ func TestStreamSourceValidation_EmptySource(t *testing.T) {
 	}
 }
 
-// Saison 14-01-FIX04: when go2rtc itself rejects a source via its
+// Saison 14-01-FIX04: when the backend rejects a source via its
 // PUT-API space-check, the admin handler surfaces a friendlier
-// German-language hint that points the operator at the YAML
-// workaround instead of leaving them with an opaque
+// German-language hint that points the operator at the backend-
+// config workaround instead of leaving them with an opaque
 // "HTTP 400: source with spaces may be insecure".
+//
+// Saison 15-01 re-branding: the message no longer says "go2rtc"
+// since the same check could fire from the carvilon-streaming-
+// server too. Wording is now backend-neutral.
 func TestRewriteStreamBackendError_SourceWithSpaces(t *testing.T) {
 	in := errors.New("streams: PUT /api/streams?name=foo&src=ffmpeg+...: HTTP 400: source with spaces may be insecure")
 	out := rewriteStreamBackendError(in)
-	if !strings.Contains(out, "go2rtc lehnt Source-URLs mit Leerzeichen") {
+	if !strings.Contains(out, "Stream-Backend lehnt Source-URLs mit Leerzeichen") {
 		t.Errorf("rewrite missing space-reject hint: %q", out)
 	}
-	if !strings.Contains(out, "go2rtc.yaml") {
-		t.Errorf("rewrite missing YAML-workaround hint: %q", out)
+	if !strings.Contains(out, "Backend-Config") {
+		t.Errorf("rewrite missing backend-config-workaround hint: %q", out)
+	}
+}
+
+// Saison 15-01: Put on the transitional go2rtc backend returns
+// ErrNotConfigured because profile CRUD migrates to the carvilon-
+// streaming-server. The rewrite must surface that hint instead
+// of leaking the raw "backend URL not configured" string into
+// the admin UI flash.
+func TestRewriteStreamBackendError_NotConfiguredMigrationHint(t *testing.T) {
+	out := rewriteStreamBackendError(streams.ErrNotConfigured)
+	if !strings.Contains(out, "carvilon-streaming-server") {
+		t.Errorf("rewrite missing migration hint: %q", out)
+	}
+	if !strings.Contains(out, "strukturierte Formular") {
+		t.Errorf("rewrite missing form-coming-later hint: %q", out)
 	}
 }
 

@@ -1,9 +1,19 @@
 # carvilon Architecture
 
-**Status:** Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU).
-Saison 14 hat die Plattform vom "Klingel-Streamer mit Web-UI"
-zur "Klingel-Anlage mit Mieter-, Admin- und ESP-Erlebnis"
-weiter entwickelt. Sub-Briefings:
+**Status:** Saison 15 in Arbeit (Stand 21. Mai 2026, S15-01).
+S15-01 hat die Stream-Schicht hinter ein
+`streams.StreamBackend`-Interface gezogen (Open-Core-Naht),
+einen 503-Default fuer das oeffentliche Repo eingebaut, den
+go2rtc-Client als transitional implementation gelassen und
+den Webviewer-Browser-Pfad auf WebRTC umgestellt (MJPEG bleibt
+als Fallback). Profile-CRUD-Vollausbau plus
+camera-dropdown-Form folgt nach Naht-Befuellung durch den
+privaten `carvilon-streaming-server`. Details: Sektion 16.
+
+Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU). Saison 14
+hat die Plattform vom "Klingel-Streamer mit Web-UI" zur
+"Klingel-Anlage mit Mieter-, Admin- und ESP-Erlebnis" weiter
+entwickelt. Sub-Briefings:
 
 - S14-01 / S14-01b / FIX01-FIX04: Stream-Backend go2rtc
   produktiv, Idle-View-Modus mit Bildschirmschoner und open-
@@ -1241,7 +1251,51 @@ S14-01-FIX01-URL-Hardening).
 
 ---
 
-## 16. Stream-Backend (Saison 14-01, go2rtc)
+## 16. Stream-Backend (Saison 14-01 / Saison 15-01)
+
+### 16.0 Open-Core-Naht (Saison 15-01)
+
+Saison 15-01 hat die Stream-Schicht hinter ein
+`streams.StreamBackend`-Interface gezogen. Das oeffentliche Repo
+liefert zwei Implementierungen:
+
+- `streams.Unconfigured()` (Default): jede Methode liefert
+  ErrNotConfigured / leere Strings, `Configured()` ist false.
+  Handler degraden via Configured()-Check sauber zu 503;
+  `/a/streams` rendert seinen "Backend nicht konfiguriert"-Banner.
+- `streams.New(url)` (transitional): Wrapper um die go2rtc-REST-
+  API. List/Get/Delete + MJPEG-URL bleiben in Betrieb, Put-Stub
+  liefert ErrNotConfigured (Profile-CRUD wandert auf den
+  eigenen Streaming-Server), ListCameras liefert leer (go2rtc
+  hat keine Protect-Verbindung).
+
+Der kommerzielle `carvilon-streaming-server` (privates Repo)
+implementiert dasselbe Interface und wird in einer spaeteren
+Saison via Build-Tag eingebunden. Das oeffentliche Repo
+importiert den privaten Server NIE direkt; die Naht ist die
+einzige Vertrags-Grenze.
+
+Konsequenz fuer Saison 15-01:
+
+```
+public build = Unconfigured | go2rtc-Client
+commercial build (zukuenftig) = carvilon-streaming-server
+                                 hinter demselben Interface
+```
+
+Stream-URLs liefert ab S15-01 ausschliesslich das Interface:
+`MJPEGURL(profile)` und `WebRTCSignalURL(profile)`. Der
+proxyMJPEGStream-Code bleibt unveraendert in der Mechanik
+(Hijack, Chunked-Strip, Flush pro Read) und liest `MJPEGURL`
+indirekt ueber `cfg.StreamBackendURL` - der Pfad ist mit
+absicht so verkabelt, dass der Env-Var-Flip von 1984 (go2rtc)
+auf 8555 (carvilon-streaming-server) eine reine Operator-
+Konfiguration ist, kein Code-Change.
+
+Profile-CRUD-Vollausbau plus camera-dropdown-Form ist ein
+Folge-Briefing nach Naht-Befuellung.
+
+### Saison-14-Stand: go2rtc als Stream-Bridge
 
 carvilon nutzt go2rtc als Stream-Bridge. UDM (UniFi Protect) liefert
 RTSPS auf Port 7441, go2rtc transmuxt das fuer alle weiteren
@@ -1331,20 +1385,110 @@ gemeinsame Kern fuer ESP- und Mieter-Pfad. Wesentliche Punkte:
 ### 16.5 Konfigurations-Vertrag
 
 ```
-UNIFIX_STREAM_BACKEND_URL  go2rtc Base-URL ohne Pfad-Suffix.
-                            Beispiel: http://127.0.0.1:1984
+CARVILON_STREAM_BACKEND_URL  Stream-Backend Base-URL ohne
+                            Pfad-Suffix. (Legacy-Alias:
+                            UNIFIX_STREAM_BACKEND_URL bleibt
+                            parallel anerkannt.)
+                            Beispiel S14: http://127.0.0.1:1984
+                                          (go2rtc-Daemon)
+                            Beispiel S15+: http://127.0.0.1:8555
+                                          (carvilon-streaming-server)
                             Empty: Server startet weiter, Stream-
                             Endpoints liefern 503, /a/streams
-                            rendert "go2rtc nicht konfiguriert".
+                            rendert "Stream-Backend nicht
+                            konfiguriert".
                             Production sollte das Env-Var setzen;
                             in S17+ wandert die Pruefung in
                             config.Validate().
 ```
 
-Die `streams.Client`-Instanz wird in `main.go` einmalig beim Boot
-gebaut. Hot-Reload bei Env-Var-Aenderung gibt es bewusst nicht;
-Operator startet `carvilon-server` neu wenn er die go2rtc-Adresse
-aendert (Production: `systemctl restart carvilon-server`).
+Die Stream-Backend-Instanz wird in `main.go` einmalig beim Boot
+gebaut (`streams.New(url)` fuer den transitional go2rtc-Wrapper
+oder `streams.Unconfigured()` als 503-Default). Hot-Reload bei
+Env-Var-Aenderung gibt es bewusst nicht; Operator startet
+`carvilon-server` neu wenn er die Backend-Adresse aendert
+(Production: `systemctl restart carvilon-server`).
+
+### 16.6 Saison-15-01-Proxy-Umzug (Operator-Konfiguration)
+
+Mit dem Anschluss des eigenen `carvilon-streaming-server`
+flippt der Operator `CARVILON_STREAM_BACKEND_URL` von
+`http://127.0.0.1:1984` (go2rtc) auf `http://127.0.0.1:8555`
+(carvilon-streaming-server). Beide Server hosten dieselbe
+`/api/stream.mjpeg`-Form, daher bleibt der proxyMJPEGStream-
+Code identisch.
+
+Zusaetzlich neu ab Saison 15-01: der eigene Streaming-Server
+hostet `/offer` als WebRTC-Signalling-Endpoint. carvilon
+proxiert das ueber `POST /webviewer/offer` (siehe Sektion 17.0).
+Solange das go2rtc-Backend gesetzt ist, liefert
+`WebRTCSignalURL(profile)` zwar eine wohlgeformte URL, aber
+go2rtc selbst kann das Endpoint nicht servieren - der
+Webviewer faellt dann auf das MJPEG-`<img>` zurueck (siehe
+17.1 zur Fallback-Logik).
+
+KEIN Code-Change ist fuer den Umzug noetig - nur die ENV-Var
+plus ein `systemctl restart carvilon-server`. Im dev-start-
+Skript ist die Adresse genauso variabel.
+
+### 16.7 WebRTC-Signalling-Proxy (Saison 15-01)
+
+```
+Route                            Wirkung
+POST /webviewer/offer            Mieter-Cookie-Auth. Body ist
+                                  SDP-Offer (application/sdp);
+                                  Response ist SDP-Answer.
+                                  Server ruft
+                                  WebRTCSignalURL(profile) vom
+                                  ResolveStreamProfile auf,
+                                  stripped Authorization-
+                                  Header und reicht Body +
+                                  Status durch. 503 wenn
+                                  Backend nicht konfiguriert;
+                                  502 wenn unerreichbar.
+                                  Body cap: 64 KB.
+```
+
+Die Mechanik ist ein normaler Request/Response-Roundtrip
+(kein Hijack); WebRTC selbst laeuft danach peer-to-peer
+zwischen Browser und Streaming-Server.
+
+### 16.8 Webviewer-Stream-Modi (WebRTC primary, MJPEG fallback)
+
+Der Mieter-Browser nutzt ab S15-01 WebRTC als primaeren
+Live-View-Pfad. Markup im `livestream`-Layer (intercom-idle)
+und im `ringing`-Overlay (intercom-ringing):
+
+```html
+<div data-stream-slot="livestream" data-stream-mode="idle">
+  <video data-webrtc-target="livestream" autoplay muted playsinline></video>
+  <img class="mieter-stream-img" data-stream-src="/webviewer/stream.mjpeg" />
+</div>
+```
+
+`webrtc-stream.js` exponiert `window.carvilonWebRTC.{connect,
+disconnect}`. Beim Connect setzt es `data-stream-mode="webrtc"`
+(CSS zeigt das `<video>`, versteckt das `<img>`); bei Fehler
+oder 503 setzt es `data-stream-mode="mjpeg"` und der img-
+Fallback uebernimmt.
+
+Lifecycle-Hooks:
+
+- `idle.js` setMode: beim Wechsel **nach** livestream connect,
+  beim Wechsel **weg** disconnect. Bei livestream-as-default
+  feuert ein einmaliger initial-connect nach DOMContentLoaded.
+- `interactions.js` openOverlay('ringing')/closeOverlay sowie
+  der ESC-Pfad: connect beim Oeffnen, disconnect beim
+  Schliessen.
+- `pagehide` / `beforeunload` global: defensiver Teardown.
+
+Teardown-Disziplin (NON-NEGOTIABLE per CLAUDE.md 11.9):
+**track.stop() VOR pc.close()**, niemals umgekehrt. Sonst
+behaelt der UA-Pfad das Mikrofon/Stream offen.
+
+ESP-Hardware ist nicht WebRTC-faehig (Billig-Board); fuer
+`/esp/stream.mjpeg` bleibt der MJPEG-Pfad der primaere und
+einzige Mode. WebRTC ist explizit nur fuer den Mieter-Browser.
 
 ## 17. Idle-View-Modus + Wetter-Backend (Saison 14-01b)
 
@@ -1705,4 +1849,5 @@ diese drei Layer erweitert werden. Heute kein Druck.
 
 ---
 
-Zuletzt aktualisiert: 2026-05-19 (Saison-14-Abschluss-Doku).
+Zuletzt aktualisiert: 2026-05-21 (Saison-15-01: StreamBackend-
+Naht + WebRTC-Webviewer).
