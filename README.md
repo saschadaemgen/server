@@ -25,16 +25,15 @@ CARVILON streaming-server. Go-Library plus eine spike-Binary.
   Seed nur in leere DB. Naht-Interface `streambackend.Backend` zur
   carvilon-Seite; build-tag-Wrapper (`carvilon_stream`) verdrahtet die
   beiden Repos ohne Public-Build-Pollution.
-- **S6 (jetzt, ESP-Mess-Apparat):** Profile bekommen Codec + Encode-
+- **S6 (durch, ESP-Mess-Apparat):** Profile bekommen Codec + Encode-
   Parameter (Width/Height/FPS/EncodeQuality). `/stream/stats` JSON
   liefert per-Client + global frames/bytes/avg-fps/avg-kbps; Linux-
   `/proc`-CPU als globaler Vergleichswert. PUT/DELETE
   `/api/profiles/{name}` für Live-Tuning ohne Restart. Drei MJPEG-
-  Profile (`mjpeg_hq` / `mjpeg_bal` / `mjpeg_fast`) ab Werk; das
-  vierte (`h264_cbp`, Constrained-Baseline-Transcode für tinyH264 auf
-  ESP32-P4) ist im DB-Schema vorgesehen und wartet auf den ESP-Chat
-  fürs Annex-B-Input-Format. Profil-#101 ist eine DB-Row, kein Code-
-  Change.
+  Profile (`mjpeg_hq` / `mjpeg_bal` / `mjpeg_fast`) plus die H.264-
+  CBP-Transcode-Variante (`h264_cbp` über `/stream/h264`, Annex-B
+  ohne AUDs, SPS/PPS vor jedem IDR, eine AU pro HTTP-Chunk, GoP=1s)
+  ab Werk. Profil-#101 ist eine DB-Row, kein Code-Change.
 - **Schritt 7+** (GenericRTSPSource, Audio, ESP32-Quelle) sind explizit
   **nicht** Teil dieser Stufe.
 
@@ -140,6 +139,7 @@ um das Dropdown zu füllen.
 | ------------------------------------ | --------------------------------------------------------------------------------------- |
 | `POST /offer?src=<name>`             | WebRTC-Offer (nur Profile mit `codec=h264_passthrough`)                                 |
 | `GET  /api/stream.mjpeg?src=<name>`  | MJPEG-Stream (nur Profile mit `codec=mjpeg`)                                            |
+| `GET  /stream/h264?src=<name>`       | H.264 Constrained Baseline Annex-B fuer ESP (nur Profile mit `codec=h264_cbp`) — eine AU pro HTTP-Chunk, SPS/PPS vor jedem Keyframe |
 | `GET  /api/profiles`                 | Liste aller Profile als JSON (mit Codec + Encode-Parametern)                            |
 | `PUT  /api/profiles/{name}`          | Profil anlegen / tunen — Body wie `.env.example` Beispiel, Validate vor Persistenz      |
 | `DELETE /api/profiles/{name}`        | Profil entfernen (laufende Viewer bleiben auf altem Hub bis Disconnect)                 |
@@ -174,6 +174,37 @@ um das Dropdown zu füllen.
    man auch ein neues Profil per PUT anlegen — der Server kennt es
    sofort, ohne Restart. Profil-#101 ist eine DB-Row, kein Code-
    Change.
+
+### H.264-CBP gegenüber MJPEG einmessen (S6-02)
+
+Der `h264_cbp`-Pfad transcodiert die Kamera-H.264 zu Constrained
+Baseline und liefert sie als chunked Annex-B an `/stream/h264?src=
+h264_cbp`. Wire-Shape ist im Briefing festgenagelt:
+
+- Annex-B mit 4-Byte-Startcodes; KEINE AUDs.
+- SPS + PPS vor jedem IDR (in-band, repeat headers ueber `-bsf:v
+  dump_extra=freq=keyframe`).
+- Eine komplette Access Unit pro HTTP-Chunk. Keyframe-AU = SPS + PPS
+  + IDR im SELBEN Chunk; P-Frame-AU = einzelner Non-IDR-Slice.
+- GoP = 1 Sekunde, laufzeit-justierbar per `PUT /api/profiles/h264_cbp`.
+
+Server-seitig gegen `ffprobe` verifizieren (der echte ESP-Decode-Test
+kommt vom ESP-Chat, sobald deren Decode-Pfad steht):
+
+```sh
+# Profil + Stream-Inhalt
+curl -s http://host:8555/stream/h264?src=h264_cbp \
+  | ffprobe -hide_banner -i - 2>&1 \
+  | grep -E "profile|codec_name|frame_rate"
+# erwartet: codec_name=h264, profile=Constrained Baseline, fps=15
+```
+
+Telemetrie:
+- `transcoder_cpu_percent` in `/stream/stats` (Linux) zeigt den CPU-
+  Preis des Transcodes.
+- Pro `/stream/h264`-Client tauchen `frames_sent`, `bytes_sent`,
+  `avg_fps`, `avg_bitrate_kbps` im Snapshot auf — 1:1 vergleichbar
+  mit den MJPEG-Profilen, was den Sinn des Experiments ausmacht.
 
 ## Cross-Compile für Raspberry Pi (arm64)
 
@@ -250,6 +281,7 @@ streaming-server/
 ├── web/index.html     (Testseite mit Profil-Dropdown)
 ├── internal/
 │   ├── h264/          (RFC-6184-Depacketizer + Unit-Tests)
+│   ├── h264esp/       (H.264-CBP-Transcode + Annex-B-AU-Splitter + Fan-Out-Hub, S6-02)
 │   ├── hub/           (H.264-Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
 │   ├── mjpeg/         (ffmpeg-Encoder + JPEG-Fan-Out + go2rtc-Multipart)
 │   ├── profile/       (Profile-Struktur + Registry, S4-01 + S6 Codec/Encode-Felder)
@@ -438,3 +470,5 @@ S5/S6-spezifisch:
 | `internal/stats` (S6) | 12 | Register/Unregister, atomic-Counter, JSON-Tag-Lock, -race smoke (8 goroutines × 1000 Frames) |
 | `internal/proccpu` (S6) | 4 | Konstruktor-Vertrag, first-call-not-ok-Regel, Stub-Verhalten auf Nicht-Linux |
 | `package stream` (S6) | 12 | `/stream/stats` empty-snapshot, PUT/DELETE `/api/profiles/{name}` happy path + 400 / 404 / 503, Logger-goroutine respektiert ctx |
+| `internal/h264esp` (S6-02) | viele | **AU-Splitter** — Keyframe-AU = SPS+PPS+IDR coalesced, P-Frame-AU einzeln, AUDs gestripped, 3-Byte-Startcodes akzeptiert/Output immer 4-Byte, EOF-Flush ohne Header-only-AU, slow-Reader byteweise. **ffmpeg-Args** — `-profile:v baseline -bf 0 -refs 1 -g <fps> -keyint_min <fps> -sc_threshold 0 -bsf:v dump_extra=freq=keyframe -f h264` gelockt; `aud=insert` verboten. **Hub** — ein Transcode für N Clients, Drop-Strategie, Lifecycle (bedarfsgesteuert), Encoder-Ende schliesst alle Subscribers, Concurrency-Stress mit `-race`. |
+| `package stream` (S6-02) | 6 | `/stream/h264` — 503 ohne ffmpeg, 400/404 für falsche src, 405 für POST, Codec-Gate (Resolver) |

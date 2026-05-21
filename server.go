@@ -18,6 +18,7 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 
 	"carvilon.local/stream/internal/droplog"
+	"carvilon.local/stream/internal/h264esp"
 	"carvilon.local/stream/internal/hub"
 	"carvilon.local/stream/internal/mjpeg"
 	"carvilon.local/stream/internal/proccpu"
@@ -34,25 +35,35 @@ var webFS embed.FS
 const h264ClockRate = 90000
 
 // Server is the CARVILON streaming kernel: HTTP signaling, multi-camera
-// fan-out, MJPEG transcoding.
+// fan-out, MJPEG + H.264-CBP transcoding.
 //
-// All viewer endpoints are profile-driven (?src=<name>):
+// All viewer endpoints are profile-driven (?src=<name>); the codec on
+// the chosen profile determines which endpoint serves it:
 //
-//   - POST /offer?src=<browser-profile>      → WebRTC viewer for that
-//     profile's camera (Usage=browser).
-//   - GET /api/stream.mjpeg?src=<esp-profile> → MJPEG stream for that
-//     profile's camera (Usage=esp).
+//   - POST /offer?src=<profile>            → WebRTC viewer for
+//     codec=h264_passthrough profiles (the camera's H.264 shipped
+//     verbatim through DTLS-SRTP).
+//   - GET /api/stream.mjpeg?src=<profile>  → multipart MJPEG for
+//     codec=mjpeg profiles (ffmpeg transcodes to JPEG, the bytes
+//     match go2rtc 1:1).
+//   - GET /stream/h264?src=<profile>       → chunked Annex-B for
+//     codec=h264_cbp profiles (ffmpeg transcodes to Constrained
+//     Baseline; SPS/PPS in-band before every IDR; ONE Access Unit
+//     per HTTP chunk — the S6-02 wire shape).
 //
 // Source lifecycle is bedarfsgesteuert (S4-01): a camera is pulled
 // ONLY when at least one viewer of any usage is currently watching it.
 // 0 viewers across all profiles for a (camera, quality) ⇒ no pull, no
-// decode, no ffmpeg.
+// decode, no ffmpeg. Two profiles sharing the same (CameraID, Quality)
+// share a single upstream camera pull AND a single transcoder per
+// codec.
 type Server struct {
-	profiles *profile.Registry
-	sources  *sourcereg.Registry
-	mjpegHub *mjpeg.Hub
-	addr     string
-	logger   *log.Logger
+	profiles   *profile.Registry
+	sources    *sourcereg.Registry
+	mjpegHub   *mjpeg.Hub
+	h264espHub *h264esp.Hub // S6-02: H.264 CBP transcode -> ESP via /stream/h264
+	addr       string
+	logger     *log.Logger
 
 	// S6-01 measurement apparatus. Both nil-safe: if unset, the
 	// /stream/stats endpoint returns zeros and the periodic log is
@@ -190,11 +201,30 @@ func NewServer(opts ServerOptions) (*Server, error) {
 			return nil, fmt.Errorf("stream: mjpeg hub: %w", err)
 		}
 		s.mjpegHub = mh
+
+		// The H.264 CBP path lives in the same "needs ffmpeg" gate as
+		// MJPEG — same binary, same subprocess strategy. EnableMJPEG
+		// stays the single switch for "this build has ffmpeg
+		// available"; a future EnableESPH264 split is easy if ffmpeg-
+		// free deployments matter, but the spike doesn't need it.
+		hh, err := h264esp.NewHub(h264esp.HubOptions{
+			EntryFor:         s.h264espEntryFor,
+			FFmpegPath:       opts.FFmpegPath,
+			Logger:           opts.Logger,
+			SubscriberBuffer: opts.SubscriberBuffer,
+		})
+		if err != nil {
+			_ = mh.Close()
+			_ = srcReg.Close()
+			return nil, fmt.Errorf("stream: h264esp hub: %w", err)
+		}
+		s.h264espHub = hh
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/offer", s.handleOffer)
 	mux.HandleFunc("/api/stream.mjpeg", s.handleMJPEG)
+	mux.HandleFunc("/stream/h264", s.handleH264)
 	mux.HandleFunc("/api/profiles", s.handleProfiles)
 	// S6-01 tuning endpoints (Go 1.22+ method+path patterns). The
 	// catch-all `/api/profiles` above keeps serving GET; these add
@@ -253,6 +283,28 @@ func (s *Server) mjpegEntryFor(name string) (mjpeg.Entry, error) {
 	return mjpeg.Entry{Spec: spec, Source: &hubAdapter{h: srcHub}}, nil
 }
 
+// h264espEntryFor implements the resolver the [h264esp.Hub] needs:
+// same idea as [Server.mjpegEntryFor] but for the codec=h264_cbp
+// profiles served at /stream/h264. The H.264 hub shares the per-
+// (camera, quality) upstream pull with MJPEG and /offer — only the
+// transcode layer is separate.
+func (s *Server) h264espEntryFor(name string) (h264esp.Entry, error) {
+	p, err := s.profiles.Get(name)
+	if err != nil {
+		return h264esp.Entry{}, err
+	}
+	if p.Codec != profile.CodecH264CBP {
+		return h264esp.Entry{}, fmt.Errorf("profile %q has codec=%q, not %q (use the matching endpoint: /offer for h264_passthrough, /api/stream.mjpeg for mjpeg)",
+			p.Name, p.Codec, profile.CodecH264CBP)
+	}
+	spec, err := h264esp.SpecFromProfile(p)
+	if err != nil {
+		return h264esp.Entry{}, err
+	}
+	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	return h264esp.Entry{Spec: spec, Source: &h264espHubAdapter{h: srcHub}}, nil
+}
+
 // Run starts the HTTP signaling server and blocks until ctx is cancelled
 // or the server errors out. On clean shutdown (ctx cancelled) it tears
 // the hub + source registry down and returns ctx.Err().
@@ -289,12 +341,16 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// shutdownAll closes the MJPEG hub (if present) before the source
-// registry, so per-camera hubs receive last-unsubscribe signals before
-// being torn down.
+// shutdownAll closes the per-codec hubs (if present) before the
+// source registry, so per-camera hubs receive last-unsubscribe
+// signals before being torn down. Order: per-codec encoders first,
+// then the upstream camera bus.
 func (s *Server) shutdownAll() {
 	if s.mjpegHub != nil {
 		_ = s.mjpegHub.Close()
+	}
+	if s.h264espHub != nil {
+		_ = s.h264espHub.Close()
 	}
 	_ = s.sources.Close()
 }
@@ -532,6 +588,103 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 				// Client gone, or proxy upstream closed. Count the
 				// undelivered frame as a drop (so the snapshot shows
 				// where the stream stopped) and exit.
+				sc.RecordDrop()
+				return
+			}
+			sc.RecordFrame(n)
+			flusher.Flush()
+		}
+	}
+}
+
+// handleH264 implements GET /stream/h264?src=<h264_cbp-profile> — the
+// S6-02 endpoint that ships the Constrained-Baseline transcode to the
+// ESP32-P4. Wire shape (briefing-pinned):
+//
+//   - One complete H.264 Access Unit per HTTP response chunk. The
+//     chunked transfer-encoding IS the framing; no multipart, no
+//     custom AU header.
+//   - Annex-B with 4-byte start codes; NO AUDs.
+//   - SPS / PPS in-band before every IDR/keyframe (handled by the
+//     ffmpeg -bsf:v dump_extra=freq=keyframe flag in h264esp.OutputArgs).
+//
+// Live-session semantics mirror handleMJPEG: bedarfsgesteuert via the
+// h264esp.Hub, one transcoder per profile, drop-statt-buffer on a
+// slow client.
+func (s *Server) handleH264(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.h264espHub == nil {
+		http.Error(w, "h264 esp not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	profName := r.URL.Query().Get("src")
+	if profName == "" {
+		http.Error(w, "missing src parameter", http.StatusBadRequest)
+		return
+	}
+
+	sub, err := s.h264espHub.Subscribe(profName)
+	if err != nil {
+		if errors.Is(err, profile.ErrUnknownProfile) {
+			http.Error(w, "unknown profile", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "subscribe: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer sub.Close()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Content-Type: H.264 Annex-B byte stream. No standard MIME type
+	// fits exactly — video/h264 is the closest in common use; the ESP
+	// doesn't parse the header anyway, but a sensible value helps
+	// curl / browser sniffing.
+	w.Header().Set("Content-Type", "video/h264")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	// X-Stream-Format makes the briefing's wire-shape contract
+	// machine-readable: "annex-b" framing, "one AU per chunk", "no AUDs".
+	// Convenient for ESP-side sanity asserts in test harnesses.
+	w.Header().Set("X-Stream-Format", "annex-b; framing=chunk-per-au; aud=stripped")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	// S6-02 telemetry: register with the stats tracker so the
+	// transcoder-cost vs MJPEG comparison is visible in /stream/stats.
+	var sc *stats.Client
+	if s.stats != nil {
+		p, _ := s.profiles.Get(profName)
+		sc = s.stats.Register(profName, string(p.Codec), r.RemoteAddr)
+		defer s.stats.Unregister(sc)
+	}
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case au, ok := <-sub.Frames():
+			if !ok {
+				// Encoder died or server shutting down.
+				return
+			}
+			// One AU per HTTP chunk = one Write + one Flush. The
+			// chunked transfer-encoding wraps each Write into its own
+			// chunk so the briefing's "one chunk = one AU" rule holds.
+			n, err := w.Write(au)
+			if err != nil {
 				sc.RecordDrop()
 				return
 			}
@@ -801,6 +954,25 @@ type subAdapter struct{ s *hub.Subscriber }
 
 func (a *subAdapter) Frames() <-chan source.AccessUnit { return a.s.Frames() }
 func (a *subAdapter) Close()                           { a.s.Close() }
+
+// h264espHubAdapter is the same shape as hubAdapter but typed against
+// h264esp.SourceHub / SourceSubscriber. The two interfaces are
+// structurally identical; we keep them per-package so the h264esp
+// hub doesn't depend on the mjpeg one.
+type h264espHubAdapter struct{ h *hub.Hub }
+
+func (a *h264espHubAdapter) Subscribe() (h264esp.SourceSubscriber, error) {
+	sub, err := a.h.Subscribe()
+	if err != nil {
+		return nil, err
+	}
+	return &h264espSubAdapter{s: sub}, nil
+}
+
+type h264espSubAdapter struct{ s *hub.Subscriber }
+
+func (a *h264espSubAdapter) Frames() <-chan source.AccessUnit { return a.s.Frames() }
+func (a *h264espSubAdapter) Close()                           { a.s.Close() }
 
 // annexBMarshal serialises a slice of raw NALs (no start codes) into the
 // Annex-B byte stream pion's H.264 payloader expects: each NAL prefixed
