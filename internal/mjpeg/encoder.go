@@ -171,12 +171,29 @@ func (e *Encoder) Start() error {
 
 // buildFFmpegArgs constructs the full ffmpeg command line: static input
 // args (raw H.264 from stdin) + spec-driven output args + pipe:1 sink.
+//
+// S6-04 fix — `-use_wallclock_as_timestamps 1`:
+//
+// The `-f h264` demuxer has NO timestamps in the bitstream (raw
+// Annex-B), so without help ffmpeg synthesises PTS at a default
+// 25 fps. If the actual camera delivers fewer frames per wallclock-
+// second (UniFi Protect High often runs at ~15-17 fps), output -r N
+// at the encoder ends up as "N frames per PTS-second" — but PTS-
+// seconds tick faster than wallclock when input is below 25 fps,
+// so the wallclock output rate drops below N. Live-measured
+// regression: mjpeg_bal configured 12 fps came out at ~8 fps.
+//
+// `-use_wallclock_as_timestamps 1` tells the demuxer to use the
+// arrival wallclock as PTS instead, so PTS-time tracks reality 1:1
+// and -r at output reflects true wallclock fps.
 func buildFFmpegArgs(s EncodeSpec) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostats",
 		"-fflags", "+nobuffer",
+		// S6-04: PTS = arrival wallclock — see the doc comment above.
+		"-use_wallclock_as_timestamps", "1",
 		// Input: raw H.264 Annex-B on stdin.
 		"-f", "h264",
 		"-i", "pipe:0",

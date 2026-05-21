@@ -151,12 +151,22 @@ func (e *Encoder) Start() error {
 // buildFFmpegArgs assembles the full ffmpeg argv. Input side reads raw
 // H.264 Annex-B from stdin (which is what runStdin writes after
 // prefixing each NAL with `00 00 00 01`).
+//
+// S6-04 fix — same `-use_wallclock_as_timestamps 1` rationale as in
+// internal/mjpeg/encoder.go: the `-f h264` demuxer otherwise
+// synthesises PTS at a default 25 fps which doesn't match the actual
+// camera wallclock rate, and the output -r ends up scaled wrong. The
+// CBP path needs the right PTS just as much as MJPEG so the configured
+// FPS reaches the wire.
 func buildFFmpegArgs(s EncodeSpec) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostats",
 		"-fflags", "+nobuffer",
+		// S6-04: PTS = arrival wallclock — see internal/mjpeg/encoder.go
+		// for the long-form reasoning. Same camera, same fix.
+		"-use_wallclock_as_timestamps", "1",
 		// Input: raw H.264 Annex-B on stdin.
 		"-f", "h264",
 		"-i", "pipe:0",
