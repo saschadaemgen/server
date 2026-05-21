@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"carvilon.local/mock/internal/crypto"
 	"carvilon.local/mock/internal/identity"

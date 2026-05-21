@@ -5,8 +5,8 @@ go 1.26
 require carvilon.local/shared v0.0.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/eclipse/paho.mqtt.golang v1.5.0
-	nhooyr.io/websocket v1.8.10
 )
 
 require (
