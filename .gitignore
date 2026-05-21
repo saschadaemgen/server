@@ -16,6 +16,12 @@ secrets.yml
 *.out
 coverage.txt
 
+# Runtime state (SQLite DB + WAL/SHM, see internal/store)
+/state/
+*.db
+*.db-shm
+*.db-wal
+
 # Editor / OS
 .vscode/
 .idea/
