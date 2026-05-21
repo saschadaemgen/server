@@ -9,7 +9,7 @@ import (
 	"carvilon.local/server/internal/auth/loginaudit"
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 )
 
@@ -60,7 +60,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 	// Wohnungs-Name. Audit-Log und Limiter-Bucket nutzen den
 	// normalisierten Wert als stabilen Key.
 	nameRaw := strings.TrimSpace(r.PostForm.Get("username"))
-	lookupKey := mockmanager.NormalizeName(nameRaw)
+	lookupKey := viewermanager.NormalizeName(nameRaw)
 	password := r.PostForm.Get("password")
 	ip := clientIP(r)
 	ua := r.UserAgent()
@@ -99,7 +99,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, hash, err := s.mockMgr.LookupByName(r.Context(), nameRaw)
+	info, hash, err := s.viewerMgr.LookupByName(r.Context(), nameRaw)
 	if err != nil || hash == "" {
 		s.viewerLimiter.RegisterFailure(ip, lookupKey)
 		reason := "viewer_not_found"

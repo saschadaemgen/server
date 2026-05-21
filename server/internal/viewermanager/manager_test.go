@@ -1,4 +1,4 @@
-package mockmanager
+package viewermanager
 
 import (
 	"context"

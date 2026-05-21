@@ -15,7 +15,7 @@ import (
 	"carvilon.local/server/internal/access"
 	"carvilon.local/server/internal/auth/argon2id"
 	"carvilon.local/server/internal/auth/loginaudit"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/password"
 	"carvilon.local/server/internal/platformconfig"
 )
@@ -60,7 +60,7 @@ func (s *Server) handleAdminWebViewersList(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, error) {
-	infos, err := s.mockMgr.ListViewers(r.Context())
+	infos, err := s.viewerMgr.ListViewers(r.Context())
 	if err != nil {
 		return adminWebViewersData{}, err
 	}
@@ -98,10 +98,10 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 	}
 	loginURL := s.buildLoginURL(r)
 	for _, info := range infos {
-		if info.Type != mockmanager.TypeWeb {
+		if info.Type != viewermanager.TypeWeb {
 			continue
 		}
-		nameKey := mockmanager.NormalizeName(info.Name)
+		nameKey := viewermanager.NormalizeName(info.Name)
 		row := webViewerRow{
 			MAC:               info.MAC,
 			Name:              info.Name,
@@ -173,22 +173,22 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	spec := mockmanager.ViewerSpec{
+	spec := viewermanager.ViewerSpec{
 		MAC:               mac,
 		Name:              name,
 		ServicePort:       port,
-		Type:              mockmanager.TypeWeb,
+		Type:              viewermanager.TypeWeb,
 		LinkedUAUserID:    linkedUser,
 		PairedIntercomMAC: pairedIntercom,
 		StreamProfile:     streamProfile,
 	}
-	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
+	if err := s.viewerMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
-		case errors.Is(err, mockmanager.ErrMACInUse):
+		case errors.Is(err, viewermanager.ErrMACInUse):
 			http.Error(w, "MAC bereits vergeben (RNG-Kollision; bitte erneut anlegen).", http.StatusConflict)
-		case errors.Is(err, mockmanager.ErrPortInUse):
+		case errors.Is(err, viewermanager.ErrPortInUse):
 			http.Error(w, "Service-Port bereits vergeben.", http.StatusConflict)
-		case errors.Is(err, mockmanager.ErrNameInUse):
+		case errors.Is(err, viewermanager.ErrNameInUse):
 			http.Error(w,
 				"Wohnungs-Name ist bereits vergeben (case-insensitive). Bitte einen anderen Namen waehlen.",
 				http.StatusConflict)
@@ -256,9 +256,9 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, manualPW
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -286,12 +286,12 @@ func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 		return
 	}
-	nameKey := mockmanager.NormalizeName(info.Name)
+	nameKey := viewermanager.NormalizeName(info.Name)
 	if s.viewerLimiter != nil && nameKey != "" {
 		s.viewerLimiter.ClearUser(nameKey)
 	}
@@ -327,8 +327,8 @@ func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Name fehlt oder zu lang.", http.StatusBadRequest)
 		return
 	}
-	if err := s.mockMgr.Rename(r.Context(), mac, name); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.Rename(r.Context(), mac, name); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -399,9 +399,9 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -410,20 +410,20 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	nameChanged := mockmanager.NormalizeName(info.Name) != mockmanager.NormalizeName(newName)
+	nameChanged := viewermanager.NormalizeName(info.Name) != viewermanager.NormalizeName(newName)
 	pwChanged := newPW != ""
 	linkChanged := info.LinkedUAUserID != newLink
 	pairedChanged := info.PairedIntercomMAC != newPaired
 	streamProfileChanged := info.StreamProfile != newStreamProfile
 
 	if nameChanged {
-		if err := s.mockMgr.Rename(r.Context(), mac, newName); err != nil {
+		if err := s.viewerMgr.Rename(r.Context(), mac, newName); err != nil {
 			switch {
-			case errors.Is(err, mockmanager.ErrNameInUse):
+			case errors.Is(err, viewermanager.ErrNameInUse):
 				http.Error(w,
 					"Wohnungs-Name ist bereits vergeben (case-insensitive). Bitte einen anderen Namen waehlen.",
 					http.StatusConflict)
-			case errors.Is(err, mockmanager.ErrViewerNotFound):
+			case errors.Is(err, viewermanager.ErrViewerNotFound):
 				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			default:
 				s.log.Error("edit rename", "err", err, "mac_prefix", mac[:8])
@@ -434,7 +434,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	}
 
 	if linkChanged {
-		if err := s.mockMgr.SetLinkedUAUserID(r.Context(), mac, newLink); err != nil {
+		if err := s.viewerMgr.SetLinkedUAUserID(r.Context(), mac, newLink); err != nil {
 			s.log.Error("edit set link", "err", err, "mac_prefix", mac[:8])
 			http.Error(w, "Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
 			return
@@ -442,7 +442,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	}
 
 	if pairedChanged {
-		if err := s.mockMgr.SetPairedIntercomMAC(r.Context(), mac, newPaired); err != nil {
+		if err := s.viewerMgr.SetPairedIntercomMAC(r.Context(), mac, newPaired); err != nil {
 			s.log.Error("edit set paired intercom", "err", err, "mac_prefix", mac[:8])
 			http.Error(w, "Klingel-Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
 			return
@@ -450,7 +450,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	}
 
 	if streamProfileChanged {
-		if err := s.mockMgr.SetStreamProfile(r.Context(), mac, newStreamProfile); err != nil {
+		if err := s.viewerMgr.SetStreamProfile(r.Context(), mac, newStreamProfile); err != nil {
 			s.log.Error("edit set stream profile", "err", err, "mac_prefix", mac[:8])
 			http.Error(w, "Stream-Profil-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 			return
@@ -530,8 +530,8 @@ func (s *Server) handleAdminWebViewersLoginInfo(w http.ResponseWriter, r *http.R
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
 		return
 	}
-	if _, err := s.mockMgr.GetViewerInfo(r.Context(), mac); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if _, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -580,8 +580,8 @@ func (s *Server) handleAdminWebViewersSetLink(w http.ResponseWriter, r *http.Req
 		return
 	}
 	userID := strings.TrimSpace(r.PostForm.Get("linked_ua_user_id"))
-	if err := s.mockMgr.SetLinkedUAUserID(r.Context(), mac, userID); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.SetLinkedUAUserID(r.Context(), mac, userID); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -600,8 +600,8 @@ func (s *Server) handleAdminWebViewersDelete(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
 		return
 	}
-	if err := s.mockMgr.RemoveViewer(r.Context(), mac); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.RemoveViewer(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -639,7 +639,7 @@ func (s *Server) storePasswordForViewer(ctx context.Context, mac, name, manualPW
 	if err != nil {
 		return credentialsResponse{}, fmt.Errorf("argon2id hash: %w", err)
 	}
-	if err := s.mockMgr.SetPasswordHash(ctx, mac, hash); err != nil {
+	if err := s.viewerMgr.SetPasswordHash(ctx, mac, hash); err != nil {
 		return credentialsResponse{}, fmt.Errorf("store hash: %w", err)
 	}
 	loginURL := s.buildLoginURL(r)

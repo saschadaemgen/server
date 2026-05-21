@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/doorhistory"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // adminViewerDetailData ist die Payload fuer
@@ -62,9 +62,9 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -94,7 +94,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		Language:               info.ResolveLanguage(),
 		ClockLayout:            info.ResolveClockLayout(),
 	}
-	if info.Type == mockmanager.TypeESP {
+	if info.Type == viewermanager.TypeESP {
 		data.BackHref = "/a/esp-viewers"
 		data.BackLabel = "ESP-Viewer"
 	} else {

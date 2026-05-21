@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/doorbellhub"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // loginAndOpenEvents performs the username+password login flow and
@@ -24,14 +24,14 @@ func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Re
 	// generieren einen einzigartigen Namen pro MAC.
 	tail := strings.ReplaceAll(viewerMAC[len(viewerMAC)-5:], ":", "")
 	viewerName := "Test Viewer " + tail
-	if _, err := env.mockMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if _, err := env.viewerMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			env.seedViewerAs(t, viewerMAC, viewerName, "TestPw-1234567X")
 		} else {
 			t.Fatalf("GetViewerInfo: %v", err)
 		}
 	}
-	info, _, err := env.mockMgr.LookupByName(context.Background(), viewerName)
+	info, _, err := env.viewerMgr.LookupByName(context.Background(), viewerName)
 	if err != nil {
 		t.Fatalf("LookupByName: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	// Push an event into the hub for this mock.
 	env.hub.Publish(testViewerMAC, doorbellhub.Event{
 		Type:      doorbellhub.TypeDoorbellStart,
-		MockMAC:   testViewerMAC,
+		ViewerMAC:   testViewerMAC,
 		RequestID: "req-1",
 		DeviceID:  "0c:ea:14:11:11:11",
 		CreatedAt: 1747000000000,
@@ -193,8 +193,8 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	if payload.TS == "" {
 		t.Errorf("ts = empty in SSE payload")
 	}
-	if payload.Raw.MockMAC != testViewerMAC {
-		t.Errorf("raw.MockMAC = %q", payload.Raw.MockMAC)
+	if payload.Raw.ViewerMAC != testViewerMAC {
+		t.Errorf("raw.ViewerMAC = %q", payload.Raw.ViewerMAC)
 	}
 	if payload.Raw.RequestID != "req-1" {
 		t.Errorf("raw.RequestID = %q", payload.Raw.RequestID)
@@ -209,7 +209,7 @@ func TestEvents_IgnoresEventsForOtherMocks(t *testing.T) {
 	// Event addressed to a different mock must not reach our subscriber.
 	env.hub.Publish("0c:ea:14:99:99:99", doorbellhub.Event{
 		Type:    doorbellhub.TypeDoorbellStart,
-		MockMAC: "0c:ea:14:99:99:99",
+		ViewerMAC: "0c:ea:14:99:99:99",
 	})
 	// give the hub a moment, then verify only the keepalive
 	// passes through (50ms heartbeat in test config).

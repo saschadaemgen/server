@@ -28,7 +28,7 @@ import (
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/streams"
@@ -83,7 +83,7 @@ func main() {
 	adminLimiter := ratelimit.New()
 	historyStore := doorhistory.NewSQLStore(database.DB)
 
-	mockMgr := mockmanager.New(database, log, mockmanager.Options{
+	viewerMgr := viewermanager.New(database, log, viewermanager.Options{
 		StateDirBase: cfg.MockStateDir,
 		ServerIPv4:   cfg.ServerIPv4,
 	})
@@ -92,14 +92,14 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if err := mockMgr.LoadFromDB(ctx); err != nil {
+	if err := viewerMgr.LoadFromDB(ctx); err != nil {
 		log.Error("mock manager load failed", "err", err)
 		os.Exit(1)
 	}
 	defer func() {
 		shutCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
-		_ = mockMgr.Shutdown(shutCtx)
+		_ = viewerMgr.Shutdown(shutCtx)
 	}()
 
 	// Saison 13-03: zentrale Push-Quelle plus Anruf-Lifecycle.
@@ -109,7 +109,7 @@ func main() {
 	// fuer Multi-Viewer-Annehmen.
 	eventBus := eventbus.New()
 	callsSvc := doorbellcalls.New(database.DB)
-	hub := doorbellhub.NewWithOptions(mockMgr, historyStore, log, doorbellhub.Options{
+	hub := doorbellhub.NewWithOptions(viewerMgr, historyStore, log, doorbellhub.Options{
 		Bus:   eventBus,
 		Calls: callsSvc,
 	})
@@ -175,7 +175,7 @@ func main() {
 		Config:         cfg,
 		Sessions:       sessionSvc,
 		AdminSessions:  adminSessionSvc,
-		MockManager:    mockMgr,
+		ViewerManager:    viewerMgr,
 		Admin:          adminSvc,
 		PlatformConfig: platformCfg,
 		Audit:          auditSvc,

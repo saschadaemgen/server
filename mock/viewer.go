@@ -91,10 +91,15 @@ func (c Config) Validate() error {
 
 // DoorbellEvent is one incoming doorbell push forwarded to the
 // library consumer. Identification of the receiving tenant
-// happens implicitly via MockMAC; the wire body never carries a
+// happens implicitly via ViewerMAC; the wire body never carries a
 // tenant id.
+//
+// Saison 15-03 rename: the field was named MockMAC. The `mock`
+// package keeps its name (the synthetic-device emulation is
+// honestly a mock), but the field reads cleanly when callers
+// downstream treat the value as the receiving viewer's MAC.
 type DoorbellEvent struct {
-	MockMAC        string    // viewer that received the push (colon form)
+	ViewerMAC      string    // viewer that received the push (colon form)
 	RequestID      string    // UA session id from submessage field_1
 	DeviceID       string    // calling intercom MAC (12-hex), submessage field_5
 	DeviceName     string    // resolved from runtime_config when available, else empty
@@ -109,7 +114,7 @@ type DoorbellEvent struct {
 // by CancelToken. ReasonCode interpretation is still a saison-11
 // hypothesis (likely accept/reject/timeout).
 type DoorbellCancelEvent struct {
-	MockMAC     string
+	ViewerMAC   string
 	CancelToken string
 	ReasonCode  int32
 	ReceivedAt  time.Time
@@ -358,7 +363,7 @@ var ErrRejectNotReady = errors.New("mock: reject publisher not ready")
 // the RPC handler goroutine.
 func (v *Viewer) publishDoorbell(rec handlers.DoorbellRecord, body []byte) {
 	ev := DoorbellEvent{
-		MockMAC:        v.cfg.MAC,
+		ViewerMAC:      v.cfg.MAC,
 		RequestID:      rec.RequestID,
 		DeviceID:       rec.DeviceID,
 		RoomID:         rec.RoomID,
@@ -383,7 +388,7 @@ func (v *Viewer) publishCancel(rec handlers.DoorbellRecord, _ []byte) {
 		rc = int32(*rec.CancelReasonCode)
 	}
 	ev := DoorbellCancelEvent{
-		MockMAC:     v.cfg.MAC,
+		ViewerMAC:   v.cfg.MAC,
 		CancelToken: rec.CancelToken,
 		ReasonCode:  rc,
 		ReceivedAt:  time.Now(),

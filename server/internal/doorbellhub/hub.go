@@ -1,4 +1,4 @@
-// Package doorbellhub bridges the mockmanager event channels to
+// Package doorbellhub bridges the viewermanager event channels to
 // per-mock SSE subscribers. The hub reads doorbell starts and
 // cancels from the manager and fans them out to every subscriber
 // registered for the receiving mock's MAC.
@@ -42,7 +42,7 @@ import (
 	"carvilon.local/server/internal/eventbus"
 )
 
-// Source is the subset of mockmanager.Manager that the hub
+// Source is the subset of viewermanager.Manager that the hub
 // needs. Defined as an interface so tests can inject a fake
 // without spinning up the full manager.
 type Source interface {
@@ -55,8 +55,8 @@ type Source interface {
 // stalled browser is dropped, not allowed to back-pressure the
 // rest of the platform.
 type Subscriber struct {
-	MockMAC string
-	Events  chan Event
+	ViewerMAC string
+	Events    chan Event
 }
 
 const subscriberBuffer = 8
@@ -73,7 +73,11 @@ const subscriberBuffer = 8
 type Event struct {
 	Type        string `json:"type"`
 	EventID     int64  `json:"event_id,omitempty"`
-	MockMAC     string `json:"mock_mac"`
+	// Saison 15-03: Go-Feldname auf ViewerMAC umbenannt, der
+	// json-Tag "mock_mac" bleibt absichtlich (Wire-Format-
+	// Stabilitaet; der Tag-Rename folgt koordiniert mit Firmware-
+	// und JS-Seite).
+	ViewerMAC   string `json:"mock_mac"`
 	RequestID   string `json:"request_id"`
 	DeviceID    string `json:"device_id,omitempty"`
 	RoomID      string `json:"room_id,omitempty"`
@@ -130,7 +134,7 @@ type Options struct {
 	Calls *doorbellcalls.Service
 }
 
-// New constructs a Hub. Pass mockmanager.Manager as the source
+// New constructs a Hub. Pass viewermanager.Manager as the source
 // and a doorhistory.Store for persistence; history may be nil
 // in narrow test setups (the hub then skips DB writes).
 //
@@ -163,7 +167,7 @@ func NewWithOptions(src Source, history doorhistory.Store, log *slog.Logger, opt
 // readers can drain via the ok-clause of a channel receive.
 func (h *Hub) Subscribe(mockMAC string) (*Subscriber, func()) {
 	sub := &Subscriber{
-		MockMAC: mockMAC,
+		ViewerMAC: mockMAC,
 		Events:  make(chan Event, subscriberBuffer),
 	}
 	h.mu.Lock()
@@ -208,7 +212,7 @@ func (h *Hub) Run(ctx context.Context) error {
 }
 
 func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
-	if ev.MockMAC == "" {
+	if ev.ViewerMAC == "" {
 		h.log.Warn("doorbell event without mock_mac, dropping")
 		return
 	}
@@ -217,24 +221,24 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 	hubEvent := Event{
 		Type:        TypeDoorbellStart,
 		EventID:     id,
-		MockMAC:     ev.MockMAC,
+		ViewerMAC:     ev.ViewerMAC,
 		RequestID:   ev.RequestID,
 		DeviceID:    ev.DeviceID,
 		RoomID:      ev.RoomID,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
 	}
-	h.broadcast(ev.MockMAC, hubEvent)
-	h.publishToBus(ev.MockMAC, "doorbell.ring", hubEvent)
+	h.broadcast(ev.ViewerMAC, hubEvent)
+	h.publishToBus(ev.ViewerMAC, "doorbell.ring", hubEvent)
 	// Saison 14-03-FIX03 Sub-2: every new doorbell row also
 	// raises the unread count. Broadcast a separate SSE frame so
 	// the screensaver badge updates without the browser doing
 	// a /webviewer/unread-count round-trip.
-	h.BroadcastUnreadCount(ctx, ev.MockMAC)
+	h.BroadcastUnreadCount(ctx, ev.ViewerMAC)
 }
 
 func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
-	if ev.MockMAC == "" {
+	if ev.ViewerMAC == "" {
 		h.log.Warn("doorbell cancel event without mock_mac, dropping")
 		return
 	}
@@ -242,12 +246,12 @@ func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
 	h.endCallTimeout(ctx, ev)
 	hubEvent := Event{
 		Type:        TypeDoorbellCancel,
-		MockMAC:     ev.MockMAC,
+		ViewerMAC:     ev.ViewerMAC,
 		CancelToken: ev.CancelToken,
 		CreatedAt:   ev.ReceivedAt.UnixMilli(),
 	}
-	h.broadcast(ev.MockMAC, hubEvent)
-	h.publishToBus(ev.MockMAC, "doorbell.cancel", hubEvent)
+	h.broadcast(ev.ViewerMAC, hubEvent)
+	h.publishToBus(ev.ViewerMAC, "doorbell.cancel", hubEvent)
 }
 
 // startCall best-effort registers the lifecycle row. The
@@ -257,9 +261,9 @@ func (h *Hub) startCall(ctx context.Context, ev mock.DoorbellEvent) {
 	if h.calls == nil || ev.CancelToken == "" {
 		return
 	}
-	if err := h.calls.Start(ctx, ev.CancelToken, ev.MockMAC, ev.DeviceID); err != nil {
+	if err := h.calls.Start(ctx, ev.CancelToken, ev.ViewerMAC, ev.DeviceID); err != nil {
 		h.log.Warn("doorbellcalls start failed",
-			"mac", ev.MockMAC,
+			"mac", ev.ViewerMAC,
 			"event_id", ev.CancelToken,
 			"err", err,
 		)
@@ -278,7 +282,7 @@ func (h *Hub) endCallTimeout(ctx context.Context, ev mock.DoorbellCancelEvent) {
 	err := h.calls.MarkEnded(ctx, ev.CancelToken, "", doorbellcalls.ReasonTimeout)
 	if err != nil && err.Error() != "doorbellcalls: call not found" {
 		h.log.Warn("doorbellcalls timeout end failed",
-			"mac", ev.MockMAC,
+			"mac", ev.ViewerMAC,
 			"event_id", ev.CancelToken,
 			"err", err,
 		)
@@ -296,7 +300,7 @@ func (h *Hub) publishToBus(mockMAC, eventType string, hubEvent Event) {
 	}
 	payload := map[string]any{
 		"event_id":     hubEvent.CancelToken,
-		"mock_mac":     hubEvent.MockMAC,
+		"mock_mac":     hubEvent.ViewerMAC,
 		"device_id":    hubEvent.DeviceID,
 		"room_id":      hubEvent.RoomID,
 		"cancel_token": hubEvent.CancelToken,
@@ -323,7 +327,7 @@ func (h *Hub) persistStart(ctx context.Context, ev mock.DoorbellEvent) int64 {
 		occurred = time.Now()
 	}
 	id, err := h.history.Insert(ctx, doorhistory.Event{
-		MockMAC:     ev.MockMAC,
+		ViewerMAC:     ev.ViewerMAC,
 		EventType:   doorhistory.TypeDoorbellStart,
 		IntercomMAC: ev.DeviceID,
 		OccurredAt:  occurred,
@@ -332,7 +336,7 @@ func (h *Hub) persistStart(ctx context.Context, ev mock.DoorbellEvent) int64 {
 	}, ev.RawBody)
 	if err != nil {
 		h.log.Warn("doorhistory insert failed",
-			"mac", ev.MockMAC,
+			"mac", ev.ViewerMAC,
 			"request_id", ev.RequestID,
 			"err", err,
 		)
@@ -352,10 +356,10 @@ func (h *Hub) persistCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
 	if occurred.IsZero() {
 		occurred = time.Now()
 	}
-	err := h.history.UpdateCancel(ctx, ev.MockMAC, ev.CancelToken, occurred)
+	err := h.history.UpdateCancel(ctx, ev.ViewerMAC, ev.CancelToken, occurred)
 	if err != nil {
 		h.log.Warn("doorhistory cancel update failed",
-			"mac", ev.MockMAC,
+			"mac", ev.ViewerMAC,
 			"cancel_token", ev.CancelToken,
 			"err", err,
 		)
@@ -399,7 +403,7 @@ func (h *Hub) BroadcastConfigChanged(ctx context.Context, viewerMAC string) {
 	}
 	h.broadcast(viewerMAC, Event{
 		Type:      TypeConfigChanged,
-		MockMAC:   viewerMAC,
+		ViewerMAC:   viewerMAC,
 		CreatedAt: time.Now().UnixMilli(),
 	})
 	if h.bus != nil {
@@ -429,7 +433,7 @@ func (h *Hub) BroadcastUnreadCount(ctx context.Context, mockMAC string) {
 	}
 	h.broadcast(mockMAC, Event{
 		Type:        TypeUnreadCount,
-		MockMAC:     mockMAC,
+		ViewerMAC:     mockMAC,
 		UnreadCount: n,
 		CreatedAt:   time.Now().UnixMilli(),
 	})

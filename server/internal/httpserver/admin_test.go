@@ -258,7 +258,7 @@ func TestAdminWebViewers_CreateReturnsCredentials(t *testing.T) {
 		t.Errorf("qr_svg missing svg root")
 	}
 
-	infos, _ := env.mockMgr.ListViewers(context.Background())
+	infos, _ := env.viewerMgr.ListViewers(context.Background())
 	if len(infos) != 1 {
 		t.Fatalf("ListViewers len = %d, want 1", len(infos))
 	}
@@ -365,21 +365,21 @@ func TestDashboard_RealNumbers(t *testing.T) {
 	now := time.Now()
 	if _, err := env.history.Insert(context.Background(),
 		doorhistory.Event{
-			MockMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
+			ViewerMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
 			OccurredAt: now.Add(-2 * time.Hour),
 		}, nil); err != nil {
 		t.Fatalf("insert event today: %v", err)
 	}
 	if _, err := env.history.Insert(context.Background(),
 		doorhistory.Event{
-			MockMAC: "0c:ea:14:33:33:02", EventType: doorhistory.TypeDoorbellStart,
+			ViewerMAC: "0c:ea:14:33:33:02", EventType: doorhistory.TypeDoorbellStart,
 			OccurredAt: now.Add(-3 * 24 * time.Hour),
 		}, nil); err != nil {
 		t.Fatalf("insert event 3d: %v", err)
 	}
 	if _, err := env.history.Insert(context.Background(),
 		doorhistory.Event{
-			MockMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
+			ViewerMAC: "0c:ea:14:33:33:01", EventType: doorhistory.TypeDoorbellStart,
 			OccurredAt: now.Add(-10 * 24 * time.Hour),
 		}, nil); err != nil {
 		t.Fatalf("insert event 10d: %v", err)
@@ -569,7 +569,7 @@ func TestAdminWebViewers_Delete(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
-	infos, _ := env.mockMgr.ListViewers(context.Background())
+	infos, _ := env.viewerMgr.ListViewers(context.Background())
 	if len(infos) != 0 {
 		t.Errorf("ListViewers len = %d, want 0", len(infos))
 	}
@@ -801,7 +801,7 @@ func TestUsersDetail_RendersLinkedViewers(t *testing.T) {
 	)
 	// Viewer mit linked_ua_user_id = "u1" seeden
 	env.seedViewerAs(t, "0c:ea:14:dd:ee:01", "Wohnung A", "TestPw-1234567X")
-	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:dd:ee:01", "u1"); err != nil {
+	if err := env.viewerMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:dd:ee:01", "u1"); err != nil {
 		t.Fatalf("SetLinkedUAUserID: %v", err)
 	}
 	resp, err := env.client.Get(env.ts.URL + "/a/users/u1")
@@ -838,7 +838,7 @@ func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
 	}
 	// MAC kommt jetzt vom Server (HOTFIX4: kein MAC-Input mehr).
 	// Wir suchen den Viewer per Name.
-	info, _, err := env.mockMgr.LookupByName(context.Background(), "Familie Mueller-Link-Test")
+	info, _, err := env.viewerMgr.LookupByName(context.Background(), "Familie Mueller-Link-Test")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
@@ -951,7 +951,7 @@ func TestWebViewerEdit_RenamesAndChangesLink(t *testing.T) {
 		access.User{ID: "u2", FirstName: "Anna", LastName: "Schmidt", Status: access.StatusActive},
 	)
 	env.seedViewerAs(t, "0c:ea:14:ee:ee:01", "Wohnung Alt", "TestPw-1234567X")
-	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:ee:ee:01", "u1"); err != nil {
+	if err := env.viewerMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:ee:ee:01", "u1"); err != nil {
 		t.Fatalf("seed link: %v", err)
 	}
 
@@ -985,7 +985,7 @@ func TestWebViewerEdit_RenamesAndChangesLink(t *testing.T) {
 		t.Errorf("link_changed = %v, want true", got["link_changed"])
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(context.Background(), "0c:ea:14:ee:ee:01")
+	info, err := env.viewerMgr.GetViewerInfo(context.Background(), "0c:ea:14:ee:ee:01")
 	if err != nil {
 		t.Fatalf("get info: %v", err)
 	}
@@ -1073,7 +1073,7 @@ func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
 	env.seedViewer(t)
 
 	// Original-Hash holen; nach Generate-PW darf der sich nicht aendern.
-	infoBefore, err := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	infoBefore, err := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("get viewer info: %v", err)
 	}
@@ -1102,7 +1102,7 @@ func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
 	}
 
 	// Hash-Stempel ist unveraendert -> nichts wurde gespeichert.
-	infoAfter, err := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	infoAfter, err := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("get viewer info after: %v", err)
 	}

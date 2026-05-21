@@ -68,7 +68,7 @@ func TestHomeRender_HistoryButton_WithUnread(t *testing.T) {
 	occurred := time.Now()
 	for i := 0; i < 2; i++ {
 		if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: occurred.Add(time.Duration(-i) * time.Minute),
 		}, nil); err != nil {

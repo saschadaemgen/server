@@ -373,10 +373,10 @@ func accessErrorStatus(err error) int {
 // collectLinkedViewers laedt die Web-Viewer die per
 // linked_ua_user_id auf diesen UA-User zeigen.
 func (s *Server) collectLinkedViewers(r *http.Request, userID string) []linkedViewerRow {
-	if s.mockMgr == nil || userID == "" {
+	if s.viewerMgr == nil || userID == "" {
 		return nil
 	}
-	all, err := s.mockMgr.ListViewers(r.Context())
+	all, err := s.viewerMgr.ListViewers(r.Context())
 	if err != nil {
 		s.log.Warn("linked viewers list failed", "err", err)
 		return nil

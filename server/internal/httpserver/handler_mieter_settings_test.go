@@ -20,7 +20,7 @@ import (
 // TestMieterSettingsPost_AutoScreensaverJSON exercises the JSON
 // branch (Accept: application/json) that the inline-settings form
 // uses. Verifies the response envelope and the persisted value
-// in mockmanager.
+// in viewermanager.
 func TestMieterSettingsPost_AutoScreensaverJSON(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)
@@ -56,7 +56,7 @@ func TestMieterSettingsPost_AutoScreensaverJSON(t *testing.T) {
 		t.Errorf("auto_screensaver_seconds = %v, want 60", out["auto_screensaver_seconds"])
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestMieterSettingsPost_AutoScreensaverInvalid(t *testing.T) {
 		t.Errorf("status = %d, want 400, body=%s", resp.StatusCode, readBody(t, resp))
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestMieterSettingsPost_AutoScreensaverZeroDisables(t *testing.T) {
 	loginMieterForTest(t, env)
 
 	// First arm the timer.
-	if err := env.mockMgr.SetAutoScreensaverSeconds(t.Context(), testViewerMAC, 300); err != nil {
+	if err := env.viewerMgr.SetAutoScreensaverSeconds(t.Context(), testViewerMAC, 300); err != nil {
 		t.Fatalf("seed: SetAutoScreensaverSeconds: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestMieterSettingsPost_AutoScreensaverZeroDisables(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestMieterHistoryJSON_EmptyAndPopulated(t *testing.T) {
 	ctx := t.Context()
 	occurred := time.Now()
 	if _, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:     testViewerMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   doorhistory.TypeDoorbellStart,
 		IntercomMAC: "28:70:4e:31:e2:9c",
 		OccurredAt:  occurred,
@@ -175,7 +175,7 @@ func TestMieterHistoryJSON_EmptyAndPopulated(t *testing.T) {
 		t.Fatalf("seed insert 1: %v", err)
 	}
 	if _, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:     testViewerMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   doorhistory.TypeDoorbellCancel,
 		IntercomMAC: "28:70:4e:31:e2:9c",
 		OccurredAt:  occurred.Add(-1 * time.Minute),
@@ -270,7 +270,7 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 
 	// One event whose intercom MAC matches the stub.
 	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:     testViewerMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   doorhistory.TypeDoorbellStart,
 		IntercomMAC: "28:70:4e:31:e2:9c",
 		OccurredAt:  time.Now(),
@@ -279,7 +279,7 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	}
 	// One event with no intercom MAC -> generic Hauseingang.
 	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now().Add(-1 * time.Minute),
 	}, nil); err != nil {
@@ -288,7 +288,7 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	// One event with an intercom MAC that UA does NOT know ->
 	// last-resort bare MAC.
 	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:     testViewerMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   doorhistory.TypeDoorbellStart,
 		IntercomMAC: "11:22:33:44:55:66",
 		OccurredAt:  time.Now().Add(-2 * time.Minute),
@@ -354,7 +354,7 @@ func TestMieterSettingsPost_AcceptsScreenOff(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestMieterSettingsPost_HistoryCaptureToggle(t *testing.T) {
 		t.Errorf("history_capture echo = %v, want false", out["history_capture"])
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestMieterSettingsPost_ClockLayoutPersists(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if info.ResolveClockLayout() != "horizontal" {
 		t.Errorf("persisted clock_layout = %q, want horizontal",
 			info.ResolveClockLayout())
@@ -503,8 +503,8 @@ func TestMieterSettingsPost_BroadcastsConfigChanged(t *testing.T) {
 		if ev.Type != "config.changed" {
 			t.Errorf("ev.Type = %q, want config.changed", ev.Type)
 		}
-		if ev.MockMAC != testViewerMAC {
-			t.Errorf("ev.MockMAC = %q, want %q", ev.MockMAC, testViewerMAC)
+		if ev.ViewerMAC != testViewerMAC {
+			t.Errorf("ev.ViewerMAC = %q, want %q", ev.ViewerMAC, testViewerMAC)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("subscriber did not receive config.changed")
@@ -539,7 +539,7 @@ func TestMieterHistoryJSON_Pagination(t *testing.T) {
 	base := time.Now()
 	for i := 0; i < 5; i++ {
 		if _, err := env.history.Insert(ctx, doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -595,7 +595,7 @@ func TestMieterHistoryJSON_DateFilter(t *testing.T) {
 		now,
 	} {
 		if _, err := env.history.Insert(ctx, doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: when,
 		}, nil); err != nil {
@@ -661,13 +661,13 @@ func TestMieterHistoryJSON_CaptureDisabledReturnsEmpty(t *testing.T) {
 	loginMieterForTest(t, env)
 
 	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := env.mockMgr.SetHistoryCaptureEnabled(t.Context(), testViewerMAC, false); err != nil {
+	if err := env.viewerMgr.SetHistoryCaptureEnabled(t.Context(), testViewerMAC, false); err != nil {
 		t.Fatalf("disable capture: %v", err)
 	}
 
@@ -698,7 +698,7 @@ func TestMieterHistoryDeleteOne_SoftHidesAndDropsOutOfList(t *testing.T) {
 	loginMieterForTest(t, env)
 
 	id, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -758,7 +758,7 @@ func TestMieterHistoryDeleteOne_OtherViewerCannotHide(t *testing.T) {
 	// Seed an event for ANOTHER viewer.
 	env.seedViewerAs(t, "0c:ea:14:bb:cc:dd", "Other Viewer", "TestPw-1234567X")
 	id, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    "0c:ea:14:bb:cc:dd",
+		ViewerMAC:    "0c:ea:14:bb:cc:dd",
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -783,7 +783,7 @@ func TestMieterHistoryDeleteAll_HidesEverythingForMieter(t *testing.T) {
 	loginMieterForTest(t, env)
 	for i := 0; i < 3; i++ {
 		if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: time.Now().Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -825,7 +825,7 @@ func TestMieterHistoryDeleteOne_DropsUnreadCount(t *testing.T) {
 	loginMieterForTest(t, env)
 
 	id, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -858,7 +858,7 @@ func TestMieterHistoryJSON_HiddenEventsAreFilteredOut(t *testing.T) {
 	loginMieterForTest(t, env)
 
 	id, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)

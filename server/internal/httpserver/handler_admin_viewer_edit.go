@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/auth/esptoken"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // adminViewerStammdatenRequest ist der JSON-Body fuer
@@ -46,9 +46,9 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -69,12 +69,12 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "Mieter-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
 			return
 		}
-		if mockmanager.NormalizeName(name) != mockmanager.NormalizeName(info.Name) {
-			if err := s.mockMgr.Rename(r.Context(), mac, name); err != nil {
+		if viewermanager.NormalizeName(name) != viewermanager.NormalizeName(info.Name) {
+			if err := s.viewerMgr.Rename(r.Context(), mac, name); err != nil {
 				switch {
-				case errors.Is(err, mockmanager.ErrNameInUse):
+				case errors.Is(err, viewermanager.ErrNameInUse):
 					http.Error(w, "Wohnungs-Name ist bereits vergeben (case-insensitive).", http.StatusConflict)
-				case errors.Is(err, mockmanager.ErrViewerNotFound):
+				case errors.Is(err, viewermanager.ErrViewerNotFound):
 					http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 				default:
 					s.log.Error("stammdaten rename", "err", err, "mac_prefix", safePrefix(mac))
@@ -93,7 +93,7 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		if paired != info.PairedIntercomMAC {
-			if err := s.mockMgr.SetPairedIntercomMAC(r.Context(), mac, paired); err != nil {
+			if err := s.viewerMgr.SetPairedIntercomMAC(r.Context(), mac, paired); err != nil {
 				s.respondStammdatenErr(w, mac, "paired_intercom_mac", err)
 				return
 			}
@@ -104,7 +104,7 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 	if body.StreamProfile != nil {
 		profile := strings.TrimSpace(*body.StreamProfile)
 		if profile != info.StreamProfile {
-			if err := s.mockMgr.SetStreamProfile(r.Context(), mac, profile); err != nil {
+			if err := s.viewerMgr.SetStreamProfile(r.Context(), mac, profile); err != nil {
 				s.respondStammdatenErr(w, mac, "stream_profile", err)
 				return
 			}
@@ -115,7 +115,7 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 	if body.LinkedUAUserID != nil {
 		linked := strings.TrimSpace(*body.LinkedUAUserID)
 		if linked != info.LinkedUAUserID {
-			if err := s.mockMgr.SetLinkedUAUserID(r.Context(), mac, linked); err != nil {
+			if err := s.viewerMgr.SetLinkedUAUserID(r.Context(), mac, linked); err != nil {
 				s.respondStammdatenErr(w, mac, "linked_ua_user_id", err)
 				return
 			}
@@ -129,7 +129,7 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 
 	// Frische Info zurueck liefern damit das UI ohne extra GET
 	// die neuen Werte sieht.
-	fresh, _ := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	fresh, _ := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":      true,
@@ -161,9 +161,9 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -171,7 +171,7 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	isESP := info.Type == mockmanager.TypeESP
+	isESP := info.Type == viewermanager.TypeESP
 
 	var body adminViewerSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -193,7 +193,7 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 		// Browser rendert wie screensaver), aber der Admin-Edit
 		// im Web-Tab sollte das nicht setzen. Trotzdem akzeptieren
 		// damit Sync-Pfad (admin <-> ESP) symmetrisch bleibt.
-		if err := s.mockMgr.SetIdleViewMode(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetIdleViewMode(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "idle_view_mode", err)
 			return
 		}
@@ -202,14 +202,14 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 
 	if body.AutoScreensaverSeconds != nil {
 		v := *body.AutoScreensaverSeconds
-		if !slices.Contains(mockmanager.AutoScreensaverSecondsAllowed, v) {
+		if !slices.Contains(viewermanager.AutoScreensaverSecondsAllowed, v) {
 			http.Error(w,
 				fmt.Sprintf("auto_screensaver_seconds muss einer von %v sein",
-					mockmanager.AutoScreensaverSecondsAllowed),
+					viewermanager.AutoScreensaverSecondsAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetAutoScreensaverSeconds(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetAutoScreensaverSeconds(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "auto_screensaver_seconds", err)
 			return
 		}
@@ -217,7 +217,7 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 	}
 
 	if body.HistoryCapture != nil {
-		if err := s.mockMgr.SetHistoryCaptureEnabled(r.Context(), mac, *body.HistoryCapture); err != nil {
+		if err := s.viewerMgr.SetHistoryCaptureEnabled(r.Context(), mac, *body.HistoryCapture); err != nil {
 			s.respondSettingsErr(w, mac, "history_capture", err)
 			return
 		}
@@ -226,13 +226,13 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 
 	if body.ClockLayout != nil {
 		v := *body.ClockLayout
-		if !slices.Contains(mockmanager.ClockLayoutAllowed, v) {
+		if !slices.Contains(viewermanager.ClockLayoutAllowed, v) {
 			http.Error(w,
-				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				fmt.Sprintf("clock_layout muss einer von %v sein", viewermanager.ClockLayoutAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetClockLayout(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetClockLayout(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "clock_layout", err)
 			return
 		}
@@ -246,14 +246,14 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		v := *body.ScreenOffAfterSec
-		if !slices.Contains(mockmanager.ScreenOffAfterSecAllowed, v) {
+		if !slices.Contains(viewermanager.ScreenOffAfterSecAllowed, v) {
 			http.Error(w,
 				fmt.Sprintf("screen_off_after_sec muss einer von %v sein",
-					mockmanager.ScreenOffAfterSecAllowed),
+					viewermanager.ScreenOffAfterSecAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetScreenOffAfterSec(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetScreenOffAfterSec(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "screen_off_after_sec", err)
 			return
 		}
@@ -270,7 +270,7 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetBrightnessIdle(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetBrightnessIdle(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "brightness_idle", err)
 			return
 		}
@@ -282,13 +282,13 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		v := *body.Language
-		if v != "" && !slices.Contains(mockmanager.LanguageAllowed, v) {
+		if v != "" && !slices.Contains(viewermanager.LanguageAllowed, v) {
 			http.Error(w,
-				fmt.Sprintf("language muss einer von %v sein", mockmanager.LanguageAllowed),
+				fmt.Sprintf("language muss einer von %v sein", viewermanager.LanguageAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetLanguage(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetLanguage(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "language", err)
 			return
 		}
@@ -320,9 +320,9 @@ func (s *Server) handleAdminViewerPassword(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -330,7 +330,7 @@ func (s *Server) handleAdminViewerPassword(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if info.Type != mockmanager.TypeWeb {
+	if info.Type != viewermanager.TypeWeb {
 		http.Error(w, "Passwort gibt es nur fuer Web-Viewer. ESP nutzt Bearer-Token.", http.StatusBadRequest)
 		return
 	}
@@ -384,9 +384,9 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -394,7 +394,7 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if info.Type != mockmanager.TypeESP {
+	if info.Type != viewermanager.TypeESP {
 		http.Error(w, "Token-Regeneration nur fuer ESP-Viewer.", http.StatusBadRequest)
 		return
 	}
@@ -404,7 +404,7 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 		http.Error(w, "Token-Erzeugung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	if err := s.mockMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
+	if err := s.viewerMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
 		s.log.Error("admin token regen store", "err", err, "mac_prefix", safePrefix(mac))
 		http.Error(w, "Token-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 		return
@@ -449,7 +449,7 @@ func (s *Server) parkTokenForHandoff(ctx context.Context, mac, clearText string)
 // adminViewerJSON shrinks a ViewerInfo down to the fields the
 // Stammdaten-UI needs for re-render after a save. We do NOT
 // expose password hash / esp token hash here.
-func adminViewerJSON(info *mockmanager.ViewerInfo) map[string]any {
+func adminViewerJSON(info *viewermanager.ViewerInfo) map[string]any {
 	if info == nil {
 		return nil
 	}
@@ -472,10 +472,10 @@ func adminViewerJSON(info *mockmanager.ViewerInfo) map[string]any {
 	}
 }
 
-// respondStammdatenErr wandelt mockmanager-Fehler in deutsche
+// respondStammdatenErr wandelt viewermanager-Fehler in deutsche
 // 4xx/500-Responses. Pendant zu respondSettingsErr.
 func (s *Server) respondStammdatenErr(w http.ResponseWriter, mac, field string, err error) {
-	if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if errors.Is(err, viewermanager.ErrViewerNotFound) {
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 		return
 	}

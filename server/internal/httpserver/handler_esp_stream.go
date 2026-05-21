@@ -40,7 +40,7 @@ import (
 	"net/url"
 	"strings"
 
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {
@@ -53,9 +53,9 @@ func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			s.log.Warn("stream proxy: viewer not found",
 				"route", r.URL.Path, "viewer_mac", mac)
 			http.Error(w, "viewer not found", http.StatusNotFound)

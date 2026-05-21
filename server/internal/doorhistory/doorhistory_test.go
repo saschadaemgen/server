@@ -40,7 +40,7 @@ func TestInsert_RoundTrip(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	id, err := s.Insert(ctx, Event{
-		MockMAC:     testMockMAC,
+		ViewerMAC:     testMockMAC,
 		EventType:   TypeDoorbellStart,
 		IntercomMAC: "28:70:4e:31:e2:9c",
 		OccurredAt:  time.Unix(1747000000, 0),
@@ -87,7 +87,7 @@ func TestInsert_RejectsEmptyFields(t *testing.T) {
 	if _, err := s.Insert(ctx, Event{EventType: TypeDoorbellStart}, nil); err == nil {
 		t.Error("Insert with empty mock_mac succeeded")
 	}
-	if _, err := s.Insert(ctx, Event{MockMAC: testMockMAC}, nil); err == nil {
+	if _, err := s.Insert(ctx, Event{ViewerMAC: testMockMAC}, nil); err == nil {
 		t.Error("Insert with empty event_type succeeded")
 	}
 }
@@ -96,7 +96,7 @@ func TestUpdateCancel_MatchesNewestOpen(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	older, err := s.Insert(ctx, Event{
-		MockMAC:     testMockMAC,
+		ViewerMAC:     testMockMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747000000, 0),
 		CancelToken: "tok-shared",
@@ -105,7 +105,7 @@ func TestUpdateCancel_MatchesNewestOpen(t *testing.T) {
 		t.Fatalf("insert older: %v", err)
 	}
 	newer, err := s.Insert(ctx, Event{
-		MockMAC:     testMockMAC,
+		ViewerMAC:     testMockMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747001000, 0),
 		CancelToken: "tok-shared",
@@ -136,7 +136,7 @@ func TestUpdateCancel_UnknownTokenReturnsNotFound(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Insert(ctx, Event{
-		MockMAC:     testMockMAC,
+		ViewerMAC:     testMockMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747000000, 0),
 		CancelToken: "tok-1",
@@ -155,7 +155,7 @@ func TestUnreadCount_OnlyUnread(t *testing.T) {
 	var ids []int64
 	for i := 0; i < 3; i++ {
 		id, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil)
@@ -187,7 +187,7 @@ func TestMarkRead_RespectsMockScope(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	idA, err := s.Insert(ctx, Event{
-		MockMAC:    testMockMAC,
+		ViewerMAC:    testMockMAC,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000000, 0),
 	}, nil)
@@ -212,7 +212,7 @@ func TestMarkAllRead_Resets(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil); err != nil {
@@ -236,7 +236,7 @@ func TestListForMock_NewestFirstAndLimit(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil); err != nil {
@@ -263,14 +263,14 @@ func TestListForMock_FiltersByMock(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Insert(ctx, Event{
-		MockMAC:    testMockMAC,
+		ViewerMAC:    testMockMAC,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000000, 0),
 	}, nil); err != nil {
 		t.Fatalf("insert A: %v", err)
 	}
 	if _, err := s.Insert(ctx, Event{
-		MockMAC:    testMockMACB,
+		ViewerMAC:    testMockMACB,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000001, 0),
 	}, nil); err != nil {
@@ -283,7 +283,7 @@ func TestListForMock_FiltersByMock(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(A) = %d, want 1", len(got))
 	}
-	if got[0].MockMAC != testMockMAC {
+	if got[0].ViewerMAC != testMockMAC {
 		t.Errorf("leaked mock B event into mock A list")
 	}
 }
@@ -294,7 +294,7 @@ func TestAggregateAdmin_BucketsByWindow(t *testing.T) {
 	now := time.Unix(1747100000, 0)
 	insertAt := func(macAddr string, offset time.Duration) {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    macAddr,
+			ViewerMAC:    macAddr,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: now.Add(offset),
 		}, nil); err != nil {
@@ -333,7 +333,7 @@ func TestAggregateAdmin_IgnoresCancelEvents(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1747100000, 0)
 	if _, err := s.Insert(ctx, Event{
-		MockMAC:    testMockMAC,
+		ViewerMAC:    testMockMAC,
 		EventType:  TypeDoorbellCancel,
 		OccurredAt: now.Add(-1 * time.Hour),
 	}, nil); err != nil {
@@ -360,7 +360,7 @@ func seedThreeEvents(t *testing.T, s *SQLStore) (ids [3]int64) {
 		base,
 	} {
 		id, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: when,
 		}, nil)
@@ -451,7 +451,7 @@ func TestListVisible_Pagination(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Hour),
 		}, nil); err != nil {
@@ -498,7 +498,7 @@ func TestListVisible_LimitClampedToMax(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < ListOptsMaxLimit+10; i++ {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Second),
 		}, nil); err != nil {
@@ -523,7 +523,7 @@ func TestListVisible_DateRange(t *testing.T) {
 	day3 := time.Date(2026, 5, 17, 10, 0, 0, 0, time.UTC)
 	for _, t0 := range []time.Time{day1, day2, day3} {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: t0,
 		}, nil); err != nil {
@@ -643,7 +643,7 @@ func TestAdminListAll_PaginationHasMore(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			MockMAC:    testMockMAC,
+			ViewerMAC:    testMockMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Hour),
 		}, nil); err != nil {

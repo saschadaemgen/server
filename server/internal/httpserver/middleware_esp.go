@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 type espContextKey int
@@ -35,9 +35,9 @@ func (s *Server) requireESPBearer(next http.Handler) http.Handler {
 			return
 		}
 		presented := strings.TrimPrefix(auth, "Bearer ")
-		mac, err := s.mockMgr.LookupESPMACByToken(r.Context(), presented)
+		mac, err := s.viewerMgr.LookupESPMACByToken(r.Context(), presented)
 		if err != nil {
-			if !errors.Is(err, mockmanager.ErrViewerNotFound) {
+			if !errors.Is(err, viewermanager.ErrViewerNotFound) {
 				s.log.Error("esp bearer lookup", "err", err)
 			}
 			http.Error(w, "invalid bearer token", http.StatusUnauthorized)

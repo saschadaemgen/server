@@ -60,7 +60,7 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), viewerMAC)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), viewerMAC)
 	if err != nil {
 		s.log.Error("mieter unlock viewer info", "err", err, "mac_prefix", viewerMAC[:8])
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -120,7 +120,7 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.history != nil {
 		_, _ = s.history.Insert(r.Context(), doorhistory.Event{
-			MockMAC:    viewerMAC,
+			ViewerMAC:    viewerMAC,
 			EventType:  "door_unlocked",
 			OccurredAt: time.Now(),
 		}, nil)
@@ -307,7 +307,7 @@ func decodeCallBody(r *http.Request) (callLifecycleRequest, error) {
 // row's device_id (populated by doorbellhub.startCall when the
 // /remote_view RPC arrived).
 func (s *Server) notifyUDMReject(ctx context.Context, eventID, viewerMAC string) {
-	if s.calls == nil || s.mockMgr == nil {
+	if s.calls == nil || s.viewerMgr == nil {
 		return
 	}
 	call, err := s.calls.Get(ctx, eventID)
@@ -324,7 +324,7 @@ func (s *Server) notifyUDMReject(ctx context.Context, eventID, viewerMAC string)
 		)
 		return
 	}
-	if err := s.mockMgr.RejectDoorbellOnMock(viewerMAC, call.DeviceID); err != nil {
+	if err := s.viewerMgr.RejectDoorbellOnViewer(viewerMAC, call.DeviceID); err != nil {
 		s.log.Warn("call_admin_result publish failed",
 			"viewer_mac_prefix", safePrefix(viewerMAC),
 			"intercom", call.DeviceID,

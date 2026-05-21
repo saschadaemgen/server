@@ -104,7 +104,7 @@ func TestESPHistory_ListReturnsViewerEvents(t *testing.T) {
 	occurred := time.Now()
 	for _, mac := range []string{espTestMAC, espTestMAC} {
 		if _, err := env.history.Insert(ctx, doorhistory.Event{
-			MockMAC:     mac,
+			ViewerMAC:     mac,
 			EventType:   doorhistory.TypeDoorbellStart,
 			IntercomMAC: "28:70:4e:31:e2:9c",
 			OccurredAt:  occurred,
@@ -113,7 +113,7 @@ func TestESPHistory_ListReturnsViewerEvents(t *testing.T) {
 		}
 	}
 	if _, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:    "0c:ea:14:bb:cc:dd",
+		ViewerMAC:    "0c:ea:14:bb:cc:dd",
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: occurred,
 	}, nil); err != nil {
@@ -141,7 +141,7 @@ func TestESPHistory_Pagination(t *testing.T) {
 	base := time.Now()
 	for i := 0; i < 5; i++ {
 		if _, err := env.history.Insert(ctx, doorhistory.Event{
-			MockMAC:    espTestMAC,
+			ViewerMAC:    espTestMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -188,7 +188,7 @@ func TestESPHistory_DateFilter(t *testing.T) {
 		now,
 	} {
 		if _, err := env.history.Insert(ctx, doorhistory.Event{
-			MockMAC:    espTestMAC,
+			ViewerMAC:    espTestMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: when,
 		}, nil); err != nil {
@@ -211,13 +211,13 @@ func TestESPHistory_CaptureDisabled(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung ESP-Hist D")
 
 	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    espTestMAC,
+		ViewerMAC:    espTestMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := env.mockMgr.SetHistoryCaptureEnabled(context.Background(), espTestMAC, false); err != nil {
+	if err := env.viewerMgr.SetHistoryCaptureEnabled(context.Background(), espTestMAC, false); err != nil {
 		t.Fatalf("disable capture: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestESPHistory_DeleteOneSoftDelete(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung ESP-Hist E")
 
 	id, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    espTestMAC,
+		ViewerMAC:    espTestMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -293,7 +293,7 @@ func TestESPHistory_DeleteAllSoftDelete(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-			MockMAC:    espTestMAC,
+			ViewerMAC:    espTestMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: time.Now().Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -342,7 +342,7 @@ func TestESPHistory_DeleteOtherViewerEvent(t *testing.T) {
 	// able to hide it via its own bearer.
 	env.seedViewerAs(t, "0c:ea:14:bb:cc:dd", "Other Viewer", "TestPw-1234567X")
 	id, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    "0c:ea:14:bb:cc:dd",
+		ViewerMAC:    "0c:ea:14:bb:cc:dd",
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -422,7 +422,7 @@ func TestESPHistory_DeleteOneDropsUnreadCount(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung ESP-Hist L")
 
 	id, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    espTestMAC,
+		ViewerMAC:    espTestMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -452,7 +452,7 @@ func TestESPSettings_AcceptsHistoryCapture(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung ESP-Capture A")
 
 	// Initial state: capture enabled (Default).
-	info, err := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, err := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestESPSettings_AcceptsHistoryCapture(t *testing.T) {
 	}
 
 	// Persistiert?
-	info2, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info2, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info2.ResolveHistoryCaptureEnabled() {
 		t.Errorf("persisted capture still enabled after Set(false)")
 	}
@@ -510,7 +510,7 @@ func TestESPSettings_HistoryCaptureRoundtripTrue(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung ESP-Capture B")
 
 	// Disable first so we can verify re-enable.
-	if err := env.mockMgr.SetHistoryCaptureEnabled(context.Background(), espTestMAC, false); err != nil {
+	if err := env.viewerMgr.SetHistoryCaptureEnabled(context.Background(), espTestMAC, false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
@@ -519,7 +519,7 @@ func TestESPSettings_HistoryCaptureRoundtripTrue(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if !info.ResolveHistoryCaptureEnabled() {
 		t.Errorf("after Set(true) capture still disabled")
 	}
@@ -555,7 +555,7 @@ func TestESPSettings_HistoryCaptureCombinedWithOtherFields(t *testing.T) {
 		t.Errorf("response missing brightness_idle key: %s", buf.String())
 	}
 
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info.ResolveHistoryCaptureEnabled() {
 		t.Errorf("history_capture not persisted")
 	}

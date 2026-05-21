@@ -10,7 +10,7 @@ import (
 
 	"carvilon.local/server/internal/access"
 	"carvilon.local/server/internal/auth/esptoken"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // nullable mapped einen leeren string auf SQL-NULL, fuer Spalten
@@ -57,7 +57,7 @@ func (s *Server) handleESPDiscover(w http.ResponseWriter, r *http.Request) {
 	// Wenn das Geraet schon in viewers steht (adoptiert): nichts
 	// in esp_pending machen. Status-Poll holt sich den Token aus
 	// viewers / dem Handoff-Slot.
-	if info, err := s.mockMgr.GetViewerInfo(r.Context(), mac); err == nil && info.Type == mockmanager.TypeESP {
+	if info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err == nil && info.Type == viewermanager.TypeESP {
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"device_id": mac,
@@ -107,8 +107,8 @@ func (s *Server) handleESPStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	// Adoption-Check via viewers-Lookup.
-	info, vErr := s.mockMgr.GetViewerInfo(r.Context(), mac)
-	if vErr == nil && info.Type == mockmanager.TypeESP {
+	info, vErr := s.viewerMgr.GetViewerInfo(r.Context(), mac)
+	if vErr == nil && info.Type == viewermanager.TypeESP {
 		// Klartext-Token-Handoff einmalig aus pending lesen.
 		var tokenCT sql.NullString
 		_ = s.sessionsDB().QueryRowContext(r.Context(),
@@ -251,13 +251,13 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 	}
 
 	// Adoptierte ESP-Viewer aus viewers.
-	infos, err := s.mockMgr.ListViewers(r.Context())
+	infos, err := s.viewerMgr.ListViewers(r.Context())
 	if err != nil {
 		return data, err
 	}
 	userNames := s.lookupUANames(r, espLinkedUserIDs(infos))
 	for _, info := range infos {
-		if info.Type != mockmanager.TypeESP {
+		if info.Type != viewermanager.TypeESP {
 			continue
 		}
 		row := espAdoptedRow{
@@ -277,11 +277,11 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 	return data, nil
 }
 
-func espLinkedUserIDs(infos []mockmanager.ViewerInfo) []string {
+func espLinkedUserIDs(infos []viewermanager.ViewerInfo) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0)
 	for _, info := range infos {
-		if info.Type != mockmanager.TypeESP {
+		if info.Type != viewermanager.TypeESP {
 			continue
 		}
 		if info.LinkedUAUserID == "" || seen[info.LinkedUAUserID] {
@@ -398,11 +398,11 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	spec := mockmanager.ViewerSpec{
+	spec := viewermanager.ViewerSpec{
 		MAC:               mac,
 		Name:              name,
 		ServicePort:       port,
-		Type:              mockmanager.TypeESP,
+		Type:              viewermanager.TypeESP,
 		LinkedUAUserID:    strings.TrimSpace(body.LinkedUAUserID),
 		PairedIntercomMAC: pairedIntercom,
 		StreamProfile:     strings.TrimSpace(body.StreamProfile),
@@ -410,11 +410,11 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		ESPFwVersion:      fwVersion.String,
 		ESPTokenHash:      hash,
 	}
-	if err := s.mockMgr.AddViewer(r.Context(), spec); err != nil {
+	if err := s.viewerMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
-		case errors.Is(err, mockmanager.ErrMACInUse):
+		case errors.Is(err, viewermanager.ErrMACInUse):
 			http.Error(w, "MAC bereits vergeben.", http.StatusConflict)
-		case errors.Is(err, mockmanager.ErrNameInUse):
+		case errors.Is(err, viewermanager.ErrNameInUse):
 			http.Error(w, "Wohnungs-Name bereits vergeben.", http.StatusConflict)
 		default:
 			s.log.Error("esp adopt addviewer", "err", err, "mac_prefix", mac[:8])
@@ -496,12 +496,12 @@ func (s *Server) handleAdminESPViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Name fehlt oder zu lang.", http.StatusBadRequest)
 		return
 	}
-	if err := s.mockMgr.Rename(r.Context(), mac, name); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.Rename(r.Context(), mac, name); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, mockmanager.ErrNameInUse) {
+		if errors.Is(err, viewermanager.ErrNameInUse) {
 			http.Error(w, "Name ist bereits vergeben.", http.StatusConflict)
 			return
 		}
@@ -532,8 +532,8 @@ func (s *Server) handleAdminESPViewersRegenerateToken(w http.ResponseWriter, r *
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := s.mockMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "ESP-Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -571,8 +571,8 @@ func (s *Server) handleAdminESPViewersDelete(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "ungueltige MAC", http.StatusBadRequest)
 		return
 	}
-	if err := s.mockMgr.RemoveViewer(r.Context(), mac); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.RemoveViewer(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}

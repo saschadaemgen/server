@@ -29,7 +29,7 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
 )
@@ -79,7 +79,7 @@ type testEnv struct {
 	adminSess   *adminsession.Service
 	adminSvc    *admin.Service
 	platformCfg *platformconfig.Service
-	mockMgr     *mockmanager.Manager
+	viewerMgr     *viewermanager.Manager
 	hub         *doorbellhub.Hub
 	history     *doorhistory.SQLStore
 	audit       *loginaudit.Service
@@ -227,7 +227,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	platformCfg := platformconfig.New(d, secSvc, platformconfig.WithClock(clock.Now))
 
-	mockMgr := mockmanager.New(d, quietLogger(), mockmanager.Options{
+	viewerMgr := viewermanager.New(d, quietLogger(), viewermanager.Options{
 		StateDirBase: filepath.Join(t.TempDir(), "mocks"),
 		ServerIPv4:   "127.0.0.1",
 		Factory:      fakeManagerFactory,
@@ -236,7 +236,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	historyStore := doorhistory.NewSQLStore(d.DB)
 	callsSvc := doorbellcalls.NewWithClock(d.DB, clock.Now)
 	hubBus := eventbus.New()
-	hub := doorbellhub.NewWithOptions(mockMgr, historyStore, quietLogger(), doorbellhub.Options{
+	hub := doorbellhub.NewWithOptions(viewerMgr, historyStore, quietLogger(), doorbellhub.Options{
 		Bus:   hubBus,
 		Calls: callsSvc,
 	})
@@ -256,7 +256,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Config:          cfg,
 		Sessions:        sess,
 		AdminSessions:   adminSess,
-		MockManager:     mockMgr,
+		ViewerManager:     viewerMgr,
 		Admin:           adminSvc,
 		PlatformConfig:  platformCfg,
 		Audit:           auditSvc,
@@ -289,13 +289,13 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		hubCancel()
 		shutCtx, c := context.WithTimeout(context.Background(), 2*time.Second)
 		defer c()
-		_ = mockMgr.Shutdown(shutCtx)
+		_ = viewerMgr.Shutdown(shutCtx)
 		_ = d.Close()
 	})
 	return &testEnv{
 		srv: srv, ts: ts, client: client,
 		sess: sess, adminSess: adminSess, adminSvc: adminSvc,
-		platformCfg: platformCfg, mockMgr: mockMgr,
+		platformCfg: platformCfg, viewerMgr: viewerMgr,
 		hub:       hub,
 		history:   historyStore,
 		audit:     auditSvc,
@@ -314,16 +314,16 @@ func (e *testEnv) seedViewer(t *testing.T) {
 // mehr, der Name IST der Login.
 func (e *testEnv) seedViewerAs(t *testing.T, mac, name, plainPW string) {
 	t.Helper()
-	infos, err := e.mockMgr.ListViewers(context.Background())
+	infos, err := e.viewerMgr.ListViewers(context.Background())
 	if err != nil {
 		t.Fatalf("seedViewer: ListViewers: %v", err)
 	}
 	port := uint16(8100 + len(infos))
-	if err := e.mockMgr.AddViewer(context.Background(), mockmanager.ViewerSpec{
+	if err := e.viewerMgr.AddViewer(context.Background(), viewermanager.ViewerSpec{
 		MAC:         mac,
 		Name:        name,
 		ServicePort: port,
-		Type:        mockmanager.TypeWeb,
+		Type:        viewermanager.TypeWeb,
 	}); err != nil {
 		t.Fatalf("seedViewer: AddViewer: %v", err)
 	}
@@ -331,7 +331,7 @@ func (e *testEnv) seedViewerAs(t *testing.T, mac, name, plainPW string) {
 	if err != nil {
 		t.Fatalf("seedViewer: hash: %v", err)
 	}
-	if err := e.mockMgr.SetPasswordHash(context.Background(), mac, hash); err != nil {
+	if err := e.viewerMgr.SetPasswordHash(context.Background(), mac, hash); err != nil {
 		t.Fatalf("seedViewer: set hash: %v", err)
 	}
 }
@@ -357,8 +357,8 @@ func quietLogger() *slog.Logger {
 }
 
 // fakeManagerFactory builds a do-nothing Viewer that satisfies
-// the mockmanager.Viewer interface without binding any sockets.
-func fakeManagerFactory(cfg mock.Config, _ *slog.Logger) (mockmanager.Viewer, error) {
+// the viewermanager.Viewer interface without binding any sockets.
+func fakeManagerFactory(cfg mock.Config, _ *slog.Logger) (viewermanager.Viewer, error) {
 	return &noopViewer{
 		mac:     cfg.MAC,
 		events:  make(chan mock.DoorbellEvent, 1),
@@ -615,7 +615,7 @@ func TestLogin_AllUmlautVariants(t *testing.T) {
 
 	for _, typed := range []string{"Daemgen", "daemgen", "DAEMGEN", "Dämgen", "  Daemgen  "} {
 		t.Run(typed, func(t *testing.T) {
-			env.srv.viewerLimiter.ClearUser(mockmanager.NormalizeName(typed))
+			env.srv.viewerLimiter.ClearUser(viewermanager.NormalizeName(typed))
 			resp := env.loginViewer(t, typed, "TestPw-1234567X")
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusSeeOther {

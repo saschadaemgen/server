@@ -70,7 +70,7 @@ func main() {
 	go func() {
 		for ev := range v.Events() {
 			log.Info("doorbell event received",
-				"mac", ev.MockMAC,
+				"mac", ev.ViewerMAC,
 				"request_id", ev.RequestID,
 				"device_id", ev.DeviceID,
 				"room_id", ev.RoomID,
@@ -80,7 +80,7 @@ func main() {
 	go func() {
 		for ev := range v.Cancels() {
 			log.Info("doorbell cancel received",
-				"mac", ev.MockMAC,
+				"mac", ev.ViewerMAC,
 				"cancel_token", ev.CancelToken,
 				"reason", ev.ReasonCode,
 			)

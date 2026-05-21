@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/doorhistory"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
 )
 
@@ -67,9 +67,9 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			s.clearSessionCookie(w)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return

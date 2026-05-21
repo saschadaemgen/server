@@ -47,7 +47,7 @@ func TestAdminViewerStammdaten_RenameAndBroadcast(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
 
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if info.Name != "Wohnung Umbenannt" {
 		t.Errorf("name = %q, want Wohnung Umbenannt", info.Name)
 	}
@@ -74,7 +74,7 @@ func TestAdminViewerStammdaten_PartialPairedIntercom(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if info.PairedIntercomMAC != "28:70:4e:31:e2:9c" {
 		t.Errorf("paired = %q", info.PairedIntercomMAC)
 	}
@@ -139,7 +139,7 @@ func TestAdminViewerSettings_FullWebUpdate(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if info.ResolveIdleViewMode() != "livestream" {
 		t.Errorf("idle_view_mode = %q", info.ResolveIdleViewMode())
 	}
@@ -163,7 +163,7 @@ func TestAdminViewerSettings_AcceptsClockLayout(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
 	if info.ResolveClockLayout() != "horizontal" {
 		t.Errorf("clock_layout = %q, want horizontal", info.ResolveClockLayout())
 	}
@@ -216,7 +216,7 @@ func TestAdminViewerSettings_ESPViewerAcceptsESPFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info.ResolveScreenOffAfterSec() != 600 {
 		t.Errorf("screen_off = %d", info.ResolveScreenOffAfterSec())
 	}
@@ -367,7 +367,7 @@ func TestAdminViewerRegenerateToken_ReturnsClearTextOnce(t *testing.T) {
 		t.Errorf("mac echo = %q", out.MAC)
 	}
 	// Token funktioniert als Bearer.
-	mac, err := env.mockMgr.LookupESPMACByToken(context.Background(), out.NewToken)
+	mac, err := env.viewerMgr.LookupESPMACByToken(context.Background(), out.NewToken)
 	if err != nil {
 		t.Fatalf("LookupESPMACByToken: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestAdminViewerRegenerateToken_InvalidatesOldToken(t *testing.T) {
 		t.Fatalf("new token equals old token - regen broken")
 	}
 	// Alter Bearer-Token wird zurueckgewiesen.
-	_, err := env.mockMgr.LookupESPMACByToken(context.Background(), oldToken)
+	_, err := env.viewerMgr.LookupESPMACByToken(context.Background(), oldToken)
 	if err == nil {
 		t.Errorf("old token still resolves to viewer; rotation failed")
 	}

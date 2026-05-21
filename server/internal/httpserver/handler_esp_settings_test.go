@@ -78,7 +78,7 @@ func TestESPSettings_FullUpdate(t *testing.T) {
 		}
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, err := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestESPSettings_PartialUpdate(t *testing.T) {
 
 	// First arm an initial brightness so we can verify the
 	// partial update leaves it untouched.
-	if err := env.mockMgr.SetBrightnessIdle(context.Background(), espTestMAC, 42); err != nil {
+	if err := env.viewerMgr.SetBrightnessIdle(context.Background(), espTestMAC, 42); err != nil {
 		t.Fatalf("seed brightness: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestESPSettings_PartialUpdate(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
 
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info.ResolveLanguage() != "en" {
 		t.Errorf("Language = %q, want en", info.ResolveLanguage())
 	}
@@ -162,7 +162,7 @@ func TestESPSettings_AcceptsScreenOff(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info.ResolveIdleViewMode() != "screen_off" {
 		t.Errorf("IdleViewMode = %q, want screen_off", info.ResolveIdleViewMode())
 	}
@@ -206,7 +206,7 @@ func TestESPSettings_AcceptsClockLayout(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
 	}
-	info, _ := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if info.ResolveClockLayout() != "horizontal" {
 		t.Errorf("persisted clock_layout = %q, want horizontal",
 			info.ResolveClockLayout())

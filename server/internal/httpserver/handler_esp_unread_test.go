@@ -52,7 +52,7 @@ func TestESPUnreadCount_ReturnsZeroAndCountsAfterSeed(t *testing.T) {
 	ctx := context.Background()
 	occurred := time.Now()
 	id1, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:    espTestMAC,
+		ViewerMAC:    espTestMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: occurred,
 	}, nil)
@@ -60,7 +60,7 @@ func TestESPUnreadCount_ReturnsZeroAndCountsAfterSeed(t *testing.T) {
 		t.Fatalf("seed 1: %v", err)
 	}
 	if _, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:    espTestMAC,
+		ViewerMAC:    espTestMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: occurred.Add(time.Minute),
 	}, nil); err != nil {
@@ -111,7 +111,7 @@ func TestESPUnreadCount_FilteredByViewerMAC(t *testing.T) {
 
 	// Seed an event for B but NOT for A.
 	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    "0c:ea:14:bb:cc:dd",
+		ViewerMAC:    "0c:ea:14:bb:cc:dd",
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil); err != nil {

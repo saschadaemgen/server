@@ -212,7 +212,7 @@ func TestAdopt_MovesFromPendingToViewers(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 
-	info, err := env.mockMgr.GetViewerInfo(context.Background(), espTestMAC)
+	info, err := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
 	if err != nil {
 		t.Fatalf("viewer not found after adopt: %v", err)
 	}

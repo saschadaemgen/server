@@ -161,7 +161,7 @@ func TestMieterUnlock_StandbyUsesPairedIntercom(t *testing.T) {
 	loginMieterForTest(t, env)
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.URL, Token: "t"}))
 
-	if err := env.mockMgr.SetPairedIntercomMAC(context.Background(),
+	if err := env.viewerMgr.SetPairedIntercomMAC(context.Background(),
 		testViewerMAC, "28:70:4e:31:e2:9c"); err != nil {
 		t.Fatalf("SetPairedIntercomMAC: %v", err)
 	}
@@ -389,7 +389,7 @@ var _ = eventbus.New
 // tests that need to inspect the recorded RejectDoorbell calls.
 func findRunningViewer(t *testing.T, env *testEnv, mac string) *noopViewer {
 	t.Helper()
-	v, err := env.mockMgr.LookupForReject(mac)
+	v, err := env.viewerMgr.LookupForReject(mac)
 	if err != nil {
 		t.Fatalf("LookupForReject(%s): %v", mac, err)
 	}

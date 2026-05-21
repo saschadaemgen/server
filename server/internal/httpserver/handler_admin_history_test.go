@@ -71,12 +71,12 @@ func TestAdminViewerHistoryJSON_IncludesHiddenWithFlag(t *testing.T) {
 	env.seedViewer(t)
 
 	id1, _ := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now().Add(-1 * time.Hour),
 	}, nil)
 	id2, _ := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -128,7 +128,7 @@ func TestAdminViewerHistoryDeleteOne_HardDeletes(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	env.seedViewer(t)
 	id, _ := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil)
@@ -159,7 +159,7 @@ func TestAdminViewerHistoryDeleteAll_HardDeletesEverything(t *testing.T) {
 	env.seedViewer(t)
 	for i := 0; i < 3; i++ {
 		if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: time.Now().Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -216,7 +216,7 @@ func TestAdminViewerHistory_PaginationAcrossPages(t *testing.T) {
 	env.seedViewer(t)
 	for i := 0; i < 5; i++ {
 		if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-			MockMAC:    testViewerMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  doorhistory.TypeDoorbellStart,
 			OccurredAt: time.Now().Add(time.Duration(-i) * time.Hour),
 		}, nil); err != nil {
@@ -245,14 +245,14 @@ func TestAdminDashboard_FilterByViewerMACs(t *testing.T) {
 	env.seedViewerAs(t, "0c:ea:14:bb:cc:dd", "Wohnung B", "TestPw-1234567X")
 	now := time.Now()
 	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: now,
 	}, nil); err != nil {
 		t.Fatalf("seed A: %v", err)
 	}
 	if _, err := env.history.Insert(context.Background(), doorhistory.Event{
-		MockMAC:    "0c:ea:14:bb:cc:dd",
+		ViewerMAC:    "0c:ea:14:bb:cc:dd",
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: now,
 	}, nil); err != nil {

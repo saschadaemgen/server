@@ -28,7 +28,7 @@ import (
 
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/weather"
 )
@@ -36,7 +36,7 @@ import (
 // uaapiUnlockReq builds the actor block UA-API sees for an
 // ESP-driven unlock. The ESP's MAC is the stable identifier;
 // the viewer name is the human-readable display label.
-func uaapiUnlockReq(info *mockmanager.ViewerInfo) uaapi.UnlockDoorRequest {
+func uaapiUnlockReq(info *viewermanager.ViewerInfo) uaapi.UnlockDoorRequest {
 	if info == nil {
 		return uaapi.UnlockDoorRequest{}
 	}
@@ -127,9 +127,9 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "viewer not found", http.StatusNotFound)
 			return
 		}
@@ -295,7 +295,7 @@ func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
 		// ohne lokales Branching.
 		s.publishToESP(mac, cancelEvent)
 	}
-	siblings, err := s.mockMgr.SiblingESPMACs(r.Context(), mac)
+	siblings, err := s.viewerMgr.SiblingESPMACs(r.Context(), mac)
 	if err != nil {
 		s.log.Error("esp answer siblings", "err", err, "mac_prefix", mac[:8])
 	}
@@ -362,7 +362,7 @@ func (s *Server) handleESPReject(w http.ResponseWriter, r *http.Request) {
 			body.EventID, doorbellcalls.ReasonRejected),
 	}
 	s.publishToESP(mac, cancelEvent)
-	siblings, err := s.mockMgr.SiblingESPMACs(r.Context(), mac)
+	siblings, err := s.viewerMgr.SiblingESPMACs(r.Context(), mac)
 	if err != nil {
 		s.log.Warn("esp reject siblings", "err", err, "mac_prefix", mac[:8])
 	}
@@ -448,7 +448,7 @@ func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ua-api not configured", http.StatusServiceUnavailable)
 		return
 	}
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		s.log.Error("esp unlock: get viewer failed",
 			"viewer_mac", mac, "err", err)
@@ -533,7 +533,7 @@ func (s *Server) handleESPState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.mockMgr.TouchESPSeen(r.Context(), mac); err != nil {
+	if err := s.viewerMgr.TouchESPSeen(r.Context(), mac); err != nil {
 		s.log.Warn("esp state touch", "err", err, "mac_prefix", mac[:8])
 	}
 	s.recordESPState(mac, body)
@@ -589,7 +589,7 @@ func (s *Server) handleESPHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
 	}
-	if err := s.mockMgr.TouchESPSeen(r.Context(), mac); err != nil {
+	if err := s.viewerMgr.TouchESPSeen(r.Context(), mac); err != nil {
 		s.log.Warn("esp heartbeat touch", "err", err, "mac_prefix", mac[:8])
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

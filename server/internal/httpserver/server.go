@@ -37,7 +37,7 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/uaapi"
@@ -60,7 +60,7 @@ type Deps struct {
 	Config         config.Config
 	Sessions       *session.Service
 	AdminSessions  *adminsession.Service
-	MockManager    *mockmanager.Manager
+	ViewerManager  *viewermanager.Manager
 	Admin          *admin.Service
 	PlatformConfig *platformconfig.Service
 	Audit          *loginaudit.Service
@@ -73,7 +73,7 @@ type Deps struct {
 	// access/ua). Nil = UA noch nicht konfiguriert; das Admin-UI
 	// zeigt dann einen Hinweis statt einer leeren Liste.
 	UserStore UserStoreLike
-	// Hub fans doorbell events from mockmanager out to per-mock
+	// Hub fans doorbell events from viewermanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
 	// History persists doorbell events for the /m/ list and the
@@ -114,7 +114,7 @@ type Server struct {
 	cfg             config.Config
 	sessions        *session.Service
 	adminSessions   *adminsession.Service
-	mockMgr         *mockmanager.Manager
+	viewerMgr         *viewermanager.Manager
 	admin           *admin.Service
 	platformCfg     *platformconfig.Service
 	audit           *loginaudit.Service
@@ -168,7 +168,7 @@ func New(deps Deps) (*Server, error) {
 		cfg:             deps.Config,
 		sessions:        deps.Sessions,
 		adminSessions:   deps.AdminSessions,
-		mockMgr:         deps.MockManager,
+		viewerMgr:         deps.ViewerManager,
 		admin:           deps.Admin,
 		platformCfg:     deps.PlatformConfig,
 		audit:           deps.Audit,

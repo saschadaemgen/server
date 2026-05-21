@@ -45,7 +45,7 @@ func TestMieterUnreadCount_Endpoint(t *testing.T) {
 	ctx := t.Context()
 	occurred := time.Now()
 	id1, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: occurred,
 	}, nil)
@@ -53,7 +53,7 @@ func TestMieterUnreadCount_Endpoint(t *testing.T) {
 		t.Fatalf("seed insert 1: %v", err)
 	}
 	if _, err := env.history.Insert(ctx, doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: occurred.Add(time.Minute),
 	}, nil); err != nil {
@@ -114,7 +114,7 @@ func TestEvents_StreamsUnreadCount(t *testing.T) {
 
 	// Seed one unread row directly so UnreadCount returns 1.
 	if _, err := env.history.Insert(t.Context(), doorhistory.Event{
-		MockMAC:    testViewerMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  doorhistory.TypeDoorbellStart,
 		OccurredAt: time.Now(),
 	}, nil); err != nil {
@@ -177,7 +177,7 @@ func TestMieterSettingsPost_CanonicalAutoScreensaverSecondsField(t *testing.T) {
 	}
 
 	// Persisted via canonical key.
-	info, err := env.mockMgr.GetViewerInfo(t.Context(), testViewerMAC)
+	info, err := env.viewerMgr.GetViewerInfo(t.Context(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("GetViewerInfo: %v", err)
 	}

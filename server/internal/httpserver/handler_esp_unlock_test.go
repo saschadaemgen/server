@@ -145,7 +145,7 @@ func TestESPUnlock_ResolvesFromPairedIntercomWhenBodyEmpty(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
-	if err := env.mockMgr.SetPairedIntercomMAC(context.Background(), espTestMAC, pairedIntercomForTest); err != nil {
+	if err := env.viewerMgr.SetPairedIntercomMAC(context.Background(), espTestMAC, pairedIntercomForTest); err != nil {
 		t.Fatalf("set paired intercom: %v", err)
 	}
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: stub.srv.URL, Token: "test-token"}))
@@ -214,7 +214,7 @@ func TestESPUnlock_400WhenPairedButUaapiReturnsEmpty(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
-	if err := env.mockMgr.SetPairedIntercomMAC(context.Background(), espTestMAC, pairedIntercomForTest); err != nil {
+	if err := env.viewerMgr.SetPairedIntercomMAC(context.Background(), espTestMAC, pairedIntercomForTest); err != nil {
 		t.Fatalf("set paired intercom: %v", err)
 	}
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: stub.srv.URL, Token: "test-token"}))

@@ -36,7 +36,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/doorhistory"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // mieterHistoryResponse is the JSON envelope. We always emit the
@@ -119,10 +119,10 @@ func (s *Server) serveHistoryList(w http.ResponseWriter, r *http.Request, mac st
 	// hat, liefern wir eine leere Liste mit capture_enabled=false.
 	// Pagination + Mark-Read entfaellt - es gibt nichts anzuzeigen.
 	captureEnabled := true
-	info, infoErr := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, infoErr := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if infoErr == nil {
 		captureEnabled = info.ResolveHistoryCaptureEnabled()
-	} else if !errors.Is(infoErr, mockmanager.ErrViewerNotFound) {
+	} else if !errors.Is(infoErr, viewermanager.ErrViewerNotFound) {
 		s.log.Warn("history viewer info failed",
 			"mac_prefix", safePrefix(mac), "err", infoErr)
 	}

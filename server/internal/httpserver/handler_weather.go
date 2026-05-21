@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/weather"
 )
@@ -45,19 +45,19 @@ const (
 // to the default - the screensaver should never break just
 // because the language column had a hiccup.
 func (s *Server) resolveTenantLanguage(ctx context.Context) string {
-	if s.mockMgr == nil {
-		return mockmanager.DefaultLanguage
+	if s.viewerMgr == nil {
+		return viewermanager.DefaultLanguage
 	}
 	mac := ViewerMACFromContext(ctx)
 	if mac == "" {
 		mac = ESPMACFromContext(ctx)
 	}
 	if mac == "" {
-		return mockmanager.DefaultLanguage
+		return viewermanager.DefaultLanguage
 	}
-	info, err := s.mockMgr.GetViewerInfo(ctx, mac)
+	info, err := s.viewerMgr.GetViewerInfo(ctx, mac)
 	if err != nil {
-		return mockmanager.DefaultLanguage
+		return viewermanager.DefaultLanguage
 	}
 	return info.ResolveLanguage()
 }

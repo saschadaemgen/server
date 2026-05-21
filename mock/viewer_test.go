@@ -181,7 +181,7 @@ func TestGenerateJWT_PropagatesValidateError(t *testing.T) {
 
 // Saison 13-04.5-B: RejectDoorbell returns ErrRejectNotReady when
 // stage 6 has not wired the publisher yet (Viewer.New / pre-Run
-// state). Live integration is covered by the mockmanager bridge
+// state). Live integration is covered by the viewermanager bridge
 // tests on the server side.
 func TestRejectDoorbell_NotReadyBeforeRun(t *testing.T) {
 	v, err := New(validConfig(t), slog.New(slog.NewTextHandler(io.Discard, nil)))

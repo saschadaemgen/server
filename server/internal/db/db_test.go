@@ -273,7 +273,7 @@ func TestViewers_UniquePort(t *testing.T) {
 
 // HOTFIX4: viewers.username-Spalte ist abgeschafft. Test fuer
 // Uniqueness laeuft jetzt ueber den Anwendungs-Layer
-// (mockmanager-Tests pruefen ErrNameInUse).
+// (viewermanager-Tests pruefen ErrNameInUse).
 func TestViewers_UsernameColumnGone(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {

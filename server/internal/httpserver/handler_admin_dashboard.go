@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/doorhistory"
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // adminUser is the {Name, Initials} bag.
@@ -97,17 +97,17 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	data.AnyFilter = len(selectedSet) > 0
 
 	now := time.Now()
-	infos, _ := s.mockMgr.ListViewers(r.Context())
-	infoByMAC := map[string]mockmanager.ViewerInfo{}
+	infos, _ := s.viewerMgr.ListViewers(r.Context())
+	infoByMAC := map[string]viewermanager.ViewerInfo{}
 	for _, info := range infos {
 		infoByMAC[info.MAC] = info
 		switch info.Type {
-		case mockmanager.TypeWeb:
+		case viewermanager.TypeWeb:
 			data.WebViewersTotal++
 			if info.Running {
 				data.WebViewersRunning++
 			}
-		case mockmanager.TypeESP:
+		case viewermanager.TypeESP:
 			data.ESPAdopted++
 			if info.HasESPToken {
 				data.ESPWithToken++
@@ -172,12 +172,12 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		for _, ev := range recent {
 			row := dashRecentEvent{
 				When:      formatRelativeGerman(ev.OccurredAt, now),
-				ViewerMAC: ev.MockMAC,
-				UnitName:  ev.MockMAC,
+				ViewerMAC: ev.ViewerMAC,
+				UnitName:  ev.ViewerMAC,
 				DoorName:  doorNameFromIntercom(ev.IntercomMAC),
 				Status:    eventStatusFor(ev),
 			}
-			if info, ok := infoByMAC[ev.MockMAC]; ok && info.Name != "" {
+			if info, ok := infoByMAC[ev.ViewerMAC]; ok && info.Name != "" {
 				row.UnitName = info.Name
 				row.UnitMark = initialsOf(info.Name)
 			} else {

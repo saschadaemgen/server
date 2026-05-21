@@ -104,7 +104,7 @@ func TestESPAuth_AcceptsValidToken(t *testing.T) {
 	}
 
 	// LookupESPMACByToken-Sanity.
-	got, err := env.mockMgr.LookupESPMACByToken(context.Background(), tok)
+	got, err := env.viewerMgr.LookupESPMACByToken(context.Background(), tok)
 	if err != nil {
 		t.Fatalf("LookupESPMACByToken: %v", err)
 	}
@@ -172,19 +172,19 @@ func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Config A")
 
-	if err := env.mockMgr.SetIdleViewMode(context.Background(), espTestMAC, "screen_off"); err != nil {
+	if err := env.viewerMgr.SetIdleViewMode(context.Background(), espTestMAC, "screen_off"); err != nil {
 		t.Fatalf("SetIdleViewMode: %v", err)
 	}
-	if err := env.mockMgr.SetBrightnessIdle(context.Background(), espTestMAC, 42); err != nil {
+	if err := env.viewerMgr.SetBrightnessIdle(context.Background(), espTestMAC, 42); err != nil {
 		t.Fatalf("SetBrightnessIdle: %v", err)
 	}
-	if err := env.mockMgr.SetScreenOffAfterSec(context.Background(), espTestMAC, 600); err != nil {
+	if err := env.viewerMgr.SetScreenOffAfterSec(context.Background(), espTestMAC, 600); err != nil {
 		t.Fatalf("SetScreenOffAfterSec: %v", err)
 	}
-	if err := env.mockMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
+	if err := env.viewerMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
 		t.Fatalf("SetLanguage: %v", err)
 	}
-	if err := env.mockMgr.SetAutoScreensaverSeconds(context.Background(), espTestMAC, 60); err != nil {
+	if err := env.viewerMgr.SetAutoScreensaverSeconds(context.Background(), espTestMAC, 60); err != nil {
 		t.Fatalf("SetAutoScreensaverSeconds: %v", err)
 	}
 
@@ -429,10 +429,10 @@ func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
 	// Zwei ESPs am selben UA-User. Sibling = B aus A's Sicht.
 	tokA := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
 	_ = adoptESPForTest(t, env, "0c:ea:14:bb:cc:dd", "Wohnung A2")
-	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), espTestMAC, "u1"); err != nil {
+	if err := env.viewerMgr.SetLinkedUAUserID(context.Background(), espTestMAC, "u1"); err != nil {
 		t.Fatalf("link A: %v", err)
 	}
-	if err := env.mockMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:bb:cc:dd", "u1"); err != nil {
+	if err := env.viewerMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:bb:cc:dd", "u1"); err != nil {
 		t.Fatalf("link B: %v", err)
 	}
 
@@ -531,7 +531,7 @@ func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
 	// running viewer's RejectDoorbell hook and the test fake
 	// captures it. Pre-S13-09 this assertion would have been
 	// impossible because the goroutine never started.
-	v, err := env.mockMgr.LookupForReject(espTestMAC)
+	v, err := env.viewerMgr.LookupForReject(espTestMAC)
 	if err != nil {
 		t.Fatalf("LookupForReject: %v", err)
 	}

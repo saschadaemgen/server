@@ -4,7 +4,7 @@
 // idle_view_mode, auto_screensaver_seconds, screen_off_after_sec,
 // brightness_idle, language. Alle Felder optional (Partial-
 // Update); jedes vorhandene Feld wird strict gegen die Allow-
-// Liste in mockmanager geprueft, applied = nur die tatsaechlich
+// Liste in viewermanager geprueft, applied = nur die tatsaechlich
 // gesetzten Felder.
 //
 // Auth: requireESPBearer. MAC kommt aus dem Bearer-Context.
@@ -30,7 +30,7 @@ import (
 	"net/http"
 	"slices"
 
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 type espSettingsRequest struct {
@@ -43,15 +43,15 @@ type espSettingsRequest struct {
 	HistoryCapture         *bool   `json:"history_capture,omitempty"`
 }
 
-// idleViewModeAllowed mirrors the mockmanager.SetIdleViewMode
+// idleViewModeAllowed mirrors the viewermanager.SetIdleViewMode
 // switch so the handler can reject early with a clear German
 // error before touching the DB. The list MUST stay in sync with
 // the four cases in SetIdleViewMode (empty string, screensaver,
 // livestream, screen_off).
 var idleViewModeAllowed = []string{
-	mockmanager.IdleViewModeScreensaver,
-	mockmanager.IdleViewModeLivestream,
-	mockmanager.IdleViewModeScreenOff,
+	viewermanager.IdleViewModeScreensaver,
+	viewermanager.IdleViewModeLivestream,
+	viewermanager.IdleViewModeScreenOff,
 }
 
 func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +76,7 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetIdleViewMode(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetIdleViewMode(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "idle_view_mode", err)
 			return
 		}
@@ -85,14 +85,14 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 
 	if body.AutoScreensaverSeconds != nil {
 		v := *body.AutoScreensaverSeconds
-		if !slices.Contains(mockmanager.AutoScreensaverSecondsAllowed, v) {
+		if !slices.Contains(viewermanager.AutoScreensaverSecondsAllowed, v) {
 			http.Error(w,
 				fmt.Sprintf("auto_screensaver_seconds muss einer von %v sein",
-					mockmanager.AutoScreensaverSecondsAllowed),
+					viewermanager.AutoScreensaverSecondsAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetAutoScreensaverSeconds(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetAutoScreensaverSeconds(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "auto_screensaver_seconds", err)
 			return
 		}
@@ -101,14 +101,14 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 
 	if body.ScreenOffAfterSec != nil {
 		v := *body.ScreenOffAfterSec
-		if !slices.Contains(mockmanager.ScreenOffAfterSecAllowed, v) {
+		if !slices.Contains(viewermanager.ScreenOffAfterSecAllowed, v) {
 			http.Error(w,
 				fmt.Sprintf("screen_off_after_sec muss einer von %v sein",
-					mockmanager.ScreenOffAfterSecAllowed),
+					viewermanager.ScreenOffAfterSecAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetScreenOffAfterSec(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetScreenOffAfterSec(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "screen_off_after_sec", err)
 			return
 		}
@@ -122,7 +122,7 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetBrightnessIdle(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetBrightnessIdle(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "brightness_idle", err)
 			return
 		}
@@ -131,13 +131,13 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 
 	if body.Language != nil {
 		v := *body.Language
-		if v != "" && !slices.Contains(mockmanager.LanguageAllowed, v) {
+		if v != "" && !slices.Contains(viewermanager.LanguageAllowed, v) {
 			http.Error(w,
-				fmt.Sprintf("language muss einer von %v sein", mockmanager.LanguageAllowed),
+				fmt.Sprintf("language muss einer von %v sein", viewermanager.LanguageAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetLanguage(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetLanguage(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "language", err)
 			return
 		}
@@ -146,13 +146,13 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 
 	if body.ClockLayout != nil {
 		v := *body.ClockLayout
-		if !slices.Contains(mockmanager.ClockLayoutAllowed, v) {
+		if !slices.Contains(viewermanager.ClockLayoutAllowed, v) {
 			http.Error(w,
-				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				fmt.Sprintf("clock_layout muss einer von %v sein", viewermanager.ClockLayoutAllowed),
 				http.StatusBadRequest)
 			return
 		}
-		if err := s.mockMgr.SetClockLayout(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetClockLayout(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "clock_layout", err)
 			return
 		}
@@ -165,7 +165,7 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 	// allen Tabs + auf der ESP-Hardware aus.
 	if body.HistoryCapture != nil {
 		v := *body.HistoryCapture
-		if err := s.mockMgr.SetHistoryCaptureEnabled(r.Context(), mac, v); err != nil {
+		if err := s.viewerMgr.SetHistoryCaptureEnabled(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "history_capture", err)
 			return
 		}
@@ -186,10 +186,10 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// respondSettingsErr maps mockmanager errors to deutsche
+// respondSettingsErr maps viewermanager errors to deutsche
 // 400/404/500-Responses und logged den vollen Fehler.
 func (s *Server) respondSettingsErr(w http.ResponseWriter, mac, field string, err error) {
-	if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if errors.Is(err, viewermanager.ErrViewerNotFound) {
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 		return
 	}

@@ -182,7 +182,7 @@ func TestESPWeather_DefaultsToGerman(t *testing.T) {
 }
 
 // TestESPWeather_RespectsEnglishLanguage flips the viewer's
-// language to "en" via mockmanager and re-fetches the snapshot.
+// language to "en" via viewermanager and re-fetches the snapshot.
 // Description must be the English label; icon + weather_code
 // stay the same (icon is language-neutral by design).
 func TestESPWeather_RespectsEnglishLanguage(t *testing.T) {
@@ -190,7 +190,7 @@ func TestESPWeather_RespectsEnglishLanguage(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Weather-Lang B")
 
-	if err := env.mockMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
+	if err := env.viewerMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
 		t.Fatalf("SetLanguage(en): %v", err)
 	}
 	snap := fetchESPWeather(t, env, tok)
@@ -218,7 +218,7 @@ func TestESPWeather_LanguageFlipsLive(t *testing.T) {
 	if first.Description != "Bewölkt" {
 		t.Fatalf("first Description = %q, want \"Bewölkt\"", first.Description)
 	}
-	if err := env.mockMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
+	if err := env.viewerMgr.SetLanguage(context.Background(), espTestMAC, "en"); err != nil {
 		t.Fatalf("SetLanguage(en): %v", err)
 	}
 	second := fetchESPWeather(t, env, tok)
@@ -241,7 +241,7 @@ func TestMieterWeather_RespectsLanguage(t *testing.T) {
 	env := setupEnvWithWeather(t)
 	loginMieterForTest(t, env)
 
-	if err := env.mockMgr.SetLanguage(context.Background(), testViewerMAC, "en"); err != nil {
+	if err := env.viewerMgr.SetLanguage(context.Background(), testViewerMAC, "en"); err != nil {
 		t.Fatalf("SetLanguage(en): %v", err)
 	}
 

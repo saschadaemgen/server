@@ -46,7 +46,7 @@ const (
 // surfaces the flag.
 type Event struct {
 	ID             int64
-	MockMAC        string
+	ViewerMAC      string
 	EventType      string
 	IntercomMAC    string
 	OccurredAt     time.Time
@@ -153,7 +153,7 @@ func NewSQLStore(db *sql.DB) *SQLStore {
 // seconds). rawFrame may be empty; we write an empty BLOB rather
 // than NULL so callers do not have to special-case nil.
 func (s *SQLStore) Insert(ctx context.Context, ev Event, rawFrame []byte) (int64, error) {
-	if ev.MockMAC == "" {
+	if ev.ViewerMAC == "" {
 		return 0, errors.New("doorhistory: viewer_mac must not be empty")
 	}
 	if ev.EventType == "" {
@@ -170,7 +170,7 @@ func (s *SQLStore) Insert(ctx context.Context, ev Event, rawFrame []byte) (int64
 		   (viewer_mac, event_type, intercom_mac, occurred_at,
 		    cancel_token, room_id, raw_frame)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		ev.MockMAC,
+		ev.ViewerMAC,
 		ev.EventType,
 		nullable(ev.IntercomMAC),
 		ev.OccurredAt.Unix(),
@@ -470,7 +470,7 @@ func scanEvent(rows *sql.Rows) (Event, error) {
 		occurredUnix int64
 	)
 	if err := rows.Scan(
-		&ev.ID, &ev.MockMAC, &ev.EventType, &intercomMAC, &occurredUnix,
+		&ev.ID, &ev.ViewerMAC, &ev.EventType, &intercomMAC, &occurredUnix,
 		&cancelledAt, &answeredAt, &endedAt,
 		&cancelToken, &roomID, &readAt,
 		&prevHash, &entryHash,
@@ -885,7 +885,7 @@ func scanAdminEvent(rows *sql.Rows) (Event, sql.NullInt64, error) {
 		hiddenAt     sql.NullInt64
 	)
 	if err := rows.Scan(
-		&ev.ID, &ev.MockMAC, &ev.EventType, &intercomMAC, &occurredUnix,
+		&ev.ID, &ev.ViewerMAC, &ev.EventType, &intercomMAC, &occurredUnix,
 		&cancelledAt, &answeredAt, &endedAt,
 		&cancelToken, &roomID, &readAt,
 		&prevHash, &entryHash,

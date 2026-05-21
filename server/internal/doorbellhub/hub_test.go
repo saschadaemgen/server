@@ -47,7 +47,7 @@ func newLoggerWithCapture() (*slog.Logger, *lockedBuffer) {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})), buf
 }
 
-// fakeSource is the minimal stand-in for mockmanager.Manager.
+// fakeSource is the minimal stand-in for viewermanager.Manager.
 // Saison 12-06: the hub no longer needs LookupUserByMAC.
 type fakeSource struct {
 	events  chan mock.DoorbellEvent
@@ -138,12 +138,12 @@ func TestPublish_BroadcastToMatchingMock(t *testing.T) {
 	subB, cleanupB := h.Subscribe(macB)
 	defer cleanupB()
 
-	h.Publish(macA, Event{Type: TypeDoorbellStart, MockMAC: macA})
+	h.Publish(macA, Event{Type: TypeDoorbellStart, ViewerMAC: macA})
 
 	select {
 	case ev := <-subA.Events:
-		if ev.MockMAC != macA {
-			t.Errorf("subA got mac=%q, want %q", ev.MockMAC, macA)
+		if ev.ViewerMAC != macA {
+			t.Errorf("subA got mac=%q, want %q", ev.ViewerMAC, macA)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("subA did not receive event")
@@ -192,7 +192,7 @@ func TestRun_DispatchesByMockMAC(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.events <- mock.DoorbellEvent{
-		MockMAC:    macA,
+		ViewerMAC:    macA,
 		RequestID:  "req-1",
 		DeviceID:   "0c:ea:14:11:11:11",
 		RoomID:     "WR-x",
@@ -203,8 +203,8 @@ func TestRun_DispatchesByMockMAC(t *testing.T) {
 		if ev.Type != TypeDoorbellStart {
 			t.Errorf("Type = %q", ev.Type)
 		}
-		if ev.MockMAC != macA {
-			t.Errorf("MockMAC = %q", ev.MockMAC)
+		if ev.ViewerMAC != macA {
+			t.Errorf("MockMAC = %q", ev.ViewerMAC)
 		}
 		if ev.RequestID != "req-1" {
 			t.Errorf("RequestID = %q", ev.RequestID)
@@ -228,7 +228,7 @@ func TestRun_DispatchesCancelByMockMAC(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.cancels <- mock.DoorbellCancelEvent{
-		MockMAC:     macA,
+		ViewerMAC:     macA,
 		CancelToken: "tok-42",
 		ReceivedAt:  time.Unix(1747000050, 0),
 	}
@@ -254,7 +254,7 @@ func TestRun_NoSubscribersLogsAndDrops(t *testing.T) {
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
 
-	src.events <- mock.DoorbellEvent{MockMAC: "0c:ea:14:99:99:99"}
+	src.events <- mock.DoorbellEvent{ViewerMAC: "0c:ea:14:99:99:99"}
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -279,7 +279,7 @@ func TestRun_EmptyMockMACDropped(t *testing.T) {
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
 
-	src.events <- mock.DoorbellEvent{MockMAC: ""}
+	src.events <- mock.DoorbellEvent{ViewerMAC: ""}
 
 	time.Sleep(50 * time.Millisecond)
 	select {
@@ -357,7 +357,7 @@ func (f *fakeHistory) Insert(_ context.Context, ev doorhistory.Event, raw []byte
 	}
 	f.nextID++
 	f.inserts = append(f.inserts, fakeHistoryInsert{
-		mockMAC:   ev.MockMAC,
+		mockMAC:   ev.ViewerMAC,
 		eventType: ev.EventType,
 		cancelTok: ev.CancelToken,
 		rawLen:    len(raw),
@@ -416,7 +416,7 @@ func TestRun_PersistsAndAssignsEventID(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.events <- mock.DoorbellEvent{
-		MockMAC:     macA,
+		ViewerMAC:     macA,
 		RequestID:   "req-1",
 		DeviceID:    "0c:ea:14:11:11:11",
 		CancelToken: "tok-abc",
@@ -460,7 +460,7 @@ func TestRun_CancelInvokesUpdateCancel(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.cancels <- mock.DoorbellCancelEvent{
-		MockMAC:     macA,
+		ViewerMAC:     macA,
 		CancelToken: "tok-xyz",
 		ReceivedAt:  time.Unix(1747000050, 0),
 	}
@@ -495,7 +495,7 @@ func TestRun_PersistFailureStillDispatches(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.events <- mock.DoorbellEvent{
-		MockMAC:    macA,
+		ViewerMAC:    macA,
 		RequestID:  "req-fail",
 		ReceivedAt: time.Unix(1747000000, 0),
 	}
@@ -527,7 +527,7 @@ func TestHub_PublishesToEventBus(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.events <- mock.DoorbellEvent{
-		MockMAC:     mac,
+		ViewerMAC:     mac,
 		RequestID:   "req-1",
 		DeviceID:    "intercom-1",
 		CancelToken: "tok-abc",
@@ -546,7 +546,7 @@ func TestHub_PublishesToEventBus(t *testing.T) {
 	}
 
 	src.cancels <- mock.DoorbellCancelEvent{
-		MockMAC:     mac,
+		ViewerMAC:     mac,
 		CancelToken: "tok-abc",
 		ReceivedAt:  time.Unix(1747000005, 0),
 	}
@@ -575,8 +575,8 @@ func TestBroadcastConfigChanged_DispatchesToSubscriber(t *testing.T) {
 		if ev.Type != TypeConfigChanged {
 			t.Errorf("Type = %q, want %q", ev.Type, TypeConfigChanged)
 		}
-		if ev.MockMAC != macA {
-			t.Errorf("MockMAC = %q, want %q", ev.MockMAC, macA)
+		if ev.ViewerMAC != macA {
+			t.Errorf("MockMAC = %q, want %q", ev.ViewerMAC, macA)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("subscriber did not receive config.changed")
@@ -660,7 +660,7 @@ func TestHub_StartsAndEndsCallLifecycle(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	src.events <- mock.DoorbellEvent{
-		MockMAC:     "mac-x",
+		ViewerMAC:     "mac-x",
 		CancelToken: "tok-life",
 		DeviceID:    "intercom-x",
 		ReceivedAt:  time.Unix(1747000010, 0),
@@ -676,7 +676,7 @@ func TestHub_StartsAndEndsCallLifecycle(t *testing.T) {
 	}
 
 	src.cancels <- mock.DoorbellCancelEvent{
-		MockMAC:     "mac-x",
+		ViewerMAC:     "mac-x",
 		CancelToken: "tok-life",
 		ReceivedAt:  time.Unix(1747000040, 0),
 	}

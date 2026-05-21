@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	"carvilon.local/server/internal/mockmanager"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // mieterSettingsData is the payload for templates/viewer/settings.html.
@@ -80,9 +80,9 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 	mode := strings.TrimSpace(r.PostForm.Get("idle_view_mode"))
 	switch mode {
 	case "",
-		mockmanager.IdleViewModeScreensaver,
-		mockmanager.IdleViewModeLivestream,
-		mockmanager.IdleViewModeScreenOff:
+		viewermanager.IdleViewModeScreensaver,
+		viewermanager.IdleViewModeLivestream,
+		viewermanager.IdleViewModeScreenOff:
 		// Saison 14-XX: 'screen_off' wird vom Web-Viewer akzeptiert,
 		// aber im UI nicht als Auswahl angeboten - die Browser-Runtime
 		// rendert ihn identisch zu 'screensaver'. Akzeptiert wird er
@@ -114,7 +114,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 			return
 		}
 		allowed := false
-		for _, v := range mockmanager.AutoScreensaverSecondsAllowed {
+		for _, v := range viewermanager.AutoScreensaverSecondsAllowed {
 			if v == val {
 				allowed = true
 				break
@@ -123,15 +123,15 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		if !allowed {
 			http.Error(w,
 				fmt.Sprintf("auto_screensaver_seconds muss einer von %v sein",
-					mockmanager.AutoScreensaverSecondsAllowed),
+					viewermanager.AutoScreensaverSecondsAllowed),
 				http.StatusBadRequest)
 			return
 		}
 		autoSecondsApplied = &val
 	}
 
-	if err := s.mockMgr.SetIdleViewMode(r.Context(), mac, mode); err != nil {
-		if errors.Is(err, mockmanager.ErrViewerNotFound) {
+	if err := s.viewerMgr.SetIdleViewMode(r.Context(), mac, mode); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 			return
 		}
@@ -140,8 +140,8 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if autoSecondsApplied != nil {
-		if err := s.mockMgr.SetAutoScreensaverSeconds(r.Context(), mac, *autoSecondsApplied); err != nil {
-			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if err := s.viewerMgr.SetAutoScreensaverSeconds(r.Context(), mac, *autoSecondsApplied); err != nil {
+			if errors.Is(err, viewermanager.ErrViewerNotFound) {
 				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 				return
 			}
@@ -157,7 +157,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 	if raw, present := r.PostForm["clock_layout"]; present && len(raw) > 0 && raw[0] != "" {
 		v := strings.TrimSpace(raw[0])
 		allowed := false
-		for _, opt := range mockmanager.ClockLayoutAllowed {
+		for _, opt := range viewermanager.ClockLayoutAllowed {
 			if opt == v {
 				allowed = true
 				break
@@ -165,7 +165,7 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 		if !allowed {
 			http.Error(w,
-				fmt.Sprintf("clock_layout muss einer von %v sein", mockmanager.ClockLayoutAllowed),
+				fmt.Sprintf("clock_layout muss einer von %v sein", viewermanager.ClockLayoutAllowed),
 				http.StatusBadRequest)
 			return
 		}
@@ -190,8 +190,8 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if captureApplied != nil {
-		if err := s.mockMgr.SetHistoryCaptureEnabled(r.Context(), mac, *captureApplied); err != nil {
-			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if err := s.viewerMgr.SetHistoryCaptureEnabled(r.Context(), mac, *captureApplied); err != nil {
+			if errors.Is(err, viewermanager.ErrViewerNotFound) {
 				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 				return
 			}
@@ -201,8 +201,8 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if clockLayoutApplied != nil {
-		if err := s.mockMgr.SetClockLayout(r.Context(), mac, *clockLayoutApplied); err != nil {
-			if errors.Is(err, mockmanager.ErrViewerNotFound) {
+		if err := s.viewerMgr.SetClockLayout(r.Context(), mac, *clockLayoutApplied); err != nil {
+			if errors.Is(err, viewermanager.ErrViewerNotFound) {
 				http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 				return
 			}
@@ -259,7 +259,7 @@ func pickAutoScreensaverField(form map[string][]string) string {
 
 func (s *Server) buildMieterSettingsData(r *http.Request) (mieterSettingsData, error) {
 	mac := ViewerMACFromContext(r.Context())
-	info, err := s.mockMgr.GetViewerInfo(r.Context(), mac)
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if err != nil {
 		return mieterSettingsData{}, err
 	}

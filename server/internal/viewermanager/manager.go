@@ -1,4 +1,4 @@
-// Package mockmanager owns the lifecycle of embedded mock viewers
+// Package viewermanager owns the lifecycle of embedded mock viewers
 // inside carvilon-server. Each viewer runs as a goroutine hosted by
 // the server process; the manager loads persisted specs from the
 // viewers table on boot, starts the goroutines, multiplexes their
@@ -12,7 +12,12 @@
 // The manager exposes a Viewer interface and a ViewerFactory so
 // tests can inject a fake viewer instead of spinning up the real
 // mock stack against a non-existent UDM.
-package mockmanager
+//
+// Saison 15-03 rename: the package directory + name went from
+// `mockmanager` to `viewermanager` (the `mock` package itself
+// keeps its name - "mock" is the honest description of the
+// synthetic device emulation).
+package viewermanager
 
 import (
 	"context"
@@ -44,10 +49,10 @@ const (
 
 // Sentinel errors. Callers check via errors.Is.
 var (
-	ErrMACInUse       = errors.New("mockmanager: mac already registered")
-	ErrPortInUse      = errors.New("mockmanager: service_port already registered")
-	ErrViewerNotFound = errors.New("mockmanager: viewer not found")
-	ErrNameInUse      = errors.New("mockmanager: viewer name already in use")
+	ErrMACInUse       = errors.New("viewermanager: mac already registered")
+	ErrPortInUse      = errors.New("viewermanager: service_port already registered")
+	ErrViewerNotFound = errors.New("viewermanager: viewer not found")
+	ErrNameInUse      = errors.New("viewermanager: viewer name already in use")
 )
 
 // Viewer is the subset of mock.Viewer that Manager needs. Defined
@@ -381,7 +386,7 @@ func New(d *db.DB, log *slog.Logger, opts Options) *Manager {
 	}
 	return &Manager{
 		db:       d,
-		log:      log.With("component", "mockmanager"),
+		log:      log.With("component", "viewermanager"),
 		opts:     opts,
 		viewers:  make(map[string]*viewerEntry),
 		eventCh:  make(chan mock.DoorbellEvent, multiplexEventBuffer),
@@ -412,7 +417,7 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 		  WHERE type IN (?, ?)
 		  ORDER BY mac`, TypeWeb, TypeESP)
 	if err != nil {
-		return fmt.Errorf("mockmanager: load: %w", err)
+		return fmt.Errorf("viewermanager: load: %w", err)
 	}
 	defer rows.Close()
 
@@ -421,13 +426,13 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 		var spec ViewerSpec
 		var port int64
 		if err := rows.Scan(&spec.MAC, &spec.Name, &port, &spec.Type, &spec.LinkedUAUserID); err != nil {
-			return fmt.Errorf("mockmanager: scan: %w", err)
+			return fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		spec.ServicePort = uint16(port)
 		specs = append(specs, spec)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("mockmanager: rows: %w", err)
+		return fmt.Errorf("viewermanager: rows: %w", err)
 	}
 
 	m.mu.Lock()
@@ -536,7 +541,7 @@ func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	res, err := m.db.ExecContext(ctx,
 		`DELETE FROM viewers WHERE mac = ?`, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: delete: %w", err)
+		return fmt.Errorf("viewermanager: delete: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 && !ok {
@@ -549,7 +554,7 @@ func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 // normalisierte Namen werden zurueckgewiesen (ErrNameInUse).
 func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	if newName == "" {
-		return errors.New("mockmanager: name must not be empty")
+		return errors.New("viewermanager: name must not be empty")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -565,7 +570,7 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 		`UPDATE viewers SET name = ?, updated_at = ? WHERE mac = ?`,
 		newName, now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: rename: %w", err)
+		return fmt.Errorf("viewermanager: rename: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -580,7 +585,7 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 // LookupForReject returns the running Viewer instance for the given
 // MAC. Test-only seam so test code can verify what RejectDoorbell
 // has been asked to publish without going through the manager's
-// own publish path. Production callers must use RejectDoorbellOnMock.
+// own publish path. Production callers must use RejectDoorbellOnViewer.
 func (m *Manager) LookupForReject(mac string) (Viewer, error) {
 	m.mu.Lock()
 	entry, ok := m.viewers[mac]
@@ -591,7 +596,7 @@ func (m *Manager) LookupForReject(mac string) (Viewer, error) {
 	return entry.viewer, nil
 }
 
-// RejectDoorbellOnMock looks up the running viewer by mock-MAC and
+// RejectDoorbellOnViewer looks up the running viewer by mock-MAC and
 // asks it to publish a /call_admin_result RPC that ends the active
 // doorbell call from intercomMAC. Returns ErrViewerNotFound if the
 // MAC is not currently running; callers are expected to log + drop
@@ -601,7 +606,7 @@ func (m *Manager) LookupForReject(mac string) (Viewer, error) {
 // Saison 13-04.5-B: lets the mieter "Ignorieren" / "Anruf beenden"
 // endpoints silence the intercom hardware immediately instead of
 // waiting for the 30-second UDM-side timeout.
-func (m *Manager) RejectDoorbellOnMock(mac, intercomMAC string) error {
+func (m *Manager) RejectDoorbellOnViewer(mac, intercomMAC string) error {
 	m.mu.Lock()
 	entry, ok := m.viewers[mac]
 	m.mu.Unlock()
@@ -620,7 +625,7 @@ func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
 		 WHERE mac = ?`,
 		hash, now, now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set password: %w", err)
+		return fmt.Errorf("viewermanager: set password: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -659,7 +664,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
-		return nil, "", fmt.Errorf("mockmanager: lookup name: %w", err)
+		return nil, "", fmt.Errorf("viewermanager: lookup name: %w", err)
 	}
 	defer rows.Close()
 
@@ -683,7 +688,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
 			&info.ClockLayout); err != nil {
-			return nil, "", fmt.Errorf("mockmanager: scan: %w", err)
+			return nil, "", fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		if autoSec.Valid {
 			v := int(autoSec.Int64)
@@ -729,7 +734,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		return &info, hashOrEmpty(hash), nil
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("mockmanager: rows: %w", err)
+		return nil, "", fmt.Errorf("viewermanager: rows: %w", err)
 	}
 	return nil, "", ErrViewerNotFound
 }
@@ -741,13 +746,13 @@ func (m *Manager) nameExistsLocked(ctx context.Context, target, excludeMAC strin
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name FROM viewers`)
 	if err != nil {
-		return false, fmt.Errorf("mockmanager: name check: %w", err)
+		return false, fmt.Errorf("viewermanager: name check: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var mac, name string
 		if err := rows.Scan(&mac, &name); err != nil {
-			return false, fmt.Errorf("mockmanager: name check scan: %w", err)
+			return false, fmt.Errorf("viewermanager: name check scan: %w", err)
 		}
 		if mac == excludeMAC {
 			continue
@@ -808,7 +813,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		return nil, ErrViewerNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("mockmanager: load info: %w", err)
+		return nil, fmt.Errorf("viewermanager: load info: %w", err)
 	}
 	info.ServicePort = uint16(port)
 	if hash.Valid {
@@ -862,7 +867,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        COALESCE(clock_layout, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
-		return nil, fmt.Errorf("mockmanager: list: %w", err)
+		return nil, fmt.Errorf("viewermanager: list: %w", err)
 	}
 	defer rows.Close()
 	out := make([]ViewerInfo, 0)
@@ -886,7 +891,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
 			&info.ClockLayout); err != nil {
-			return nil, fmt.Errorf("mockmanager: scan list: %w", err)
+			return nil, fmt.Errorf("viewermanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
 			v := int(autoSec.Int64)
@@ -924,7 +929,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		out = append(out, info)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("mockmanager: list rows: %w", err)
+		return nil, fmt.Errorf("viewermanager: list rows: %w", err)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -989,7 +994,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		now, now,
 	)
 	if err != nil {
-		return fmt.Errorf("mockmanager: insert: %w", err)
+		return fmt.Errorf("viewermanager: insert: %w", err)
 	}
 	return nil
 }
@@ -1007,7 +1012,7 @@ func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC str
 		`UPDATE viewers SET paired_intercom_mac = ?, updated_at = ? WHERE mac = ?`,
 		strings.ToLower(strings.TrimSpace(intercomMAC)), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set paired intercom: %w", err)
+		return fmt.Errorf("viewermanager: set paired intercom: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1036,7 +1041,7 @@ func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) err
 		`UPDATE viewers SET stream_profile = ?, updated_at = ? WHERE mac = ?`,
 		nullable(trimmed), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set stream profile: %w", err)
+		return fmt.Errorf("viewermanager: set stream profile: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1063,7 +1068,7 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 	switch trimmed {
 	case "", IdleViewModeScreensaver, IdleViewModeLivestream, IdleViewModeScreenOff:
 	default:
-		return fmt.Errorf("mockmanager: idle view mode %q must be %q, %q or %q",
+		return fmt.Errorf("viewermanager: idle view mode %q must be %q, %q or %q",
 			trimmed, IdleViewModeScreensaver, IdleViewModeLivestream, IdleViewModeScreenOff)
 	}
 	now := m.opts.Now().UnixMilli()
@@ -1071,7 +1076,7 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 		`UPDATE viewers SET idle_view_mode = ?, updated_at = ? WHERE mac = ?`,
 		nullable(trimmed), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set idle view mode: %w", err)
+		return fmt.Errorf("viewermanager: set idle view mode: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1090,14 +1095,14 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 // Saison 14-XX.
 func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) error {
 	if value < 0 || value > 100 {
-		return fmt.Errorf("mockmanager: brightness_idle %d must be in 0..100", value)
+		return fmt.Errorf("viewermanager: brightness_idle %d must be in 0..100", value)
 	}
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
 		`UPDATE viewers SET brightness_idle = ?, updated_at = ? WHERE mac = ?`,
 		int64(value), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set brightness idle: %w", err)
+		return fmt.Errorf("viewermanager: set brightness idle: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1126,7 +1131,7 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 		}
 	}
 	if !allowed {
-		return fmt.Errorf("mockmanager: screen_off_after_sec %d not in %v",
+		return fmt.Errorf("viewermanager: screen_off_after_sec %d not in %v",
 			value, ScreenOffAfterSecAllowed)
 	}
 	var stored any
@@ -1138,7 +1143,7 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 		`UPDATE viewers SET screen_off_after_sec = ?, updated_at = ? WHERE mac = ?`,
 		stored, now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set screen off after sec: %w", err)
+		return fmt.Errorf("viewermanager: set screen off after sec: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1162,7 +1167,7 @@ func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("mockmanager: clock_layout %q not in %v",
+			return fmt.Errorf("viewermanager: clock_layout %q not in %v",
 				trimmed, ClockLayoutAllowed)
 		}
 	}
@@ -1171,7 +1176,7 @@ func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 		`UPDATE viewers SET clock_layout = ?, updated_at = ? WHERE mac = ?`,
 		nullable(trimmed), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set clock layout: %w", err)
+		return fmt.Errorf("viewermanager: set clock layout: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1197,7 +1202,7 @@ func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enab
 		`UPDATE viewers SET history_capture_enabled = ?, updated_at = ? WHERE mac = ?`,
 		stored, now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set history capture: %w", err)
+		return fmt.Errorf("viewermanager: set history capture: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1221,7 +1226,7 @@ func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("mockmanager: language %q not in %v",
+			return fmt.Errorf("viewermanager: language %q not in %v",
 				trimmed, LanguageAllowed)
 		}
 	}
@@ -1230,7 +1235,7 @@ func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 		`UPDATE viewers SET language = ?, updated_at = ? WHERE mac = ?`,
 		nullable(trimmed), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set language: %w", err)
+		return fmt.Errorf("viewermanager: set language: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1261,7 +1266,7 @@ func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, sec
 		}
 	}
 	if !allowed {
-		return fmt.Errorf("mockmanager: auto_screensaver_seconds %d not in %v",
+		return fmt.Errorf("viewermanager: auto_screensaver_seconds %d not in %v",
 			seconds, AutoScreensaverSecondsAllowed)
 	}
 	var stored any
@@ -1273,7 +1278,7 @@ func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, sec
 		`UPDATE viewers SET auto_screensaver_seconds = ?, updated_at = ? WHERE mac = ?`,
 		stored, now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set auto screensaver: %w", err)
+		return fmt.Errorf("viewermanager: set auto screensaver: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1306,7 +1311,7 @@ func (m *Manager) SiblingESPMACs(ctx context.Context, mac string) ([]string, err
 		return nil, ErrViewerNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("mockmanager: sibling lookup self: %w", err)
+		return nil, fmt.Errorf("viewermanager: sibling lookup self: %w", err)
 	}
 	if !linked.Valid || linked.String == "" {
 		return nil, nil
@@ -1316,14 +1321,14 @@ func (m *Manager) SiblingESPMACs(ctx context.Context, mac string) ([]string, err
 		  WHERE type = 'esp' AND linked_ua_user_id = ? AND mac <> ?`,
 		linked.String, mac)
 	if err != nil {
-		return nil, fmt.Errorf("mockmanager: sibling query: %w", err)
+		return nil, fmt.Errorf("viewermanager: sibling query: %w", err)
 	}
 	defer rows.Close()
 	out := make([]string, 0)
 	for rows.Next() {
 		var sibling string
 		if err := rows.Scan(&sibling); err != nil {
-			return nil, fmt.Errorf("mockmanager: sibling scan: %w", err)
+			return nil, fmt.Errorf("viewermanager: sibling scan: %w", err)
 		}
 		out = append(out, sibling)
 	}
@@ -1340,7 +1345,7 @@ func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
 		`UPDATE viewers SET updated_at = ? WHERE mac = ? AND type = 'esp'`,
 		now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: touch esp: %w", err)
+		return fmt.Errorf("viewermanager: touch esp: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1359,7 +1364,7 @@ func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
 		 WHERE mac = ? AND type = 'esp'`,
 		nullable(hash), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set esp token: %w", err)
+		return fmt.Errorf("viewermanager: set esp token: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1384,14 +1389,14 @@ func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (st
 		`SELECT mac, esp_token_hash FROM viewers
 		  WHERE type = 'esp' AND esp_token_hash IS NOT NULL`)
 	if err != nil {
-		return "", fmt.Errorf("mockmanager: lookup esp by token: %w", err)
+		return "", fmt.Errorf("viewermanager: lookup esp by token: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var mac string
 		var hash sql.NullString
 		if err := rows.Scan(&mac, &hash); err != nil {
-			return "", fmt.Errorf("mockmanager: scan esp token: %w", err)
+			return "", fmt.Errorf("viewermanager: scan esp token: %w", err)
 		}
 		if !hash.Valid || hash.String == "" {
 			continue
@@ -1401,7 +1406,7 @@ func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (st
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("mockmanager: rows: %w", err)
+		return "", fmt.Errorf("viewermanager: rows: %w", err)
 	}
 	return "", ErrViewerNotFound
 }
@@ -1418,7 +1423,7 @@ func (m *Manager) LookupESPTokenHash(ctx context.Context, mac string) (string, e
 		return "", ErrViewerNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("mockmanager: lookup esp token: %w", err)
+		return "", fmt.Errorf("viewermanager: lookup esp token: %w", err)
 	}
 	return hashOrEmpty(hash), nil
 }
@@ -1431,7 +1436,7 @@ func (m *Manager) SetLinkedUAUserID(ctx context.Context, mac, userID string) err
 		`UPDATE viewers SET linked_ua_user_id = ?, updated_at = ? WHERE mac = ?`,
 		nullable(userID), now, mac)
 	if err != nil {
-		return fmt.Errorf("mockmanager: set linked ua user: %w", err)
+		return fmt.Errorf("viewermanager: set linked ua user: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -1455,7 +1460,7 @@ func (m *Manager) startViewerLocked(spec ViewerSpec) error {
 	}
 	viewer, err := m.opts.Factory(cfg, m.log)
 	if err != nil {
-		return fmt.Errorf("mockmanager: factory: %w", err)
+		return fmt.Errorf("viewermanager: factory: %w", err)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	entry := &viewerEntry{
@@ -1498,7 +1503,7 @@ func (m *Manager) forwardEvents(ctx context.Context, src <-chan mock.DoorbellEve
 			case m.eventCh <- ev:
 			default:
 				m.log.Warn("multiplex event channel full, dropping",
-					"mac", ev.MockMAC,
+					"mac", ev.ViewerMAC,
 					"request_id", ev.RequestID,
 				)
 			}
@@ -1522,7 +1527,7 @@ func (m *Manager) forwardCancels(ctx context.Context, src <-chan mock.DoorbellCa
 			case m.cancelCh <- ev:
 			default:
 				m.log.Warn("multiplex cancel channel full, dropping",
-					"mac", ev.MockMAC,
+					"mac", ev.ViewerMAC,
 					"cancel_token", ev.CancelToken,
 				)
 			}
@@ -1532,16 +1537,16 @@ func (m *Manager) forwardCancels(ctx context.Context, src <-chan mock.DoorbellCa
 
 func validateSpec(spec ViewerSpec) error {
 	if spec.MAC == "" {
-		return errors.New("mockmanager: MAC must not be empty")
+		return errors.New("viewermanager: MAC must not be empty")
 	}
 	if spec.Name == "" {
-		return errors.New("mockmanager: Name must not be empty")
+		return errors.New("viewermanager: Name must not be empty")
 	}
 	if spec.ServicePort == 0 {
-		return errors.New("mockmanager: ServicePort must be > 0")
+		return errors.New("viewermanager: ServicePort must be > 0")
 	}
 	if spec.Type != "" && spec.Type != TypeWeb && spec.Type != TypeESP {
-		return fmt.Errorf("mockmanager: Type %q must be 'web' or 'esp'", spec.Type)
+		return fmt.Errorf("viewermanager: Type %q must be 'web' or 'esp'", spec.Type)
 	}
 	return nil
 }
