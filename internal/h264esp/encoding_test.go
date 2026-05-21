@@ -58,6 +58,11 @@ func TestOutputArgs_LocksBriefingFlags(t *testing.T) {
 		"-sc_threshold 0",     // no scene-change keyframes
 		"-tune zerolatency",
 		"-preset ultrafast",
+		// S6-04: undo sliced-threads from -tune zerolatency. Without
+		// this, libx264 emits multiple slices per frame and the
+		// splitter's "one VCL NAL = one AU" contract inflates the
+		// frame counter.
+		"-x264-params sliced-threads=0:slices=1",
 		"-bsf:v dump_extra=freq=keyframe", // SPS/PPS before every IDR
 		"-f h264",                          // Annex-B output
 		"-vf scale=800:1280",

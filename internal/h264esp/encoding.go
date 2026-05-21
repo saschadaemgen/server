@@ -88,6 +88,15 @@ func (s EncodeSpec) Validate() error {
 //   - `-preset ultrafast -tune zerolatency`: minimum encoder latency
 //     and CPU cost. ESP is decoding live; we don't have a budget for
 //     "veryslow".
+//   - `-x264-params sliced-threads=0:slices=1`: belt-and-braces single-
+//     slice enforcement. `-tune zerolatency` ALONE turns on libx264's
+//     `sliced-threads=1` (slice-level parallelism: N slices per frame,
+//     one per worker thread). Our splitter's contract is "one VCL NAL
+//     == one Access Unit" — multi-slice frames would inflate the
+//     emitted-AU count 4-10x and make /stream/stats avg_fps useless
+//     for the codec comparison the whole experiment hangs on. This
+//     S6-04 fix forces back to the briefing's "ein Slice pro Frame"
+//     default. Frame-level threading still works via -threads.
 //   - `-bf 0`: no B-frames. CBP forbids them anyway, but be explicit.
 //   - `-refs 1`: single reference frame. Lowest decoder memory; the
 //     ESP cares.
@@ -118,6 +127,10 @@ func (s EncodeSpec) OutputArgs() []string {
 		"-level", "3.0",
 		"-preset", "ultrafast",
 		"-tune", "zerolatency",
+		// S6-04: undo the sliced-threads=1 that -tune zerolatency
+		// implicitly turns on, and pin slices=1. See the package doc
+		// comment above for why this matters.
+		"-x264-params", "sliced-threads=0:slices=1",
 		"-bf", "0",
 		"-refs", "1",
 		"-g", gop,
