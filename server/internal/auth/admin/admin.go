@@ -1,18 +1,17 @@
-// Package admin authenticates the platform operator (the
-// Hausverwalter in saison 12 vocabulary). Exactly one admin user
-// is supported in saison 12; a multi-admin migration is a later
-// season problem.
+// Package admin authenticates the platform operator (Hausverwalter
+// in the German UI). Exactly one admin user is supported for now;
+// a multi-admin migration is a later-season problem.
 //
-// Saison 13-02-FIX4-a: Argon2id (m=64MB, t=3, p=4) ersetzt bcrypt
-// fuer NEU gesetzte Passwoerter. Beim Login werden Bcrypt-Hashes
-// transparent ueber Rehash-on-Login zu Argon2id migriert (der
-// erste Login nach dem Update macht den Wechsel). Pepper wird vom
-// platformconfig-Service geliefert (PepperSource interface), damit
-// das admin-Paket nicht direkt von platformconfig abhaengt.
+// Argon2id (m=64MB, t=3, p=4) replaces bcrypt for newly set
+// passwords. On login, bcrypt hashes are transparently rehashed to
+// Argon2id (the first login after the update performs the swap).
+// The pepper is supplied by platformconfig via the PepperSource
+// interface so the admin package does not depend on platformconfig
+// directly.
 //
-// Login leakt nicht den Unterschied zwischen "user not found" und
-// "wrong password" durch sein Error-Type; Caller muessen beides
-// als "invalid credentials" surfen.
+// Login never leaks the difference between "user not found" and
+// "wrong password" through its error type; callers must surface
+// both as the same generic "invalid credentials" response.
 package admin
 
 import (
@@ -38,16 +37,16 @@ var (
 	ErrPasswordTooShort = errors.New("admin: password must be at least 12 characters")
 )
 
-// PepperSource liefert den Argon2id-Pepper zur Laufzeit. Das
-// platformconfig-Paket implementiert das via GetSecret/SetSecret;
-// in Tests reicht ein schlanker Stub. Empty-string return bedeutet
-// "kein Pepper" und ist ein gueltiger Zustand.
+// PepperSource provides the Argon2id pepper at runtime. The
+// platformconfig package implements it via GetSecret/SetSecret;
+// a thin stub is enough for tests. An empty-string return means
+// "no pepper" and is a valid state.
 type PepperSource interface {
 	GetPepper(ctx context.Context) (string, error)
 }
 
-// Service mediiert zwischen der admin_users-Tabelle und der HTTP-
-// Schicht.
+// Service mediates between the admin_users table and the HTTP
+// layer.
 type Service struct {
 	db     *db.DB
 	pepper PepperSource
@@ -62,9 +61,9 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Service) { s.now = now }
 }
 
-// WithPepper injects the pepper source. Without it Argon2id-Hashes
-// werden ohne Pepper-Konkatenation gerechnet (akzeptiert in
-// Test-Setups die ohne platformconfig auskommen).
+// WithPepper injects the pepper source. Without it, Argon2id
+// hashes are computed without pepper concatenation (accepted in
+// test setups that run without platformconfig).
 func WithPepper(p PepperSource) Option {
 	return func(s *Service) { s.pepper = p }
 }
@@ -79,18 +78,18 @@ func New(d *db.DB, opts ...Option) *Service {
 }
 
 // Login verifies username + password. On success bumps
-// last_login_at. Wenn der gespeicherte Hash bcrypt-format ist,
-// wird er nach erfolgreicher Verifikation transparent zu Argon2id
-// rehashed (Migrations-Pfad fuer Bestand-Admins).
+// last_login_at. If the stored hash is in bcrypt format, it is
+// transparently rehashed to Argon2id after a successful verify
+// (migration path for legacy admins).
 func (s *Service) Login(ctx context.Context, username, password string) error {
 	var hash string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT password_hash FROM admin_users WHERE username = ?`, username,
 	).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Dummy-Argon2id-Compare gegen einen festen Hash, um die
-		// Verify-Latenz der "user found"-Pfade zu spiegeln und
-		// User-Enumeration-Probes zu erschweren.
+		// Dummy Argon2id compare against a fixed hash to mirror the
+		// verify latency of the "user found" paths and frustrate
+		// user-enumeration probes.
 		_, _ = argon2id.VerifyWithPepper(password, "", dummyArgon2idHash)
 		return ErrNotFound
 	}
@@ -110,7 +109,7 @@ func (s *Service) Login(ctx context.Context, username, password string) error {
 			return ErrInvalidPassword
 		}
 	default:
-		// bcrypt-Pfad: rehash-on-login bei Erfolg.
+		// bcrypt path: rehash on successful login.
 		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 			return ErrInvalidPassword
 		}
@@ -120,7 +119,7 @@ func (s *Service) Login(ctx context.Context, username, password string) error {
 				`UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?`,
 				newHash, s.now().UnixMilli(), username,
 			); err != nil {
-				// Rehash-Fehler ist nicht-fatal fuer den Login.
+				// Rehash failure is non-fatal for the login.
 			}
 		}
 	}
@@ -134,7 +133,8 @@ func (s *Service) Login(ctx context.Context, username, password string) error {
 	return nil
 }
 
-// SetPassword creates or updates an admin user. Argon2id mit Pepper.
+// SetPassword creates or updates an admin user, hashing with
+// Argon2id + pepper.
 func (s *Service) SetPassword(ctx context.Context, username, password string) error {
 	if username == "" {
 		return errors.New("admin: username must not be empty")
@@ -182,8 +182,8 @@ func (s *Service) fetchPepper(ctx context.Context) (string, error) {
 	return s.pepper.GetPepper(ctx)
 }
 
-// dummyArgon2idHash ist ein fester PHC-String der die normale
-// Login-Latenz spiegelt um User-Enumeration zu erschweren. Die
-// genaue Pepper / Salt / Hash-Bytes sind irrelevant - der Verify
-// schlaegt immer fehl, aber er braucht ~250ms wie ein echter Verify.
+// dummyArgon2idHash is a fixed PHC string used to mirror the real
+// login latency and thereby frustrate user enumeration. The exact
+// pepper / salt / hash bytes are irrelevant - verify always fails,
+// but it takes ~250ms like a real verify.
 const dummyArgon2idHash = "$argon2id$v=19$m=65536,t=3,p=4$00000000000000000000000000000000$00000000000000000000000000000000000000000000"
