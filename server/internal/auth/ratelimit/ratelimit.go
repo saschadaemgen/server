@@ -1,19 +1,20 @@
-// Package ratelimit ist ein in-memory Anti-Brute-Force-Limiter
-// fuer den Web-Viewer- und Admin-Login. Drei unabhaengige Zaehler:
+// Package ratelimit is an in-memory anti-brute-force limiter for
+// the web-viewer and admin login. Three independent counters:
 //
-//	IP        : 5 Fehlversuche pro 15 Minuten
-//	Username  : 10 Fehlversuche pro 60 Minuten
-//	Lockout   : nach 10 Fehlversuchen pro Username -> 5 Minuten Sperre
+//	IP       : 5 failed attempts per 15 minutes
+//	Username : 10 failed attempts per 60 minutes
+//	Lockout  : after 10 failures per username -> 5-minute lockout
 //
-// Erfolgreicher Login (RegisterSuccess) loescht den Username-
-// Zaehler und nimmt eine bestehende Sperre weg. IP-Zaehler bleibt
-// stehen damit IP-weite Brute-Force-Versuche nicht via einzelnem
-// erfolgreichem Account zurueckgesetzt werden koennen.
+// A successful login (RegisterSuccess) clears the username
+// counter and lifts any active lockout for that user. The IP
+// counter is intentionally NOT cleared, so a wide brute-force
+// run against a single host cannot be reset via one lucky
+// account.
 //
-// Storage ist Process-Memory mit sync.RWMutex. Reichlich genug
-// fuer eine Hausverwaltungs-Plattform; bei mehreren Servern oder
-// bei Server-Restart gehen Zaehler verloren (akzeptierte Trade-Off,
-// wir wollen kein Redis im RPi-Stack).
+// Storage is process memory guarded by a sync.RWMutex. Plenty
+// for a single-house deployment; with multiple servers or after
+// a server restart the counters are lost (accepted trade-off:
+// we do not want Redis in the RPi stack).
 package ratelimit
 
 import (
@@ -22,7 +23,7 @@ import (
 	"time"
 )
 
-// Default-Schwellen.
+// Default thresholds.
 const (
 	IPMaxAttempts        = 5
 	IPWindow             = 15 * time.Minute
@@ -32,29 +33,29 @@ const (
 	UserLockoutDuration  = 5 * time.Minute
 )
 
-// Decision beschreibt das Ergebnis eines Allow-Calls.
+// Decision is the outcome of an Allow call.
 type Decision int
 
 const (
-	// Allow heisst: Login darf versucht werden.
+	// Allow means: the login may be attempted.
 	Allow Decision = iota
-	// BlockedByIP heisst: zu viele Versuche aus dieser IP.
+	// BlockedByIP means: too many attempts from this IP.
 	BlockedByIP
-	// BlockedByUser heisst: zu viele Versuche fuer diesen Username
-	// (account-lockout aktiv).
+	// BlockedByUser means: too many attempts for this username
+	// (account lockout active).
 	BlockedByUser
 )
 
-// Lock ist ein Snapshot einer aktiven Sperre, fuer die Settings-
-// Liste im Admin-UI.
+// Lock is a snapshot of an active lockout, used by the
+// settings list in the admin UI.
 type Lock struct {
-	Kind        string // "ip" oder "user"
+	Kind        string // "ip" or "user"
 	Value       string
 	Attempts    int
 	LockedUntil time.Time
 }
 
-// Limiter ist die Live-Datenstruktur.
+// Limiter is the live data structure.
 type Limiter struct {
 	mu              sync.RWMutex
 	ipHits          map[string][]time.Time
@@ -63,12 +64,12 @@ type Limiter struct {
 	now             func() time.Time
 }
 
-// New baut einen frischen Limiter mit time.Now als Clock-Quelle.
+// New builds a fresh Limiter with time.Now as the clock source.
 func New() *Limiter {
 	return NewWithClock(time.Now)
 }
 
-// NewWithClock injiziert eine Test-Clock.
+// NewWithClock injects a test clock.
 func NewWithClock(now func() time.Time) *Limiter {
 	return &Limiter{
 		ipHits:          make(map[string][]time.Time),
@@ -78,24 +79,24 @@ func NewWithClock(now func() time.Time) *Limiter {
 	}
 }
 
-// Allow prueft ob ein Login fuer (ip, username) gerade zulaessig
-// ist. Decision == Allow -> caller darf den Hash-Compare machen.
-// Bei Block braucht caller nichts mehr tun ausser dem User Bescheid
-// zu sagen ("Zu viele Versuche").
+// Allow checks whether a login for (ip, username) is currently
+// permitted. Decision == Allow -> caller may run the hash
+// compare. On block the caller only needs to tell the user
+// ("Zu viele Versuche").
 func (l *Limiter) Allow(ip, username string) Decision {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	now := l.now()
 
-	// Lockout vorrangig: wenn Username gerade gesperrt ist, blocken.
+	// Lockout takes precedence: if the username is currently
+	// locked, block.
 	if until, ok := l.userLockedUntil[username]; ok {
 		if now.Before(until) {
 			return BlockedByUser
 		}
-		// Sperre abgelaufen, Lockout-Eintrag entsorgen und Zaehler
-		// auch zuruecksetzen damit der User wieder von 0 anfangen
-		// kann.
+		// Lockout expired; drop the entry and also reset the
+		// counter so the user can start fresh.
 		delete(l.userLockedUntil, username)
 		delete(l.userHits, username)
 	}
@@ -115,9 +116,9 @@ func (l *Limiter) Allow(ip, username string) Decision {
 	return Allow
 }
 
-// RegisterFailure zaehlt einen Fehlversuch und triggert ggf. einen
-// Account-Lockout. Caller ruft das nach einer fehlgeschlagenen
-// Hash-Verifikation auf.
+// RegisterFailure counts a failed attempt and, if the threshold
+// is hit, triggers an account lockout. Callers invoke this after
+// a failed hash verification.
 func (l *Limiter) RegisterFailure(ip, username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -134,9 +135,9 @@ func (l *Limiter) RegisterFailure(ip, username string) {
 	}
 }
 
-// RegisterSuccess loescht die Sperren und Zaehler fuer den
-// Username, weil ein erfolgreicher Login zeigt dass der User legit
-// ist. IP-Zaehler bleiben stehen (siehe Paket-Doku).
+// RegisterSuccess clears the lockout and counters for the
+// username, because a successful login proves the user is
+// legitimate. IP counters are kept (see package doc).
 func (l *Limiter) RegisterSuccess(username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -144,8 +145,8 @@ func (l *Limiter) RegisterSuccess(username string) {
 	delete(l.userLockedUntil, username)
 }
 
-// ClearUser hebt die Sperre fuer einen Username manuell auf
-// (Admin-Aktion). Auch der Hit-Counter wird geleert.
+// ClearUser manually lifts the lockout for a username
+// (admin action). The hit counter is cleared as well.
 func (l *Limiter) ClearUser(username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -153,15 +154,15 @@ func (l *Limiter) ClearUser(username string) {
 	delete(l.userLockedUntil, username)
 }
 
-// ClearIP hebt die IP-Sperre manuell auf (Admin-Aktion).
+// ClearIP manually lifts the IP lockout (admin action).
 func (l *Limiter) ClearIP(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.ipHits, ip)
 }
 
-// LockedUsers liefert eine Liste der aktuell gesperrten Usernamen
-// (sortiert nach Wartezeit, kuerzeste zuerst). Fuer das Admin-UI.
+// LockedUsers returns the currently locked-out usernames sorted
+// by remaining wait time (shortest first). For the admin UI.
 func (l *Limiter) LockedUsers() []Lock {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -184,8 +185,9 @@ func (l *Limiter) LockedUsers() []Lock {
 	return out
 }
 
-// HotIPs liefert IPs mit mindestens floor Fehlversuchen im
-// IP-Fenster. Fuer das Admin-UI ("aktive Brute-Force-Quellen").
+// HotIPs returns IPs with at least `floor` failed attempts in
+// the current IP window. For the admin UI
+// ("aktive Brute-Force-Quellen").
 func (l *Limiter) HotIPs(floor int) []Lock {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -208,8 +210,8 @@ func (l *Limiter) HotIPs(floor int) []Lock {
 	return out
 }
 
-// pruneOlder filtert alle Zeitpunkte raus, die vor cutoff liegen.
-// Schreibt direkt im uebergebenen Slice (in-place).
+// pruneOlder filters out all timestamps before cutoff. Writes
+// into the passed-in slice in place.
 func pruneOlder(ts []time.Time, cutoff time.Time) []time.Time {
 	if len(ts) == 0 {
 		return ts
