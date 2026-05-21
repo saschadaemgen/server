@@ -6,24 +6,39 @@
 // usage (browser / esp). Cameras are pulled only when watched
 // (S4: 0 viewers = 0 RTSP pull, 0 ffmpeg, 0 decode).
 //
-// As of S5, profiles persist in a SQLite database. The startup chain
-// is: open the DB → if empty, seed from CARVILON_PROFILES_JSON
-// (or the S6 default-set built from UNIFI_CAMERA_ID) → load the
-// in-memory registry from the DB → run. After the first start the DB
-// is the source of truth; subsequent env changes to PROFILES_JSON are
-// ignored (and the spike logs that fact explicitly).
+// As of S5, profiles persist in a SQLite database. As of S6-03, the
+// spike comes with a built-in measurement-set default so the
+// "100 measurement runs" workflow doesn't require any env-var typing.
+// The startup chain is:
 //
-// Single-camera quick-start (seeds five profiles on that camera: one
-// browser/h264_passthrough plus the four ESP measurement profiles —
-// mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp):
+//  1. open the DB (create parent dir + schema if needed)
+//  2. if the DB is empty, seed it. Priority order:
+//     a. CARVILON_PROFILES_JSON  — explicit multi-camera config wins
+//     b. UNIFI_CAMERA_ID         — S6-set on this camera
+//     c. <none>                  — S6-set on the built-in default
+//                                  intercom camera (see
+//                                  defaultIntercomCameraID below)
+//  3. load the in-memory registry from the DB
+//  4. run.
 //
-//	$env:UNIFI_NVR_HOST   = '192.168.1.1'
-//	$env:UNIFI_API_KEY    = '<protect-integration-key>'
-//	$env:UNIFI_CAMERA_ID  = '<camera-id>'
+// After the first start the DB is the source of truth; subsequent env
+// changes are ignored (and the spike logs that fact explicitly).
+//
+// Zero-config quick-start (uses the built-in intercom camera):
+//
+//	$env:UNIFI_NVR_HOST = '192.168.1.1'
+//	$env:UNIFI_API_KEY  = '<protect-integration-key>'
 //	go run .\cmd\spike
 //
-// Multi-camera quick-start (only takes effect when the DB is empty;
-// CARVILON_PROFILES_JSON overrides the default-set):
+// — seeds five profiles on the intercom: intercom_web (browser/WebRTC),
+// mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp.
+//
+// Single-camera quick-start (same set on a different camera):
+//
+//	$env:UNIFI_CAMERA_ID = '<other-camera-id>'
+//	go run .\cmd\spike
+//
+// Multi-camera quick-start (CARVILON_PROFILES_JSON overrides everything):
 //
 //	$env:CARVILON_PROFILES_JSON = '[
 //	  {"name":"intercom_browser","cameraID":"abc","quality":"high","usage":"browser","codec":"h264_passthrough","description":"Intercom"},
@@ -31,6 +46,10 @@
 //	  {"name":"ai360_browser",   "cameraID":"def","quality":"high","usage":"browser","codec":"h264_passthrough","description":"AI 360"}
 //	]'
 //	go run .\cmd\spike
+//
+// The built-in default-set lives in cmd/spike only — the carvilon-side
+// production deployment (which links through streambackend.Backend)
+// starts with an empty registry and lets the admin fill it via CRUD.
 package main
 
 import (
@@ -72,6 +91,17 @@ const (
 
 	defaultListen = ":8555"
 	defaultDBPath = "./state/stream.db"
+
+	// defaultIntercomCameraID is the Intercom-on-the-test-UDM Protect
+	// identifier. Used by the built-in S6 measurement default-set so
+	// `go run .\cmd\spike` with neither CARVILON_PROFILES_JSON nor
+	// UNIFI_CAMERA_ID still produces a working set of profiles
+	// pointing at the obvious camera. NOT a secret — the ID is a
+	// device-local handle, the API key (which is the secret) is still
+	// required via UNIFI_API_KEY. Hard-coding it here is deliberate
+	// spike convenience; the carvilon-side production deployment
+	// configures cameras via the admin UI, not through this fallback.
+	defaultIntercomCameraID = "679573e101080b03e4000424"
 )
 
 func main() {
@@ -238,26 +268,29 @@ func seedSource() string {
 		return envProfilesJSON
 	}
 	if os.Getenv(envCameraID) != "" {
-		return "single-camera defaults via " + envCameraID
+		return "S6 default-set via " + envCameraID
 	}
-	return "<no seed>"
+	return "built-in S6 default-set (intercom camera)"
 }
 
 // loadSeedProfiles returns the profile list to seed the DB with if (and
-// only if) the DB is currently empty. Preference order:
+// only if) the DB is currently empty. Preference order (S6-03):
 //
-//  1. CARVILON_PROFILES_JSON: the explicit multi-camera config.
-//  2. UNIFI_CAMERA_ID: builds the S6 default-set for that single
-//     camera — one browser profile plus the four ESP measurement
-//     profiles (mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp). The admin
-//     can edit / delete any of them through the CRUD surface.
-//  3. Empty: no profiles to seed. The DB stays empty until the admin
-//     creates profiles through the CRUD surface.
+//  1. CARVILON_PROFILES_JSON: the explicit multi-camera config wins
+//     over everything — admin spelled it out, we obey.
+//  2. UNIFI_CAMERA_ID: build the S6 measurement set on THIS camera.
+//     Useful when the operator runs the spike against a non-Intercom
+//     camera and still wants the standard measurement profiles.
+//  3. Neither set: build the S6 measurement set on the hard-coded
+//     [defaultIntercomCameraID] — pure spike convenience for the
+//     "100 measurement runs" workflow where typing the JSON every time
+//     was getting in the way. NOT used by the carvilon-side production
+//     deployment: the streambackend Naht stays empty-start (the
+//     carvilon admin fills the DB via CRUD); the default-set lives
+//     exclusively in cmd/spike.
 //
-// S6-01 rationale for the default-set: shipping four ESP profiles out
-// of the box means the measurement campaign starts the moment the
-// binary is up — no manual config required to compare mjpeg vs.
-// h264_cbp on the same camera.
+// The streambackend never imports this file or the function — the
+// boundary is enforced by package structure, not by a flag.
 func loadSeedProfiles() ([]profile.Profile, error) {
 	if raw := os.Getenv(envProfilesJSON); raw != "" {
 		var ps []profile.Profile
@@ -268,41 +301,63 @@ func loadSeedProfiles() ([]profile.Profile, error) {
 	}
 	cam := os.Getenv(envCameraID)
 	if cam == "" {
-		return nil, nil
+		cam = defaultIntercomCameraID
 	}
+	return defaultMeasurementProfileSet(cam), nil
+}
+
+// defaultMeasurementProfileSet returns the five S6 measurement profiles
+// the spike seeds when no explicit JSON is given. The parameters are
+// the briefing-pinned values; tweak via the CRUD endpoints
+// (PUT /api/profiles/{name}) once the binary is up — no code change
+// needed for further measurement runs.
+//
+// Profile cheat-sheet (S6-03 briefing):
+//
+//	intercom_web  browser  h264_passthrough  (WebRTC reference)
+//	mjpeg_hq      esp      mjpeg   800x1280  10 fps  q=4
+//	mjpeg_bal     esp      mjpeg   800x1280  12 fps  q=6
+//	mjpeg_fast    esp      mjpeg   640x1024  18 fps  q=6
+//	h264_cbp      esp      h264_cbp 800x1280 15 fps  CRF 26
+//
+// The h264_cbp profile only becomes addressable when S6-02 ships the
+// /stream/h264 endpoint — until then it sits in the DB as a placeholder
+// so the measurement-vs-MJPEG comparison row is already there for the
+// admin UI / docs.
+func defaultMeasurementProfileSet(cameraID string) []profile.Profile {
 	return []profile.Profile{
-		// Browser fallback: WebRTC-passthrough, no transcode.
+		// Browser reference: WebRTC-passthrough, no transcode. Lets the
+		// operator open localhost:8555 and confirm the camera is alive
+		// before fiddling with MJPEG / H.264 parameters.
 		{
-			Name:        "intercom_browser",
-			CameraID:    cam,
+			Name:        "intercom_web",
+			CameraID:    cameraID,
 			Quality:     profile.QualityHigh,
 			Usage:       profile.UsageBrowser,
-			Description: "Intercom (browser, H.264 passthrough via WebRTC)",
+			Description: "Intercom (browser reference, H.264 passthrough via WebRTC)",
 			Codec:       profile.CodecH264Passthrough,
 		},
 
 		// MJPEG measurement triplet — covers the bandwidth / framerate
-		// extremes the ESP can plausibly handle. The 'bal' profile
-		// mirrors the S5 default so existing measurements stay
-		// comparable.
+		// span the ESP32-P4 + intercom screen can plausibly handle.
 		{
 			Name:          "mjpeg_hq",
-			CameraID:      cam,
+			CameraID:      cameraID,
 			Quality:       profile.QualityHigh,
 			Usage:         profile.UsageESP,
-			Description:   "ESP: MJPEG, 800x1280 @ 9 fps, q:v 4 (high quality)",
+			Description:   "ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)",
 			Codec:         profile.CodecMJPEG,
 			Width:         800,
 			Height:        1280,
-			FPS:           9,
+			FPS:           10,
 			EncodeQuality: 4,
 		},
 		{
 			Name:          "mjpeg_bal",
-			CameraID:      cam,
+			CameraID:      cameraID,
 			Quality:       profile.QualityHigh,
 			Usage:         profile.UsageESP,
-			Description:   "ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced — S5 default)",
+			Description:   "ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)",
 			Codec:         profile.CodecMJPEG,
 			Width:         800,
 			Height:        1280,
@@ -311,33 +366,33 @@ func loadSeedProfiles() ([]profile.Profile, error) {
 		},
 		{
 			Name:          "mjpeg_fast",
-			CameraID:      cam,
+			CameraID:      cameraID,
 			Quality:       profile.QualityHigh,
 			Usage:         profile.UsageESP,
-			Description:   "ESP: MJPEG, 640x1024 @ 15 fps, q:v 8 (fast)",
+			Description:   "ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)",
 			Codec:         profile.CodecMJPEG,
 			Width:         640,
 			Height:        1024,
-			FPS:           15,
-			EncodeQuality: 8,
+			FPS:           18,
+			EncodeQuality: 6,
 		},
 
-		// H.264 Constrained Baseline — the S6-01 experiment. ESP32-P4
-		// + tinyH264 can decode this; we want to see whether the byte
-		// budget per frame beats MJPEG at similar visual quality.
-		// CRF 26 is the libx264 sweet-spot start for low-latency
-		// streaming; tune via CRUD as the measurements come in.
+		// H.264 Constrained Baseline — the S6-01/02 experiment. CRF 26
+		// is the libx264 sweet-spot start for low-latency streaming;
+		// tune via CRUD as the measurements come in. Only addressable
+		// once /stream/h264 (S6-02) ships; sits in the DB beforehand so
+		// the row is ready when the endpoint lands.
 		{
 			Name:          "h264_cbp",
-			CameraID:      cam,
+			CameraID:      cameraID,
 			Quality:       profile.QualityHigh,
 			Usage:         profile.UsageESP,
-			Description:   "ESP: H.264 Constrained Baseline, 800x1280 @ 12 fps, CRF 26",
+			Description:   "ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26",
 			Codec:         profile.CodecH264CBP,
 			Width:         800,
 			Height:        1280,
-			FPS:           12,
+			FPS:           15,
 			EncodeQuality: 26,
 		},
-	}, nil
+	}
 }

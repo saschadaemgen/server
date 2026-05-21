@@ -463,6 +463,36 @@ func TestProfile_WireTags(t *testing.T) {
 	}
 }
 
+// TestNaht_EmptyStartHasZeroProfiles is the explicit S6-03 guard: the
+// streambackend.Backend MUST NOT fabricate any "default" profiles on
+// its own. The default-set introduced in cmd/spike for the
+// measurement workflow lives exclusively in cmd/spike; the carvilon-
+// side production deployment that links through streambackend starts
+// with an empty registry and lets the admin populate it via CRUD.
+//
+// Test premise:
+//   - fresh in-memory store, never SeedIfEmpty'd
+//   - fresh profile.Registry, no preloads
+//   - call New() and expect zero profiles in both layers
+//
+// If anyone ever sneaks a default-set into streambackend.New() this
+// test fails immediately — the boundary is enforced by the test, not
+// by trust.
+func TestNaht_EmptyStartHasZeroProfiles(t *testing.T) {
+	b := freshBackend(t, nil) // freshBackend uses an empty :memory: store + empty registry
+
+	if names := b.opts.Profiles.Names(); len(names) != 0 {
+		t.Errorf("registry has %d profile(s) on empty-start: %v — Naht must NOT inject defaults", len(names), names)
+	}
+	rows, err := b.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("List returned %d row(s) on empty-start: %+v", len(rows), rows)
+	}
+}
+
 // TestProfile_RoundTripsTranscodedCodec asserts that a wire-shape MJPEG
 // profile survives a CRUD round-trip with all codec fields intact —
 // proving the toWire/fromWire mapping covers the new S6 columns.

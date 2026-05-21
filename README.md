@@ -59,8 +59,8 @@ cp .env.example .env
 | -------------------------- | ------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `UNIFI_NVR_HOST`           | ja      | —                     | Host des UDM, z.B. `192.168.1.1`                                                                                   |
 | `UNIFI_API_KEY`            | ja      | —                     | Protect-Integration-Key (Settings → Integrations)                                                                  |
-| `UNIFI_CAMERA_ID`          | one of¹ | —                     | Seed-Default fürs S6-Set (5 Profile: 1× Browser-Passthrough + 3× MJPEG + 1× H.264-CBP-Slot) auf dieser einen Kamera |
-| `CARVILON_PROFILES_JSON`   | one of¹ | —                     | JSON-Liste fürs Multi-Kamera-Setup (siehe `.env.example`); überschreibt den `UNIFI_CAMERA_ID`-Default               |
+| `UNIFI_CAMERA_ID`          | nein¹   | Intercom-Default-Cam  | Welche Kamera fürs S6-Default-Set; bei leer nimmt der Spike die hart kodierte Intercom-CameraID                    |
+| `CARVILON_PROFILES_JSON`   | nein¹   | —                     | JSON-Liste fürs Multi-Kamera-Setup (siehe `.env.example`); überschreibt sowohl `UNIFI_CAMERA_ID` als auch das Default-Set |
 | `CARVILON_STREAM_DB`       | nein    | `./state/stream.db`   | Pfad zur SQLite-Profil-DB. **Hat die DB einmal Profile, gewinnt sie über JSON** (S5-Regel).                         |
 | `CARVILON_STREAM_BASE_URL` | nein    | `http://127.0.0.1`+Listen | Absolute Basis-URL für `MJPEGURL` / `WebRTCSignalURL` im Backend (carvilon-Proxy ruft das auf)                  |
 | `UNIFI_ENCRYPTION`         | nein    | `tls`                 | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)                                 |
@@ -68,17 +68,22 @@ cp .env.example .env
 | `CARVILON_FFMPEG`          | nein    | `ffmpeg`              | Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                                               |
 | `CARVILON_DISABLE_MJPEG`   | nein    | —                     | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                                                 |
 
-¹ Entweder `UNIFI_CAMERA_ID` (für Single-Kamera-Demo) ODER `CARVILON_PROFILES_JSON` (für echte Multi-Kamera-Setups).
-Beide Quellen seeden die DB nur, wenn sie leer ist; ab dem zweiten Start ist die DB die Wahrheit.
+¹ Seed-Priorität bei leerer DB:
+1. `CARVILON_PROFILES_JSON` gesetzt → JSON wird geseedet.
+2. `UNIFI_CAMERA_ID` gesetzt → S6-Mess-Set auf dieser Kamera.
+3. Keins von beidem → S6-Mess-Set auf der eingebauten Intercom-Default-CameraID (**S6-03**, nur im Spike).
+
+Hat die DB schon Profile, gewinnt sie unabhängig vom Env immer (S5-Regel).
+Das eingebaute Default-Set existiert **nur in `cmd/spike`** — die `streambackend`-Naht
+(Produktiv-Pfad ueber carvilon-server) startet leer; der carvilon-Admin füllt sie via CRUD.
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 
 ## Starten (Windows / PowerShell)
 
 ```powershell
-$env:UNIFI_NVR_HOST   = '192.168.1.1'
-$env:UNIFI_API_KEY    = '<protect-integration-key>'
-$env:UNIFI_CAMERA_ID  = '<camera-id>'
+$env:UNIFI_NVR_HOST = '192.168.1.1'
+$env:UNIFI_API_KEY  = '<protect-integration-key>'
 go run .\cmd\spike
 ```
 
@@ -87,9 +92,15 @@ go run .\cmd\spike
 ```sh
 export UNIFI_NVR_HOST='192.168.1.1'
 export UNIFI_API_KEY='<protect-integration-key>'
-export UNIFI_CAMERA_ID='<camera-id>'
 go run ./cmd/spike
 ```
+
+Zero-Config-Start (S6-03): ohne `UNIFI_CAMERA_ID` und ohne
+`CARVILON_PROFILES_JSON` seedet der Spike automatisch das eingebaute
+S6-Mess-Default-Set (5 Profile auf der hard-coded Intercom-CameraID).
+Genau dafür gedacht: `git pull && go run .\cmd\spike` und sofort
+durchmessen. Die DB wird zur Wahrheit, ab dem zweiten Start ist das
+Default-Set egal — Tuning ueber `PUT /api/profiles/{name}`.
 
 Danach im Browser öffnen:
 
@@ -137,11 +148,14 @@ um das Dropdown zu füllen.
 
 ### S6 Mess-Workflow
 
-1. **Default-Set kommt von alleine.** Mit `UNIFI_CAMERA_ID` allein
-   seedet der erste Start fünf Profile: `intercom_browser`,
-   `mjpeg_hq`, `mjpeg_bal`, `mjpeg_fast`, `h264_cbp` (letzteres ist
-   nur in der DB; der Endpoint kommt erst, wenn das tinyH264-Input-
-   Format aus dem ESP-Chat klar ist).
+1. **Default-Set kommt von alleine.** Zero-Config-Start
+   (`UNIFI_NVR_HOST` + `UNIFI_API_KEY` reichen) seedet fünf Profile auf
+   der eingebauten Intercom-Default-CameraID: `intercom_web`,
+   `mjpeg_hq`, `mjpeg_bal`, `mjpeg_fast`, `h264_cbp` (letzteres ist nur
+   in der DB; der Endpoint kommt erst, wenn das tinyH264-Input-
+   Format aus dem ESP-Chat klar ist). Mit `UNIFI_CAMERA_ID` läuft das
+   Set auf einer anderen Kamera; mit `CARVILON_PROFILES_JSON` ein
+   vollständig eigenes Set.
 2. **Viewer öffnen.** ESP / `curl` / Browser zieht ein MJPEG-Profil,
    z.B. `curl -o /dev/null http://host:8555/api/stream.mjpeg?src=mjpeg_bal`.
 3. **Messen.** `curl http://host:8555/stream/stats | jq`. Pro Client
