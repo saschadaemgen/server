@@ -175,8 +175,10 @@ func main() {
 	if err != nil {
 		logger.Fatalf("backend: %v", err)
 	}
-	_ = backend // bound but unused locally; carvilon-side wrapper picks it up
 	logger.Printf("backend: %d profile(s) loaded from DB: %v", len(reg.Names()), reg.Names())
+	// `backend` is also used below as the ProfileWriter for the S6
+	// tuning endpoints; the build-tagged carvilon wrapper consumes the
+	// same pointer.
 
 	// --- MJPEG check --------------------------------------------------------
 	enableMJPEG := os.Getenv(envDisableMJPEG) == ""
@@ -216,6 +218,7 @@ func main() {
 		Stats:            statsReg,
 		CPU:              cpuSampler,
 		StatsLogInterval: 30 * time.Second,
+		ProfileWriter:    backend, // S6-01 tuning: PUT/DELETE /api/profiles/{name}
 	})
 	if err != nil {
 		logger.Fatalf("server: %v", err)

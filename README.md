@@ -14,14 +14,28 @@ CARVILON streaming-server. Go-Library plus eine spike-Binary.
   pro Subscriber.
 - **S3 (durch):** MJPEG-Output für ESP/Browser via ffmpeg-Subprozess.
   Byte-Schnitt 1:1 wie go2rtc — Drop-in für den carvilon-Proxy.
-- **S4, Schritt 4 (jetzt):** Multi-Kamera, bedarfsgesteuert. Pro
+- **S4 (durch):** Multi-Kamera, bedarfsgesteuert. Pro
   `(CameraID, Quality)` ein eigener Lifecycle. Alle Viewer-Endpoints
   sind profile-driven (`?src=<name>`); Profile binden Kamera, Quality
   und Usage (browser / esp). **Eine Kamera wird NUR gepullt, wenn
   mindestens ein Viewer sie gerade anschaut** — sonst kein RTSP-Pull,
   kein Decode, kein ffmpeg. 5 Kameras, 0 Viewer = 0 Last.
-- **Schritt 5+** (Interface-Naht zu carvilon-server, Admin-UI für
-  Profile-CRUD, GenericRTSPSource, ESP32-Quelle, Audio) sind explizit
+- **S5 (durch):** Profile-Persistenz in SQLite (`modernc.org/sqlite`,
+  pure-Go, kein cgo). DB ist Source of Truth nach erstem Start; JSON-
+  Seed nur in leere DB. Naht-Interface `streambackend.Backend` zur
+  carvilon-Seite; build-tag-Wrapper (`carvilon_stream`) verdrahtet die
+  beiden Repos ohne Public-Build-Pollution.
+- **S6 (jetzt, ESP-Mess-Apparat):** Profile bekommen Codec + Encode-
+  Parameter (Width/Height/FPS/EncodeQuality). `/stream/stats` JSON
+  liefert per-Client + global frames/bytes/avg-fps/avg-kbps; Linux-
+  `/proc`-CPU als globaler Vergleichswert. PUT/DELETE
+  `/api/profiles/{name}` für Live-Tuning ohne Restart. Drei MJPEG-
+  Profile (`mjpeg_hq` / `mjpeg_bal` / `mjpeg_fast`) ab Werk; das
+  vierte (`h264_cbp`, Constrained-Baseline-Transcode für tinyH264 auf
+  ESP32-P4) ist im DB-Schema vorgesehen und wartet auf den ESP-Chat
+  fürs Annex-B-Input-Format. Profil-#101 ist eine DB-Row, kein Code-
+  Change.
+- **Schritt 7+** (GenericRTSPSource, Audio, ESP32-Quelle) sind explizit
   **nicht** Teil dieser Stufe.
 
 ## Voraussetzungen
@@ -41,18 +55,21 @@ cp .env.example .env
 # .env editieren — niemals committen (durch .gitignore abgedeckt)
 ```
 
-| Env-Variable               | Pflicht | Default | Bedeutung                                                                                                          |
-| -------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `UNIFI_NVR_HOST`           | ja      | —       | Host des UDM, z.B. `192.168.1.1`                                                                                   |
-| `UNIFI_API_KEY`            | ja      | —       | Protect-Integration-Key (Settings → Integrations)                                                                   |
-| `UNIFI_CAMERA_ID`          | one of¹ | —       | Backward-Compat: registriert zwei Default-Profile (`intercom_browser` + `intercom_esp`) auf dieser einen Kamera     |
-| `CARVILON_PROFILES_JSON`   | one of¹ | —       | JSON-Liste fürs Multi-Kamera-Setup (siehe `.env.example`); überschreibt den `UNIFI_CAMERA_ID`-Default               |
-| `UNIFI_ENCRYPTION`         | nein    | `tls`   | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)                                  |
-| `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                                                                         |
-| `CARVILON_FFMPEG`          | nein    | `ffmpeg`| Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                                                |
-| `CARVILON_DISABLE_MJPEG`   | nein    | —       | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                                                  |
+| Env-Variable               | Pflicht | Default               | Bedeutung                                                                                                          |
+| -------------------------- | ------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `UNIFI_NVR_HOST`           | ja      | —                     | Host des UDM, z.B. `192.168.1.1`                                                                                   |
+| `UNIFI_API_KEY`            | ja      | —                     | Protect-Integration-Key (Settings → Integrations)                                                                  |
+| `UNIFI_CAMERA_ID`          | one of¹ | —                     | Seed-Default fürs S6-Set (5 Profile: 1× Browser-Passthrough + 3× MJPEG + 1× H.264-CBP-Slot) auf dieser einen Kamera |
+| `CARVILON_PROFILES_JSON`   | one of¹ | —                     | JSON-Liste fürs Multi-Kamera-Setup (siehe `.env.example`); überschreibt den `UNIFI_CAMERA_ID`-Default               |
+| `CARVILON_STREAM_DB`       | nein    | `./state/stream.db`   | Pfad zur SQLite-Profil-DB. **Hat die DB einmal Profile, gewinnt sie über JSON** (S5-Regel).                         |
+| `CARVILON_STREAM_BASE_URL` | nein    | `http://127.0.0.1`+Listen | Absolute Basis-URL für `MJPEGURL` / `WebRTCSignalURL` im Backend (carvilon-Proxy ruft das auf)                  |
+| `UNIFI_ENCRYPTION`         | nein    | `tls`                 | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)                                 |
+| `CARVILON_STREAM_LISTEN`   | nein    | `:8555`               | HTTP-Listen-Adresse (Signaling + Testseite)                                                                        |
+| `CARVILON_FFMPEG`          | nein    | `ffmpeg`              | Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                                               |
+| `CARVILON_DISABLE_MJPEG`   | nein    | —                     | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                                                 |
 
 ¹ Entweder `UNIFI_CAMERA_ID` (für Single-Kamera-Demo) ODER `CARVILON_PROFILES_JSON` (für echte Multi-Kamera-Setups).
+Beide Quellen seeden die DB nur, wenn sie leer ist; ab dem zweiten Start ist die DB die Wahrheit.
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 
@@ -98,12 +115,51 @@ Browser-Tabs öffnen. Server-Log zeigt genau **EIN** `unifi: got RTSPS URL`
 und **EIN** `unifi: first IDR`, egal wie viele Viewer.
 
 **MJPEG testen:** Browser direkt auf
-`http://<host>:8555/api/stream.mjpeg?src=intercom_browser` (oder
-`?src=intercom_esp`). Format byte-identisch zu go2rtc.
+`http://<host>:8555/api/stream.mjpeg?src=mjpeg_bal` (oder ein anderes
+MJPEG-Profil aus dem Default-Set). Format byte-identisch zu go2rtc.
 
 **Profile-Liste auslesen:** `GET /api/profiles` liefert JSON mit allen
-registrierten Profilen (Name, CameraID, Quality, Usage, Description) —
-die Testseite nutzt das, um das Dropdown zu füllen.
+registrierten Profilen (Name, CameraID, Quality, Usage, Description,
+Codec, Width, Height, FPS, EncodeQuality) — die Testseite nutzt das,
+um das Dropdown zu füllen.
+
+## HTTP-Endpoints (S6-Stand)
+
+| Methode + Pfad                       | Zweck                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `POST /offer?src=<name>`             | WebRTC-Offer (nur Profile mit `codec=h264_passthrough`)                                 |
+| `GET  /api/stream.mjpeg?src=<name>`  | MJPEG-Stream (nur Profile mit `codec=mjpeg`)                                            |
+| `GET  /api/profiles`                 | Liste aller Profile als JSON (mit Codec + Encode-Parametern)                            |
+| `PUT  /api/profiles/{name}`          | Profil anlegen / tunen — Body wie `.env.example` Beispiel, Validate vor Persistenz      |
+| `DELETE /api/profiles/{name}`        | Profil entfernen (laufende Viewer bleiben auf altem Hub bis Disconnect)                 |
+| `GET  /stream/stats`                 | JSON-Snapshot: per-Client + per-Profil + global (frames, bytes, avg-fps, avg-kbps, cpu) |
+| `GET  /healthz`                      | `204 No Content` (Liveness)                                                             |
+
+### S6 Mess-Workflow
+
+1. **Default-Set kommt von alleine.** Mit `UNIFI_CAMERA_ID` allein
+   seedet der erste Start fünf Profile: `intercom_browser`,
+   `mjpeg_hq`, `mjpeg_bal`, `mjpeg_fast`, `h264_cbp` (letzteres ist
+   nur in der DB; der Endpoint kommt erst, wenn das tinyH264-Input-
+   Format aus dem ESP-Chat klar ist).
+2. **Viewer öffnen.** ESP / `curl` / Browser zieht ein MJPEG-Profil,
+   z.B. `curl -o /dev/null http://host:8555/api/stream.mjpeg?src=mjpeg_bal`.
+3. **Messen.** `curl http://host:8555/stream/stats | jq`. Pro Client
+   sieht man `frames_sent`, `bytes_sent`, `avg_fps`, `avg_bitrate_kbps`;
+   global zusätzlich `transcoder_cpu_percent` (nur Linux).
+4. **Tunen.** Encode-Parameter via `PUT /api/profiles/{name}` ändern:
+   ```sh
+   curl -X PUT http://host:8555/api/profiles/mjpeg_bal \
+        -H 'Content-Type: application/json' \
+        -d '{"camera_id":"<cam>","quality":"high","usage":"esp","codec":"mjpeg","width":800,"height":1280,"fps":10,"encode_quality":5}'
+   ```
+   Neue Viewer erleben sofort die neuen Werte (alte Viewer bleiben
+   auf ihrer Session, bis sie disconnecten). Periodisches Stats-Log
+   im stderr (alle 30 s) zeigt den Effekt.
+5. **Profil hinzufügen.** Statt `mjpeg_bal` zu überschreiben kann
+   man auch ein neues Profil per PUT anlegen — der Server kennt es
+   sofort, ohne Restart. Profil-#101 ist eine DB-Row, kein Code-
+   Change.
 
 ## Cross-Compile für Raspberry Pi (arm64)
 
@@ -174,15 +230,20 @@ Backpressure endet beim einzelnen Subscriber-Buffer (Default 30 AUs,
 
 ```
 streaming-server/
-├── cmd/spike/         (Binary; baut Profile + Source-Factory)
-├── server.go          (HTTP /offer + /api/stream.mjpeg + /api/profiles)
+├── cmd/spike/         (Binary; baut Profile + Source-Factory + Stats)
+├── server.go          (HTTP /offer + /api/stream.mjpeg + /api/profiles + /stream/stats)
+├── streambackend/     (carvilon-Naht: Backend, Profile/Camera-Wireshape, INTEGRATION.md)
 ├── web/index.html     (Testseite mit Profil-Dropdown)
 ├── internal/
 │   ├── h264/          (RFC-6184-Depacketizer + Unit-Tests)
 │   ├── hub/           (H.264-Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
 │   ├── mjpeg/         (ffmpeg-Encoder + JPEG-Fan-Out + go2rtc-Multipart)
-│   ├── profile/       (Profile-Struktur + Registry, S4-01)
+│   ├── profile/       (Profile-Struktur + Registry, S4-01 + S6 Codec/Encode-Felder)
 │   ├── sourcereg/     (Source-Registry pro (CameraID,Quality), S4-01)
+│   ├── store/         (SQLite-Profile-Persistenz mit additiver Migration, S5)
+│   ├── unifiapi/      (Protect-Integration-Client: ListCameras, S5)
+│   ├── stats/         (per-Client throughput-Counter, atomic, S6-01)
+│   ├── proccpu/       (linux: /proc/<pid>/stat-Sampler, S6-01)
 │   ├── droplog/       (rate-limited drop-counter)
 │   └── source/
 │       ├── source.go  (VideoSource-Interface)
@@ -315,10 +376,13 @@ Top-Level-Abhängigkeiten sind ausschließlich:
 - `github.com/bluenviron/gortsplib/v5` (RTSP-Transport + SDP)
 - `github.com/pion/webrtc/v4` (WebRTC, packetization, SRTP)
 - `github.com/pion/rtp` (transitiv über pion, brauchen wir direkt für RTP-Packet-Typen)
+- `modernc.org/sqlite` (pure-Go SQLite — S5-freigegeben, kein cgo)
 
 Weitere Dritt-Libs vorher mit dem Stream-Chat klären. Der Depacketizer ist
 bewusst in-tree (`internal/h264`) gebaut, um die Doktrin sauber zu halten —
 und um unabhängig zu sein davon, was eine Fremd-Lib zufällig kann.
+Genauso bewusst: kein gopsutil für die CPU-Sample — `internal/proccpu`
+liest `/proc/<pid>/stat` direkt; nicht-Linux liefert einen Stub.
 
 ## Tests
 
@@ -349,3 +413,14 @@ S4-spezifisch:
 | --- | --- | --- |
 | `internal/profile` | 12 | Profile validate, Registry lookup, ByUsage-Filter, Duplikat-Erkennung |
 | `internal/sourcereg` | 12 | Lazy-Hub, 0 Pull bei 0 Viewer, 2-Kameras unabhaengiger Lifecycle, shared-Pull bei selber Key, race-clean |
+
+S5/S6-spezifisch:
+
+| Paket | Tests | Was beweisen die |
+| --- | --- | --- |
+| `internal/store` | viele | CRUD-Round-Trip, Persistence über Open/Close, **Migration idempotent und backfillt Pre-S6-Rows** (codec='' → korrekter Codec via Usage), SeedIfEmpty respektiert DB-Wahrheit |
+| `streambackend` | viele | URL-Builder + Query-Escape, CRUD inkl. Codec-Round-Trip, Sentinels (`ErrProfileNotFound`/`ErrNotConfigured`), JSON-Wire-Tags gelockt (carvilon-Wrapper kopiert feldweise) |
+| `internal/profile` (S6) | + | Codec validate (passthrough ignoriert Encode-Params, mjpeg/h264_cbp verlangen sie), Range-Checks pro transcodiertem Codec |
+| `internal/stats` (S6) | 12 | Register/Unregister, atomic-Counter, JSON-Tag-Lock, -race smoke (8 goroutines × 1000 Frames) |
+| `internal/proccpu` (S6) | 4 | Konstruktor-Vertrag, first-call-not-ok-Regel, Stub-Verhalten auf Nicht-Linux |
+| `package stream` (S6) | 12 | `/stream/stats` empty-snapshot, PUT/DELETE `/api/profiles/{name}` happy path + 400 / 404 / 503, Logger-goroutine respektiert ctx |

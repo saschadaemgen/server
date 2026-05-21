@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -56,9 +57,13 @@ type Server struct {
 	// S6-01 measurement apparatus. Both nil-safe: if unset, the
 	// /stream/stats endpoint returns zeros and the periodic log is
 	// silenced.
-	stats     *stats.Registry
-	cpu       *proccpu.Sampler
-	statsLog  time.Duration // 0 = no periodic log
+	stats    *stats.Registry
+	cpu      *proccpu.Sampler
+	statsLog time.Duration // 0 = no periodic log
+
+	// S6-01 tuning surface. nil → PUT/DELETE /api/profiles/{name}
+	// return 503; the read-only GET still works.
+	writer ProfileWriter
 
 	api *webrtc.API
 	srv *http.Server
@@ -113,6 +118,28 @@ type ServerOptions struct {
 	// silences the periodic log. /stream/stats remains available
 	// regardless.
 	StatsLogInterval time.Duration
+
+	// ProfileWriter (optional) enables runtime profile mutations via
+	// PUT/DELETE /api/profiles/{name}. The intended implementation is
+	// [streambackend.Backend], which writes the SQLite store and the
+	// in-memory registry atomically. If nil, both endpoints return 503
+	// — the read-only GET /api/profiles stays available so an admin
+	// UI can still inspect the registered profiles.
+	//
+	// Live-session semantics: a PUT only affects new viewers; existing
+	// viewers stay on the hub they joined. This is the spike-stage
+	// rule documented in streambackend.Backend.Put.
+	ProfileWriter ProfileWriter
+}
+
+// ProfileWriter is the mutating half of the profile surface — the
+// read half is the [profile.Registry] passed in via Options.Profiles.
+// Implemented by [streambackend.Backend]'s internal-shape methods
+// ([streambackend.Backend.PutProfile] / DeleteProfile); a test fake
+// can satisfy it without spinning up a store.
+type ProfileWriter interface {
+	PutProfile(ctx context.Context, p profile.Profile) error
+	DeleteProfile(ctx context.Context, name string) error
 }
 
 // NewServer builds a Server. Hubs and the source registry start here
@@ -148,6 +175,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		stats:    opts.Stats,
 		cpu:      opts.CPU,
 		statsLog: opts.StatsLogInterval,
+		writer:   opts.ProfileWriter,
 	}
 
 	if opts.EnableMJPEG {
@@ -168,6 +196,11 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/offer", s.handleOffer)
 	mux.HandleFunc("/api/stream.mjpeg", s.handleMJPEG)
 	mux.HandleFunc("/api/profiles", s.handleProfiles)
+	// S6-01 tuning endpoints (Go 1.22+ method+path patterns). The
+	// catch-all `/api/profiles` above keeps serving GET; these add
+	// per-name PUT/DELETE without re-implementing routing.
+	mux.HandleFunc("PUT /api/profiles/{name}", s.handleProfilePut)
+	mux.HandleFunc("DELETE /api/profiles/{name}", s.handleProfileDelete)
 	mux.HandleFunc("/stream/stats", s.handleStats)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -538,6 +571,129 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	_, _ = io.WriteString(w, "]")
+}
+
+// handleProfilePut implements PUT /api/profiles/{name}: parse the JSON
+// body into a profile.Profile, override Name with the URL path so the
+// REST identity wins, validate, and hand it to the [ProfileWriter] for
+// persistence + registry-sync.
+//
+// Body shape mirrors the profile.Profile JSON (snake_case): camera_id,
+// quality, usage, description, codec, width, height, fps,
+// encode_quality. The Name in the body is ignored if present —
+// /api/profiles/{name} IS the name; double-specifying would invite
+// "two sources of truth" bugs.
+//
+// Returns:
+//   - 204 No Content on success.
+//   - 400 if the JSON is malformed or profile.Validate fails.
+//   - 503 if no ProfileWriter is wired (read-only deployment).
+//
+// Live-session semantics are documented on [ProfileWriter] /
+// [streambackend.Backend.PutProfile]: existing viewers stay on the old
+// hub identity, new viewers pick up the change.
+func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
+	if s.writer == nil {
+		http.Error(w, "profile write disabled (no ProfileWriter configured)", http.StatusServiceUnavailable)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "missing profile name", http.StatusBadRequest)
+		return
+	}
+
+	var body profileJSON
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		http.Error(w, "decode body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	p := profile.Profile{
+		Name:          name, // URL wins; body.Name is ignored.
+		CameraID:      body.CameraID,
+		Quality:       profile.Quality(body.Quality),
+		Usage:         profile.Usage(body.Usage),
+		Description:   body.Description,
+		Codec:         profile.Codec(body.Codec),
+		Width:         body.Width,
+		Height:        body.Height,
+		FPS:           body.FPS,
+		EncodeQuality: body.EncodeQuality,
+	}
+	if err := p.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.writer.PutProfile(r.Context(), p); err != nil {
+		http.Error(w, "put: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logger.Printf("profile: tuned %q codec=%s %dx%d@%dfps q=%d",
+		p.Name, p.Codec, p.Width, p.Height, p.FPS, p.EncodeQuality)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleProfileDelete implements DELETE /api/profiles/{name}: remove
+// the named profile from the persistent store + the in-memory
+// registry. Existing viewers of that profile keep streaming (the hub
+// stays alive until the last subscriber leaves) — only NEW ?src=
+// requests for the deleted name will 404.
+func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if s.writer == nil {
+		http.Error(w, "profile write disabled (no ProfileWriter configured)", http.StatusServiceUnavailable)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "missing profile name", http.StatusBadRequest)
+		return
+	}
+	err := s.writer.DeleteProfile(r.Context(), name)
+	if err != nil {
+		// We don't have a typed sentinel reachable from this package
+		// (the writer is an interface), so fall back to a substring
+		// sniff for the "not found" case. The streambackend wraps
+		// ErrProfileNotFound which renders with %q on the name; the
+		// admin UI just needs the 404 to render correctly.
+		// We can't reach into streambackend for the typed
+		// ErrProfileNotFound because importing streambackend from
+		// package stream would create a cycle (streambackend itself
+		// imports the internal profile package shared with this one).
+		// A substring sniff against the rendered error message is good
+		// enough for the 404 vs 500 split — the streambackend formats
+		// not-found with "not found".
+		msg := strings.ToLower(err.Error())
+		if errors.Is(err, profile.ErrUnknownProfile) ||
+			strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "unknown") {
+			http.Error(w, "unknown profile", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "delete: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logger.Printf("profile: deleted %q", name)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// profileJSON mirrors the JSON tags the admin UI and the streambackend
+// wire shape use (snake_case). Kept private to server.go — outside
+// callers go through streambackend.Profile, which has the same field
+// set but adds the runtime Consumers count.
+type profileJSON struct {
+	CameraID      string `json:"camera_id"`
+	Quality       string `json:"quality"`
+	Usage         string `json:"usage"`
+	Description   string `json:"description"`
+	Codec         string `json:"codec"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	EncodeQuality int    `json:"encode_quality"`
 }
 
 // handleStats implements GET /stream/stats — the JSON snapshot of the

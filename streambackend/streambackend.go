@@ -268,6 +268,37 @@ func (b *Backend) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
+// PutProfile is the internal-shape sibling of [Backend.Put]: it takes a
+// fully-formed [profile.Profile] (the streaming-server's own type),
+// validates it, persists it to the store, and refreshes the in-memory
+// registry. The wire conversion that [Backend.Put] does is unnecessary
+// here because the caller is already on the streaming-server side
+// (e.g. the in-process tuning endpoint).
+//
+// Same live-session semantics as Put: existing viewers stay on the
+// old hub identity until they disconnect; new viewers pick up the
+// new settings on their next ?src= request.
+func (b *Backend) PutProfile(ctx context.Context, p profile.Profile) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if err := b.opts.Store.Put(ctx, p); err != nil {
+		return err
+	}
+	if err := b.opts.Profiles.Put(p); err != nil {
+		return fmt.Errorf("streambackend: persist OK but registry sync failed: %w", err)
+	}
+	return nil
+}
+
+// DeleteProfile is the internal-shape sibling of [Backend.Delete].
+// Mirrors the wire-shape variant byte-for-byte except for the absent
+// toWire/fromWire trip. See [Backend.Delete] for the live-session
+// semantics.
+func (b *Backend) DeleteProfile(ctx context.Context, name string) error {
+	return b.Delete(ctx, name)
+}
+
 // ListCameras returns the cameras the Protect controller knows about.
 // Empty slice (not an error) when no [unifiapi.Client] was wired,
 // mirroring the carvilon `unconfiguredBackend`-default behaviour for
