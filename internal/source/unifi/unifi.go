@@ -37,6 +37,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/gortsplib/v5/pkg/headers"
 	"github.com/pion/rtp"
 
 	"carvilon.local/stream/internal/droplog"
@@ -180,7 +181,7 @@ func (s *Source) Start(ctx context.Context) error {
 		return fmt.Errorf("unifi: rtsp dial %s://%s: %w", u.Scheme, u.Host, err)
 	}
 
-	desc, _, err := client.Describe(u)
+	desc, resp, err := client.Describe(u)
 	if err != nil {
 		client.Close()
 		return fmt.Errorf("unifi: rtsp describe: %w", err)
@@ -194,6 +195,16 @@ func (s *Source) Start(ctx context.Context) error {
 	}
 	s.opts.Logger.Printf("unifi: found H.264 track (payload type %d, packetization-mode %d)",
 		h264Fmt.PayloadType(), h264Fmt.PacketizationMode)
+
+	// One-shot SDP-security introspection: tells us how the camera
+	// advertises the SRTP key (if at all). See sdp.go for the redaction
+	// rules — inline keys are NEVER written to the log.
+	s.opts.Logger.Printf("unifi: SDP security: %s", sdpSecurityReport(resp.Body))
+	s.opts.Logger.Printf("unifi: gortsplib parsed view: media.Profile=%s, session.KeyMgmtMikey=%t, media.KeyMgmtMikey=%t",
+		profileName(medi.Profile),
+		desc.KeyMgmtMikey != nil,
+		medi.KeyMgmtMikey != nil,
+	)
 
 	sps, pps := h264Fmt.SafeParams()
 	s.params = source.H264Params{
@@ -462,4 +473,17 @@ func profileLevelIDFromSPS(sps []byte) string {
 		return ""
 	}
 	return fmt.Sprintf("%02x%02x%02x", sps[1], sps[2], sps[3])
+}
+
+// profileName renders a gortsplib TransportProfile in the wire-form
+// strings ("AVP" / "SAVP") for logging.
+func profileName(p headers.TransportProfile) string {
+	switch p {
+	case headers.TransportProfileAVP:
+		return "AVP"
+	case headers.TransportProfileSAVP:
+		return "SAVP"
+	default:
+		return fmt.Sprintf("unknown(%d)", p)
+	}
 }
