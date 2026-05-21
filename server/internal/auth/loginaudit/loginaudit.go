@@ -1,11 +1,12 @@
-// Package loginaudit schreibt jeden Web-Viewer- und Admin-Login-
-// Versuch (success / fail / locked / unlocked) in die login_audit-
-// Tabelle (Migration 006). Das Admin-Dashboard rendert die letzten
-// Eintraege; Settings-Seite zeigt eine groessere Liste plus Filter.
+// Package loginaudit writes every web-viewer and admin login
+// attempt (success / fail / locked / unlocked) into the
+// login_audit table (Migration 006). The admin dashboard renders
+// the most recent entries; the settings page shows a longer list
+// with filters.
 //
-// Ein Background-Job (Cleanup) loescht Eintraege die aelter als
-// retentionDays sind. In Saison 13-02-FIX4-a wird Cleanup einmal
-// pro Stunde aus dem Server-Boot-Loop angetriggert.
+// A background job (Cleanup) drops entries older than the
+// configured retention. The server boot loop runs Cleanup once
+// per hour.
 package loginaudit
 
 import (
@@ -18,10 +19,10 @@ import (
 	"carvilon.local/server/internal/db"
 )
 
-// DefaultRetention ist die Aufbewahrungsdauer fuer Audit-Eintraege.
+// DefaultRetention is how long audit entries are kept by default.
 const DefaultRetention = 90 * 24 * time.Hour
 
-// Outcome listet die zulaessigen outcome-Werte.
+// Outcome enumerates the valid outcome values.
 type Outcome string
 
 const (
@@ -31,7 +32,7 @@ const (
 	OutcomeUnlocked Outcome = "unlocked"
 )
 
-// Realm grenzt Web-Viewer- gegen Admin-Eintraege ab.
+// Realm separates web-viewer entries from admin entries.
 type Realm string
 
 const (
@@ -39,7 +40,7 @@ const (
 	RealmAdmin  Realm = "admin"
 )
 
-// Entry ist eine Zeile aus login_audit.
+// Entry is one row from login_audit.
 type Entry struct {
 	ID        int64
 	Timestamp time.Time
@@ -51,25 +52,25 @@ type Entry struct {
 	Outcome   Outcome
 }
 
-// Service kapselt die DB-Operationen.
+// Service wraps the DB operations.
 type Service struct {
 	db  *db.DB
 	now func() time.Time
 }
 
-// New baut einen Service mit time.Now als Clock-Quelle.
+// New builds a Service with time.Now as the clock source.
 func New(d *db.DB) *Service {
 	return NewWithClock(d, time.Now)
 }
 
-// NewWithClock injiziert eine Test-Clock.
+// NewWithClock injects a test clock.
 func NewWithClock(d *db.DB, now func() time.Time) *Service {
 	return &Service{db: d, now: now}
 }
 
-// Insert schreibt einen neuen Eintrag. Fehler werden lediglich
-// zurueckgegeben; Login-Pfade loggen die Fehler aber blocken nicht
-// weil der Login-Outcome wichtiger ist als der Audit-Eintrag.
+// Insert writes a new entry. Errors are returned as-is; the login
+// paths log them but do not block, because the login outcome
+// matters more than the audit row.
 func (s *Service) Insert(ctx context.Context, e Entry) error {
 	if e.Outcome == "" {
 		return errors.New("loginaudit: outcome required")
@@ -95,8 +96,8 @@ func (s *Service) Insert(ctx context.Context, e Entry) error {
 	return nil
 }
 
-// Recent liefert die letzten N Eintraege (newest first), optional
-// gefiltert auf einen Realm. limit <= 0 -> 50.
+// Recent returns the last N entries (newest first), optionally
+// filtered to a single Realm. limit <= 0 -> 50.
 func (s *Service) Recent(ctx context.Context, realm Realm, limit int) ([]Entry, error) {
 	if limit <= 0 {
 		limit = 50
@@ -130,7 +131,7 @@ func (s *Service) Recent(ctx context.Context, realm Realm, limit int) ([]Entry, 
 	return out, nil
 }
 
-// Cleanup loescht Eintraege aelter als retention.
+// Cleanup deletes entries older than retention.
 func (s *Service) Cleanup(ctx context.Context, retention time.Duration) (int, error) {
 	if retention <= 0 {
 		retention = DefaultRetention
