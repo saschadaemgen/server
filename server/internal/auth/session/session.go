@@ -5,11 +5,10 @@
 // rolling renewal: last_seen is bumped and expires_at is pushed
 // out by DefaultIdleTimeout.
 //
-// Saison 13-02-FIX4-a: the table is now viewer_sessions (was
-// mieter_sessions) and the FK column is viewer_mac (was mock_mac).
-// The vocabulary swap matches the broader Mock -> Viewer rename
-// across the platform; routing semantics are unchanged (one
-// viewer = one device).
+// The table is viewer_sessions (formerly mieter_sessions) and the
+// FK column is viewer_mac (formerly mock_mac), matching the
+// platform-wide Mock -> Viewer rename. Routing semantics are
+// unchanged (one viewer = one device).
 //
 // Session ids are 32 random bytes encoded base64url-without-
 // padding (43 characters). They live in viewer_sessions keyed by
@@ -151,9 +150,9 @@ func (s *Service) Revoke(ctx context.Context, sessionID string) error {
 
 // RevokeAllForViewer deletes every session bound to viewerMAC
 // and returns the number of rows removed. Useful when the admin
-// resets a viewer's password (S13-02-FIX4-a) or removes the
-// viewer (FK cascade handles the same outcome, but explicit
-// feedback is nicer for the admin UI).
+// resets a viewer's password or removes the viewer (FK cascade
+// handles the same outcome, but explicit feedback is nicer for
+// the admin UI).
 func (s *Service) RevokeAllForViewer(ctx context.Context, viewerMAC string) (int, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM viewer_sessions WHERE viewer_mac = ?`, viewerMAC)
@@ -169,8 +168,8 @@ func (s *Service) RevokeAllForViewer(ctx context.Context, viewerMAC string) (int
 
 // CleanupExpired removes every session whose expires_at is in the
 // past and returns the count. Intended to be called periodically
-// by a future background job; in saison 13 it is implemented but
-// not yet wired up.
+// by a future background job; for now it is implemented but not
+// yet wired up.
 func (s *Service) CleanupExpired(ctx context.Context) (int, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM viewer_sessions WHERE expires_at < ?`, s.now().UnixMilli())
@@ -201,10 +200,9 @@ func (s *Service) ActiveCount(ctx context.Context) (int, error) {
 
 // RecentlyActiveCount returns the number of viewer_sessions whose
 // last_seen is within the given window (e.g. last 30 minutes).
-// Saison 13-02-FIX4-a-HOTFIX3: dashboard surfaces this as
-// "aktive Sessions" - genauer als ActiveCount, das eine Sessions
-// zaehlt die naechste Woche noch gueltig WAEREN aber niemand
-// benutzt.
+// The dashboard surfaces this as "aktive Sessions" - more accurate
+// than ActiveCount, which counts sessions that would still be valid
+// next week but that nobody is actually using.
 func (s *Service) RecentlyActiveCount(ctx context.Context, window time.Duration) (int, error) {
 	if window <= 0 {
 		window = 30 * time.Minute
