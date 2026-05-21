@@ -13,42 +13,56 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
+
+	"carvilon.local/stream/internal/droplog"
+	"carvilon.local/stream/internal/source"
 )
 
 //go:embed web
 var webFS embed.FS
 
-// Server hosts the WebRTC signaling HTTP endpoint plus a tiny static test
-// page that exercises it from a browser. One [Source] feeds any number of
-// peer connections through the source's shared track.
+// h264ClockRate is the RTP clock rate for H.264 (90 kHz, RFC 6184).
+const h264ClockRate = 90000
+
+// Server is the CARVILON streaming kernel: a tiny WebRTC signaling
+// endpoint, an embedded test page, and a frame-consumer that turns
+// upstream access units into pion samples for any number of viewers
+// (today: single-viewer spike).
 //
-// The signaling protocol is intentionally minimal: POST the browser's offer
-// SDP to /offer with Content-Type application/sdp, receive the answer SDP
-// in the response body. No trickle ICE, no auth — spike scope only.
+// The kernel knows nothing about how frames are acquired — it accepts a
+// [source.VideoSource] and only ever calls its interface methods. UniFi,
+// generic RTSP, ESP32 etc. plug in through the same shape.
+//
+// Signaling protocol: POST the browser's offer SDP to /offer with
+// Content-Type application/sdp, receive the answer SDP in the response
+// body. No trickle ICE, no auth — spike scope only.
 type Server struct {
-	src    *Source
+	src    source.VideoSource
 	addr   string
 	logger *log.Logger
 
-	api *webrtc.API
-	srv *http.Server
+	api   *webrtc.API
+	track *webrtc.TrackLocalStaticSample
+	srv   *http.Server
+
+	drops *droplog.Counter
 }
 
 // ServerOptions configures a [Server].
 type ServerOptions struct {
-	// Source is the video source whose track this server hands out to peers.
-	// Must already have been Started.
-	Source *Source
+	// Source is the video producer. Must already be Started.
+	Source source.VideoSource
 
 	// Addr is the HTTP listen address, e.g. ":8555". Avoid 9080
 	// (carvilon-server) and 1984 (go2rtc).
 	Addr string
 
-	// Logger receives diagnostic output. If nil, the default logger is used.
+	// Logger receives diagnostic output. If nil, the default logger.
 	Logger *log.Logger
 }
 
-// NewServer builds a Server. It does not listen — call [Server.ListenAndServe].
+// NewServer builds a Server.
 func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Source == nil {
 		return nil, errors.New("stream: Source is required")
@@ -56,9 +70,8 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Addr == "" {
 		return nil, errors.New("stream: Addr is required")
 	}
-	logger := opts.Logger
-	if logger == nil {
-		logger = log.Default()
+	if opts.Logger == nil {
+		opts.Logger = log.Default()
 	}
 
 	me := &webrtc.MediaEngine{}
@@ -67,11 +80,22 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: h264ClockRate},
+		"video",
+		"carvilon-stream",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("stream: create track: %w", err)
+	}
+
 	s := &Server{
 		src:    opts.Source,
 		addr:   opts.Addr,
-		logger: logger,
+		logger: opts.Logger,
 		api:    api,
+		track:  track,
+		drops:  &droplog.Counter{Logger: opts.Logger, Label: "stream: writesample"},
 	}
 
 	mux := http.NewServeMux()
@@ -94,26 +118,72 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return s, nil
 }
 
-// ListenAndServe starts the HTTP server and blocks until it stops. The
-// returned error is never nil — it is at least [http.ErrServerClosed] on a
-// clean shutdown.
-func (s *Server) ListenAndServe() error {
+// Run starts the frame consumer (source → pion samples) and the HTTP
+// signaling server. It blocks until ctx is cancelled or the HTTP server
+// errors out. On clean shutdown (ctx cancelled) it returns ctx.Err().
+func (s *Server) Run(ctx context.Context) error {
+	go s.consumeFrames(ctx)
+
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("stream: listen %s: %w", s.addr, err)
 	}
 	s.logger.Printf("stream: signaling + test page on http://%s", ln.Addr())
-	return s.srv.Serve(ln)
+
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- s.srv.Serve(ln) }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.srv.Shutdown(shutdownCtx)
+		return ctx.Err()
+	case err := <-serveDone:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
 }
 
-// Shutdown stops the HTTP server gracefully.
-func (s *Server) Shutdown(ctx context.Context) error {
-	return s.srv.Shutdown(ctx)
+// consumeFrames pulls AUs from the source, turns each into a pion
+// media.Sample (Annex-B body + duration from PTS delta), and writes it
+// to the shared video track. Drops on write error are counted into the
+// shared rate-limited logger; the loop never dies on a single sample.
+func (s *Server) consumeFrames(ctx context.Context) {
+	var (
+		prevPTS    int64
+		prevPTSSet bool
+	)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case au, ok := <-s.src.Frames():
+			if !ok {
+				s.logger.Printf("stream: source frames channel closed; consumer exiting")
+				return
+			}
+
+			dur := frameDuration(au.PTS, prevPTS, prevPTSSet)
+			prevPTS = au.PTS
+			prevPTSSet = true
+
+			if err := s.track.WriteSample(media.Sample{
+				Data:     annexBMarshal(au.NALUs),
+				Duration: dur,
+			}); err != nil {
+				s.drops.Record(err)
+			}
+		}
+	}
 }
 
-// handleOffer implements the POST /offer endpoint: read the browser's offer
-// SDP, attach the source's track to a fresh PeerConnection, return the
-// answer SDP with all ICE candidates already gathered.
+// handleOffer implements POST /offer: parse the browser's SDP offer,
+// attach the shared track to a fresh PeerConnection, gather ICE, return
+// the answer SDP.
 func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -127,12 +197,6 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(body) == 0 {
 		http.Error(w, "empty offer", http.StatusBadRequest)
-		return
-	}
-
-	track := s.src.Track()
-	if track == nil {
-		http.Error(w, "source not ready", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -152,7 +216,7 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	if _, err := pc.AddTrack(track); err != nil {
+	if _, err := pc.AddTrack(s.track); err != nil {
 		_ = pc.Close()
 		http.Error(w, "add track: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -183,4 +247,41 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/sdp")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, pc.LocalDescription().SDP)
+}
+
+// --- helpers ---------------------------------------------------------------
+
+// annexBMarshal serialises a slice of raw NALs (no start codes) into the
+// Annex-B byte stream pion's H.264 payloader expects: each NAL prefixed
+// with 0x00 0x00 0x00 0x01.
+func annexBMarshal(au [][]byte) []byte {
+	size := 0
+	for _, nalu := range au {
+		size += 4 + len(nalu)
+	}
+	buf := make([]byte, 0, size)
+	for _, nalu := range au {
+		buf = append(buf, 0x00, 0x00, 0x00, 0x01)
+		buf = append(buf, nalu...)
+	}
+	return buf
+}
+
+// frameDuration returns the gap between the previous and current PTS as a
+// time.Duration. Sample.Duration tells pion how much to advance the
+// outbound RTP timestamp before the NEXT sample — for constant frame rate
+// this is exact, for variable rate it is off by at most one frame. The
+// first frame and any suspicious gap (zero / negative / > 200 ms) falls
+// back to 33 ms (~30 fps).
+func frameDuration(pts, prev int64, prevSet bool) time.Duration {
+	var dur time.Duration
+	if prevSet {
+		if delta := pts - prev; delta > 0 {
+			dur = time.Duration(delta) * time.Second / h264ClockRate
+		}
+	}
+	if dur <= 0 || dur > 200*time.Millisecond {
+		dur = 33 * time.Millisecond
+	}
+	return dur
 }
