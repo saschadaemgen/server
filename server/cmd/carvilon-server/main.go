@@ -141,15 +141,25 @@ func main() {
 	userStore := ua.New(uaClient)
 
 	// Stream-Backend zeigt auf die StreamBackend-Naht
-	// (Saison 15-01). Mit gesetzter CARVILON_STREAM_BACKEND_URL
-	// wird der transitional go2rtc-Client konstruiert; ohne setzen
-	// wir den 503-Default ein, sodass die Handler nie nil pruefen
-	// muessen und alle Stream-Endpoints sauber degradieren. Die
-	// commercial-Variante (carvilon-streaming-server) plugt spaeter
-	// per Build-Tag dieselbe Naht; das oeffentliche Repo importiert
-	// den privaten Server nicht.
+	// (Saison 15-01). Praezedenz seit Saison 15-07:
+	//
+	//   1. commercialBackend (Build-Tag carvilon_stream; bindet den
+	//      privaten carvilon-streaming-server). Im public-Build ist
+	//      commercialBackend nil (siehe backend_default.go) und
+	//      dieser Zweig faellt durch.
+	//   2. CARVILON_STREAM_BACKEND_URL gesetzt -> transitional
+	//      go2rtc-Client (S14-01).
+	//   3. Sonst streams.Unconfigured() (503-Default), Handler
+	//      degraden sauber per Configured()-Check.
+	//
+	// Das oeffentliche Repo importiert den privaten Server NIE
+	// direkt; die Build-Tag-Naht ist die einzige Vertrags-Grenze.
 	var streamBackend streams.StreamBackend = streams.Unconfigured()
-	if cfg.StreamBackendURL != "" {
+	switch {
+	case commercialBackend != nil:
+		streamBackend = commercialBackend
+		log.Info("stream backend configured", "source", "commercial wrapper (carvilon_stream build tag)")
+	case cfg.StreamBackendURL != "":
 		c, err := streams.New(cfg.StreamBackendURL)
 		if err != nil {
 			log.Error("stream backend init failed", "err", err)
@@ -159,8 +169,8 @@ func main() {
 		// Boot-Log mit der vom Briefing geforderten Wortlaut, damit
 		// der Operator nach jedem systemctl restart sofort sieht ob
 		// /esp/stream.mjpeg und /webviewer/stream.mjpeg funktionieren.
-		log.Info("stream backend configured", "url", cfg.StreamBackendURL)
-	} else {
+		log.Info("stream backend configured", "url", cfg.StreamBackendURL, "source", "go2rtc transitional")
+	default:
 		log.Warn("stream backend not configured: /esp/stream.mjpeg, /webviewer/stream.mjpeg and /webviewer/offer return 503")
 	}
 
