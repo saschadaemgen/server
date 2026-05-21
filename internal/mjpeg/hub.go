@@ -8,26 +8,19 @@ import (
 	"sync"
 
 	"carvilon.local/stream/internal/droplog"
-	"carvilon.local/stream/internal/hub"
 	"carvilon.local/stream/internal/source"
 )
 
-// ErrUnknownProfile is returned by [Hub.Subscribe] when no profile with
-// the requested name is registered. Maps cleanly to a 404 in the HTTP
-// handler.
-var ErrUnknownProfile = errors.New("mjpeg: unknown profile")
-
-// SourceHub is the interface [Hub] needs from the upstream H.264 bus
-// — just enough to subscribe and let the subscriber close itself.
-// Matched by [hub.Hub]. The interface (rather than a concrete
-// reference) lets the MJPEG hub be tested with a fake.
+// SourceHub is the interface [Hub] needs from the upstream H.264 bus —
+// just enough to subscribe and let the subscriber close itself. Matched
+// by *hub.Hub via an adapter in the server layer, and by test fakes.
 type SourceHub interface {
-	Subscribe() (sourceSubscriber, error)
+	Subscribe() (SourceSubscriber, error)
 }
 
-// sourceSubscriber abstracts the upstream subscriber. Matched by
-// [hub.Subscriber] via the adapter in [NewHub].
-type sourceSubscriber interface {
+// SourceSubscriber abstracts the upstream subscriber returned by a
+// SourceHub.Subscribe call.
+type SourceSubscriber interface {
 	Frames() <-chan source.AccessUnit
 	Close()
 }
@@ -46,17 +39,29 @@ type encoderIface interface {
 // compile-time assertion
 var _ encoderIface = (*Encoder)(nil)
 
-// EncoderFactory builds an encoder for a profile. The default factory
-// (when HubOptions.EncoderFactory is nil) returns a real ffmpeg-backed
-// [Encoder].
-type EncoderFactory func(Profile) (encoderIface, error)
+// EncoderFactory builds an encoder for a given label+spec. The default
+// factory (when HubOptions.EncoderFactory is nil) returns a real
+// ffmpeg-backed [Encoder].
+type EncoderFactory func(label string, spec EncodeSpec) (encoderIface, error)
 
-// defaultEncoderFactory wires up the real ffmpeg-backed encoder. Used
-// when HubOptions.EncoderFactory is nil.
+// Entry is the resolved configuration for one MJPEG profile: which
+// H.264 hub to source from, and how to encode the output.
+//
+// The hub's [HubOptions.EntryFor] function returns one of these per
+// profile name on first Subscribe. Multiple profile names pointing to
+// the same Source (same camera/quality) share a single upstream pull,
+// because EntryFor returns the same SourceHub identity.
+type Entry struct {
+	Spec   EncodeSpec
+	Source SourceHub
+}
+
+// defaultEncoderFactory wires up the real ffmpeg-backed encoder.
 func defaultEncoderFactory(opts HubOptions) EncoderFactory {
-	return func(prof Profile) (encoderIface, error) {
+	return func(label string, spec EncodeSpec) (encoderIface, error) {
 		return NewEncoder(EncoderOptions{
-			Profile:    prof,
+			Label:      label,
+			Spec:       spec,
 			FFmpegPath: opts.FFmpegPath,
 			Logger:     opts.Logger,
 			InputBuf:   opts.EncoderInputBuf,
@@ -66,8 +71,8 @@ func defaultEncoderFactory(opts HubOptions) EncoderFactory {
 }
 
 // Hub fans out a single ffmpeg encoder's output to many MJPEG HTTP
-// viewers. ONE encoder per profile; if a profile has no viewers, no
-// encoder runs and no upstream subscription exists.
+// viewers. ONE encoder per profile name; if a profile has no viewers,
+// no encoder runs and no upstream subscription exists.
 //
 // Architecture (per profile, lazy-built on first Subscribe):
 //
@@ -76,23 +81,23 @@ func defaultEncoderFactory(opts HubOptions) EncoderFactory {
 //	                                                       per-viewer Subscribers
 //
 // Lifecycle:
-//   - First Subscribe for profile X: build upstream subscriber, build
-//     encoder, spawn forwarder + run goroutines.
+//   - First Subscribe for profile X: call EntryFor(X), subscribe to the
+//     returned Source, build an encoder with the returned Spec, start
+//     it, spawn forwarder + run goroutines.
 //   - Further Subscribe for X: just adds another subscriber to the
 //     running session.
 //   - Last viewer for X leaves: encoder.Close(), upstream subscriber
 //     Close(), session removed from the map.
 //   - Sessions for different profiles are independent.
-//
-// Concurrent Subscribe / Close from many HTTP handlers is safe: a
-// session's subscriber list is owned by the session's `run` goroutine
-// and mutated only via channels; the hub-level map is mutex-protected.
+//   - Two profiles whose EntryFor returns the same Source identity
+//     share a single upstream pull (the source-registry layer handles
+//     that — the mjpeg.Hub just observes whatever Source identity it
+//     gets).
 type Hub struct {
-	src          SourceHub
-	profiles     map[string]Profile
-	logger       *log.Logger
-	subBufSize   int
-	encFactory   EncoderFactory
+	entryFor   func(name string) (Entry, error)
+	logger     *log.Logger
+	subBufSize int
+	encFactory EncoderFactory
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -103,18 +108,12 @@ type Hub struct {
 
 // HubOptions configures a [Hub].
 type HubOptions struct {
-	// StreamHub is the H.264 source bus. Required (unless SourceHub
-	// is set, e.g. by tests with a fake upstream).
-	StreamHub *hub.Hub
-
-	// SourceHub overrides StreamHub with a custom upstream. Useful for
-	// tests; in production, leave nil and set StreamHub.
-	SourceHub SourceHub
-
-	// Profiles are the named encode targets the hub will accept on
-	// Subscribe. ErrUnknownProfile is returned for any name not in
-	// this set.
-	Profiles []Profile
+	// EntryFor resolves a profile name to its [Entry] (encode spec +
+	// source hub). The server typically implements this by looking
+	// the profile up in a [profile.Registry], validating it's an
+	// MJPEG-usage profile, and asking a source registry for the
+	// camera's hub. Required.
+	EntryFor func(name string) (Entry, error)
 
 	// FFmpegPath defaults to "ffmpeg".
 	FFmpegPath string
@@ -139,8 +138,8 @@ type HubOptions struct {
 // NewHub validates options and returns a ready-to-use Hub. No encoder
 // is spawned until the first [Hub.Subscribe].
 func NewHub(opts HubOptions) (*Hub, error) {
-	if opts.SourceHub == nil && opts.StreamHub == nil {
-		return nil, errors.New("mjpeg: StreamHub (or SourceHub for tests) is required")
+	if opts.EntryFor == nil {
+		return nil, errors.New("mjpeg: EntryFor is required")
 	}
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
@@ -152,30 +151,13 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		opts.SubscriberBuffer = 30
 	}
 
-	pm := make(map[string]Profile, len(opts.Profiles))
-	for _, p := range opts.Profiles {
-		if err := p.Validate(); err != nil {
-			return nil, err
-		}
-		if _, dup := pm[p.Name]; dup {
-			return nil, fmt.Errorf("mjpeg: duplicate profile name %q", p.Name)
-		}
-		pm[p.Name] = p
-	}
-
-	src := opts.SourceHub
-	if src == nil {
-		src = &streamHubAdapter{h: opts.StreamHub}
-	}
-
 	encFactory := opts.EncoderFactory
 	if encFactory == nil {
 		encFactory = defaultEncoderFactory(opts)
 	}
 
 	return &Hub{
-		src:        src,
-		profiles:   pm,
+		entryFor:   opts.EntryFor,
 		logger:     opts.Logger,
 		subBufSize: opts.SubscriberBuffer,
 		encFactory: encFactory,
@@ -184,49 +166,27 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}, nil
 }
 
-// ProfileNames returns the set of registered profile names, sorted
-// alphabetically. Handy for /healthz-style introspection.
-func (h *Hub) ProfileNames() []string {
-	names := make([]string, 0, len(h.profiles))
-	for n := range h.profiles {
-		names = append(names, n)
-	}
-	// Simple bubble: tiny N, not worth the sort import dance.
-	for i := 0; i < len(names); i++ {
-		for j := i + 1; j < len(names); j++ {
-			if names[j] < names[i] {
-				names[i], names[j] = names[j], names[i]
-			}
-		}
-	}
-	return names
-}
-
-// Subscribe attaches a new MJPEG viewer to the named profile. Returns
-// [ErrUnknownProfile] for an unregistered name, or any error bubbling
-// up from the encoder / upstream subscription on first-viewer startup.
-func (h *Hub) Subscribe(profileName string) (*Subscriber, error) {
-	prof, ok := h.profiles[profileName]
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownProfile, profileName)
-	}
-
+// Subscribe attaches a new MJPEG viewer to the named profile. The
+// underlying EntryFor decides whether the name is known and resolves
+// it to an Entry — propagate its error verbatim (typically
+// [profile.ErrUnknownProfile] for unknown names, which the HTTP layer
+// maps to 404).
+func (h *Hub) Subscribe(name string) (*Subscriber, error) {
 	h.mu.Lock()
 	if isClosed(h.closed) {
 		h.mu.Unlock()
 		return nil, errors.New("mjpeg: hub closed")
 	}
 
-	sess := h.sessions[profileName]
+	sess := h.sessions[name]
 	if sess == nil {
-		// First viewer for this profile — build everything.
-		newSess, err := h.startSessionLocked(prof)
+		newSess, err := h.startSessionLocked(name)
 		if err != nil {
 			h.mu.Unlock()
 			return nil, err
 		}
 		sess = newSess
-		h.sessions[profileName] = sess
+		h.sessions[name] = sess
 	}
 	h.mu.Unlock()
 
@@ -262,16 +222,27 @@ func (h *Hub) Close() error {
 	return nil
 }
 
-// startSessionLocked must be called with h.mu held. It subscribes to
-// the upstream H.264 hub, spawns an encoder, and starts the session
-// goroutines.
-func (h *Hub) startSessionLocked(prof Profile) (*session, error) {
-	upstream, err := h.src.Subscribe()
+// startSessionLocked must be called with h.mu held. It resolves the
+// profile name to its Entry, subscribes to the upstream source, spawns
+// an encoder, and starts the session goroutines.
+func (h *Hub) startSessionLocked(name string) (*session, error) {
+	entry, err := h.entryFor(name)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Source == nil {
+		return nil, fmt.Errorf("mjpeg: profile %q has no Source", name)
+	}
+	if err := entry.Spec.Validate(); err != nil {
+		return nil, fmt.Errorf("mjpeg: profile %q: %w", name, err)
+	}
+
+	upstream, err := entry.Source.Subscribe()
 	if err != nil {
 		return nil, fmt.Errorf("mjpeg: upstream subscribe: %w", err)
 	}
 
-	enc, err := h.encFactory(prof)
+	enc, err := h.encFactory(name, entry.Spec)
 	if err != nil {
 		upstream.Close()
 		return nil, err
@@ -283,7 +254,7 @@ func (h *Hub) startSessionLocked(prof Profile) (*session, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sess := &session{
-		profile:    prof,
+		name:       name,
 		hub:        h,
 		encoder:    enc,
 		upstream:   upstream,
@@ -297,7 +268,7 @@ func (h *Hub) startSessionLocked(prof Profile) (*session, error) {
 	go sess.runForwarder()
 	go sess.run()
 
-	h.logger.Printf("mjpeg: session %q started", prof.Name)
+	h.logger.Printf("mjpeg: session %q started", name)
 	return sess, nil
 }
 
@@ -315,11 +286,11 @@ func (h *Hub) removeSession(name string, want *session) {
 // subscriber list and routes JPEG frames; one forwarder goroutine pumps
 // H.264 AUs from upstream into the encoder's input channel.
 type session struct {
-	profile Profile
-	hub     *Hub
+	name string
+	hub  *Hub
 
 	encoder  encoderIface
-	upstream sourceSubscriber
+	upstream SourceSubscriber
 
 	addCh   chan addSubReq
 	unsubCh chan uint64
@@ -346,7 +317,7 @@ type addSubResp struct {
 func (s *session) runForwarder() {
 	dc := &droplog.Counter{
 		Logger: s.hub.logger,
-		Label:  fmt.Sprintf("mjpeg: session %q encoder input", s.profile.Name),
+		Label:  fmt.Sprintf("mjpeg: session %q encoder input", s.name),
 	}
 	for {
 		select {
@@ -390,13 +361,13 @@ func (s *session) run() {
 				frames: make(chan []byte, s.subBufSize),
 				drops: &droplog.Counter{
 					Logger: s.hub.logger,
-					Label:  fmt.Sprintf("mjpeg: session %q viewer %d", s.profile.Name, nextID),
+					Label:  fmt.Sprintf("mjpeg: session %q viewer %d", s.name, nextID),
 				},
 				session: s,
 			}
 			subscribers[nextID] = sub
 			s.hub.logger.Printf("mjpeg: session %q viewer %d joined (total=%d)",
-				s.profile.Name, sub.id, len(subscribers))
+				s.name, sub.id, len(subscribers))
 			req.resp <- addSubResp{sub: sub}
 
 		case id := <-s.unsubCh:
@@ -407,15 +378,15 @@ func (s *session) run() {
 			delete(subscribers, id)
 			close(sub.frames)
 			s.hub.logger.Printf("mjpeg: session %q viewer %d left (total=%d)",
-				s.profile.Name, id, len(subscribers))
+				s.name, id, len(subscribers))
 			if len(subscribers) == 0 {
-				s.hub.logger.Printf("mjpeg: session %q last viewer left", s.profile.Name)
+				s.hub.logger.Printf("mjpeg: session %q last viewer left", s.name)
 				return
 			}
 
 		case frame, ok := <-s.encoder.JPEGs():
 			if !ok {
-				s.hub.logger.Printf("mjpeg: session %q encoder ended", s.profile.Name)
+				s.hub.logger.Printf("mjpeg: session %q encoder ended", s.name)
 				for _, sub := range subscribers {
 					close(sub.frames)
 				}
@@ -438,8 +409,8 @@ func (s *session) teardown() {
 	s.cancel()
 	_ = s.encoder.Close()
 	s.upstream.Close()
-	s.hub.removeSession(s.profile.Name, s)
-	s.hub.logger.Printf("mjpeg: session %q stopped", s.profile.Name)
+	s.hub.removeSession(s.name, s)
+	s.hub.logger.Printf("mjpeg: session %q stopped", s.name)
 }
 
 // Subscriber represents one connected MJPEG HTTP viewer. Obtain via
@@ -470,27 +441,6 @@ func (s *Subscriber) Close() {
 		}
 	})
 }
-
-// --- upstream-Hub adapter ---------------------------------------------------
-
-// streamHubAdapter exposes [hub.Hub]'s narrow Subscribe contract as the
-// generic [SourceHub] interface mjpeg.Hub depends on. The two-level
-// indirection makes the mjpeg.Hub testable without spinning up a real
-// stream.Hub.
-type streamHubAdapter struct{ h *hub.Hub }
-
-func (a *streamHubAdapter) Subscribe() (sourceSubscriber, error) {
-	sub, err := a.h.Subscribe()
-	if err != nil {
-		return nil, err
-	}
-	return &streamSubAdapter{s: sub}, nil
-}
-
-type streamSubAdapter struct{ s *hub.Subscriber }
-
-func (a *streamSubAdapter) Frames() <-chan source.AccessUnit { return a.s.Frames() }
-func (a *streamSubAdapter) Close()                           { a.s.Close() }
 
 // isClosed returns true if ch has been closed. Cheap-and-correct because
 // we use the channel only as a one-shot signal (see [Hub.closed]).

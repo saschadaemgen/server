@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
 )
 
@@ -23,7 +24,7 @@ type fakeSource struct {
 
 func newFakeSource() *fakeSource { return &fakeSource{} }
 
-func (f *fakeSource) Subscribe() (sourceSubscriber, error) {
+func (f *fakeSource) Subscribe() (SourceSubscriber, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -74,18 +75,20 @@ func (s *fakeSrcSub) Close() {
 // --- fake encoder -------------------------------------------------------------
 
 type fakeEncoder struct {
-	profile Profile
+	label   string
+	spec    EncodeSpec
 	in      chan source.AccessUnit
 	out     chan []byte
 	started atomic.Bool
 	closed  atomic.Bool
 }
 
-func newFakeEncoder(p Profile) *fakeEncoder {
+func newFakeEncoder(label string, spec EncodeSpec) *fakeEncoder {
 	return &fakeEncoder{
-		profile: p,
-		in:      make(chan source.AccessUnit, 8),
-		out:     make(chan []byte, 4),
+		label: label,
+		spec:  spec,
+		in:    make(chan source.AccessUnit, 8),
+		out:   make(chan []byte, 4),
 	}
 }
 
@@ -112,22 +115,36 @@ func (e *fakeEncoder) emit(frame []byte) {
 
 func quietHubLogger() *log.Logger { return log.New(io.Discard, "", 0) }
 
-func newTestHub(t *testing.T, src *fakeSource, encs map[string]*fakeEncoder) (*Hub, map[string]*fakeEncoder) {
+// testProfiles wires up entry-resolution for the standard pair of
+// browser/esp profiles, all backed by the given source. Encoders are
+// stored in `encs` keyed by profile name for inspection.
+func testHub(t *testing.T, src *fakeSource, encs map[string]*fakeEncoder) (*Hub, func(name string) (Entry, error)) {
 	t.Helper()
 	if encs == nil {
-		encs = make(map[string]*fakeEncoder)
+		t.Fatal("encs map required")
 	}
 
-	profiles := DefaultProfiles()
-	factory := func(p Profile) (encoderIface, error) {
-		fe := newFakeEncoder(p)
-		encs[p.Name] = fe
+	specs := map[string]EncodeSpec{
+		"intercom_browser": {Width: 640, Height: 1024, FPS: 12, Quality: 5},
+		"intercom_esp":     {Width: 800, Height: 1280, FPS: 9, Quality: 6},
+	}
+
+	entryFor := func(name string) (Entry, error) {
+		spec, ok := specs[name]
+		if !ok {
+			return Entry{}, profile.ErrUnknownProfile
+		}
+		return Entry{Spec: spec, Source: src}, nil
+	}
+
+	factory := func(label string, spec EncodeSpec) (encoderIface, error) {
+		fe := newFakeEncoder(label, spec)
+		encs[label] = fe
 		return fe, nil
 	}
 
 	h, err := NewHub(HubOptions{
-		SourceHub:        src,
-		Profiles:         profiles,
+		EntryFor:         entryFor,
 		Logger:           quietHubLogger(),
 		EncoderFactory:   factory,
 		SubscriberBuffer: 8,
@@ -135,25 +152,27 @@ func newTestHub(t *testing.T, src *fakeSource, encs map[string]*fakeEncoder) (*H
 	if err != nil {
 		t.Fatalf("NewHub: %v", err)
 	}
-	return h, encs
+	return h, entryFor
 }
 
 // --- tests --------------------------------------------------------------------
 
 func TestHub_SubscribeUnknownProfile(t *testing.T) {
 	src := newFakeSource()
-	h, _ := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	_, err := h.Subscribe("does-not-exist")
-	if !errors.Is(err, ErrUnknownProfile) {
-		t.Errorf("err=%v, want ErrUnknownProfile", err)
+	if !errors.Is(err, profile.ErrUnknownProfile) {
+		t.Errorf("err=%v, want profile.ErrUnknownProfile chain", err)
 	}
 }
 
 func TestHub_FirstSubscribeStartsEncoderAndUpstream(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	sub, err := h.Subscribe("intercom_esp")
@@ -169,6 +188,9 @@ func TestHub_FirstSubscribeStartsEncoderAndUpstream(t *testing.T) {
 	if !enc.started.Load() {
 		t.Error("encoder Start not called")
 	}
+	if enc.spec.FPS != 9 {
+		t.Errorf("encoder got fps=%d, want 9 (esp default)", enc.spec.FPS)
+	}
 	if src.subCount.Load() != 1 {
 		t.Errorf("upstream subscriptions = %d, want 1", src.subCount.Load())
 	}
@@ -176,7 +198,8 @@ func TestHub_FirstSubscribeStartsEncoderAndUpstream(t *testing.T) {
 
 func TestHub_TwoSubscribersOneEncoder(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	subA, _ := h.Subscribe("intercom_esp")
@@ -194,7 +217,8 @@ func TestHub_TwoSubscribersOneEncoder(t *testing.T) {
 
 func TestHub_DifferentProfilesIndependent(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	a, _ := h.Subscribe("intercom_esp")
@@ -205,6 +229,9 @@ func TestHub_DifferentProfilesIndependent(t *testing.T) {
 	if got := len(encs); got != 2 {
 		t.Errorf("encoders built = %d, want 2 (one per profile)", got)
 	}
+	// Both profiles point to the same source in this test → 2 subscribes
+	// to that source. In real life if EntryFor returned different
+	// sources per profile, sub counts would split accordingly.
 	if src.subCount.Load() != 2 {
 		t.Errorf("upstream subscriptions = %d, want 2 (one per profile)", src.subCount.Load())
 	}
@@ -212,7 +239,8 @@ func TestHub_DifferentProfilesIndependent(t *testing.T) {
 
 func TestHub_JPEGDistributedToAllSubscribers(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	a, _ := h.Subscribe("intercom_esp")
@@ -240,7 +268,8 @@ func TestHub_JPEGDistributedToAllSubscribers(t *testing.T) {
 
 func TestHub_LastSubscribeClosesEncoderAndUpstream(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	sub, _ := h.Subscribe("intercom_esp")
@@ -261,14 +290,26 @@ func TestHub_LastSubscribeClosesEncoderAndUpstream(t *testing.T) {
 
 func TestHub_ResubscribeAfterDownToZeroRebuildsEncoder(t *testing.T) {
 	src := newFakeSource()
+	encs := make(map[string]*fakeEncoder)
 	var builds atomic.Int64
-	factory := func(p Profile) (encoderIface, error) {
+	specs := map[string]EncodeSpec{
+		"intercom_esp": {Width: 800, Height: 1280, FPS: 9, Quality: 6},
+	}
+	entryFor := func(name string) (Entry, error) {
+		spec, ok := specs[name]
+		if !ok {
+			return Entry{}, profile.ErrUnknownProfile
+		}
+		return Entry{Spec: spec, Source: src}, nil
+	}
+	factory := func(label string, spec EncodeSpec) (encoderIface, error) {
 		builds.Add(1)
-		return newFakeEncoder(p), nil
+		fe := newFakeEncoder(label, spec)
+		encs[label] = fe
+		return fe, nil
 	}
 	h, err := NewHub(HubOptions{
-		SourceHub:      src,
-		Profiles:       DefaultProfiles(),
+		EntryFor:       entryFor,
 		Logger:         quietHubLogger(),
 		EncoderFactory: factory,
 	})
@@ -291,7 +332,8 @@ func TestHub_ResubscribeAfterDownToZeroRebuildsEncoder(t *testing.T) {
 
 func TestHub_EncoderEndClosesAllSubscriberChannels(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	a, _ := h.Subscribe("intercom_esp")
@@ -316,7 +358,8 @@ func TestHub_EncoderEndClosesAllSubscriberChannels(t *testing.T) {
 
 func TestHub_UpstreamEndTearsDownSession(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	sub, _ := h.Subscribe("intercom_esp")
@@ -342,7 +385,8 @@ func TestHub_UpstreamEndTearsDownSession(t *testing.T) {
 
 func TestHub_CloseShutsDownAllSessions(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 
 	subA, _ := h.Subscribe("intercom_esp")
 	subB, _ := h.Subscribe("intercom_browser")
@@ -360,27 +404,30 @@ func TestHub_CloseShutsDownAllSessions(t *testing.T) {
 	}
 }
 
-func TestHub_ProfileNamesSorted(t *testing.T) {
-	src := newFakeSource()
-	h, _ := newTestHub(t, src, nil)
+func TestHub_EntryForErrorBubblesUp(t *testing.T) {
+	wantErr := errors.New("synthetic entryFor failure")
+	entryFor := func(name string) (Entry, error) {
+		return Entry{}, wantErr
+	}
+	h, err := NewHub(HubOptions{
+		EntryFor: entryFor,
+		Logger:   quietHubLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewHub: %v", err)
+	}
 	defer h.Close()
 
-	got := h.ProfileNames()
-	want := []string{"intercom_browser", "intercom_esp"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("got %v, want %v", got, want)
-			break
-		}
+	_, err = h.Subscribe("anything")
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want chain containing wantErr", err)
 	}
 }
 
 func TestHub_AUForwardedToEncoderInput(t *testing.T) {
 	src := newFakeSource()
-	h, encs := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	sub, _ := h.Subscribe("intercom_esp")
@@ -402,7 +449,8 @@ func TestHub_AUForwardedToEncoderInput(t *testing.T) {
 
 func TestHub_Subscriber_CloseIdempotent(t *testing.T) {
 	src := newFakeSource()
-	h, _ := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	sub, _ := h.Subscribe("intercom_esp")
@@ -413,7 +461,8 @@ func TestHub_Subscriber_CloseIdempotent(t *testing.T) {
 
 func TestHub_SubscriberHasUniqueIDs(t *testing.T) {
 	src := newFakeSource()
-	h, _ := newTestHub(t, src, nil)
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
 	defer h.Close()
 
 	const n = 5
@@ -437,5 +486,15 @@ func TestHub_SubscriberHasUniqueIDs(t *testing.T) {
 			t.Errorf("duplicate ID %d", s.ID())
 		}
 		seen[s.ID()] = true
+	}
+}
+
+func TestHub_NilEntryForRejected(t *testing.T) {
+	_, err := NewHub(HubOptions{
+		EntryFor: nil,
+		Logger:   quietHubLogger(),
+	})
+	if err == nil {
+		t.Fatal("expected error for nil EntryFor")
 	}
 }

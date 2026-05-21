@@ -18,6 +18,9 @@ import (
 	"carvilon.local/stream/internal/droplog"
 	"carvilon.local/stream/internal/hub"
 	"carvilon.local/stream/internal/mjpeg"
+	"carvilon.local/stream/internal/profile"
+	"carvilon.local/stream/internal/source"
+	"carvilon.local/stream/internal/sourcereg"
 )
 
 //go:embed web
@@ -26,21 +29,23 @@ var webFS embed.FS
 // h264ClockRate is the RTP clock rate for H.264 (90 kHz, RFC 6184).
 const h264ClockRate = 90000
 
-// Server is the CARVILON streaming kernel. It hosts a small WebRTC
-// signaling endpoint plus an embedded test page, and fans out a single
-// upstream source pull to N concurrent browser viewers.
+// Server is the CARVILON streaming kernel: HTTP signaling, multi-camera
+// fan-out, MJPEG transcoding.
 //
-// Each /offer request becomes its own [hub.Subscriber] with its own
-// [webrtc.TrackLocalStaticSample] and its own feeder goroutine. A slow
-// viewer can only ever delay itself — the source pull and the other
-// viewers are isolated through the hub's non-blocking distribution.
+// All viewer endpoints are profile-driven (?src=<name>):
 //
-// Source lifecycle is managed by the hub: the first connecting viewer
-// triggers a fresh source build via [hub.SourceFactory] and Start; when
-// the last viewer leaves, the source is Closed. The next connection
-// rebuilds. This keeps the camera idle when no one is watching.
+//   - POST /offer?src=<browser-profile>      → WebRTC viewer for that
+//     profile's camera (Usage=browser).
+//   - GET /api/stream.mjpeg?src=<esp-profile> → MJPEG stream for that
+//     profile's camera (Usage=esp).
+//
+// Source lifecycle is bedarfsgesteuert (S4-01): a camera is pulled
+// ONLY when at least one viewer of any usage is currently watching it.
+// 0 viewers across all profiles for a (camera, quality) ⇒ no pull, no
+// decode, no ffmpeg.
 type Server struct {
-	hub      *hub.Hub
+	profiles *profile.Registry
+	sources  *sourcereg.Registry
 	mjpegHub *mjpeg.Hub
 	addr     string
 	logger   *log.Logger
@@ -51,12 +56,15 @@ type Server struct {
 
 // ServerOptions configures a [Server].
 type ServerOptions struct {
-	// SourceFactory builds a fresh, un-Started [source.VideoSource] on
-	// demand. The hub invokes it at first Subscribe and again after the
-	// subscriber count drops back to zero. The factory is invoked
-	// without arguments — capture whatever configuration the source
-	// needs in a closure (see cmd/spike/main.go for the pattern).
-	SourceFactory hub.SourceFactory
+	// Profiles is the registry of all named profiles, of any usage.
+	// Required. The server filters by usage at the relevant endpoint.
+	Profiles *profile.Registry
+
+	// SourceFactory builds a fresh, un-Started [source.VideoSource] for
+	// a given (CameraID, Quality) on demand. Invoked lazily by the
+	// source registry: nothing happens until a viewer arrives for that
+	// key.
+	SourceFactory sourcereg.Factory
 
 	// Addr is the HTTP listen address, e.g. ":8555". Avoid 9080
 	// (carvilon-server) and 1984 (go2rtc).
@@ -65,24 +73,26 @@ type ServerOptions struct {
 	// Logger receives diagnostic output. If nil, the default logger.
 	Logger *log.Logger
 
-	// SubscriberBuffer is forwarded to [hub.Options.SubscriberBuffer].
+	// SubscriberBuffer is forwarded to the per-camera hub.Options.
 	// Zero means hub default (30).
 	SubscriberBuffer int
 
-	// MJPEGProfiles registers MJPEG output profiles. If empty, the
-	// /api/stream.mjpeg endpoint returns 503 for every request — the
-	// server still serves WebRTC viewers fine, only MJPEG is disabled.
-	MJPEGProfiles []mjpeg.Profile
-
 	// FFmpegPath is the path to the ffmpeg binary used by the MJPEG
-	// encoder. Defaults to "ffmpeg" (resolved via $PATH). Ignored if
-	// MJPEGProfiles is empty.
+	// encoders. Defaults to "ffmpeg" (resolved via $PATH).
 	FFmpegPath string
+
+	// EnableMJPEG controls whether the /api/stream.mjpeg endpoint is
+	// active. Defaults to true. Set to false for WebRTC-only dev runs
+	// on machines without ffmpeg.
+	EnableMJPEG bool
 }
 
-// NewServer builds a Server. The underlying hub is started here and
-// torn down by [Server.Run]'s shutdown path.
+// NewServer builds a Server. Hubs and the source registry start here
+// and are torn down by [Server.Run]'s shutdown path.
 func NewServer(opts ServerOptions) (*Server, error) {
+	if opts.Profiles == nil {
+		return nil, errors.New("stream: Profiles registry is required")
+	}
 	if opts.SourceFactory == nil {
 		return nil, errors.New("stream: SourceFactory is required")
 	}
@@ -99,43 +109,41 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
-	h := hub.New(opts.SourceFactory, hub.Options{
-		Logger:           opts.Logger,
-		SubscriberBuffer: opts.SubscriberBuffer,
-	})
-
-	var mh *mjpeg.Hub
-	if len(opts.MJPEGProfiles) > 0 {
-		var err error
-		mh, err = mjpeg.NewHub(mjpeg.HubOptions{
-			StreamHub:  h,
-			Profiles:   opts.MJPEGProfiles,
-			FFmpegPath: opts.FFmpegPath,
-			Logger:     opts.Logger,
-		})
-		if err != nil {
-			_ = h.Close()
-			return nil, fmt.Errorf("stream: mjpeg hub: %w", err)
-		}
-	}
+	srcReg := sourcereg.New(opts.SourceFactory, opts.Logger)
 
 	s := &Server{
-		hub:      h,
-		mjpegHub: mh,
+		profiles: opts.Profiles,
+		sources:  srcReg,
 		addr:     opts.Addr,
 		logger:   opts.Logger,
 		api:      api,
 	}
 
+	if opts.EnableMJPEG {
+		mh, err := mjpeg.NewHub(mjpeg.HubOptions{
+			EntryFor:         s.mjpegEntryFor,
+			FFmpegPath:       opts.FFmpegPath,
+			Logger:           opts.Logger,
+			SubscriberBuffer: opts.SubscriberBuffer,
+		})
+		if err != nil {
+			_ = srcReg.Close()
+			return nil, fmt.Errorf("stream: mjpeg hub: %w", err)
+		}
+		s.mjpegHub = mh
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/offer", s.handleOffer)
 	mux.HandleFunc("/api/stream.mjpeg", s.handleMJPEG)
+	mux.HandleFunc("/api/profiles", s.handleProfiles)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
+		_ = srcReg.Close()
 		return nil, fmt.Errorf("stream: web embed: %w", err)
 	}
 	mux.Handle("/", http.FileServer(http.FS(sub)))
@@ -148,14 +156,40 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return s, nil
 }
 
+// mjpegEntryFor implements the resolver the [mjpeg.Hub] needs: turn a
+// profile name into an Entry (encode spec + source hub).
+//
+//   - Unknown name → propagate [profile.ErrUnknownProfile] for 404.
+//   - Wrong usage (not "esp") → explicit error so the caller learns
+//     they hit the wrong endpoint.
+//   - Otherwise: resolve the camera-side hub via the source registry
+//     and the encode spec via the usage-default. The source hub for a
+//     given (CameraID, Quality) is shared by ALL MJPEG profiles AND
+//     by /offer subscribers — a single upstream pull serves everyone.
+func (s *Server) mjpegEntryFor(name string) (mjpeg.Entry, error) {
+	p, err := s.profiles.Get(name)
+	if err != nil {
+		return mjpeg.Entry{}, err
+	}
+	if p.Usage != profile.UsageESP {
+		return mjpeg.Entry{}, fmt.Errorf("profile %q has usage=%q, not %q (use /offer for browser usage)",
+			p.Name, p.Usage, profile.UsageESP)
+	}
+	spec, err := mjpeg.DefaultSpecForUsage(p.Usage)
+	if err != nil {
+		return mjpeg.Entry{}, err
+	}
+	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	return mjpeg.Entry{Spec: spec, Source: &hubAdapter{h: srcHub}}, nil
+}
+
 // Run starts the HTTP signaling server and blocks until ctx is cancelled
 // or the server errors out. On clean shutdown (ctx cancelled) it tears
-// the hub down (closing source and all subscribers) and returns
-// ctx.Err().
+// the hub + source registry down and returns ctx.Err().
 func (s *Server) Run(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		_ = s.hub.Close()
+		s.shutdownAll()
 		return fmt.Errorf("stream: listen %s: %w", s.addr, err)
 	}
 	s.logger.Printf("stream: signaling + test page on http://%s", ln.Addr())
@@ -168,16 +202,10 @@ func (s *Server) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.srv.Shutdown(shutdownCtx)
-		if s.mjpegHub != nil {
-			_ = s.mjpegHub.Close()
-		}
-		_ = s.hub.Close()
+		s.shutdownAll()
 		return ctx.Err()
 	case err := <-serveDone:
-		if s.mjpegHub != nil {
-			_ = s.mjpegHub.Close()
-		}
-		_ = s.hub.Close()
+		s.shutdownAll()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -185,20 +213,49 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// handleOffer implements POST /offer:
-//   - Subscribes a new viewer at the hub (may start the source on the
-//     very first viewer; that step blocks for the RTSP/Protect-API
-//     bring-up, typically 1–3 s).
+// shutdownAll closes the MJPEG hub (if present) before the source
+// registry, so per-camera hubs receive last-unsubscribe signals before
+// being torn down.
+func (s *Server) shutdownAll() {
+	if s.mjpegHub != nil {
+		_ = s.mjpegHub.Close()
+	}
+	_ = s.sources.Close()
+}
+
+// handleOffer implements POST /offer?src=<browser-profile>:
+//   - Looks the profile up and checks Usage=browser.
+//   - Resolves the camera-side hub via [sourcereg.Registry.HubFor].
+//   - Subscribes a new viewer; the camera-pull starts here only if
+//     this is the first subscriber for that (CameraID, Quality).
 //   - Builds a per-viewer [webrtc.TrackLocalStaticSample] H.264 track.
-//   - Spawns a feeder goroutine that drains the subscriber's frames
-//     into the track.
 //   - Performs the standard WebRTC offer/answer exchange.
 //
 // On peer-connection close/fail/disconnect the subscriber is removed
-// and, if it was the last one, the hub will close the source.
+// and, if it was the last one on the camera, the pull stops.
 func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	profName := r.URL.Query().Get("src")
+	if profName == "" {
+		http.Error(w, "missing src parameter", http.StatusBadRequest)
+		return
+	}
+	p, err := s.profiles.Get(profName)
+	if err != nil {
+		if errors.Is(err, profile.ErrUnknownProfile) {
+			http.Error(w, "unknown profile", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if p.Usage != profile.UsageBrowser {
+		http.Error(w, fmt.Sprintf("profile %q is usage=%q, not %q (use /api/stream.mjpeg)",
+			p.Name, p.Usage, profile.UsageBrowser), http.StatusBadRequest)
 		return
 	}
 
@@ -212,7 +269,8 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, err := s.hub.Subscribe()
+	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	sub, err := srcHub.Subscribe()
 	if err != nil {
 		http.Error(w, "subscribe: "+err.Error(), http.StatusServiceUnavailable)
 		return
@@ -220,8 +278,8 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: h264ClockRate},
-		fmt.Sprintf("video-%d", sub.ID()),
-		fmt.Sprintf("carvilon-viewer-%d", sub.ID()),
+		fmt.Sprintf("video-%s-%d", p.Name, sub.ID()),
+		fmt.Sprintf("carvilon-%s-%d", p.Name, sub.ID()),
 	)
 	if err != nil {
 		sub.Close()
@@ -236,11 +294,8 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wire down-edge cleanup: any non-success terminal state on the
-	// PC closes our subscriber. The hub then cleans up the channel
-	// and (if this was the last viewer) stops the source.
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
-		s.logger.Printf("stream: viewer %d state=%s", sub.ID(), st)
+		s.logger.Printf("stream: viewer %s/%d state=%s", p.Name, sub.ID(), st)
 		switch st {
 		case webrtc.PeerConnectionStateFailed,
 			webrtc.PeerConnectionStateClosed,
@@ -257,13 +312,9 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Feeder goroutine: drains the subscriber's frames into the track.
-	// Exits when the subscriber channel closes (subscriber Close, hub
-	// shutdown, source end). On exit we close the PC defensively so a
-	// source-side failure tears the viewer connection down too.
 	feedDrops := &droplog.Counter{
 		Logger: s.logger,
-		Label:  fmt.Sprintf("stream: viewer %d writesample", sub.ID()),
+		Label:  fmt.Sprintf("stream: viewer %s/%d writesample", p.Name, sub.ID()),
 	}
 	go func() {
 		defer func() { _ = pc.Close() }()
@@ -322,17 +373,16 @@ func (s *Server) feedTrack(sub *hub.Subscriber, track *webrtc.TrackLocalStaticSa
 	}
 }
 
-// handleMJPEG implements GET /api/stream.mjpeg?src=<profile>.
+// handleMJPEG implements GET /api/stream.mjpeg?src=<esp-profile>.
 //
 // The endpoint is intentionally drop-in compatible with go2rtc — the
 // carvilon-proxy forwards bytes verbatim, so the wire format must match
 // to the byte. See [mjpeg.HeaderContentType] / [mjpeg.FramePrefix] for
 // the locked-in layout.
 //
-// The handler keeps a single [mjpeg.Subscriber] for the duration of the
-// HTTP response; closing the response (client disconnect or server
-// shutdown) closes the subscriber, which triggers the per-profile
-// session's last-viewer teardown if appropriate.
+// The profile's CameraID determines which camera is pulled; multiple
+// MJPEG profiles on the SAME camera share one upstream RTSP pull via
+// the source registry.
 func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -343,15 +393,15 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile := r.URL.Query().Get("src")
-	if profile == "" {
+	profName := r.URL.Query().Get("src")
+	if profName == "" {
 		http.Error(w, "missing src parameter", http.StatusBadRequest)
 		return
 	}
 
-	sub, err := s.mjpegHub.Subscribe(profile)
+	sub, err := s.mjpegHub.Subscribe(profName)
 	if err != nil {
-		if errors.Is(err, mjpeg.ErrUnknownProfile) {
+		if errors.Is(err, profile.ErrUnknownProfile) {
 			http.Error(w, "unknown profile", http.StatusNotFound)
 			return
 		}
@@ -395,7 +445,52 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleProfiles returns the registered profile names + their public
+// fields as JSON. Useful for the admin UI and for the spike's web/
+// test page to discover available streams without hardcoding.
+func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	all := s.profiles.All()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	// Hand-roll JSON to avoid pulling encoding/json into the mainline
+	// hot path. Five fields, all string. The output is stable, ordered
+	// by profile name.
+	_, _ = io.WriteString(w, "[")
+	for i, p := range all {
+		if i > 0 {
+			_, _ = io.WriteString(w, ",")
+		}
+		fmt.Fprintf(w, `{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q}`,
+			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description)
+	}
+	_, _ = io.WriteString(w, "]")
+}
+
 // --- helpers ---------------------------------------------------------------
+
+// hubAdapter wraps *hub.Hub to satisfy [mjpeg.SourceHub]. The two-level
+// indirection lets mjpeg.Hub be tested without spinning up a real H.264
+// hub.
+type hubAdapter struct{ h *hub.Hub }
+
+func (a *hubAdapter) Subscribe() (mjpeg.SourceSubscriber, error) {
+	sub, err := a.h.Subscribe()
+	if err != nil {
+		return nil, err
+	}
+	return &subAdapter{s: sub}, nil
+}
+
+type subAdapter struct{ s *hub.Subscriber }
+
+func (a *subAdapter) Frames() <-chan source.AccessUnit { return a.s.Frames() }
+func (a *subAdapter) Close()                           { a.s.Close() }
 
 // annexBMarshal serialises a slice of raw NALs (no start codes) into the
 // Annex-B byte stream pion's H.264 payloader expects: each NAL prefixed
@@ -419,14 +514,6 @@ func annexBMarshal(au [][]byte) []byte {
 // this is exact, for variable rate it is off by at most one frame. The
 // first frame and any suspicious gap (zero / negative / > 200 ms) falls
 // back to 33 ms (~30 fps).
-//
-// When a new viewer joins, the hub pre-feeds the cached IDR before any
-// fresh AUs. That cached IDR has the old camera-side PTS, so the first
-// subsequent fresh AU produces a "huge gap" that this safety cap quietly
-// clamps to 33 ms. Net effect: the per-viewer RTP stream stays monotonic
-// with reasonable frame spacing from the very first sample. The fact that
-// the absolute pion timestamps differ from the camera's PTS is fine —
-// only relative spacing matters to the browser decoder.
 func frameDuration(pts, prev int64, prevSet bool) time.Duration {
 	var dur time.Duration
 	if prevSet {
@@ -439,4 +526,3 @@ func frameDuration(pts, prev int64, prevSet bool) time.Duration {
 	}
 	return dur
 }
-

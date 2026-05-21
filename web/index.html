@@ -15,10 +15,11 @@
     }
     h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 1rem; }
     .row { display: flex; gap: .75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
-    button {
+    button, select {
       background: #2563eb; color: white; border: 0; border-radius: 6px;
       padding: .55rem 1rem; font-size: .95rem; cursor: pointer;
     }
+    select { background: #1a1d24; border: 1px solid #374151; }
     button:disabled { background: #555; cursor: not-allowed; }
     button.secondary { background: #374151; }
     #status { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; opacity: .85; }
@@ -34,8 +35,10 @@
   </style>
 </head>
 <body>
-  <h1>CARVILON Stream-Server S1 — single-viewer spike</h1>
+  <h1>CARVILON Stream-Server — multi-camera spike</h1>
   <div class="row">
+    <label for="profile" style="font-size:.85rem;opacity:.85">Profile</label>
+    <select id="profile"></select>
     <button id="connect">Connect</button>
     <button id="disconnect" class="secondary" disabled>Disconnect</button>
     <span id="status">idle</span>
@@ -44,6 +47,7 @@
   <pre id="log"></pre>
 
   <script>
+    const $profile    = document.getElementById('profile');
     const $connect    = document.getElementById('connect');
     const $disconnect = document.getElementById('disconnect');
     const $status     = document.getElementById('status');
@@ -59,12 +63,41 @@
     };
     const setStatus = (s) => { $status.textContent = s; };
 
+    async function loadProfiles() {
+      try {
+        const res = await fetch('/api/profiles');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const all = await res.json();
+        const browsers = all.filter(p => p.usage === 'browser');
+        if (browsers.length === 0) {
+          log('no browser profiles registered — /offer will not work');
+          $connect.disabled = true;
+          return;
+        }
+        $profile.innerHTML = '';
+        for (const p of browsers) {
+          const opt = document.createElement('option');
+          opt.value = p.name;
+          opt.textContent = p.description ? `${p.name} — ${p.description}` : p.name;
+          $profile.appendChild(opt);
+        }
+        log(`loaded ${browsers.length} browser profile(s)`);
+      } catch (err) {
+        log('profile load failed:', err.message);
+        $connect.disabled = true;
+      }
+    }
+
     async function connect() {
+      const profileName = $profile.value;
+      if (!profileName) {
+        log('no profile selected');
+        return;
+      }
       $connect.disabled = true;
-      setStatus('creating peer connection…');
+      setStatus(`creating peer for ${profileName}…`);
 
       pc = new RTCPeerConnection();
-
       pc.addTransceiver('video', { direction: 'recvonly' });
 
       pc.ontrack = (ev) => {
@@ -87,9 +120,9 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await iceGatheringComplete(pc);
-        log('offer ready, posting /offer');
+        log(`offer ready, posting /offer?src=${profileName}`);
 
-        const res = await fetch('/offer', {
+        const res = await fetch(`/offer?src=${encodeURIComponent(profileName)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/sdp' },
           body: pc.localDescription.sdp,
@@ -135,6 +168,7 @@
 
     $connect.addEventListener('click', connect);
     $disconnect.addEventListener('click', disconnect);
+    loadProfiles();
   </script>
 </body>
 </html>

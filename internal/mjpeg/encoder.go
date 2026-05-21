@@ -18,8 +18,8 @@ import (
 //
 //  1. accepts a raw H.264 Annex-B stream on stdin (from our hub),
 //  2. decodes it,
-//  3. scales to the profile's target resolution,
-//  4. re-encodes each frame as JPEG at the profile's quality,
+//  3. scales to the spec's target resolution,
+//  4. re-encodes each frame as JPEG at the spec's quality,
 //  5. emits the JPEGs on stdout in the `-f mjpeg` concat format.
 //
 // Lifecycle:
@@ -41,7 +41,8 @@ import (
 // disconnected and reconnect (which spawns a fresh encoder). Spike
 // scope; production might want a supervisor.
 type Encoder struct {
-	profile    Profile
+	label      string // human-readable, log-only ("intercom_esp" etc.)
+	spec       EncodeSpec
 	ffmpegPath string
 	logger     *log.Logger
 
@@ -60,9 +61,16 @@ type Encoder struct {
 	exitErr   error
 }
 
-// EncoderOptions configures an Encoder. Only Profile is required.
+// EncoderOptions configures an Encoder.
 type EncoderOptions struct {
-	Profile    Profile
+	// Label appears in log lines for this encoder. Typically the
+	// profile name ("intercom_esp"); pure cosmetic.
+	Label string
+
+	// Spec is the encode configuration (resolution / fps / quality).
+	// Required.
+	Spec EncodeSpec
+
 	FFmpegPath string // default: "ffmpeg"
 	Logger     *log.Logger
 	InputBuf   int // input channel size, default 8
@@ -77,7 +85,7 @@ const (
 // NewEncoder constructs an Encoder. It does not contact ffmpeg yet —
 // call Start.
 func NewEncoder(opts EncoderOptions) (*Encoder, error) {
-	if err := opts.Profile.Validate(); err != nil {
+	if err := opts.Spec.Validate(); err != nil {
 		return nil, err
 	}
 	if opts.FFmpegPath == "" {
@@ -92,10 +100,14 @@ func NewEncoder(opts EncoderOptions) (*Encoder, error) {
 	if opts.OutputBuf <= 0 {
 		opts.OutputBuf = defaultOutputBuf
 	}
+	if opts.Label == "" {
+		opts.Label = "encoder"
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Encoder{
-		profile:    opts.Profile,
+		label:      opts.Label,
+		spec:       opts.Spec,
 		ffmpegPath: opts.FFmpegPath,
 		logger:     opts.Logger,
 		inputCh:    make(chan source.AccessUnit, opts.InputBuf),
@@ -120,12 +132,16 @@ func (e *Encoder) Input() chan<- source.AccessUnit { return e.inputCh }
 // ffmpeg process exits (clean stop or crash).
 func (e *Encoder) JPEGs() <-chan []byte { return e.outputCh }
 
-// Profile returns the encode configuration this instance was built with.
-func (e *Encoder) Profile() Profile { return e.profile }
+// Label returns the configured log-label. Useful for tests and
+// diagnostics.
+func (e *Encoder) Label() string { return e.label }
+
+// Spec returns the encode configuration this instance was built with.
+func (e *Encoder) Spec() EncodeSpec { return e.spec }
 
 // Start spawns ffmpeg and the I/O goroutines.
 func (e *Encoder) Start() error {
-	args := buildFFmpegArgs(e.profile)
+	args := buildFFmpegArgs(e.spec)
 
 	e.cmd = exec.CommandContext(e.ctx, e.ffmpegPath, args...)
 
@@ -143,8 +159,8 @@ func (e *Encoder) Start() error {
 	if err := e.cmd.Start(); err != nil {
 		return fmt.Errorf("mjpeg: ffmpeg start (%s): %w", e.ffmpegPath, err)
 	}
-	e.logger.Printf("mjpeg: ffmpeg started for profile %q (pid=%d, %dx%d @ %d fps q:v %d)",
-		e.profile.Name, e.cmd.Process.Pid, e.profile.Width, e.profile.Height, e.profile.FPS, e.profile.Quality)
+	e.logger.Printf("mjpeg: ffmpeg started for %q (pid=%d, %dx%d @ %d fps q:v %d)",
+		e.label, e.cmd.Process.Pid, e.spec.Width, e.spec.Height, e.spec.FPS, e.spec.Quality)
 
 	e.wg.Add(3)
 	go e.runStdin()
@@ -154,9 +170,8 @@ func (e *Encoder) Start() error {
 }
 
 // buildFFmpegArgs constructs the full ffmpeg command line: static input
-// args (raw H.264 from stdin) + profile-driven output args + pipe:1
-// sink.
-func buildFFmpegArgs(p Profile) []string {
+// args (raw H.264 from stdin) + spec-driven output args + pipe:1 sink.
+func buildFFmpegArgs(s EncodeSpec) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -166,7 +181,7 @@ func buildFFmpegArgs(p Profile) []string {
 		"-f", "h264",
 		"-i", "pipe:0",
 	}
-	args = append(args, p.OutputArgs()...)
+	args = append(args, s.OutputArgs()...)
 	args = append(args, "pipe:1")
 	return args
 }
@@ -188,13 +203,13 @@ func (e *Encoder) runStdin() {
 			ok2 := true
 			for _, nalu := range au.NALUs {
 				if _, err := e.stdin.Write(startCodes); err != nil {
-					e.logger.Printf("mjpeg: stdin write (profile %q): %v", e.profile.Name, err)
+					e.logger.Printf("mjpeg: stdin write (%q): %v", e.label, err)
 					e.cancel()
 					ok2 = false
 					break
 				}
 				if _, err := e.stdin.Write(nalu); err != nil {
-					e.logger.Printf("mjpeg: stdin write (profile %q): %v", e.profile.Name, err)
+					e.logger.Printf("mjpeg: stdin write (%q): %v", e.label, err)
 					e.cancel()
 					ok2 = false
 					break
@@ -216,7 +231,7 @@ func (e *Encoder) runStdout() {
 		frame, err := sp.Next()
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-				e.logger.Printf("mjpeg: stdout read (profile %q): %v", e.profile.Name, err)
+				e.logger.Printf("mjpeg: stdout read (%q): %v", e.label, err)
 			}
 			return
 		}
@@ -242,7 +257,7 @@ func (e *Encoder) runStderr() {
 			// Strip trailing newlines for cleaner logs.
 			msg := strings.TrimRight(string(buf[:n]), "\r\n ")
 			if msg != "" {
-				e.logger.Printf("mjpeg: ffmpeg stderr (profile %q): %s", e.profile.Name, msg)
+				e.logger.Printf("mjpeg: ffmpeg stderr (%q): %s", e.label, msg)
 			}
 		}
 		if err != nil {
@@ -273,7 +288,7 @@ func (e *Encoder) Close() error {
 		select {
 		case <-doneCh:
 		case <-time.After(5 * time.Second):
-			e.logger.Printf("mjpeg: encoder %q goroutines did not exit within 5s", e.profile.Name)
+			e.logger.Printf("mjpeg: encoder %q goroutines did not exit within 5s", e.label)
 		}
 		if e.cmd != nil {
 			e.exitErr = e.cmd.Wait()

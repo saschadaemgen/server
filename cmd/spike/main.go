@@ -1,29 +1,33 @@
-// Command spike is the S1+S2 feasibility binary.
+// Command spike is the S1+S2+S3+S4 feasibility binary.
 //
-// It hosts a tiny WebRTC signaling endpoint at the configured listen
-// address and fans out a single UniFi Protect camera pull to any number
-// of concurrent browser viewers (Fan-Out, see S2-01). The first
-// connecting viewer triggers the camera bring-up; the last leaving viewer
-// shuts it down again so the camera is idle when nobody is watching.
+// It hosts a small WebRTC signaling endpoint and a go2rtc-compatible
+// MJPEG endpoint, both /offer and /api/stream.mjpeg keyed by ?src=
+// profile name. Profiles bind a camera, a Protect quality tier, and a
+// usage (browser / esp). Cameras are pulled only when watched
+// (S4-01: 0 viewers = 0 RTSP pull, 0 ffmpeg, 0 decode).
 //
-// Usage (PowerShell):
+// Usage (PowerShell, single-camera backward-compatible):
 //
 //	$env:UNIFI_NVR_HOST   = '192.168.1.1'
 //	$env:UNIFI_API_KEY    = '<protect-integration-key>'
-//	$env:UNIFI_CAMERA_ID  = '<camera-id>'
-//	# optional, defaults to :8555
-//	# $env:CARVILON_STREAM_LISTEN = ':8555'
+//	$env:UNIFI_CAMERA_ID  = '<camera-id>'           # default profile builder
 //	go run .\cmd\spike
 //
-// Then open http://<host>:8555/ in a LAN browser and click "Connect".
-// Open it in several tabs / browsers to exercise fan-out — they should
-// all see the same live feed without the camera being pulled more than
-// once.
+// For multi-camera: set CARVILON_PROFILES_JSON to a JSON array, e.g.
+//
+//	$env:CARVILON_PROFILES_JSON = '[
+//	  {"name":"intercom_browser","cameraID":"abc","quality":"high","usage":"browser","description":"Intercom"},
+//	  {"name":"intercom_esp",    "cameraID":"abc","quality":"high","usage":"esp"},
+//	  {"name":"ai360_browser",   "cameraID":"def","quality":"high","usage":"browser","description":"AI 360"}
+//	]'
+//	go run .\cmd\spike
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -32,21 +36,23 @@ import (
 
 	"carvilon.local/stream"
 	"carvilon.local/stream/internal/mjpeg"
+	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
 	"carvilon.local/stream/internal/source/unifi"
+	"carvilon.local/stream/internal/sourcereg"
 )
 
 const (
-	envNVRHost     = "UNIFI_NVR_HOST"
-	envAPIKey      = "UNIFI_API_KEY"
-	envCameraID    = "UNIFI_CAMERA_ID"
-	envListen      = "CARVILON_STREAM_LISTEN"
-	envQuality     = "UNIFI_QUALITY"    // optional, defaults to "high"
-	envEncryption  = "UNIFI_ENCRYPTION" // optional, defaults to "tls"
-	envFFmpegPath  = "CARVILON_FFMPEG"  // optional, defaults to "ffmpeg"
+	envNVRHost      = "UNIFI_NVR_HOST"
+	envAPIKey       = "UNIFI_API_KEY"
+	envCameraID     = "UNIFI_CAMERA_ID"
+	envListen       = "CARVILON_STREAM_LISTEN"
+	envEncryption   = "UNIFI_ENCRYPTION" // optional, defaults to "tls"
+	envFFmpegPath   = "CARVILON_FFMPEG"  // optional, defaults to "ffmpeg"
 	envDisableMJPEG = "CARVILON_DISABLE_MJPEG"
-	defaultListen  = ":8555"
-	defaultQuality = "high"
+	envProfilesJSON = "CARVILON_PROFILES_JSON"
+
+	defaultListen = ":8555"
 )
 
 func main() {
@@ -54,51 +60,59 @@ func main() {
 
 	nvrHost := os.Getenv(envNVRHost)
 	apiKey := os.Getenv(envAPIKey)
-	cameraID := os.Getenv(envCameraID)
 	addr := os.Getenv(envListen)
-	quality := os.Getenv(envQuality)
-	encryption := os.Getenv(envEncryption) // empty = unifi default (tls)
-	ffmpegPath := os.Getenv(envFFmpegPath) // empty = "ffmpeg" via $PATH
+	encryption := os.Getenv(envEncryption)
+	ffmpegPath := os.Getenv(envFFmpegPath)
 	if addr == "" {
 		addr = defaultListen
-	}
-	if quality == "" {
-		quality = defaultQuality
 	}
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
 
-	if nvrHost == "" || apiKey == "" || cameraID == "" {
-		logger.Fatalf("missing one of %s / %s / %s — see .env.example", envNVRHost, envAPIKey, envCameraID)
+	if nvrHost == "" || apiKey == "" {
+		logger.Fatalf("missing %s or %s — see .env.example", envNVRHost, envAPIKey)
 	}
 
-	// Decide whether MJPEG is available. By default we enable it and
-	// fail-fast if ffmpeg is missing — go2rtc-replacement is the whole
-	// point of the binary, so a silent disable would be misleading.
-	// CARVILON_DISABLE_MJPEG=1 turns it off (e.g. WebRTC-only dev runs
-	// without an ffmpeg install).
-	var mjpegProfiles []mjpeg.Profile
-	if os.Getenv(envDisableMJPEG) == "" {
+	// Profile configuration:
+	//   1. CARVILON_PROFILES_JSON, if set, is the full list (multi-camera).
+	//   2. Otherwise: UNIFI_CAMERA_ID drives a built-in default pair
+	//      (browser + esp on that one camera). Backward-compat with
+	//      the S1..S3 single-camera spike.
+	profiles, err := loadProfiles()
+	if err != nil {
+		logger.Fatalf("profile config: %v", err)
+	}
+	if len(profiles) == 0 {
+		logger.Fatalf("no profiles registered — set %s or %s", envProfilesJSON, envCameraID)
+	}
+
+	reg, err := profile.NewRegistry(profiles)
+	if err != nil {
+		logger.Fatalf("profile registry: %v", err)
+	}
+	logger.Printf("profiles: %v", reg.Names())
+
+	// MJPEG availability check.
+	enableMJPEG := os.Getenv(envDisableMJPEG) == ""
+	if enableMJPEG {
 		if err := mjpeg.CheckFFmpeg(ffmpegPath); err != nil {
 			logger.Fatalf("mjpeg startup check failed: %v\nSet %s=1 to disable MJPEG output.", err, envDisableMJPEG)
 		}
-		mjpegProfiles = mjpeg.DefaultProfiles()
-		logger.Printf("mjpeg: enabled with profiles %v (ffmpeg=%q)", profileNames(mjpegProfiles), ffmpegPath)
+		logger.Printf("mjpeg: enabled (ffmpeg=%q)", ffmpegPath)
 	} else {
 		logger.Printf("mjpeg: disabled via %s; only /offer (WebRTC) is served", envDisableMJPEG)
 	}
 
-	// Source factory: invoked lazily by the hub on first viewer and again
-	// after every down-to-zero cycle, so each lifetime gets a fresh
-	// gortsplib client (the previous one's channels are closed and not
-	// reusable).
-	srcFactory := func() (source.VideoSource, error) {
+	// Source factory: builds a fresh unifi.Source for any (CameraID,
+	// Quality) key. The source registry calls this lazily — never at
+	// startup, only when a viewer for that key arrives.
+	srcFactory := func(key sourcereg.Key) (source.VideoSource, error) {
 		return unifi.NewSource(unifi.Options{
 			NVRHost:    nvrHost,
 			APIKey:     apiKey,
-			CameraID:   cameraID,
-			Quality:    quality,
+			CameraID:   key.CameraID,
+			Quality:    key.Quality,
 			Encryption: unifi.Encryption(encryption),
 			Logger:     logger,
 		})
@@ -108,11 +122,12 @@ func main() {
 	defer stop()
 
 	srv, err := stream.NewServer(stream.ServerOptions{
+		Profiles:      reg,
 		SourceFactory: srcFactory,
 		Addr:          addr,
 		Logger:        logger,
-		MJPEGProfiles: mjpegProfiles,
 		FFmpegPath:    ffmpegPath,
+		EnableMJPEG:   enableMJPEG,
 	})
 	if err != nil {
 		logger.Fatalf("server: %v", err)
@@ -125,10 +140,37 @@ func main() {
 	}
 }
 
-func profileNames(ps []mjpeg.Profile) []string {
-	names := make([]string, len(ps))
-	for i, p := range ps {
-		names[i] = p.Name
+// loadProfiles returns the configured profile list, preferring the
+// JSON env var over the single-camera convenience defaults.
+func loadProfiles() ([]profile.Profile, error) {
+	if raw := os.Getenv(envProfilesJSON); raw != "" {
+		var ps []profile.Profile
+		if err := json.Unmarshal([]byte(raw), &ps); err != nil {
+			return nil, fmt.Errorf("%s: %w", envProfilesJSON, err)
+		}
+		return ps, nil
 	}
-	return names
+	cam := os.Getenv(envCameraID)
+	if cam == "" {
+		return nil, nil
+	}
+	// Backward-compat default: one camera, two profiles (browser + esp),
+	// both on the "high" quality tier — mirrors the S3 default that the
+	// existing carvilon-proxy expects.
+	return []profile.Profile{
+		{
+			Name:        "intercom_browser",
+			CameraID:    cam,
+			Quality:     profile.QualityHigh,
+			Usage:       profile.UsageBrowser,
+			Description: "Intercom (browser)",
+		},
+		{
+			Name:        "intercom_esp",
+			CameraID:    cam,
+			Quality:     profile.QualityHigh,
+			Usage:       profile.UsageESP,
+			Description: "Intercom (ESP)",
+		},
+	}, nil
 }

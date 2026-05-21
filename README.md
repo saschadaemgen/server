@@ -11,16 +11,18 @@ CARVILON streaming-server. Go-Library plus eine spike-Binary.
   eigener RFC-6184-Depacketizer), Live-Bild auf der Testseite.
 - **S2 (durch):** Fan-Out — EINE Kamera, N WebRTC-Viewer. Erster Viewer
   triggert den Kamera-Pull; letzter Viewer beendet ihn. Drop-statt-buffer
-  pro Subscriber. Neue Subscriber bekommen ein gecachtes IDR vorab.
-- **S3, Schritt 3 (jetzt):** MJPEG-Output für ESP/Browser. ffmpeg als
-  Subprozess (kein cgo, kein Linken) macht decode+scale+JPEG-encode.
-  Eigener Fan-Out-Hub pro Profil; mehrere MJPEG-Clients teilen sich
-  einen Encoder. Byte-Schnitt 1:1 wie go2rtc — der carvilon-Proxy
-  kann von go2rtc auf streaming-server umgebogen werden ohne Änderung
-  am Proxy oder am ESP. **Nach diesem Schritt ist go2rtc ersetzbar.**
-- **Schritt 4+** (Profil-Admin-UI, GenericRTSPSource, ESP32-Quelle,
-  Andocken an carvilon-server, Audio) sind explizit **nicht** Teil
-  dieser Stufe.
+  pro Subscriber.
+- **S3 (durch):** MJPEG-Output für ESP/Browser via ffmpeg-Subprozess.
+  Byte-Schnitt 1:1 wie go2rtc — Drop-in für den carvilon-Proxy.
+- **S4, Schritt 4 (jetzt):** Multi-Kamera, bedarfsgesteuert. Pro
+  `(CameraID, Quality)` ein eigener Lifecycle. Alle Viewer-Endpoints
+  sind profile-driven (`?src=<name>`); Profile binden Kamera, Quality
+  und Usage (browser / esp). **Eine Kamera wird NUR gepullt, wenn
+  mindestens ein Viewer sie gerade anschaut** — sonst kein RTSP-Pull,
+  kein Decode, kein ffmpeg. 5 Kameras, 0 Viewer = 0 Last.
+- **Schritt 5+** (Interface-Naht zu carvilon-server, Admin-UI für
+  Profile-CRUD, GenericRTSPSource, ESP32-Quelle, Audio) sind explizit
+  **nicht** Teil dieser Stufe.
 
 ## Voraussetzungen
 
@@ -39,16 +41,18 @@ cp .env.example .env
 # .env editieren — niemals committen (durch .gitignore abgedeckt)
 ```
 
-| Env-Variable               | Pflicht | Default | Bedeutung                                                                              |
-| -------------------------- | ------- | ------- | -------------------------------------------------------------------------------------- |
-| `UNIFI_NVR_HOST`           | ja      | —       | Host des UDM, z.B. `192.168.1.1`                                                       |
-| `UNIFI_API_KEY`            | ja      | —       | Protect-Integration-Key (Settings → Integrations)                                       |
-| `UNIFI_CAMERA_ID`          | ja      | —       | Protect-Camera-ID                                                                       |
-| `UNIFI_QUALITY`            | nein    | `high`  | Stream-Tier (`high` / `medium` / `low`)                                                 |
-| `UNIFI_ENCRYPTION`         | nein    | `tls`   | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)      |
-| `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                                             |
-| `CARVILON_FFMPEG`          | nein    | `ffmpeg`| Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                    |
-| `CARVILON_DISABLE_MJPEG`   | nein    | —       | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                       |
+| Env-Variable               | Pflicht | Default | Bedeutung                                                                                                          |
+| -------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `UNIFI_NVR_HOST`           | ja      | —       | Host des UDM, z.B. `192.168.1.1`                                                                                   |
+| `UNIFI_API_KEY`            | ja      | —       | Protect-Integration-Key (Settings → Integrations)                                                                   |
+| `UNIFI_CAMERA_ID`          | one of¹ | —       | Backward-Compat: registriert zwei Default-Profile (`intercom_browser` + `intercom_esp`) auf dieser einen Kamera     |
+| `CARVILON_PROFILES_JSON`   | one of¹ | —       | JSON-Liste fürs Multi-Kamera-Setup (siehe `.env.example`); überschreibt den `UNIFI_CAMERA_ID`-Default               |
+| `UNIFI_ENCRYPTION`         | nein    | `tls`   | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)                                  |
+| `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                                                                         |
+| `CARVILON_FFMPEG`          | nein    | `ffmpeg`| Pfad zum ffmpeg-Binary für die MJPEG-Pipeline (Standard via `$PATH`)                                                |
+| `CARVILON_DISABLE_MJPEG`   | nein    | —       | Nicht-leerer Wert deaktiviert MJPEG (WebRTC-only-Runs ohne ffmpeg)                                                  |
+
+¹ Entweder `UNIFI_CAMERA_ID` (für Single-Kamera-Demo) ODER `CARVILON_PROFILES_JSON` (für echte Multi-Kamera-Setups).
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 
@@ -76,24 +80,30 @@ Danach im Browser öffnen:
 http://<host>:8555/
 ```
 
-→ **Connect** klicken. Sobald der ICE-State `connected` ist und der erste
-IDR durch den Depacketizer geflossen ist, sollte das `<video>`-Element das
-Live-Bild der Intercom-Kamera zeigen (typisch 1–5 s nach Connect, abhängig
-vom GoP-Intervall der Kamera).
+→ Profil aus dem Dropdown wählen, **Connect** klicken. Sobald der
+ICE-State `connected` ist und der erste IDR durch den Depacketizer
+geflossen ist, zeigt das `<video>`-Element das Live-Bild der gewählten
+Kamera (typisch 1–5 s nach Connect, abhängig vom GoP-Intervall).
 
-**Fan-Out testen:** dieselbe URL in mehreren Browser-Tabs / Geräten
-öffnen und Connect drücken. Der Server-Log sollte genau **EIN**
-`unifi: got RTSPS URL ...` und **EIN** `unifi: first IDR ...` zeigen,
-egal wie viele Viewer dazukommen. Beim Schließen des letzten Tabs:
-`hub: source stopped (last subscriber left)`.
+**Multi-Kamera testen** (mit `CARVILON_PROFILES_JSON` konfiguriert):
+
+- Tab 1 mit Profil A → Server-Log: nur Kamera A wird gepullt.
+- Tab 2 mit Profil B → zusätzlich Kamera B startet.
+- Tab 1 schließen → Kamera A stoppt, Kamera B läuft weiter.
+- Beide Tabs schließen → beide Kameras stoppen.
+- Profil C wurde nie aufgerufen → Kamera C wurde NIE gepullt.
+
+**Fan-Out auf einer Kamera testen:** dieselbe Profil-URL in mehreren
+Browser-Tabs öffnen. Server-Log zeigt genau **EIN** `unifi: got RTSPS URL`
+und **EIN** `unifi: first IDR`, egal wie viele Viewer.
 
 **MJPEG testen:** Browser direkt auf
 `http://<host>:8555/api/stream.mjpeg?src=intercom_browser` (oder
-`?src=intercom_esp`) — Bewegtbild im Tab. Format ist byte-identisch
-zu go2rtc, daher kann der carvilon-Proxy seinen `STREAM_BACKEND_URL`
-auf diesen Server umbiegen ohne Änderung am ESP. Mehrere MJPEG-Clients
-am selben Profil teilen einen ffmpeg-Encoder (Log:
-`mjpeg: session "intercom_browser" viewer N joined (total=…)`).
+`?src=intercom_esp`). Format byte-identisch zu go2rtc.
+
+**Profile-Liste auslesen:** `GET /api/profiles` liefert JSON mit allen
+registrierten Profilen (Name, CameraID, Quality, Usage, Description) —
+die Testseite nutzt das, um das Dropdown zu füllen.
 
 ## Cross-Compile für Raspberry Pi (arm64)
 
@@ -164,18 +174,47 @@ Backpressure endet beim einzelnen Subscriber-Buffer (Default 30 AUs,
 
 ```
 streaming-server/
-├── cmd/spike/         (Binary; baut SourceFactory + MJPEG-Profile)
-├── server.go          (HTTP-Signaling /offer + /api/stream.mjpeg)
-├── web/index.html     (Testseite — in N Tabs öffnen für Fan-Out-Test)
+├── cmd/spike/         (Binary; baut Profile + Source-Factory)
+├── server.go          (HTTP /offer + /api/stream.mjpeg + /api/profiles)
+├── web/index.html     (Testseite mit Profil-Dropdown)
 ├── internal/
 │   ├── h264/          (RFC-6184-Depacketizer + Unit-Tests)
 │   ├── hub/           (H.264-Fan-Out-Bus + Source-Lifecycle + IDR-Cache)
 │   ├── mjpeg/         (ffmpeg-Encoder + JPEG-Fan-Out + go2rtc-Multipart)
+│   ├── profile/       (Profile-Struktur + Registry, S4-01)
+│   ├── sourcereg/     (Source-Registry pro (CameraID,Quality), S4-01)
 │   ├── droplog/       (rate-limited drop-counter)
 │   └── source/
 │       ├── source.go  (VideoSource-Interface)
 │       └── unifi/     (UniFiProtectSource)
 ```
+
+### Multi-Kamera-Lifecycle (S4)
+
+```
+Profile-Registry: {"intercom_browser" → {cam=A, q=high, usage=browser}, ...}
+                                    │
+                                    ▼ Lookup by ?src=
+                          Source-Registry (sourcereg)
+                                    │
+                  ┌─────────────────┴─────────────────┐
+                  │      lazy: Hub per (cam,q)        │
+                  │                                   │
+                  ▼                                   ▼
+            hub.Hub für (A, high)             hub.Hub für (B, high)
+                  │                                   │
+        ┌─────────┴─────────┐                  ┌─────┴─────┐
+        ▼                   ▼                  ▼           ▼
+   WebRTC-Viewer         MJPEG-Session    WebRTC-Viewer  (idle wenn 0 Viewer)
+   für Profil A          für Profil A
+   (browser-usage)       (esp-usage)
+```
+
+**Bedarfsgesteuert**: hat eine `(CameraID, Quality)` keinen einzigen
+Viewer (über alle Profile hinweg, browser + esp), wird die Quelle
+nicht gepullt. Bei 5 Kameras und 0 Zuschauern: 0 RTSP-Pulls,
+0 Decodes, 0 ffmpeg-Instanzen. Nur Hub-Bookkeeping (KB) bleibt im
+Speicher.
 
 ### MJPEG-Pipeline (S3)
 
@@ -300,6 +339,13 @@ go test -race ./internal/hub/...   # zusätzlich: race-detector
 | `internal/source/unifi` SDP-Tests | `sdpSecurityReport` redaktiert Inline-Keys und MIKEY-Payloads | Geheimnisse dürfen NIE im Log landen — Tests prüfen das aktiv (5 Tests). |
 | `internal/source/unifi` Encryption-Tests | `stripEnableSrtp` und `NewSource`-Encryption-Validierung | Sicherstellt: `enableSrtp` weg, andere Query-Felder bleiben, `srtp`-Modus kommt mit klarem Fehler raus (10 Tests). |
 
-Insgesamt 87 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
+Insgesamt 111 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
 einem Live-Problem zeigen die Tests, ob das Problem im Code oder in
 der Verdrahtung liegt.
+
+S4-spezifisch:
+
+| Paket | Tests | Was beweisen die |
+| --- | --- | --- |
+| `internal/profile` | 12 | Profile validate, Registry lookup, ByUsage-Filter, Duplikat-Erkennung |
+| `internal/sourcereg` | 12 | Lazy-Hub, 0 Pull bei 0 Viewer, 2-Kameras unabhaengiger Lifecycle, shared-Pull bei selber Key, race-clean |

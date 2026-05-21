@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-// The encoder mostly drives an external ffmpeg subprocess, which is
-// hard to unit-test in isolation. We focus tests on:
+// Encoder mostly drives an external ffmpeg subprocess, which is hard to
+// unit-test in isolation. We focus tests on:
 //
 //   - argument construction (buildFFmpegArgs)
 //   - CheckFFmpeg error path on a missing binary
-//   - constructor validation
+//   - constructor validation + default handling
 //
 // The subprocess plumbing is exercised by the live test.
 
 func TestBuildFFmpegArgs_LayoutMatchesContract(t *testing.T) {
-	p := Profile{Name: "intercom_esp", Width: 800, Height: 1280, FPS: 9, Quality: 6}
-	args := buildFFmpegArgs(p)
+	s := EncodeSpec{Width: 800, Height: 1280, FPS: 9, Quality: 6}
+	args := buildFFmpegArgs(s)
 
 	// Input side: -f h264 -i pipe:0 must appear in that order, ahead
 	// of any output options.
@@ -37,7 +37,7 @@ func TestBuildFFmpegArgs_LayoutMatchesContract(t *testing.T) {
 		t.Errorf("last arg = %q, want pipe:1 (full: %v)", args[len(args)-1], args)
 	}
 
-	// Profile values present.
+	// Spec values present.
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"scale=800:1280", "-r 9", "-q:v 6", "-c:v mjpeg", "-f mjpeg",
@@ -49,9 +49,9 @@ func TestBuildFFmpegArgs_LayoutMatchesContract(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgs_ProfileValuesFlowThrough(t *testing.T) {
-	p := Profile{Name: "android_hi", Width: 1280, Height: 720, FPS: 25, Quality: 3}
-	args := buildFFmpegArgs(p)
+func TestBuildFFmpegArgs_SpecValuesFlowThrough(t *testing.T) {
+	s := EncodeSpec{Width: 1280, Height: 720, FPS: 25, Quality: 3}
+	args := buildFFmpegArgs(s)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "scale=1280:720") {
 		t.Errorf("expected scale=1280:720; got %v", args)
@@ -64,18 +64,21 @@ func TestBuildFFmpegArgs_ProfileValuesFlowThrough(t *testing.T) {
 	}
 }
 
-func TestNewEncoder_RejectsInvalidProfile(t *testing.T) {
+func TestNewEncoder_RejectsInvalidSpec(t *testing.T) {
 	_, err := NewEncoder(EncoderOptions{
-		Profile: Profile{Name: "", Width: 800, Height: 1280, FPS: 9, Quality: 6},
+		Label: "x",
+		Spec:  EncodeSpec{Width: 0, Height: 1280, FPS: 9, Quality: 6},
 	})
 	if err == nil {
-		t.Fatal("expected error for empty profile Name")
+		t.Fatal("expected error for zero Width")
 	}
 }
 
 func TestNewEncoder_AppliesDefaults(t *testing.T) {
-	p := Profile{Name: "x", Width: 100, Height: 100, FPS: 10, Quality: 5}
-	enc, err := NewEncoder(EncoderOptions{Profile: p})
+	enc, err := NewEncoder(EncoderOptions{
+		Label: "x",
+		Spec:  EncodeSpec{Width: 100, Height: 100, FPS: 10, Quality: 5},
+	})
 	if err != nil {
 		t.Fatalf("NewEncoder: %v", err)
 	}
@@ -87,6 +90,18 @@ func TestNewEncoder_AppliesDefaults(t *testing.T) {
 	}
 	if cap(enc.outputCh) != defaultOutputBuf {
 		t.Errorf("default output buf = %d, want %d", cap(enc.outputCh), defaultOutputBuf)
+	}
+}
+
+func TestNewEncoder_DefaultLabel(t *testing.T) {
+	enc, err := NewEncoder(EncoderOptions{
+		Spec: EncodeSpec{Width: 100, Height: 100, FPS: 10, Quality: 5},
+	})
+	if err != nil {
+		t.Fatalf("NewEncoder: %v", err)
+	}
+	if enc.Label() == "" {
+		t.Error("empty label should be replaced with a default")
 	}
 }
 
