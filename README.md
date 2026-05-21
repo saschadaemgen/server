@@ -33,13 +33,14 @@ cp .env.example .env
 # .env editieren — niemals committen (durch .gitignore abgedeckt)
 ```
 
-| Env-Variable               | Pflicht | Default | Bedeutung                                                        |
-| -------------------------- | ------- | ------- | ---------------------------------------------------------------- |
-| `UNIFI_NVR_HOST`           | ja      | —       | Host des UDM, z.B. `192.168.1.1`                                  |
-| `UNIFI_API_KEY`            | ja      | —       | Protect-Integration-Key (Settings → Integrations)                  |
-| `UNIFI_CAMERA_ID`          | ja      | —       | Protect-Camera-ID                                                  |
-| `UNIFI_QUALITY`            | nein    | `high`  | Stream-Tier (`high` / `medium` / `low`)                            |
-| `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                       |
+| Env-Variable               | Pflicht | Default | Bedeutung                                                                              |
+| -------------------------- | ------- | ------- | -------------------------------------------------------------------------------------- |
+| `UNIFI_NVR_HOST`           | ja      | —       | Host des UDM, z.B. `192.168.1.1`                                                       |
+| `UNIFI_API_KEY`            | ja      | —       | Protect-Integration-Key (Settings → Integrations)                                       |
+| `UNIFI_CAMERA_ID`          | ja      | —       | Protect-Camera-ID                                                                       |
+| `UNIFI_QUALITY`            | nein    | `high`  | Stream-Tier (`high` / `medium` / `low`)                                                 |
+| `UNIFI_ENCRYPTION`         | nein    | `tls`   | Wire-Protection: `tls` (heute) oder `srtp` (zukünftig, heute Fehler — siehe unten)      |
+| `CARVILON_STREAM_LISTEN`   | nein    | `:8555` | HTTP-Listen-Adresse (Signaling + Testseite)                                             |
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 
@@ -135,24 +136,65 @@ streaming-server/
 │       └── unifi/     (UniFiProtectSource)
 ```
 
+## Sicherheitsmodell
+
+Die Kamera-zu-Server-Strecke läuft per **TLS** (rtsps:// auf Port 7441 der
+UDM) — verschlüsselt zwischen den beiden kontrollierten LAN-Endpunkten.
+Innerhalb des TLS-Tunnels wird **Plain-RTP** transportiert. Das
+entspricht dem `rtspx://`-Pfad, den go2rtc seit Jahren für UniFi-Kameras
+nutzt, und der etablierten CARVILON-Setup-Linie aus dem ESP-Projekt.
+
+Konkret: die Protect-API liefert URLs mit `?enableSrtp`. Mit diesem
+Query-Schalter aktiviert UniFi zusätzlich SRTP (RFC 3711) mit MIKEY-
+Schlüsseltausch in der SDP. Diese Variante ist in der Go-Welt nicht
+gelöst (go2rtc Issue #81 offen seit 2022), und der eingebaute MIKEY-
+Decrypt-Pfad in gortsplib aktiviert sich nicht, weil UniFi die SDP als
+`RTP/AVP` (nicht `RTP/SAVP`) auszeichnet — eine UniFi-Inkonsistenz.
+
+`UniFiProtectSource` strippt im TLS-Modus daher den `?enableSrtp`-
+Parameter, bevor die URL gortsplib erreicht. UniFi liefert dann Plain-
+RTP im TLS-Tunnel — direkt dekodierbar durch unseren Depacketizer.
+Siehe Commit `f1da18e` (SDP-Befund-Logging) und das S1-07-Bewertungs-
+Briefing für die Argumentation.
+
+Der ausgehende Weg zum Browser ist immer DTLS-SRTP (WebRTC), unabhängig
+vom UniFi-Modus.
+
+**`srtp`-Modus als Backlog-Eintrag.** Das `UNIFI_ENCRYPTION`-Schalter-
+feld kennt `srtp` als zweiten Wert, der heute mit einem klaren
+`ErrEncryptionSRTPNotImplemented` rausfliegt. Damit ist die
+Konfigurations-Form stabil, falls eine MIKEY+SRTP-Implementierung
+später nachzieht. Der dafür plausible Pfad (Weg B3 aus der S1-07-
+Bewertung): gortsplibs public `pkg/mikey`-Parser auf `medi.KeyMgmtMikey`,
+`pion/srtp/v3` als neue Top-Level-Dep, ein Wrapper, der die Pakete vor
+unserem Depacketizer entschlüsselt. Aufwand ~3–5 Tage, kein praktischer
+LAN-Mehrschutz gegenüber TLS — daher heute nicht gebaut.
+
 ## Bekannte Stolpersteine
 
 - **TLS ohne IP-SAN.** Sowohl Protect-API als auch RTSPS laufen über die
   UDM mit Self-signed-Cert ohne IP-SAN. Aktuell `InsecureSkipVerify`
   beidseits. Später: gegen die UDM-CA pinnen wie der carvilon-UA-Client.
+  Diese Härtung ist der real wirksame Sicherheits-Hebel und nicht eine
+  zweite Verschlüsselungs-Schicht.
 - **UA-Intercom-Packetization.** Die Kamera deklariert in der SDP
   `packetization-mode=1`, sendet aber das volle Mode-2-Spektrum
   (FU-B / STAP-B / MTAP-16 / MTAP-24). gortsplib v5 lehnt diese ab — der
   eigene Depacketizer (`internal/h264`) behandelt sie. STAP-A mit Non-
   Zero-Padding nach Zero-Size-Marker (auch eine UA-Eigenheit) wird
   tolerant zu Ende gelesen statt verworfen.
+- **Port 7447 ist tot** auf dieser UDM-SE (in ESP-Saison 1 verifiziert).
+  Der UniFi-Pfad geht ausschließlich über `rtsps://` auf 7441; ein
+  Fallback auf unverschlüsselte RTSP-Verbindungen ist explizit nicht
+  vorgesehen.
 - **Drop statt Buffer.** Der Frames-Channel zwischen Quelle und Kern
   hat ein winziges Buffer (4) und non-blocking Send. Wenn der Consumer
   hinterherhinkt, wird gedroppt. Das Drop-Logging ist gedrosselt
   (1× pro Sekunde mit Summe), damit echte Anomalien sichtbar bleiben.
-- **Sicherheit.** API-Key, Host, Camera-ID nur per Env-Var. Niemals ins
-  Repo. Der API-Key und die fertige RTSPS-URL (Token!) werden niemals
-  geloggt.
+- **Sicherheit / Geheimnisse.** API-Key, Host, Camera-ID nur per Env-Var.
+  Niemals ins Repo. Der API-Key und die fertige RTSPS-URL (Token!)
+  werden niemals geloggt — die SDP-Befund-Ausgabe redaktiert Inline-Keys
+  und MIKEY-Payloads explizit (mit Unit-Tests, `internal/source/unifi/sdp_test.go`).
 
 ## Dependency-Doktrin
 
@@ -168,15 +210,18 @@ und um unabhängig zu sein davon, was eine Fremd-Lib zufällig kann.
 
 ## Tests
 
-Der RFC-6184-Depacketizer ist die kritischste Komponente und ist isoliert
-unit-getestet:
+Drei Test-Suites, alle stdlib-`testing`, keine zusätzlichen Deps:
 
 ```sh
-go test ./internal/h264/...
+go test ./...
 ```
 
-18 Tests, alle sechs Packetization-Typen abgedeckt, plus Edge-Cases
-(Seq-Gap, Start+End in einem Paket, STAP-A-Padding-Toleranz, …). Wenn das
-Live-Bild fehlt aber die Tests grün sind, liegt der Fehler in
-Quelle/Verdrahtung, nicht im Depacketizer — genau diese Trennschärfe ist
-der Grund für die Unit-Tests.
+| Paket | Was getestet wird | Zweck |
+| --- | --- | --- |
+| `internal/h264` | RFC-6184-Depacketizer (18 Tests, alle sechs Packetization-Typen, Edge-Cases wie Seq-Gap, Start+End in einem Paket, STAP-A-Padding-Toleranz) | Wenn das Live-Bild fehlt, aber diese Tests grün sind, liegt der Fehler in Quelle/Verdrahtung — nicht im Depacketizer. |
+| `internal/source/unifi` SDP-Tests | `sdpSecurityReport` redaktiert Inline-Keys und MIKEY-Payloads | Geheimnisse dürfen NIE im Log landen — Tests prüfen das aktiv (5 Tests). |
+| `internal/source/unifi` Encryption-Tests | `stripEnableSrtp` und `NewSource`-Encryption-Validierung | Sicherstellt: `enableSrtp` weg, andere Query-Felder bleiben, `srtp`-Modus kommt mit klarem Fehler raus (10 Tests). |
+
+Insgesamt 33 Tests, alle grün. Diese Trennschärfe ist Absicht — bei
+einem Live-Problem zeigen die Tests, ob das Problem im Code oder in
+der Verdrahtung liegt.

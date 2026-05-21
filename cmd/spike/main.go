@@ -32,13 +32,14 @@ import (
 )
 
 const (
-	envNVRHost      = "UNIFI_NVR_HOST"
-	envAPIKey       = "UNIFI_API_KEY"
-	envCameraID     = "UNIFI_CAMERA_ID"
-	envListen       = "CARVILON_STREAM_LISTEN"
-	envQuality      = "UNIFI_QUALITY" // optional, defaults to "high"
-	defaultListen   = ":8555"
-	defaultQuality  = "high"
+	envNVRHost     = "UNIFI_NVR_HOST"
+	envAPIKey      = "UNIFI_API_KEY"
+	envCameraID    = "UNIFI_CAMERA_ID"
+	envListen      = "CARVILON_STREAM_LISTEN"
+	envQuality     = "UNIFI_QUALITY"    // optional, defaults to "high"
+	envEncryption  = "UNIFI_ENCRYPTION" // optional, defaults to "tls"
+	defaultListen  = ":8555"
+	defaultQuality = "high"
 )
 
 func main() {
@@ -49,6 +50,7 @@ func main() {
 	cameraID := os.Getenv(envCameraID)
 	addr := os.Getenv(envListen)
 	quality := os.Getenv(envQuality)
+	encryption := os.Getenv(envEncryption) // empty = unifi default (tls)
 	if addr == "" {
 		addr = defaultListen
 	}
@@ -64,11 +66,12 @@ func main() {
 	defer stop()
 
 	src, err := unifi.NewSource(unifi.Options{
-		NVRHost:  nvrHost,
-		APIKey:   apiKey,
-		CameraID: cameraID,
-		Quality:  quality,
-		Logger:   logger,
+		NVRHost:    nvrHost,
+		APIKey:     apiKey,
+		CameraID:   cameraID,
+		Quality:    quality,
+		Encryption: unifi.Encryption(encryption),
+		Logger:     logger,
 	})
 	if err != nil {
 		logger.Fatalf("unifi source: %v", err)

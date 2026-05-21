@@ -45,6 +45,45 @@ import (
 	"carvilon.local/stream/internal/source"
 )
 
+// Encryption selects how the camera-to-server stream is protected on the
+// wire. The Protect-API-returned URL is rewritten accordingly.
+//
+//   - EncryptionTLS — TLS tunnel only (rtsps:// scheme), plain RTP inside.
+//     The `?enableSrtp` query parameter, which the UniFi API always
+//     attaches, is stripped before the URL reaches gortsplib. This is the
+//     go2rtc rtspx://-equivalent path that is in wide field use against
+//     UniFi cameras and has been the established CARVILON setup for the
+//     ESP project. Default.
+//
+//   - EncryptionSRTP — TLS tunnel PLUS per-packet SRTP, with the master
+//     key delivered via MIKEY in the SDP. Reserved for a future
+//     implementation (gortsplib has the MIKEY parser, but the SRTP
+//     decrypt path is only auto-activated when the camera advertises
+//     RTP/SAVP in the m= line, which UniFi does not — see S1-07
+//     evaluation). Currently rejected with an explicit error so the
+//     intent is visible in the type today.
+//
+// Security rationale for the default (TLS-only):
+//
+// The CARVILON deployment runs the camera ↔ streaming-server hop entirely
+// on a LAN under one administrator's control. TLS protects the wire
+// against passive capture; the second SRTP layer, when keyed by MIKEY
+// over that same TLS connection, has no independent secret to add. The
+// path outbound to viewers is always DTLS-SRTP (WebRTC), independent of
+// this setting. DSGVO "kein Klartext im Netz" is met by TLS.
+type Encryption string
+
+const (
+	EncryptionTLS  Encryption = "tls"
+	EncryptionSRTP Encryption = "srtp"
+)
+
+// ErrEncryptionSRTPNotImplemented is returned by NewSource when
+// Encryption is set to EncryptionSRTP. The type accepts the value so
+// callers can wire the switch today; the actual MIKEY+SRTP decrypt is a
+// separate, larger piece of work (Weg B in the S1-07 evaluation).
+var ErrEncryptionSRTPNotImplemented = errors.New("unifi: Encryption=srtp not yet implemented (Weg B; MIKEY+SRTP requires gortsplib internals or a wrapper layer — see S1-07)")
+
 // Options configures a [Source]. All three required fields hold secrets
 // or device identifiers and MUST come from runtime env, never from a
 // committed config file.
@@ -65,6 +104,16 @@ type Options struct {
 	// If the named tier is missing in the API response, the first
 	// available tier is used and a log line notes the fallback.
 	Quality string
+
+	// Encryption picks the wire-protection model for the camera-to-server
+	// stream. See [Encryption] for the available modes and the security
+	// rationale for the default (EncryptionTLS).
+	//
+	// Empty string is treated as EncryptionTLS. EncryptionSRTP currently
+	// returns [ErrEncryptionSRTPNotImplemented]; the field exists today
+	// so callers can wire the switch and so a future SRTP implementation
+	// plugs in without refactoring the API.
+	Encryption Encryption
 
 	// Logger receives diagnostic output. If nil, the default logger.
 	// The Source guarantees that the API key and the RTSPS URL never
@@ -127,6 +176,17 @@ func NewSource(opts Options) (*Source, error) {
 	if opts.Quality == "" {
 		opts.Quality = "high"
 	}
+	switch opts.Encryption {
+	case "":
+		opts.Encryption = EncryptionTLS
+	case EncryptionTLS:
+		// supported
+	case EncryptionSRTP:
+		return nil, ErrEncryptionSRTPNotImplemented
+	default:
+		return nil, fmt.Errorf("unifi: unknown Encryption value %q (expected %q or %q)",
+			opts.Encryption, EncryptionTLS, EncryptionSRTP)
+	}
 	if opts.FramesBuffer <= 0 {
 		opts.FramesBuffer = 4
 	}
@@ -165,6 +225,16 @@ func (s *Source) Start(ctx context.Context) error {
 		return fmt.Errorf("unifi: get RTSPS URL: %w", err)
 	}
 	s.opts.Logger.Printf("unifi: got RTSPS URL for camera %s (token redacted)", s.opts.CameraID)
+
+	// TLS mode: strip ?enableSrtp before handing the URL to gortsplib.
+	// The Protect API attaches the parameter unconditionally; without it
+	// UniFi delivers plain RTP inside the TLS tunnel (go2rtc rtspx://-
+	// equivalent path). This makes the depacketizer work against a stream
+	// our toolchain can decode end-to-end. See S1-07 for the trade-off.
+	if s.opts.Encryption == EncryptionTLS {
+		rtspURL = stripEnableSrtp(rtspURL)
+	}
+	s.opts.Logger.Printf("unifi: encryption mode=%s", s.opts.Encryption)
 
 	u, err := base.ParseURL(rtspURL)
 	if err != nil {
