@@ -1,21 +1,20 @@
-//go:build !carvilon_stream
-
-// Saison 15-07: public-build default for the commercialBackend
-// slot. The commercial build (-tags carvilon_stream) replaces
-// this file with main_carvilon_stream.go, which binds the
-// private carvilon-streaming-server to the StreamBackend seam.
+// Saison 15-07 + Nachtrag: shared commercialBackend slot. The
+// public build leaves the variable nil (Zero-Value). The commercial
+// build (-tags carvilon_stream) assigns it in
+// main_carvilon_stream.go to bind the private streaming-server.
 //
-// The two files use inverse build tags (carvilon_stream vs
-// !carvilon_stream) so commercialBackend is defined in exactly
-// one of them per build, never both, never zero.
+// This file is intentionally NOT build-tagged: the declaration must
+// be visible in BOTH builds, otherwise the commercial init() would
+// hit an undefined-variable error (it only assigns, it does not
+// re-declare).
 
 package main
 
 import "carvilon.local/server/internal/streams"
 
-// commercialBackend is nil in the public build; the commercial
-// build (-tags carvilon_stream) defines it in
-// main_carvilon_stream.go and binds the private streaming-
-// server. main() falls back to the transitional go2rtc client
-// (or streams.Unconfigured()) when this is nil.
-var commercialBackend streams.StreamBackend = nil
+// commercialBackend is nil in the public build. The commercial
+// build (-tags carvilon_stream) assigns it in
+// main_carvilon_stream.go to bind the private streaming-server.
+// main() reads this slot first and falls back to the transitional
+// go2rtc client / streams.Unconfigured() when it stays nil.
+var commercialBackend streams.StreamBackend
