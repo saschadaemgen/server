@@ -31,15 +31,31 @@ package streams
 // the eventual commercial UI renders. Today only Description is
 // shown to the operator in the minimal /a/streams list.
 //
+// Saison 15-07 (ADR-STREAM-01): the codec / dimension / fps /
+// encode-quality fields were added to mirror the carvilon-
+// streaming-server S6-01 profile model. The transitional
+// go2rtc client + Unconfigured default leave them at the zero
+// value; the commercial wrapper (build-tag carvilon_stream)
+// maps them to the private profile registry via
+// fromPrivateProfile / toPrivateProfile. Codec is one of
+// "h264_passthrough" / "mjpeg" / "h264_cbp"; Width / Height /
+// FPS apply to mjpeg + h264_cbp; EncodeQuality is the -q:v for
+// mjpeg or the CRF for h264_cbp.
+//
 // Consumers is the live count of clients currently pulling the
 // profile, useful for the admin UI ("3 active viewers"). The
 // go2rtc client fills it from /api/streams; the unconfigured
 // default leaves it zero.
 type Profile struct {
-	Name        string `json:"name"`
-	CameraID    string `json:"camera_id"`
-	Quality     string `json:"quality"`
-	Usage       string `json:"usage"`
-	Description string `json:"description"`
-	Consumers   int    `json:"consumers"`
+	Name          string `json:"name"`
+	CameraID      string `json:"camera_id"`
+	Quality       string `json:"quality"`
+	Usage         string `json:"usage"`
+	Description   string `json:"description"`
+	Codec         string `json:"codec"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	EncodeQuality int    `json:"encode_quality"`
+	Consumers     int    `json:"consumers"`
 }
