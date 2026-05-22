@@ -1,18 +1,17 @@
 // Package doorhistory owns the door_events table: writes when a
-// doorbell event arrives, updates when a cancel matches, reads for
-// the mieter and admin UIs.
+// doorbell event arrives, updates when a cancel matches, reads
+// for the mieter and admin UIs.
 //
-// Saison 13-01 introduces this table (migration 005) and connects
-// the doorbellhub to persist every start and cancel alongside the
-// SSE fan-out. Saison 14 will add the UA-webhook receiver as a
-// second writer (event_type "doorbell_unlocked", etc.); saison 16+
-// will populate the prev_hash / entry_hash columns for the
-// stempelkarten append-only audit chain. In saison 13 those
-// columns stay NULL.
+// The table was introduced by Migration 005, alongside the
+// doorbellhub wiring that persists every start and cancel next
+// to the SSE fan-out. A planned UA-webhook receiver will become
+// a second writer (event_type "doorbell_unlocked", etc.); a
+// future stempelkarten audit chain will populate the prev_hash
+// / entry_hash columns. Until then those columns stay NULL.
 //
 // The package exposes a Store interface so the doorbellhub and
-// HTTP handlers can be unit-tested against a fake without spinning
-// up SQLite.
+// HTTP handlers can be unit-tested against a fake without
+// spinning up SQLite.
 package doorhistory
 
 import (
@@ -25,8 +24,8 @@ import (
 )
 
 // Event type strings written to door_events.event_type. The list
-// is extended in later saisons (S13-03 adds doorbell_answered and
-// doorbell_ended; S16+ adds punch_in, punch_out, visitor_enter).
+// will grow with future event categories (planned: punch_in,
+// punch_out, visitor_enter for the stempelkarten audit chain).
 const (
 	TypeDoorbellStart    = "doorbell_start"
 	TypeDoorbellCancel   = "doorbell_cancel"
@@ -39,11 +38,11 @@ const (
 // not exposed here; if a future consumer needs it, the Store grows
 // a dedicated read method.
 //
-// Saison 14-04-Phase2: HiddenByViewer is set when a row is joined
-// against viewer_hidden_events for the calling mac (admin-side
-// read). HiddenAt is the corresponding hidden_at timestamp.
-// Mieter-side reads filter the row out entirely; only AdminListAll
-// surfaces the flag.
+// HiddenByViewer is set when a row is joined against
+// viewer_hidden_events for the calling mac (admin-side read).
+// HiddenAt is the corresponding hidden_at timestamp. Mieter-side
+// reads filter the row out entirely; only AdminListAll surfaces
+// the flag.
 type Event struct {
 	ID             int64
 	ViewerMAC      string
@@ -63,11 +62,11 @@ type Event struct {
 }
 
 // ListOpts bundles the pagination + date-range filter for the
-// saison-14-04-phase2 listing endpoints. Zero values default to
-// "no bound": Limit 0 falls back to 20, Offset 0 starts at the
-// newest row, From/To zero-time means no lower/upper cutoff.
-// Limit is clamped to ListOptsMaxLimit so a stray client cannot
-// pull the whole table in one request.
+// listing endpoints. Zero values default to "no bound": Limit 0
+// falls back to 20, Offset 0 starts at the newest row, From/To
+// zero-time means no lower/upper cutoff. Limit is clamped to
+// ListOptsMaxLimit so a stray client cannot pull the whole
+// table in one request.
 type ListOpts struct {
 	Limit  int
 	Offset int
@@ -106,12 +105,12 @@ type AdminStats struct {
 // Store is the doorhistory contract. Implementations live in this
 // package (sqlite) or in tests (memory fake).
 //
-// Saison 14-04-Phase2 adds the soft-delete + admin-hard-delete +
-// pagination contract. ListVisible is the mieter-side equivalent
-// of ListForMock that respects viewer_hidden_events; ListForMock
-// stays as the unfiltered legacy reader (used by handler_home.go
-// at server-render time, where the existing Variante-A mark-read
-// flow expects the full list).
+// Soft-delete + admin-hard-delete + pagination are part of the
+// contract. ListVisible is the mieter-side equivalent of
+// ListForMock that respects viewer_hidden_events; ListForMock
+// stays as the unfiltered reader (used by handler_home.go at
+// server-render time, where the existing mark-read flow expects
+// the full list).
 type Store interface {
 	Insert(ctx context.Context, ev Event, rawFrame []byte) (int64, error)
 	UpdateCancel(ctx context.Context, mockMAC, cancelToken string, cancelledAt time.Time) error
@@ -122,7 +121,7 @@ type Store interface {
 	UnreadCount(ctx context.Context, mockMAC string) (int, error)
 	CountSince(ctx context.Context, since time.Time) (int, error)
 	AggregateAdmin(ctx context.Context, now time.Time) (AdminStats, error)
-	// Saison 14-04-Phase2.
+	// Soft-delete + pagination + admin hard-delete.
 	HideEvent(ctx context.Context, mockMAC string, eventID int64) error
 	HideAllEvents(ctx context.Context, mockMAC string) (int, error)
 	ListVisible(ctx context.Context, mockMAC string, opts ListOpts) ([]Event, error)
@@ -249,9 +248,8 @@ func (s *SQLStore) MarkRead(ctx context.Context, mockMAC string, eventIDs []int6
 }
 
 // MarkAllRead sets read_at on every still-unread row for mockMAC.
-// Used by Variante B if the per-id approach turns out to be too
-// expensive; in saison 13 the mieter handler uses MarkRead with
-// the rendered list (Variante A).
+// Reserved for a future bulk variant; for now the mieter handler
+// uses MarkRead with the rendered list (per-id approach).
 func (s *SQLStore) MarkAllRead(ctx context.Context, mockMAC string, readAt time.Time) error {
 	if mockMAC == "" {
 		return nil
@@ -309,11 +307,10 @@ func (s *SQLStore) ListForMock(ctx context.Context, mockMAC string, limit int) (
 // Hot path (called on every /webviewer/ render); the LEFT JOIN +
 // partial index combination keeps this cheap.
 //
-// Saison 14-04-Phase2: vor diesem Patch zaehlte UnreadCount auch
-// hidden-Reihen; das war pre-Soft-Delete-Welt noch korrekt, aber
-// mit Mieter-Soft-Delete wuerde ein "Eintrag-Loeschen"-Klick den
-// Badge nicht runterziehen. Jetzt respektiert die Abfrage den
-// hidden-Marker.
+// Before mieter-soft-delete existed, UnreadCount also tallied
+// hidden rows. Once soft-delete landed, a tenant "Eintrag
+// loeschen" click had to also drop the badge counter, so the
+// query now respects the hidden marker.
 func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error) {
 	if mockMAC == "" {
 		return 0, nil
@@ -337,12 +334,12 @@ func (s *SQLStore) UnreadCount(ctx context.Context, mockMAC string) (int, error)
 
 // ListRecent returns up to limit most-recent doorbell_start
 // events across ALL viewers, newest first. Used by the admin
-// dashboard's global activity list (Saison 13-02-FIX4-a-HOTFIX3).
+// dashboard's global activity list.
 //
-// Saison 14-04-Phase2: filterMACs ist eine optionale Whitelist.
-// Nil oder leerer Slice -> alle Viewer (Verhalten wie vorher).
-// Mit Whitelist filtert die WHERE-Klausel auf
-// viewer_mac IN (...) - SQL-Injection-sicher per ?-placeholder.
+// filterMACs is an optional whitelist. nil or an empty slice
+// means "every viewer" (the original behaviour). With a
+// whitelist, the WHERE clause filters on viewer_mac IN (...) -
+// SQL-injection-safe through ?-placeholders.
 func (s *SQLStore) ListRecent(ctx context.Context, limit int, filterMACs ...string) ([]Event, error) {
 	if limit <= 0 {
 		limit = 20
@@ -385,9 +382,9 @@ func (s *SQLStore) ListRecent(ctx context.Context, limit int, filterMACs ...stri
 	return out, nil
 }
 
-// CountSince zaehlt doorbell_start-Eintraege mit occurred_at >=
-// since. Wird vom Dashboard fuer "Klingel-Events heute" und
-// "Klingel-Events 7 Tage" benutzt.
+// CountSince counts doorbell_start rows with occurred_at >=
+// since. Used by the dashboard for "Klingel-Events heute" and
+// "Klingel-Events 7 Tage".
 func (s *SQLStore) CountSince(ctx context.Context, since time.Time) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx,
@@ -522,7 +519,7 @@ func nullable(s string) any {
 	return s
 }
 
-// ---------- Saison 14-04-Phase2: soft-delete + pagination ----------
+// ---------- Soft-delete + pagination ----------
 
 // HideEvent records a mieter-soft-delete on a single door_events
 // row. Idempotent via ON CONFLICT - calling it twice for the same
@@ -636,7 +633,7 @@ func (s *SQLStore) ListVisible(ctx context.Context, mockMAC string, opts ListOpt
 // CountVisible returns the total number of door_events that
 // ListVisible would surface for the given opts (ignoring
 // Limit/Offset). Used by the mieter pagination logic to decide
-// whether to render the "Mehr laden"-button.
+// whether to render the "Mehr laden" button.
 func (s *SQLStore) CountVisible(ctx context.Context, mockMAC string, opts ListOpts) (int, error) {
 	if mockMAC == "" {
 		return 0, nil
@@ -715,7 +712,7 @@ func buildVisibleQuery(mockMAC string, opts ListOpts, limit, offset int) (string
 	return q, args
 }
 
-// ---------- Admin reads + hard-delete (Saison 14-04-Phase2) ----------
+// ---------- Admin reads + hard-delete ----------
 
 // AdminListAll returns the page-of-events for mockMAC as the
 // admin sees it: hidden rows are INCLUDED but flagged via
@@ -754,9 +751,9 @@ func (s *SQLStore) AdminListAll(ctx context.Context, mockMAC string, opts ListOp
 	if err := rows.Err(); err != nil {
 		return AdminListResult{}, fmt.Errorf("doorhistory: admin list rows: %w", err)
 	}
-	// Total + Hidden in einer einzigen Aggregat-Query. Filter
-	// (Date-Range) wird beruecksichtigt damit "84 Eintraege" sich
-	// auf das aktuell geladene Filter-Fenster bezieht.
+	// Total + Hidden in a single aggregate query. The date-range
+	// filter is honoured so that "84 Eintraege" refers to the
+	// currently loaded filter window.
 	total, hidden, err := s.adminCounts(ctx, mockMAC, opts)
 	if err != nil {
 		return AdminListResult{}, err
