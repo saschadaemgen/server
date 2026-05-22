@@ -13,26 +13,24 @@ import (
 	"carvilon.local/server/internal/platformconfig"
 )
 
-// viewerLoginPageData ist die Payload fuer das Login-Form.
-// Saison 13-02-FIX4-a-HOTFIX1: Pre-Fill via URL-Parameter ist
-// raus (Sicherheits-Anti-Pattern; Passwoerter sollen nicht in
-// Server-Logs / Browser-History / Referer landen).
+// viewerLoginPageData is the payload for the login form. Pre-fill
+// via URL parameters was removed (security anti-pattern; passwords
+// must not land in server logs, browser history or referer).
 type viewerLoginPageData struct {
 	Username     string
 	ErrorMessage string
 	Locked       bool
 }
 
-// handleLoginGet beantwortet GET /login (Saison 14-02; ersetzt
-// handleViewerRoot auf /einloggen).
+// handleLoginGet answers GET /login (the replacement for the
+// legacy /einloggen entry point).
 //
-// Mit gueltiger Session: 303 Redirect nach /webviewer/ - die URL-
-// Anzeige im Browser bleibt damit sauber (kein /login mit
-// gerendertem Home-Body).
-// Ohne Session: Login-Form anzeigen.
+// With a valid session: 303 redirect to /webviewer/ - the browser
+// URL stays clean (no /login with a rendered home body).
+// Without a session: render the login form.
 //
-// Saison 13-02-FIX4-a-HOTFIX1: ?u= und ?p= URL-Parameter werden
-// IGNORIERT (Pre-Fill via QR-Code wurde entfernt).
+// ?u= and ?p= URL parameters are IGNORED (the QR-code pre-fill
+// path was removed).
 func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	if sid := s.readSessionCookie(r); sid != "" {
 		if _, err := s.sessions.Validate(r.Context(), sid); err == nil {
@@ -43,22 +41,21 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 	s.renderViewerLogin(w, viewerLoginPageData{})
 }
 
-// handleViewerLoginPost validiert Username+Passwort, prueft den
-// Rate-Limiter und legt bei Erfolg eine viewer_session an.
+// handleViewerLoginPost validates username + password, checks the
+// rate limiter and creates a viewer_session on success.
 //
-// Saison 13-02-FIX4-a-HOTFIX1: strukturierte slog-Logs an jedem
-// Pfad, case-insensitive Username-Lookup (DB hat Username
-// lowercase, Mieter darf auch in MixedCase tippen), QR-Code-
-// Pre-Fill-Felder raus.
+// Structured slog logs on every path; the username lookup is
+// case-insensitive (DB stores lowercase, mieter may type in
+// MixedCase). The QR-code pre-fill fields are no longer accepted.
 func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
 		return
 	}
-	// Form-Field heisst weiter "username" (Browser-autofill nutzt
-	// das HTML-Attribut), aber inhaltlich ist es jetzt der
-	// Wohnungs-Name. Audit-Log und Limiter-Bucket nutzen den
-	// normalisierten Wert als stabilen Key.
+	// The form field is still named "username" (browser autofill
+	// keys off the HTML attribute) but its content is now the
+	// Wohnungs-Name. The audit log and limiter bucket use the
+	// normalised value as the stable key.
 	nameRaw := strings.TrimSpace(r.PostForm.Get("username"))
 	lookupKey := viewermanager.NormalizeName(nameRaw)
 	password := r.PostForm.Get("password")
@@ -149,9 +146,9 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	s.viewerLimiter.RegisterSuccess(lookupKey)
 
-	// Bestehende Session desselben Browsers wird verworfen, damit
-	// es keinen Doppel-Eintrag gibt. Andere Sessions des Viewers
-	// (Tablet im Flur, Handy in der Tasche) bleiben.
+	// Drop any existing session from the same browser so there is
+	// no duplicate entry. Other sessions of the same viewer
+	// (tablet in the hallway, phone in the pocket) stay.
 	if oldSID := s.readSessionCookie(r); oldSID != "" {
 		_ = s.sessions.Revoke(r.Context(), oldSID)
 	}
@@ -175,9 +172,9 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 		Outcome:   loginaudit.OutcomeSuccess,
 	})
 
-	// WICHTIG: Set-Cookie MUSS vor http.Redirect rausgehen, sonst
-	// schreibt Redirect zuerst WriteHeader und unsere Cookie-Header
-	// landen auf der falschen Seite des Status-Codes.
+	// IMPORTANT: Set-Cookie MUST go out before http.Redirect or
+	// the redirect writes the response status first and our
+	// cookie header ends up on the wrong side of the status code.
 	s.setSessionCookie(w, sid)
 	log.Info("granted",
 		"viewer_mac", info.MAC,
@@ -189,8 +186,8 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
 }
 
-// handleViewerLogout revokiert die Viewer-Session und loescht das
-// Cookie.
+// handleViewerLogout revokes the viewer session and clears the
+// cookie.
 func (s *Server) handleViewerLogout(w http.ResponseWriter, r *http.Request) {
 	if sid := s.readSessionCookie(r); sid != "" {
 		_ = s.sessions.Revoke(r.Context(), sid)
@@ -207,8 +204,8 @@ func (s *Server) renderViewerLogin(w http.ResponseWriter, data viewerLoginPageDa
 	}
 }
 
-// recordAudit ist ein Convenience-Wrapper der Audit-Fehler
-// nicht-fatal logged. Wenn der loginaudit-Service fehlt, no-op.
+// recordAudit is a convenience wrapper that logs audit errors
+// non-fatally. No-op when the loginaudit service is missing.
 func (s *Server) recordAudit(r *http.Request, e loginaudit.Entry) {
 	if s.audit == nil {
 		return
@@ -218,9 +215,9 @@ func (s *Server) recordAudit(r *http.Request, e loginaudit.Entry) {
 	}
 }
 
-// sidPrefix gibt die ersten 8 Zeichen einer Session-ID zurueck;
-// reicht fuer ein Log-Korrelations-Token ohne die volle ID zu
-// leaken.
+// sidPrefix returns the first 8 characters of a session ID;
+// enough for a log correlation token without leaking the full
+// ID.
 func sidPrefix(sid string) string {
 	if len(sid) < 8 {
 		return sid
