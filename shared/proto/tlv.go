@@ -2,9 +2,9 @@ package proto
 
 import "fmt"
 
-// TLV types in discovery response payloads (saison 7).
-// All values from CreateDeviceFromDiscoveryMessage disassembly and
-// live capture verification.
+// TLV types in discovery response payloads.
+// All values come from CreateDeviceFromDiscoveryMessage
+// disassembly plus live-capture verification.
 
 const (
 	TLVTypeMAC           uint8 = 0x21 // UTF-8 string of MAC hex without colons (12 bytes ASCII)
@@ -14,7 +14,7 @@ const (
 	TLVTypeName          uint8 = 0x0b // device display name
 	TLVTypeModel         uint8 = 0x15 // ASCII model code
 	TLVTypeAppVersion    uint8 = 0x16 // ASCII app version
-	TLVTypeReady         uint8 = 0x17 // single byte, 0x01 = ready (pcap-verified saison 9)
+	TLVTypeReady         uint8 = 0x17 // single byte, 0x01 = ready (pcap-verified)
 	TLVTypeServicePort   uint8 = 0x24 // 4-byte BE service port
 	TLVTypeTimestamp1    uint8 = 0x27 // 4 zero bytes + 4-byte BE unix timestamp
 	TLVTypeEmpty28       uint8 = 0x28 // empty value

@@ -1,9 +1,9 @@
-// Package proto encodes the saison 1-9 reverse-engineering findings
-// for the UniFi Access wire format: discovery TLVs, MQTT topics,
-// WebSocket endpoint, and the protobuf-like RPC wire format.
+// Package proto encodes the reverse-engineered UniFi Access wire
+// format: discovery TLVs, MQTT topics, WebSocket endpoint, and
+// the protobuf-like RPC wire format.
 package proto
 
-// Discovery protocol constants from saison 7 world-first documentation.
+// Discovery protocol constants.
 //
 // UDM probes devices via multicast 233.89.188.1:10001 and
 // limited broadcast 255.255.255.255:10001 every 10 seconds with a

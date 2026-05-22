@@ -6,15 +6,15 @@ import (
 	"fmt"
 )
 
-// RPC wire format (saison 8 reverse engineering, protobuf-like).
+// RPC wire format, reverse-engineered, protobuf-like.
 //
-// Responses produced by the mock keep the saison-9 outer wrapper:
+// Responses produced by the mock keep the original outer wrapper:
 //   0x12 + varint(body_length) + body
 //
-// UDM-side REQUESTS observed in saison 10 (live capture of
-// /update_tokens, /remote_view, /cancel_doorbell_notification)
-// arrive WITHOUT the outer wrapper. The whole frame is the body,
-// starting directly with the first map-entry tag 0x0a.
+// UDM-side REQUESTS observed in live captures (/update_tokens,
+// /remote_view, /cancel_doorbell_notification) arrive WITHOUT the
+// outer wrapper. The whole frame is the body, starting directly
+// with the first map-entry tag 0x0a.
 //
 // Body map entry:   0x0a + length-delim + entry
 // Entry:            0x0a + len + key + 0x12 + len + value
@@ -23,10 +23,10 @@ import (
 // emits the outer wrapper because UDM accepts that form for
 // responses and we have no reason to change a working encoder.
 
-// Wire-level key strings used inside the body map. Saison 9 did not
-// pin these down via live capture; the values below are placeholders
-// that round-trip cleanly through the helpers below. Adjust if a
-// future capture reveals different keys.
+// Wire-level key strings used inside the body map. These were
+// never pinned down via live capture; the values below are
+// placeholders that round-trip cleanly through the helpers below.
+// Adjust if a future capture reveals different keys.
 const (
 	rpcKeyPath      = "path"
 	rpcKeyRequestID = "requestId"
@@ -95,9 +95,9 @@ func DecodeRPCRequest(data []byte) (*RPCRequest, error) {
 // decodeRequestBody walks the leading 0x0a map-entry blocks and
 // pulls out path + request id. Anything past the first non-map-
 // entry tag is ignored: real UDM requests carry additional fields
-// (0x12 sub-message with tokens, settings, intercom list) that the
-// saison-10/11 mock does not need to introspect, only forward as
-// Raw for higher-level handlers.
+// (0x12 sub-message with tokens, settings, intercom list) that
+// the mock does not need to introspect, only forward as Raw for
+// higher-level handlers.
 func decodeRequestBody(body, raw []byte) (*RPCRequest, error) {
 	req := &RPCRequest{Raw: append([]byte(nil), raw...)}
 	for len(body) > 0 {
@@ -153,18 +153,18 @@ func decodeMapEntry(entry []byte) (key, value string, err error) {
 //
 // Two passes run over the body:
 //
-//  1. The S11-03 strict-map-entry walker harvests every
-//     length-delimited field whose payload looks like
+//  1. A strict-map-entry walker harvests every length-delimited
+//     field whose payload looks like
 //     0x0a+len+key+0x12+len+value into the top-level out map.
 //     This catches path, requestId (top-level), and any nested
-//     config strings (saison-10 bundle d2-01-tagged entries).
+//     config strings (d2-01-tagged bundle entries).
 //
-//  2. The S11-04 inner-submessage extractor finds the first
-//     top-level wire-type-2 field whose payload is NOT a strict
-//     map-entry, decodes it as standard protobuf with numbered
-//     fields, and stores the result under out["_submessage"].
-//     This exposes /remote_view's UUID, MAC, room-id fields by
-//     their wire field numbers (field_1, field_5, field_9 ...).
+//  2. An inner-submessage extractor finds the first top-level
+//     wire-type-2 field whose payload is NOT a strict map-entry,
+//     decodes it as standard protobuf with numbered fields, and
+//     stores the result under out["_submessage"]. This exposes
+//     /remote_view's UUID, MAC, room-id fields by their wire
+//     field numbers (field_1, field_5, field_9 ...).
 //
 // Outer wrapper (0x12+varint) is skipped if present. Best-effort:
 // returns the partial map even on truncated or malformed input.

@@ -1,6 +1,6 @@
 package proto
 
-// MQTT broker endpoint (saison 8 + 9).
+// MQTT broker endpoint.
 const (
 	MQTTBrokerScheme = "tls" // UDM uses "tls://" prefix in broker_address
 	MQTTBrokerPort   = 12812
@@ -14,7 +14,8 @@ const (
 	MQTTTopicHeartbeat       = "/uctrl/%s/device/%s/stat"
 )
 
-// RPC method paths sent by UDM to device (saison 9 live capture).
+// RPC method paths sent by UDM to device, observed in live MQTT
+// captures.
 const (
 	RPCMethodUpdateTokens               = "/update_tokens"
 	RPCMethodUpdateConfigs              = "/update_configs"
@@ -22,8 +23,13 @@ const (
 	RPCMethodCancelDoorbellNotification = "/cancel_doorbell_notification"
 )
 
-// RPC method paths sent by device to UDM (saison 9 hypothesized,
-// not yet live-verified).
+// UNVERIFIED: hypothetical method names that have NEVER been
+// observed on the wire. They were proposed as plausible
+// "device -> UDM" paths during early reverse engineering and
+// kept around for orientation, but the real unlock path lives in
+// the relay flow (see relay-related code in the mock package).
+// Do NOT rely on these values for production wiring; treat them
+// as TODO markers until a live capture confirms the schema.
 const (
 	RPCMethodUnlock         = "/unlock"
 	RPCMethodImageCapture   = "/image/capture"
