@@ -1,26 +1,24 @@
-// Saison 14-XX: POST /esp/settings.
+// POST /esp/settings.
 //
-// ESP-Geraet kann seine persistierten Settings aktualisieren -
-// idle_view_mode, auto_screensaver_seconds, screen_off_after_sec,
-// brightness_idle, language. Alle Felder optional (Partial-
-// Update); jedes vorhandene Feld wird strict gegen die Allow-
-// Liste in viewermanager geprueft, applied = nur die tatsaechlich
-// gesetzten Felder.
+// The ESP device updates its persisted settings - idle_view_mode,
+// auto_screensaver_seconds, screen_off_after_sec, brightness_idle,
+// language. All fields are optional (partial update); each
+// present field is strictly checked against the allow-list in
+// viewermanager, applied = only the fields that actually changed.
 //
-// Auth: requireESPBearer. MAC kommt aus dem Bearer-Context.
+// Auth: requireESPBearer. The MAC comes from the bearer context.
 //
-// Response: { ok: true, applied: { ...nur geaenderte Felder } }
+// Response: { ok: true, applied: { ...only changed fields } }
 //
-// Triggert doorbellhub.BroadcastConfigChanged damit Mieter-
-// Browser (auf demselben viewer_mac via /webviewer/events) und
-// andere ESP-Geraete (via /esp/events) ihre Config neu holen.
+// Triggers doorbellhub.BroadcastConfigChanged so mieter browsers
+// (on the same viewer_mac via /webviewer/events) and other ESP
+// devices (via /esp/events) refetch their config.
 //
-// Saison 14-04-Phase2-FIX06: history_capture (boolean) kommt
-// dazu. Toggle den Datenschutz-Schalter fuer die Verlauf-Liste
-// (deaktiviert blendet die Mieter-/ESP-API leer, der Server-
-// Audit-Trail bleibt intakt; Admin sieht weiter alles). Boolean
-// statt Allow-Liste; bei false UND true wird config.changed
-// broadcastet.
+// history_capture (boolean) is the privacy toggle for the history
+// list (when off, the mieter / ESP API returns an empty list,
+// but the server audit trail stays intact; the admin still sees
+// everything). It is a boolean instead of an allow-list; both
+// false AND true trigger a config.changed broadcast.
 package httpserver
 
 import (
@@ -159,10 +157,10 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 		applied["clock_layout"] = v
 	}
 
-	// Saison 14-04-Phase2-FIX06: Datenschutz-Toggle. Boolean,
-	// keine Allow-Liste. SetHistoryCaptureEnabled persistiert,
-	// danach loest config.changed im SSE-Block den Refetch in
-	// allen Tabs + auf der ESP-Hardware aus.
+	// Privacy toggle. Boolean, no allow-list.
+	// SetHistoryCaptureEnabled persists; config.changed in the
+	// SSE block then triggers the refetch in all tabs + on the
+	// ESP hardware.
 	if body.HistoryCapture != nil {
 		v := *body.HistoryCapture
 		if err := s.viewerMgr.SetHistoryCaptureEnabled(r.Context(), mac, v); err != nil {
@@ -172,9 +170,9 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 		applied["history_capture"] = v
 	}
 
-	// Broadcast config.changed sobald mindestens ein Feld
-	// tatsaechlich gesetzt wurde. Leerer POST (kein Feld in body)
-	// triggert keinen Broadcast - das waere ein No-Op-Event.
+	// Broadcast config.changed as soon as at least one field was
+	// actually set. An empty POST (no field in the body) does
+	// not trigger a broadcast - that would be a no-op event.
 	if len(applied) > 0 && s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
@@ -186,8 +184,8 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// respondSettingsErr maps viewermanager errors to deutsche
-// 400/404/500-Responses und logged den vollen Fehler.
+// respondSettingsErr maps viewermanager errors to German
+// 400/404/500 responses and logs the full error.
 func (s *Server) respondSettingsErr(w http.ResponseWriter, mac, field string, err error) {
 	if errors.Is(err, viewermanager.ErrViewerNotFound) {
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
