@@ -20,13 +20,6 @@ func ViewerMACFromContext(ctx context.Context) string {
 	return v
 }
 
-// MockMACFromContext is the legacy alias for ViewerMACFromContext.
-// Deprecated: use ViewerMACFromContext. The vocabulary swap left
-// the routing semantics unchanged.
-func MockMACFromContext(ctx context.Context) string {
-	return ViewerMACFromContext(ctx)
-}
-
 // requireSession is the auth middleware for /webviewer/ routes
 // other than the login endpoints. It reads the session cookie,
 // validates it (which also performs rolling renewal), and

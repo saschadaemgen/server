@@ -17,18 +17,18 @@ const defaultEventsHeartbeat = 30 * time.Second
 
 // handleMieterEvents holds a long-lived SSE connection for one
 // tenant browser. It registers a doorbellhub subscriber for the
-// session's mock_mac and streams events as they arrive.
+// session's viewer_mac and streams events as they arrive.
 //
 // The handler returns on client disconnect (r.Context().Done)
 // or server shutdown. The defer cleanup() releases the hub
 // subscription and closes the events channel so no goroutine
 // leaks behind the listener.
 //
-// Subscriptions are keyed by mock_mac, matching the mock-centric
-// routing model.
+// Subscriptions are keyed by viewer_mac, matching the viewer-
+// centric routing model.
 func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
-	mockMAC := MockMACFromContext(r.Context())
-	if mockMAC == "" {
+	viewerMAC := ViewerMACFromContext(r.Context())
+	if viewerMAC == "" {
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
@@ -50,7 +50,7 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	sub, cleanup := s.hub.Subscribe(mockMAC)
+	sub, cleanup := s.hub.Subscribe(viewerMAC)
 	defer cleanup()
 
 	// Initial comment so the browser onopen fires immediately.
@@ -86,16 +86,16 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeSSEEvent emits one SSE record per the design-library
-// contract:
+// writeSSEEvent emits one SSE record in the shape the tenant
+// client expects:
 //
 //	event: doorbell_start
 //	data:  { "door": "Hauseingang", "ts": "2026-05-13T23:36:14Z" }
 //
-// The hub's richer Event struct (MockMAC, RequestID, RoomID...)
-// is shrunk to the two fields the library client expects. We
-// also keep the legacy fields available under nested "raw" so
-// future frontends can opt in without a hub change.
+// The hub's richer Event struct (ViewerMAC, RequestID, RoomID...)
+// is shrunk to the two fields the client cares about. The
+// legacy fields stay available under nested "raw" so future
+// frontends can opt in without a hub change.
 //
 // TypeUnreadCount frames use a dedicated minimal payload
 // {"count": N} so the screensaver badge does not have to dig
@@ -130,7 +130,7 @@ func writeSSEEvent(w http.ResponseWriter, ev doorbellhub.Event) error {
 
 // doorNameFor maps the doorbellhub Event onto a human door label
 // for the SSE payload. The hub does not yet carry a door name
-// (mock_mac is the routing key), so for now we surface the
+// (viewer_mac is the routing key), so for now we surface the
 // device MAC when present and fall back to "Hauseingang".
 func doorNameFor(ev doorbellhub.Event) string {
 	if ev.DeviceID != "" {
