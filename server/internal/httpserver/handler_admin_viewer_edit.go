@@ -1,15 +1,14 @@
-// Saison 14-04-Phase2-FIX02: Admin-Inline-Edit-Endpoints fuer
-// die Detail-Seite. Vier Endpoints, alle JSON-only, alle
-// requireAdminSession-gated:
+// Admin inline-edit endpoints for the per-viewer detail page.
+// Four endpoints, all JSON-only, all requireAdminSession-gated:
 //
 //	POST /a/viewers/{mac}/stammdaten
 //	POST /a/viewers/{mac}/settings
 //	POST /a/viewers/{mac}/password
 //	POST /a/viewers/{mac}/regenerate-token
 //
-// Die ersten beiden triggern doorbellhub.BroadcastConfigChanged
-// damit Mieter-Browser ihre Config neu holen (Multi-Device-Sync
-// wie bei /webviewer/settings).
+// The first two trigger doorbellhub.BroadcastConfigChanged so
+// tenant browsers refetch their config (multi-device sync,
+// matching /webviewer/settings).
 package httpserver
 
 import (
@@ -25,11 +24,11 @@ import (
 	"carvilon.local/server/internal/viewermanager"
 )
 
-// adminViewerStammdatenRequest ist der JSON-Body fuer
-// /a/viewers/{mac}/stammdaten. Alle Felder optional - der
-// Handler patcht nur was im Body steht. Strings werden getrimmt.
-// Empty-String an einem Feld setzt das Feld auf "leer" (NULL in
-// der DB); zum Nicht-Anfassen das Feld ganz weglassen.
+// adminViewerStammdatenRequest is the JSON body for
+// /a/viewers/{mac}/stammdaten. All fields are optional - the
+// handler only patches what is present in the body. Strings are
+// trimmed. An empty-string value clears the field (NULL in the
+// DB); to leave a field untouched, omit it entirely.
 type adminViewerStammdatenRequest struct {
 	Name              *string `json:"name,omitempty"`
 	PairedIntercomMAC *string `json:"paired_intercom_mac,omitempty"`
@@ -37,10 +36,10 @@ type adminViewerStammdatenRequest struct {
 	LinkedUAUserID    *string `json:"linked_ua_user_id,omitempty"`
 }
 
-// handleAdminViewerStammdaten setzt Name + Paired-Intercom +
-// Stream-Profil + UA-User-Verknuepfung auf einem Viewer.
-// Validierung pro Feld; broadcastet config.changed nur wenn min.
-// ein Feld tatsaechlich geaendert wurde.
+// handleAdminViewerStammdaten sets name + paired intercom +
+// stream profile + UA-user link on a viewer. Validation is
+// per-field; config.changed is broadcast only when at least one
+// field actually changed.
 func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Request) {
 	mac, ok := parseMACPathValue(w, r)
 	if !ok {
@@ -127,8 +126,8 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
 
-	// Frische Info zurueck liefern damit das UI ohne extra GET
-	// die neuen Werte sieht.
+	// Return the fresh info so the UI sees the new values without
+	// an extra GET round-trip.
 	fresh, _ := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -138,10 +137,10 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// adminViewerSettingsRequest ist der JSON-Body fuer
-// /a/viewers/{mac}/settings. Strikt identisch zu /esp/settings
-// vom Vokabular, plus history_capture. ESP-spezifische Felder
-// sind nur bei type='esp' erlaubt - sonst 400.
+// adminViewerSettingsRequest is the JSON body for
+// /a/viewers/{mac}/settings. Vocabulary is strictly identical to
+// /esp/settings, plus history_capture. ESP-specific fields are
+// only allowed for type='esp' - otherwise 400.
 type adminViewerSettingsRequest struct {
 	IdleViewMode           *string `json:"idle_view_mode,omitempty"`
 	AutoScreensaverSeconds *int    `json:"auto_screensaver_seconds,omitempty"`
@@ -152,10 +151,11 @@ type adminViewerSettingsRequest struct {
 	Language               *string `json:"language,omitempty"`
 }
 
-// handleAdminViewerSettings ist die Auto-Save-Senke fuer alle
-// Settings-Felder. Mieter-Settings (idle/auto-screensaver/history-
-// capture) gelten fuer beide Viewer-Typen; ESP-Settings (screen-
-// off/brightness/language) sind nur bei type='esp' erlaubt.
+// handleAdminViewerSettings is the auto-save sink for every
+// settings field. Tenant-side settings (idle / auto-screensaver
+// / history-capture) apply to both viewer types; ESP-side
+// settings (screen-off / brightness / language) are only
+// accepted for type='esp'.
 func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Request) {
 	mac, ok := parseMACPathValue(w, r)
 	if !ok {
@@ -188,11 +188,11 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 				http.StatusBadRequest)
 			return
 		}
-		// screen_off ist ein ESP-Hardware-Konzept - bei Web-Viewer
-		// erlauben wir es zwar als pass-through (S14-XX-Vertrag,
-		// Browser rendert wie screensaver), aber der Admin-Edit
-		// im Web-Tab sollte das nicht setzen. Trotzdem akzeptieren
-		// damit Sync-Pfad (admin <-> ESP) symmetrisch bleibt.
+		// screen_off is an ESP-hardware concept. For web viewers
+		// we still accept it as a pass-through (the browser
+		// renders it identical to screensaver), even though the
+		// admin web tab should not normally set it. Accepting
+		// the value keeps the admin <-> ESP sync path symmetric.
 		if err := s.viewerMgr.SetIdleViewMode(r.Context(), mac, v); err != nil {
 			s.respondSettingsErr(w, mac, "idle_view_mode", err)
 			return
@@ -239,7 +239,7 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 		applied["clock_layout"] = v
 	}
 
-	// ESP-only Felder. type='web' -> 400 mit klarem Hinweis.
+	// ESP-only fields. type='web' -> 400 with a clear message.
 	if body.ScreenOffAfterSec != nil {
 		if !isESP {
 			http.Error(w, "screen_off_after_sec ist nur fuer ESP-Viewer", http.StatusBadRequest)
@@ -305,16 +305,16 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// adminViewerPasswordRequest ist der JSON-Body fuer
-// /a/viewers/{mac}/password. Nur Web-Viewer haben Passwoerter;
-// ESP-Viewer benutzen Bearer-Token (siehe regenerate-token).
+// adminViewerPasswordRequest is the JSON body for
+// /a/viewers/{mac}/password. Only web viewers carry passwords;
+// ESP viewers use bearer tokens (see regenerate-token).
 type adminViewerPasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
-// handleAdminViewerPassword setzt ein neues Passwort auf einem
-// Web-Viewer. Mindestens 8 Zeichen; bestehende Sessions werden
-// invalidiert. ESP-Viewer (kein Passwort-Konzept) liefern 400.
+// handleAdminViewerPassword sets a new password on a web viewer.
+// Minimum 8 characters; existing sessions are revoked. ESP
+// viewers (no password concept) get 400.
 func (s *Server) handleAdminViewerPassword(w http.ResponseWriter, r *http.Request) {
 	mac, ok := parseMACPathValue(w, r)
 	if !ok {
@@ -359,26 +359,25 @@ func (s *Server) handleAdminViewerPassword(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// adminViewerTokenResponse ist die Antwort von
-// /a/viewers/{mac}/regenerate-token. Der frische Klartext-Token
-// wird EINMALIG in der Response geliefert; eine zweite Abfrage
-// liefert den Token nicht erneut. Briefing 9: "Token einmalig
-// im Klartext sichtbar, kann NICHT erneut angezeigt werden".
+// adminViewerTokenResponse is the response from
+// /a/viewers/{mac}/regenerate-token. The fresh clear-text token
+// is returned ONCE; a second call does not surface the token
+// again. The contract is one-shot reveal: token visible once in
+// clear, never re-shown.
 type adminViewerTokenResponse struct {
 	OK        bool   `json:"ok"`
 	NewToken  string `json:"new_token"`
 	MAC       string `json:"mac"`
 }
 
-// handleAdminViewerRegenerateToken erzeugt einen frischen Bearer-
-// Token fuer einen ESP-Viewer und gibt den Klartext einmalig
-// zurueck. Der existierende handleAdminESPViewersRegenerateToken
-// liefert nur einen Preview + parkt den Token in
-// esp_pending_devices fuer den ESP-Pickup; das Phase2-FIX02-Briefing
-// verlangt den vollen Klartext-Return zur direkten Admin-Anzeige.
-// Beide Pfade leben friedlich nebeneinander: dieser hier zeigt
-// dem Admin den Wert, der bestehende Handoff-Slot bleibt fuer den
-// ESP-Status-Poll bestehen.
+// handleAdminViewerRegenerateToken creates a fresh bearer token
+// for an ESP viewer and returns the clear-text value once. The
+// existing handleAdminESPViewersRegenerateToken only returns a
+// preview and parks the token in esp_pending_devices for the
+// ESP pickup; this endpoint returns the full clear-text so the
+// admin UI can show it directly. Both paths coexist: this one
+// hands the value to the admin, the older handoff slot stays
+// available for the ESP status poll.
 func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http.Request) {
 	mac, ok := parseMACPathValue(w, r)
 	if !ok {
@@ -409,10 +408,10 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 		http.Error(w, "Token-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Auch in pending-Handoff parken damit ein neuer Status-Poll
-	// von einem (noch nicht updateten) ESP den Token automatisch
-	// uebernimmt. Parallelbetrieb zum klassischen
-	// /a/esp-viewers/{mac}/regenerate-token.
+	// Also park the token in the pending-handoff slot so a fresh
+	// status poll from a not-yet-updated ESP can pick it up
+	// automatically. Runs in parallel to the classic
+	// /a/esp-viewers/{mac}/regenerate-token path.
 	s.parkTokenForHandoff(r.Context(), mac, clearText)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -472,8 +471,8 @@ func adminViewerJSON(info *viewermanager.ViewerInfo) map[string]any {
 	}
 }
 
-// respondStammdatenErr wandelt viewermanager-Fehler in deutsche
-// 4xx/500-Responses. Pendant zu respondSettingsErr.
+// respondStammdatenErr maps viewermanager errors to the German
+// 4xx/500 responses. Mirrors respondSettingsErr.
 func (s *Server) respondStammdatenErr(w http.ResponseWriter, mac, field string, err error) {
 	if errors.Is(err, viewermanager.ErrViewerNotFound) {
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
