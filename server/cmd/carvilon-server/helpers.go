@@ -1,7 +1,9 @@
-// Saison 15-07-Nachtrag: shared helpers visible to both builds
-// (public + commercial). main_carvilon_stream.go calls these from
-// its init(); the public build links them but never invokes them
-// (the commercial init() does not run without the build tag).
+// Shared helpers visible to both builds (public + commercial).
+// They are only invoked from the commercial init() in
+// main_carvilon_stream.go (build tag carvilon_stream); the
+// public build links them in but never calls them, so a reader
+// who spots them in `go build ./...` should NOT mistake them
+// for dead code.
 
 package main
 

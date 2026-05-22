@@ -18,8 +18,9 @@ import (
 	"carvilon.local/shared/proto"
 )
 
-// JWTHMACSecret is the HS256 secret extracted from the UDM service
-// in saison 8 via heap inspection. The value is the literal UUID
+// JWTHMACSecret is the HS256 secret extracted from the UDM
+// unifi-access service via heap inspection (documented in the
+// reverse-engineering archive). The value is the literal UUID
 // string bytes, not a binary derivation.
 const JWTHMACSecret = "fce4a199-45e7-4265-9d3b-d815604921e4"
 
