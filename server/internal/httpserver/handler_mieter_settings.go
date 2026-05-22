@@ -1,14 +1,12 @@
-// Saison 14-01b: tenant-facing settings page.
-// Saison 14-02 renamed the URL tree from /einloggen/* to
-// /webviewer/*.
-// Saison 14-03 extends POST with the auto-screensaver field
-// and switches the success path to JSON when the request asks
-// for it (the inline-settings mode in the home page consumes
-// JSON; the stand-alone /webviewer/settings page keeps the
-// 303 redirect).
-// Saison 14-03-FIX03 Sub-1a: canonical seconds-field name is
-// `auto_screensaver_seconds`; the previous `auto_screensaver`
-// remains accepted as a legacy alias.
+// Tenant-facing settings page. POST persists idle_view_mode +
+// auto_screensaver_seconds and switches the success path to JSON
+// when the request asks for it (the inline-settings mode in the
+// home page consumes JSON; the stand-alone /webviewer/settings
+// page keeps the 303 redirect).
+//
+// The canonical seconds-field name is `auto_screensaver_seconds`;
+// the previous `auto_screensaver` remains accepted as a legacy
+// alias.
 //
 // Routes:
 //
@@ -38,17 +36,16 @@ import (
 
 // mieterSettingsData is the payload for templates/viewer/settings.html.
 //
-// Saison 14-04-Phase2: HistoryCaptureEnabled hydrates the new
-// radio-group "Verlauf-Erfassung" in the inline settings mode and
-// the standalone /webviewer/settings page.
-// Saison 14-04-Phase2-FIX05: ClockLayout fuer die Uhr-Anzeige-
-// Praeferenz (vertical / horizontal).
+// HistoryCaptureEnabled hydrates the "Verlauf-Erfassung" radio
+// group in the inline settings mode and the standalone
+// /webviewer/settings page. ClockLayout carries the clock-display
+// preference (vertical / horizontal).
 type mieterSettingsData struct {
 	UnitName               string
 	IdleViewMode           string // "screensaver" or "livestream"
 	AutoScreensaverSeconds int    // 0 = off, otherwise one of AutoScreensaverSecondsAllowed
-	HistoryCaptureEnabled  bool   // true = Mieter sieht Verlauf
-	ClockLayout            string // "vertical" oder "horizontal"
+	HistoryCaptureEnabled  bool   // true = mieter sees the history
+	ClockLayout            string // "vertical" or "horizontal"
 	Flash                  string
 	FlashType              string
 }
@@ -83,12 +80,12 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		viewermanager.IdleViewModeScreensaver,
 		viewermanager.IdleViewModeLivestream,
 		viewermanager.IdleViewModeScreenOff:
-		// Saison 14-XX: 'screen_off' wird vom Web-Viewer akzeptiert,
-		// aber im UI nicht als Auswahl angeboten - die Browser-Runtime
-		// rendert ihn identisch zu 'screensaver'. Akzeptiert wird er
-		// trotzdem damit eine ESP-Cross-Device-Aenderung (Mieter setzt
-		// am ESP screen_off, Web-Browser zieht via config.changed
-		// nach) keine 400 produziert.
+		// 'screen_off' is accepted by the web viewer but not
+		// offered in its UI - the browser runtime renders it
+		// identically to 'screensaver'. We still accept it so an
+		// ESP-side change (mieter sets screen_off on the ESP,
+		// web browser pulls in via config.changed) does not
+		// produce a 400.
 	default:
 		http.Error(w,
 			"idle_view_mode muss 'screensaver', 'livestream' oder 'screen_off' sein",
@@ -96,10 +93,9 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Saison 14-03 + 14-03-FIX03 Sub-1a: auto-screensaver.
-	// Canonical form field is `auto_screensaver_seconds` (matches
-	// the DB column and the JSON response key). The shorter
-	// `auto_screensaver` alias from the FIX02 implementation
+	// Auto-screensaver. The canonical form field is
+	// `auto_screensaver_seconds` (matches the DB column and the
+	// JSON response key). The shorter `auto_screensaver` alias
 	// stays accepted as a legacy fallback so any in-flight
 	// inline-settings JS still sending the old name keeps working
 	// through a browser-cache cycle.
@@ -151,8 +147,8 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Saison 14-04-Phase2-FIX05 clock_layout. Akzeptiert die zwei
-	// Allow-List-Werte; fehlend = unveraendert.
+	// clock_layout. Accepts the two allow-list values; missing =
+	// unchanged.
 	var clockLayoutApplied *string
 	if raw, present := r.PostForm["clock_layout"]; present && len(raw) > 0 && raw[0] != "" {
 		v := strings.TrimSpace(raw[0])
@@ -172,9 +168,9 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		clockLayoutApplied = &v
 	}
 
-	// Saison 14-04-Phase2: history_capture toggle. Akzeptiert "1"
-	// und "0" als string-Form-Werte (HTML radio-input liefert
-	// genau das). Fehlend = unveraendert, ungueltig = 400.
+	// history_capture toggle. Accepts "1" and "0" as string form
+	// values (the HTML radio input delivers exactly that).
+	// Missing = unchanged, invalid = 400.
 	var captureApplied *bool
 	if raw, present := r.PostForm["history_capture"]; present && len(raw) > 0 && raw[0] != "" {
 		switch strings.TrimSpace(raw[0]) {
@@ -212,10 +208,10 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Saison 14-XX: config.changed broadcasten damit andere Tabs /
-	// Browser-Sessions auf demselben viewer_mac und (sobald gepaart)
-	// ESP-Geraete ihre Config neu holen. Filter ist pro viewer_mac,
-	// kein Cross-Tenant-Leak.
+	// Broadcast config.changed so other tabs / browser sessions
+	// on the same viewer_mac and (once paired) ESP devices
+	// refetch their config. The filter is per viewer_mac, so no
+	// cross-tenant leak.
 	if s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
@@ -243,10 +239,8 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 
 // pickAutoScreensaverField returns the first non-empty value
 // from the canonical `auto_screensaver_seconds` form key or the
-// FIX02-era `auto_screensaver` alias. Returns "" if neither is
+// legacy `auto_screensaver` alias. Returns "" if neither is
 // present, signaling "keep the previously-persisted value".
-//
-// Saison 14-03-FIX03 Sub-1a.
 func pickAutoScreensaverField(form map[string][]string) string {
 	if raw, present := form["auto_screensaver_seconds"]; present && len(raw) > 0 && raw[0] != "" {
 		return raw[0]
