@@ -1,10 +1,10 @@
-// Saison 14-03: JSON endpoint behind the inline-history mode of
-// the home page. Returns the most-recent doorbell events for the
-// authenticated viewer and asynchronously marks the unread rows
-// as read - the client already received them once via this
-// payload, so subsequent opens see them as read.
+// JSON endpoint behind the inline-history mode of the home page.
+// Returns the most-recent doorbell events for the authenticated
+// viewer and asynchronously marks the unread rows as read - the
+// client already received them once via this payload, so
+// subsequent opens see them as read.
 //
-// Saison 14-04-Phase2 extends the endpoint with three things:
+// The endpoint supports:
 //
 //  1. Pagination via ?offset=...&limit=... (limit clamped to 50)
 //  2. Date-filter via ?from=YYYY-MM-DD&to=YYYY-MM-DD (inclusive)
@@ -17,12 +17,12 @@
 // Auth:  Mieter-Session-Cookie. MAC comes from the context.
 // Body:  see mieterHistoryResponse.
 //
-// Saison 14-04-Phase2-FIX06: the actual list/hide logic moved to
-// MAC-parametrised serveHistory* helpers so the ESP-Bearer-tree
-// (/esp/history*) can reuse them. The Mieter wrappers below just
-// pull the MAC from the session context and delegate; the ESP
-// wrappers in handler_esp_history.go pull from the bearer context.
-// Shared validation lives in parseHistoryListOpts so both surfaces
+// The actual list/hide logic lives in MAC-parametrised
+// serveHistory* helpers so the ESP-Bearer-tree (/esp/history*)
+// can reuse them. The Mieter wrappers below just pull the MAC
+// from the session context and delegate; the ESP wrappers in
+// handler_esp_history.go pull from the bearer context. Shared
+// validation lives in parseHistoryListOpts so both surfaces
 // reject identical bogus offset/limit/from/to inputs.
 package httpserver
 
@@ -43,7 +43,7 @@ import (
 // "events" key (never nil) so the client can render an empty list
 // without a null-check.
 //
-// Saison 14-04-Phase2 fields:
+// Pagination + capture fields:
 //   - HasMore signals whether another page exists beyond this one
 //     (offset + len(events) < total).
 //   - NextOffset is the offset the client should send to fetch the
@@ -79,13 +79,12 @@ type mieterHistoryItem struct {
 // with the briefing's "20 default, 50 max"-spec.
 const mieterHistoryDefaultLimit = 20
 
-// mieterHistoryMaxOffset is a Sanity-Bound: kein Client darf den
-// Server zwingen 10001+ Rows zu skippen. Briefing 4.1 verlangt
-// 0..10000.
+// mieterHistoryMaxOffset is a sanity bound: no client gets to
+// force the server to skip 10001+ rows.
 const mieterHistoryMaxOffset = 10000
 
-// mieterHistoryDateLayout entspricht dem HTML <input type="date">
-// Standard. Anderer Format -> 400.
+// mieterHistoryDateLayout matches the HTML <input type="date">
+// default. Any other format -> 400.
 const mieterHistoryDateLayout = "2006-01-02"
 
 func (s *Server) handleMieterHistoryJSON(w http.ResponseWriter, r *http.Request) {
@@ -115,9 +114,9 @@ func (s *Server) serveHistoryList(w http.ResponseWriter, r *http.Request, mac st
 		opts.Limit = mieterHistoryDefaultLimit
 	}
 
-	// Capture-Toggle: wenn der Mieter die Erfassung deaktiviert
-	// hat, liefern wir eine leere Liste mit capture_enabled=false.
-	// Pagination + Mark-Read entfaellt - es gibt nichts anzuzeigen.
+	// Capture toggle: when the mieter has disabled history capture
+	// we return an empty list with capture_enabled=false.
+	// Pagination + mark-read are skipped - there is nothing to show.
 	captureEnabled := true
 	info, infoErr := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if infoErr == nil {
@@ -156,15 +155,15 @@ func (s *Server) serveHistoryList(w http.ResponseWriter, r *http.Request, mac st
 	if err != nil {
 		s.log.Warn("doorhistory count visible failed",
 			"mac_prefix", safePrefix(mac), "err", err)
-		// Soft-fail: HasMore wird falsch sein, aber wir liefern die
-		// Seite trotzdem aus.
+		// Soft-fail: HasMore will be wrong but we still serve the
+		// page.
 		totalVisible = opts.Offset + len(events)
 	}
 
-	// Saison 14-03-FIX02/FIX03: ONE ListDoors call per render,
-	// then resolve every row through the cached doorMeta. The
-	// single-door fallback inside resolveDoorName covers the
-	// door_unlocked event-type which often has no intercom MAC.
+	// ONE ListDoors call per render, then resolve every row
+	// through the cached doorMeta. The single-door fallback inside
+	// resolveDoorName covers the door_unlocked event-type which
+	// often has no intercom MAC.
 	meta := s.loadDoorMeta(r.Context())
 
 	items := make([]mieterHistoryItem, 0, len(events))
@@ -205,10 +204,10 @@ func (s *Server) serveHistoryList(w http.ResponseWriter, r *http.Request, mac st
 					"mac_prefix", safePrefix(mac), "err", err)
 				return
 			}
-			// Saison 14-03-FIX03 Sub-2: tell every subscriber on
-			// this mock that the count just dropped (usually to
-			// 0). The screensaver badge uses this to hide itself
-			// without polling /webviewer/unread-count.
+			// Tell every subscriber on this mock that the count
+			// just dropped (usually to 0). The screensaver badge
+			// uses this to hide itself without polling
+			// /webviewer/unread-count.
 			if s.hub != nil {
 				s.hub.BroadcastUnreadCount(ctx, mac)
 			}
@@ -228,8 +227,6 @@ func writeMieterHistoryJSON(w http.ResponseWriter, resp mieterHistoryResponse) {
 // another viewer returns 404.
 //
 // Route: DELETE /webviewer/history/{event_id}
-//
-// Saison 14-04-Phase2.
 func (s *Server) handleMieterHistoryHideOne(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
@@ -266,9 +263,9 @@ func (s *Server) serveHistoryHideOne(w http.ResponseWriter, r *http.Request, mac
 		http.Error(w, "Verstecken fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Unread-count koennte gerade gesunken sein, wenn der ver-
-	// steckte Eintrag noch read_at IS NULL hatte. Broadcast laesst
-	// alle Tabs + die ESP-Hardware das Badge synchron nachziehen.
+	// The unread count may have just dropped if the hidden entry
+	// still had read_at IS NULL. The broadcast lets all tabs +
+	// the ESP hardware pull the badge in sync.
 	if s.hub != nil {
 		s.hub.BroadcastUnreadCount(r.Context(), mac)
 	}
@@ -282,15 +279,12 @@ func (s *Server) serveHistoryHideOne(w http.ResponseWriter, r *http.Request, mac
 // handleMieterHistoryHideAll soft-deletes every currently-visible
 // row for the caller. Idempotent: a second call right after this
 // one returns hidden_count=0. We do NOT trigger config.changed -
-// the change is purely visible-history-state, not config; the
-// SSE unread-count broadcast (because the count might drop) is
-// handled inside the doorbellhub-Layer ueberlegt fuer einen
-// spaeteren Sub-Briefing - der heutige Mieter-UI-Reload nach
-// "Verlauf leeren" reicht.
+// the change is purely visible-history-state, not config; a
+// follow-up SSE unread-count broadcast inside the doorbellhub
+// layer is left for a later iteration; today's mieter UI reload
+// after "Verlauf leeren" is enough.
 //
 // Route: DELETE /webviewer/history
-//
-// Saison 14-04-Phase2.
 func (s *Server) handleMieterHistoryHideAll(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
@@ -314,9 +308,9 @@ func (s *Server) serveHistoryHideAll(w http.ResponseWriter, r *http.Request, mac
 		http.Error(w, "Loeschen fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Unread-Count broadcast: nach HideAll sind keine sichtbaren
-	// ungelesenen Reihen mehr da. Der Browser kann das Badge
-	// gleich auf 0 ziehen ohne erneut zu pollen.
+	// Unread-count broadcast: after HideAll there are no visible
+	// unread rows left. The browser can drop the badge to 0
+	// immediately without polling again.
 	if s.hub != nil {
 		s.hub.BroadcastUnreadCount(r.Context(), mac)
 	}
@@ -329,16 +323,13 @@ func (s *Server) serveHistoryHideAll(w http.ResponseWriter, r *http.Request, mac
 
 // parseHistoryListOpts validates the four query parameters and
 // translates them into a doorhistory.ListOpts. Invalid input
-// returns a deutsche-Fehlermeldung; the handler maps that to 400.
+// returns a German error message; the handler maps that to 400.
 //
-// Wenn der Client keinen ?limit= mitschickt, bleibt opts.Limit
-// auf 0; jeder Handler setzt seinen eigenen Page-Default
-// (mieter: 20, admin: 50) bevor er ListVisible/AdminListAll
-// aufruft. So koennen Caller mit identischer parser-Logik
-// unterschiedliche Defaults bedienen ohne dass der Parser sie
-// kennen muss.
-//
-// Saison 14-04-Phase2.
+// When the client does not send ?limit=, opts.Limit stays at 0;
+// every handler sets its own page default (mieter: 20, admin:
+// 50) before calling ListVisible/AdminListAll. That way callers
+// with identical parser logic can serve different defaults
+// without the parser having to know about them.
 func parseHistoryListOpts(r *http.Request) (doorhistory.ListOpts, error) {
 	var opts doorhistory.ListOpts
 
