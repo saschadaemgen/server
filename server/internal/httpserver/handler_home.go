@@ -15,14 +15,13 @@ import (
 // /m/ list.
 const ViewerHistoryLimit = 20
 
-// viewerHomeData is the payload for the Claude-Design intercom
-// snippets. The library uses three pages of fields under one
-// flat struct; we mirror their names exactly so the snippets
-// can be reused unchanged.
+// viewerHomeData is the payload for the tenant home template.
+// The flat structure mirrors the template field names so renames
+// stay in lock-step.
 //
-// Saison 13-07 dropped StandbyDoorID; the standby-unlock JS
-// now POSTs to the literal /webviewer/doors/standby/unlock
-// route and the server reads viewer.paired_intercom_mac.
+// StandbyDoorID is intentionally absent; the standby-unlock JS
+// posts to the literal /webviewer/doors/standby/unlock route and
+// the server reads viewer.paired_intercom_mac.
 type viewerHomeData struct {
 	UnitName     string
 	DoorName     string
@@ -30,37 +29,35 @@ type viewerHomeData struct {
 	NowDate      string // "Di, 13. Mai"
 	DND          bool
 	HasUnread    bool
-	UnreadCount  int                // S14-03-FIX04: numeric count for the history-button badge
+	UnreadCount  int                // numeric count for the history-button badge
 	HistoryItems []viewerHistoryRow // {Where, When, Unread}
-	// Saison 14-01b idle-view fields.
+	// Idle-view fields.
 	IdleViewMode string            // "screensaver" or "livestream"
 	Weather      *weather.Snapshot // nil = backend unreachable, hide weather block
-	// Saison 14-03 inline-mode payload. AutoScreensaverSeconds is
-	// the persisted timer (0 = disabled); the browser runtime
+	// Inline-mode payload. AutoScreensaverSeconds is the
+	// persisted timer (0 = disabled); the browser runtime
 	// promotes the setting into the slide-up modes container.
 	AutoScreensaverSeconds int
-	// Saison 14-04-Phase2: hydrates the inline settings-mode
-	// "Verlauf-Erfassung" radio group. True = capture aktiv.
+	// Hydrates the inline settings-mode "Verlauf-Erfassung"
+	// radio group. True = capture active.
 	HistoryCaptureEnabled bool
-	// Saison 14-04-Phase2-FIX05 clock-layout. Initial-Paint des
-	// Screensavers + Settings-Radio.
+	// clock-layout. Initial paint of the screensaver +
+	// settings radio.
 	ClockLayout string
 }
 
-// viewerHistoryRow matches the design-library shape for one
-// history-sheet entry.
+// viewerHistoryRow is one row in the history-sheet template.
 type viewerHistoryRow struct {
 	Where  string
 	When   string
 	Unread bool
 }
 
-// handleHome renders the tenant intercom-viewer page (the
-// Claude-Design library produces the markup; we provide data).
+// handleHome renders the tenant intercom-viewer page. The
+// template produces the markup; we provide the data.
 //
-// Saison 13-01 Mark-Read-Variante-A bleibt aktiv: nach dem
-// Rendern werden die angezeigten ungelesenen Events asynchron
-// als gelesen markiert.
+// Mark-read variant A is active: after rendering, the displayed
+// unread events are asynchronously marked as read.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
@@ -80,12 +77,12 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	history, unread := s.loadViewerHistory(r.Context(), mac)
-	// Saison 14-03-FIX02/FIX03: resolve every row's intercom MAC
-	// to a human door name via ONE UA-API round-trip per render.
-	// loadDoorMeta returns the full door list too so rows without
-	// an intercom MAC (door_unlocked events) can fall back to the
-	// single existing door's name when the installation has only
-	// one door.
+	// Resolve every row's intercom MAC to a human door name via
+	// ONE UA-API round-trip per render. loadDoorMeta returns the
+	// full door list too so rows without an intercom MAC
+	// (door_unlocked events) can fall back to the single
+	// existing door's name when the installation has only one
+	// door.
 	meta := s.loadDoorMeta(r.Context())
 	rows := make([]viewerHistoryRow, 0, len(history))
 	displayedIDs := make([]int64, 0, len(history))
@@ -101,11 +98,11 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	// S14-03-FIX06: cam-label door name flows through the same
-	// resolver as the history rows so a UA-Console rename is
-	// reflected in one render cycle. PairedIntercomMAC is the
-	// natural lookup key (S13-07); single-door installs fall
-	// through to that one door regardless.
+	// The cam-label door name flows through the same resolver as
+	// the history rows so a UA-Console rename is reflected in one
+	// render cycle. PairedIntercomMAC is the natural lookup key;
+	// single-door installs fall through to that one door
+	// regardless.
 	camDoorName := resolveDoorName(meta, info.PairedIntercomMAC)
 	data := viewerHomeData{
 		UnitName:               info.Name,
@@ -230,11 +227,10 @@ func safePrefix(mac string) string {
 // hides its weather block on nil so a degraded screensaver still
 // shows clock + date.
 //
-// Saison 14-FIX07: the language is resolved from the calling
-// tenant (session or bearer context). The shared
-// resolveTenantLanguage helper falls back to German if no MAC is
-// on the context, which keeps the admin /a/weather pre-FIX07
-// behavior intact.
+// The language is resolved from the calling tenant (session or
+// bearer context). The shared resolveTenantLanguage helper falls
+// back to German if no MAC is on the context, which keeps the
+// admin /a/weather behaviour intact.
 func (s *Server) fetchHomeWeather(r *http.Request) *weather.Snapshot {
 	if s.weather == nil {
 		return nil
