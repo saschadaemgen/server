@@ -2,40 +2,42 @@ package httpserver
 
 import "net/http"
 
-// Viewer-Session-Cookie. Saison 13-02-FIX4-a:
+// Viewer session cookie.
 //
-// In Production (Secure=true) wird der __Host-Prefix gesetzt; das
-// schliesst per RFC 6265bis Domain-Pinning, Path-Bypass und HTTP-
-// Cookies vollstaendig aus. Damit aendert sich auch der Path: __Host-
-// erfordert Path=/ , also liegt das Cookie nicht mehr nur unter
-// /m/ . Da Admin- und Viewer-Cookie unterschiedliche Namen haben
-// stoert das nicht (siehe cookie_admin.go).
+// In production (Secure=true) the __Host- prefix is set; per
+// RFC 6265bis that rules out domain pinning, path bypass and
+// plain-HTTP cookies entirely. __Host- requires Path=/ so the
+// cookie no longer sits under /m/ only - admin and viewer
+// cookies use different NAMES and therefore do not collide (see
+// cookie_admin.go).
 //
-// In DevMode (UNIFIX_DEV_MODE=1, plain HTTP) ist Secure unmoeglich
-// und damit der __Host-Prefix nicht regelkonform; die Browser
-// wuerden ihn ablehnen. Wir fallen dann auf "carvilon_viewer" ohne
-// Prefix zurueck (akzeptierter Trade-Off, dokumentiert).
+// In DevMode (CARVILON_DEV_MODE=1; legacy alias UNIFIX_DEV_MODE
+// still accepted by config.lookupEnv, plain HTTP) Secure is not
+// possible, which makes the __Host- prefix illegal; browsers
+// would reject it. We fall back to "carvilon_viewer" without
+// the prefix (accepted trade-off, documented).
 //
-// MaxAge ist quasi-permanent (1 Jahr); das DB-rolling-renewal in
-// session.Validate sorgt fuer "echte" 30-Tage-Idle-Loesung.
+// MaxAge is quasi-permanent (1 year); the DB-side rolling
+// renewal in session.Validate enforces the actual 30-day idle
+// timeout.
 const (
 	viewerCookieNameSecure = "__Host-carvilon_viewer"
 	viewerCookieNameDev    = "carvilon_viewer"
-	// Saison 13-02-FIX4-a-HOTFIX2: Cookie laeuft jetzt unter / ,
-	// damit sowohl /einloggen als auch zukuenftige Pfade (z.B.
-	// /api/...) das Cookie sehen ohne Path-Mismatch. Production
-	// braucht Path=/ ohnehin fuer den __Host-Prefix.
+	// The cookie now lives under / so both /login and any
+	// future path (for example /api/...) see it without a
+	// path mismatch. Production needs Path=/ anyway for the
+	// __Host- prefix.
 	viewerCookiePathSecure = "/"
 	viewerCookiePathDev    = "/"
 	sessionCookieMaxAge    = 365 * 24 * 3600
 )
 
-// SessionCookieName ist nur ein Default fuer Tests; Production-
-// Code geht ueber Server.viewerCookieName.
+// SessionCookieName is only a default for tests; production
+// code goes through Server.viewerCookieName.
 const SessionCookieName = viewerCookieNameDev
 
-// SessionCookiePath ist nur ein Default fuer Tests; Production-
-// Code geht ueber Server.viewerCookiePath.
+// SessionCookiePath is only a default for tests; production
+// code goes through Server.viewerCookiePath.
 const SessionCookiePath = viewerCookiePathDev
 
 func (s *Server) viewerCookieName() string {
@@ -66,7 +68,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, sessionID string) {
 	})
 }
 
-// clearSessionCookie loescht das Viewer-Session-Cookie (Logout-Pfad).
+// clearSessionCookie clears the viewer session cookie (logout path).
 func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     s.viewerCookieName(),

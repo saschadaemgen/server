@@ -2,18 +2,18 @@ package httpserver
 
 import "strings"
 
-// normalizeForCompare bringt einen Wohnungs-Namen auf eine
-// kanonische Vergleichs-Form. Beide Seiten (Anlegen und Login)
-// gehen durch diese Funktion; der gespeicherte name bleibt
-// ORIGINAL (mit Umlaut, Grossschreibung, Leerzeichen). Nur der
-// Vergleich normalisiert.
+// normalizeForCompare brings a Wohnungs-Name down to its
+// canonical comparison form. Both the create path and the login
+// path go through this function; the stored `name` column keeps
+// the ORIGINAL spelling (umlauts, case, spaces). Only the
+// comparison value is normalised.
 //
-//	"Familie Mueller 2OG"  == "familie mueller 2og"
-//	"Dämgen"               == "Daemgen"               == "DAEMGEN"
-//	"Müller  Hof"          == "mueller hof"           (doppel-Whitespace zusammen)
+//	"Familie Mueller 2OG" == "familie mueller 2og"
+//	"Dämgen"              == "Daemgen"               == "DAEMGEN"
+//	"Müller  Hof"         == "mueller hof"           (collapsed whitespace)
 //
-// Saison 13-02-FIX4-a-HOTFIX4 hat die separate Username-Spalte
-// abgeschafft und nutzt den Wohnungs-Namen direkt als Login.
+// There is no separate username column; the Wohnungs-Name is
+// used directly as the login.
 func normalizeForCompare(s string) string {
 	s = expandGermanUmlauts(s)
 	s = strings.ToLower(s)
@@ -22,8 +22,8 @@ func normalizeForCompare(s string) string {
 	return s
 }
 
-// expandGermanUmlauts ersetzt ä/ö/ü/ß und ihre Grossschreibungen
-// durch die zwei-Zeichen-ASCII-Aequivalente.
+// expandGermanUmlauts maps ä/ö/ü/ß and their uppercase variants
+// to two-character ASCII equivalents.
 func expandGermanUmlauts(s string) string {
 	r := strings.NewReplacer(
 		"ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss",
@@ -32,9 +32,9 @@ func expandGermanUmlauts(s string) string {
 	return r.Replace(s)
 }
 
-// collapseWhitespace ersetzt jede Whitespace-Sequenz (Spaces,
-// Tabs, Mehrfach-Spaces) durch einen einzelnen Space. So
-// matched "Familie  Mueller" gegen "Familie Mueller".
+// collapseWhitespace replaces every whitespace run (spaces,
+// tabs, multiple spaces) with a single space so
+// "Familie  Mueller" matches "Familie Mueller".
 func collapseWhitespace(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

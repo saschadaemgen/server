@@ -9,11 +9,11 @@ import (
 	"strings"
 )
 
-// htmlCommentRE matches HTML comment blocks. The Claude-Design
-// library files start with extensive doc comments that contain
-// example {{template "..." .}} action snippets. Go's
-// html/template parses those actions even inside <!-- ... -->,
-// so we strip the comments before handing the body to Parse.
+// htmlCommentRE matches HTML comment blocks. The design-library
+// files start with extensive doc comments that contain example
+// {{template "..." .}} action snippets. Go's html/template parses
+// those actions even inside <!-- ... -->, so we strip the
+// comments before handing the body to Parse.
 var htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
 
 // libraryDemoOpenRE strips the `is-open` class from the modal,
@@ -21,11 +21,12 @@ var htmlCommentRE = regexp.MustCompile(`(?s)<!--.*?-->`)
 // in as a standalone-demo convenience.
 var libraryDemoOpenRE = regexp.MustCompile(`\bis-open\b`)
 
-// libraryNavRE strippt den Library-eigenen <nav class="admin-nav">
-// ...</nav>-Block aus den Library-Snippets. Saison 13-02-FIX4-a
-// haengt eine neue Nav (Web-Viewer, ESP-Viewer, Benutzer, ...) an
-// und kann den alten Block (Mieter, Mock-Tools) nicht direkt in
-// den Library-Files anpassen, weil die Library als heilig gilt.
+// libraryNavRE strips the library's own <nav class="admin-nav">
+// ...</nav> block from the library snippets. The carvilon admin
+// surface attaches its own nav (Web-Viewer, ESP-Viewer, Benutzer,
+// ...) and cannot edit the legacy block (Mieter, Mock-Tools)
+// directly inside the library files because the library is kept
+// as an immutable design source.
 var libraryNavRE = regexp.MustCompile(`(?s)<nav class="admin-nav".*?</nav>\s*`)
 
 //go:embed templates/admin/*.html templates/viewer/*.html
@@ -46,10 +47,11 @@ func macIDFromMAC(mac string) string {
 }
 
 // adminLibraryFor lists the design-library snippets each admin
-// page shell needs. login uses the library card; alle anderen
-// admin-Seiten haben in Saison 13-02-FIX4-a eigene schlanke
-// Templates (Vokabular- und Nav-Wechsel passt nicht 1:1 in die
-// Library-Snippets, und die Library bleibt heilig).
+// page shell needs. Only the login page uses a library card;
+// every other admin page has its own slim template (the
+// vocabulary + nav changes did not fit cleanly into the library
+// snippets, and the library is kept immutable as a design
+// source).
 var adminLibraryFor = map[string][]string{
 	"login":       {"admin-login.html"},
 	"dashboard":   {},

@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// designLibraryFS is the Claude-Design library bundle (S13-02-FIX3).
-// tokens.css, components.css and interactions.js are exposed
-// verbatim under /static/; the HTML snippets are parsed as Go
-// templates by templates.go (same embed FS, different consumer).
+// designLibraryFS is the design-library bundle. tokens.css,
+// components.css and interactions.js are exposed verbatim under
+// /static/; the HTML snippets are parsed as Go templates by
+// templates.go (same embed FS, different consumer).
 //
 //go:embed design-library/*
 var designLibraryFS embed.FS

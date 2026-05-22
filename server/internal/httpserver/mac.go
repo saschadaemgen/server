@@ -16,11 +16,9 @@ import (
 // stays narrow because admin viewer operations always go through
 // the colon spelling.
 //
-// Saison 13-05-HOTFIX5: live test 14 May 12:33 showed the
-// browser POSTs the bare-12-hex form (the doorbell_start SSE
-// frame's device_id), but the saved mapping is keyed in
-// colon-form. Sniffing both lets the handler normalise before
-// lookup.
+// The browser POSTs the bare-12-hex form (the doorbell_start SSE
+// frame's device_id), but the saved mapping is keyed in colon
+// form. Sniffing both lets the handler normalise before lookup.
 var macAnyForm = regexp.MustCompile(
 	`^(?:[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})$`,
 )

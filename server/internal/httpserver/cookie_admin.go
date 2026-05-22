@@ -2,8 +2,9 @@ package httpserver
 
 import "net/http"
 
-// Admin-Session-Cookie. Wie das Viewer-Cookie: __Host-Prefix und
-// Path=/ in Production, "carvilon_a_session" mit Path=/a/ in DevMode.
+// Admin session cookie. Same scheme as the viewer cookie:
+// __Host- prefix and Path=/ in production, "carvilon_a_session"
+// with Path=/a/ in DevMode.
 const (
 	adminCookieNameSecure = "__Host-carvilon_admin"
 	adminCookieNameDev    = "carvilon_a_session"
@@ -11,7 +12,8 @@ const (
 	adminCookiePathDev    = "/a/"
 )
 
-// AdminSessionCookieName / -Path sind Test-Defaults.
+// AdminSessionCookieName / AdminSessionCookiePath are test
+// defaults; production code goes through the Server methods.
 const AdminSessionCookieName = adminCookieNameDev
 const AdminSessionCookiePath = adminCookiePathDev
 

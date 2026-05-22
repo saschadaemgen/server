@@ -21,8 +21,8 @@ func ViewerMACFromContext(ctx context.Context) string {
 }
 
 // MockMACFromContext is the legacy alias for ViewerMACFromContext.
-// Deprecated: use ViewerMACFromContext (Saison 13-02-FIX4-a
-// vocabulary swap; the routing semantics are unchanged).
+// Deprecated: use ViewerMACFromContext. The vocabulary swap left
+// the routing semantics unchanged.
 func MockMACFromContext(ctx context.Context) string {
 	return ViewerMACFromContext(ctx)
 }
@@ -34,9 +34,9 @@ func MockMACFromContext(ctx context.Context) string {
 // invalid session: redirect to /login with 303 See Other so
 // browsers downgrade the next request to GET.
 //
-// Saison 14-02 renamed the post-login tree from /einloggen/ to
-// /webviewer/; the auth mechanism (bcrypt + session cookie) is
-// unchanged.
+// The post-login tree was renamed from /einloggen/ to
+// /webviewer/; the auth mechanism (bcrypt + session cookie)
+// stayed the same.
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sid := s.readSessionCookie(r)
