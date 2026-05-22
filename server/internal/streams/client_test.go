@@ -26,10 +26,10 @@ func TestMJPEGURLEncodesProfile(t *testing.T) {
 	}
 }
 
-// Saison 15-01: the seam reserved /offer?src=<profile> for the
-// browser WebRTC signalling POST. WebRTCSignalURL must build the
-// same path against the backend so the proxy handler can copy the
-// body straight through.
+// The seam reserves /offer?src=<profile> for the browser WebRTC
+// signalling POST. WebRTCSignalURL must build the same path
+// against the backend so the proxy handler can copy the body
+// straight through.
 func TestWebRTCSignalURLEncodesProfile(t *testing.T) {
 	c, _ := New("http://127.0.0.1:8555/")
 	got := c.WebRTCSignalURL("browser hd")
@@ -80,16 +80,16 @@ func TestListDecodesGo2RTCShape(t *testing.T) {
 	if profiles[1].Consumers != 2 {
 		t.Fatalf("intercom_esp consumers: want 2, got %d", profiles[1].Consumers)
 	}
-	// Saison 15-01: structured fields stay empty for the
-	// transitional go2rtc backend.
+	// Structured fields stay empty for the transitional go2rtc
+	// backend.
 	if profiles[0].CameraID != "" || profiles[0].Quality != "" || profiles[0].Usage != "" {
 		t.Errorf("transitional Profile should leave structured fields empty, got %+v", profiles[0])
 	}
 }
 
-// Saison 15-01: Put returns ErrNotConfigured because profile CRUD
-// is migrating to the carvilon-streaming-server. The admin UI
-// flashes the migration message; no go2rtc REST call is made.
+// Put returns ErrNotConfigured because profile CRUD is migrating
+// to the carvilon-streaming-server. The admin UI flashes the
+// migration message; no go2rtc REST call is made.
 func TestPutIsTransitionalStub(t *testing.T) {
 	hit := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -145,9 +145,9 @@ func TestDeleteRequestsBackend(t *testing.T) {
 	}
 }
 
-// Saison 15-01: go2rtc has no Protect connection; ListCameras
-// returns an empty slice so the admin UI's camera-dropdown can
-// render an "Quelle waehlbar ab Stream-Server"-Hinweis.
+// go2rtc has no Protect connection; ListCameras returns an empty
+// slice so the admin UI's camera-dropdown can render an "Quelle
+// waehlbar ab Stream-Server"-Hinweis.
 func TestListCamerasIsEmpty(t *testing.T) {
 	c, _ := New("http://127.0.0.1:1984/")
 	cams, err := c.ListCameras(context.Background())
@@ -159,9 +159,9 @@ func TestListCamerasIsEmpty(t *testing.T) {
 	}
 }
 
-// Saison 15-01: backend.go's unconfiguredBackend covers the
-// public-build default. Verify the empty-URL + ErrNotConfigured
-// surface so main.go can wire it without nil-checks.
+// backend.go's unconfiguredBackend covers the public-build
+// default. Verify the empty-URL + ErrNotConfigured surface so
+// main.go can wire it without nil-checks.
 func TestUnconfiguredBackend(t *testing.T) {
 	b := Unconfigured()
 	if b.MJPEGURL("x") != "" {

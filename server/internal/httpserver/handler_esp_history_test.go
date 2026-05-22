@@ -1,8 +1,7 @@
-// Saison 14-04-Phase2-FIX06: tests for the ESP-Pendant der
-// Mieter-Verlauf-Endpoints (/esp/history*, plus history_capture
-// in /esp/settings).
+// Tests for the ESP pendant of the mieter history endpoints
+// (/esp/history*, plus history_capture in /esp/settings).
 //
-// Bearer-Auth, identische Response-Form wie /webviewer/history*,
+// Bearer auth, identical response shape as /webviewer/history*,
 // strikter Cross-Viewer-Schutz, Soft-Delete. Mirrors die Test-
 // Patterns aus handler_mieter_settings_test.go (mieter-side) und
 // handler_esp_settings_test.go (esp-bearer-flow).

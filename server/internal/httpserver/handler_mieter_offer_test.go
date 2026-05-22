@@ -1,4 +1,4 @@
-// Saison 15-01: tests for POST /webviewer/offer.
+// Tests for POST /webviewer/offer.
 //
 // The offer-proxy forwards a tenant SDP-offer to the streaming
 // backend's WebRTC signalling endpoint and copies the SDP-answer

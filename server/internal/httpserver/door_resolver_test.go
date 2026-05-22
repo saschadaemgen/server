@@ -1,4 +1,4 @@
-// Saison 14-03-FIX02 + FIX03: door-name-resolution coverage.
+// Door-name-resolution coverage.
 package httpserver
 
 import (
@@ -52,11 +52,11 @@ func TestResolveDoorName_MultiDoor(t *testing.T) {
 	}
 }
 
-// FIX04 Sub-1b: in a single-door installation the only door is
-// the answer regardless of the row's intercom field - including
-// the unknown-MAC case (was generic "Tuer" pre-FIX04). A
-// single-door site has exactly one candidate; calling it "Tuer"
-// when we know its real name is silly.
+// In a single-door installation the only door is the answer
+// regardless of the row's intercom field - including the
+// unknown-MAC case (which earlier returned the generic "Tuer"
+// label). A single-door site has exactly one candidate; calling
+// it "Tuer" when we know its real name is silly.
 func TestResolveDoorName_SingleDoorWinsOverUnknownIntercom(t *testing.T) {
 	meta := doorMeta{
 		intercomToName: map[string]string{
@@ -81,7 +81,7 @@ func TestResolveDoorName_SingleDoorWinsOverUnknownIntercom(t *testing.T) {
 }
 
 // UA-API down: empty meta produces only generic labels, never
-// the bare MAC the pre-FIX03 resolver used to print.
+// the bare MAC the earlier resolver used to print.
 func TestResolveDoorName_NoUAAvailable(t *testing.T) {
 	empty := doorMeta{intercomToName: map[string]string{}}
 	if got := resolveDoorName(empty, ""); got != genericDoorName {
@@ -103,10 +103,10 @@ func TestResolveDoorName_BlankNameFallsThrough(t *testing.T) {
 	}
 }
 
-// FIX04 Sub-1a: doorShortName must prefer the short Name over
-// the hierarchical FullName. uaapi.Door's own DisplayName helper
-// stays unchanged (admin-side callers still get full_name) but
-// every mieter-facing render goes through doorShortName.
+// doorShortName must prefer the short Name over the hierarchical
+// FullName. uaapi.Door's own DisplayName helper stays unchanged
+// (admin-side callers still get full_name) but every
+// mieter-facing render goes through doorShortName.
 func TestDoorShortName_PreferenceOrder(t *testing.T) {
 	cases := []struct {
 		name string
@@ -143,9 +143,9 @@ func TestDoorShortName_PreferenceOrder(t *testing.T) {
 	}
 }
 
-// FIX04 Sub-1c: the generic fallback label must carry a real
-// umlaut. Documents the convention so a future refactor that
-// reaches for the ASCII spelling fails the test.
+// The generic fallback label must carry a real umlaut. Documents
+// the convention so a future refactor that reaches for the ASCII
+// spelling fails the test.
 func TestGenericDoorName_HasUmlaut(t *testing.T) {
 	if genericDoorName != "Tür" {
 		t.Errorf("genericDoorName = %q, want %q", genericDoorName, "Tür")

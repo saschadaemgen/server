@@ -150,8 +150,8 @@ func TestESPConfig_ReturnsAllFields(t *testing.T) {
 		}
 	}
 	ui, _ := got["ui"].(map[string]any)
-	// Saison 14-XX: das ui-Block enthaelt jetzt die persistierten
-	// Settings plus den FIX4-d-Legacy-Alias screensaver_after_sec.
+	// The ui block carries the persisted settings plus the
+	// legacy alias screensaver_after_sec.
 	for _, k := range []string{
 		"language", "idle_view_mode",
 		"auto_screensaver_seconds", "screensaver_after_sec",
@@ -163,10 +163,10 @@ func TestESPConfig_ReturnsAllFields(t *testing.T) {
 	}
 }
 
-// TestESPConfig_IncludesNewSettingsFields ist der Saison-14-XX-
-// Sanity-Check: nachdem POST /esp/settings ein paar Felder
-// persistiert hat, taucht der gleiche Wert in /esp/config wieder
-// auf (kein Cache, kein Default-Override).
+// TestESPConfig_IncludesNewSettingsFields is the sanity check:
+// after POST /esp/settings has persisted a few fields, the same
+// value shows up again in /esp/config (no cache, no default
+// override).
 func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -222,11 +222,11 @@ func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
 		t.Errorf("ui.screensaver_after_sec (legacy alias) = %v, want 60",
 			ui["screensaver_after_sec"])
 	}
-	// Saison 14-04-Phase2-FIX05 clock_layout default (vertical).
+	// clock_layout default (vertical).
 	if ui["clock_layout"] != "vertical" {
 		t.Errorf("ui.clock_layout = %v, want vertical (default)", ui["clock_layout"])
 	}
-	// Top-level idle_view_mode bleibt fuer Backwards-Compat erhalten.
+	// Top-level idle_view_mode stays for backwards compat.
 	if got["idle_view_mode"] != "screen_off" {
 		t.Errorf("top-level idle_view_mode = %v, want screen_off",
 			got["idle_view_mode"])
@@ -473,9 +473,9 @@ func TestESPAnswer_PushesCancelToSiblings(t *testing.T) {
 	}
 }
 
-// Saison 13-08: dedicated /esp/reject endpoint - mirrors
-// /webviewer/reject (doorbellcalls.MarkRejected + sibling
-// cancel + UDM ring-stop via call_admin_result).
+// Dedicated /esp/reject endpoint - mirrors /webviewer/reject
+// (doorbellcalls.MarkRejected + sibling cancel + UDM ring-stop
+// via call_admin_result).
 
 func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
 	env := newTestServer(t)
@@ -526,11 +526,10 @@ func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
 	if got.CancelReason != "rejected" {
 		t.Errorf("CancelReason = %q, want rejected", got.CancelReason)
 	}
-	// Saison 13-09: ESP-type viewers spawn the same Mock-Goroutine
-	// stack as web-type viewers, so notifyUDMReject reaches the
-	// running viewer's RejectDoorbell hook and the test fake
-	// captures it. Pre-S13-09 this assertion would have been
-	// impossible because the goroutine never started.
+	// ESP-type viewers spawn the same Mock-Goroutine stack as
+	// web-type viewers, so notifyUDMReject reaches the running
+	// viewer's RejectDoorbell hook and the test fake captures
+	// it.
 	v, err := env.viewerMgr.LookupForReject(espTestMAC)
 	if err != nil {
 		t.Fatalf("LookupForReject: %v", err)
@@ -539,7 +538,7 @@ func TestESPReject_PushesCancelAndMarksRejected(t *testing.T) {
 	nv.rejectMu.Lock()
 	defer nv.rejectMu.Unlock()
 	if len(nv.rejectCalls) != 1 {
-		t.Fatalf("RejectDoorbell calls = %d, want 1 (S13-09 hybrid spawn)",
+		t.Fatalf("RejectDoorbell calls = %d, want 1 (hybrid spawn)",
 			len(nv.rejectCalls))
 	}
 	if nv.rejectCalls[0].IntercomMAC != intercomMAC {
@@ -636,7 +635,7 @@ func TestESPUnlock_CallsUAAPIUnlock(t *testing.T) {
 	}
 }
 
-// Saison 13-08 Phase A: /esp/stream.mjpeg reverse-proxy stub.
+// /esp/stream.mjpeg reverse-proxy stub.
 
 func TestESPStream_RequiresBearer(t *testing.T) {
 	env := newTestServer(t)
@@ -683,10 +682,10 @@ func TestESPStream_ForwardsToBackendWithoutAuthHeader(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
 
-	// Saison 14-01: StreamBackendURL is the go2rtc BASE URL; the
-	// proxy appends /api/stream.mjpeg?src=<resolved-profile>. For
-	// an esp-type viewer without an explicit StreamProfile the
-	// convention default is "intercom_esp".
+	// StreamBackendURL is the go2rtc BASE URL; the proxy appends
+	// /api/stream.mjpeg?src=<resolved-profile>. For an esp-type
+	// viewer without an explicit StreamProfile the convention
+	// default is "intercom_esp".
 	env.srv.cfg.StreamBackendURL = backend.URL
 
 	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)

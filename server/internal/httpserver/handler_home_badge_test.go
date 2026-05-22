@@ -1,4 +1,4 @@
-// Saison 14-03-FIX04 Sub-2: history-button-badge render tests.
+// History-button-badge render tests.
 //
 // Asserts the server-side HTML carries the right shape so that
 // idle.js can attach behavior to a stable contract:
@@ -92,38 +92,37 @@ func TestHomeRender_HistoryButton_WithUnread(t *testing.T) {
 	}
 }
 
-// TestHomeRender_ClockLayoutAttributeOnScreensaver bewacht die
-// Saison 14-04-Phase2-FIX05-Verdrahtung: das Screensaver-Markup
-// rendert immer ein data-layout-Attribut auf .screensaver-clock,
-// und das clock_layout-Settings-Fieldset taucht im Settings-Form
-// auf. CSS-Selektor + idle.js-Echo-Handler haengen daran.
+// TestHomeRender_ClockLayoutAttributeOnScreensaver guards the
+// clock-layout wiring: the screensaver markup always renders a
+// data-layout attribute on .screensaver-clock, and the
+// clock_layout settings fieldset appears in the settings form.
+// The CSS selector + idle.js echo handler depend on both.
 func TestHomeRender_ClockLayoutAttributeOnScreensaver(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)
 	html := renderHomeHTML(t, env)
 
 	if !strings.Contains(html, `data-layout="vertical"`) {
-		t.Errorf("default clock layout data-attribute fehlt (vertical)")
+		t.Errorf("default clock layout data-attribute missing (vertical)")
 	}
 	if !strings.Contains(html, `name="clock_layout"`) {
-		t.Errorf("clock_layout-radios fehlen im settings-form")
+		t.Errorf("clock_layout radios missing from settings form")
 	}
-	// Beide Radio-Werte muessen gerendert sein damit der Mieter
-	// zwischen den zwei Layouts waehlen kann.
+	// Both radio values must render so the mieter can choose
+	// between the two layouts.
 	if !strings.Contains(html, `value="vertical"`) || !strings.Contains(html, `value="horizontal"`) {
-		t.Errorf("clock_layout radio options unvollstaendig")
+		t.Errorf("clock_layout radio options incomplete")
 	}
 }
 
-// TestHomeRender_ConfigChangedHasSkipEchoLogic ist der Regression-
-// Bewacher fuer Saison 14-04-Phase2-FIX03. Der Mieter-Settings-
-// Auto-Save broadcastet config.changed; ohne Skip-Echo wuerde
-// derselbe Tab seinen eigenen Echo aufgreifen und location.reload
-// ausloesen, was den User aus dem Settings-Modus reisst. Der Test
-// verifiziert dass das gerenderte home.html sowohl die
-// CONFIG_ECHO_SKIP_MS-Konstante als auch den lastOwnSaveAt-Check
-// enthaelt - beides ist das, was die Skip-Echo-Heuristik
-// faktisch ausmacht.
+// TestHomeRender_ConfigChangedHasSkipEchoLogic is the regression
+// guard for the skip-echo heuristic. The mieter-settings auto-
+// save broadcasts config.changed; without skip-echo the same
+// tab would pick up its own echo and trigger location.reload,
+// tearing the user out of settings mode. The test verifies that
+// the rendered home.html carries both the CONFIG_ECHO_SKIP_MS
+// constant and the lastOwnSaveAt check - the two pieces that
+// make the heuristic work.
 func TestHomeRender_ConfigChangedHasSkipEchoLogic(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)

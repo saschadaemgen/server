@@ -15,8 +15,8 @@ import (
 )
 
 // uaDoorStubConfig drives the test-side UA-API stub used by all
-// the saison-13-07 mieter-unlock tests. Each entry maps a door
-// UUID to the intercom MAC its extras.door_thumbnail encodes.
+// the mieter-unlock tests. Each entry maps a door UUID to the
+// intercom MAC its extras.door_thumbnail encodes.
 type uaDoorStubConfig struct {
 	doors map[string]string // door-uuid -> intercom-mac (lowercase, no colons in path)
 }
@@ -68,9 +68,9 @@ func loginMieterForTest(t *testing.T, env *testEnv) {
 	resp.Body.Close()
 }
 
-// Saison 13-07: bell-overlay path. The browser POSTs the
-// intercom MAC (colon-form, from doorbell_start.device_id) and
-// the handler auto-resolves the door via uaapi.LookupDoorForIntercom.
+// Bell-overlay path. The browser POSTs the intercom MAC
+// (colon-form, from doorbell_start.device_id) and the handler
+// auto-resolves the door via uaapi.LookupDoorForIntercom.
 func TestMieterUnlock_BellOverlayResolvesViaThumbnail(t *testing.T) {
 	var gotDoorID string
 	uaStub := newUADoorsStub(t, uaDoorStubConfig{
@@ -113,8 +113,8 @@ func TestMieterUnlock_BellOverlayResolvesViaThumbnail(t *testing.T) {
 	}
 }
 
-// Saison 13-07: bell-overlay path with bare 12-hex from the SSE
-// frame (saison-13-05-HOTFIX5 verified the SSE device_id format).
+// Bell-overlay path with bare 12-hex from the SSE frame (the
+// SSE device_id format was verified against live capture).
 func TestMieterUnlock_BareMACPathResolvesViaThumbnail(t *testing.T) {
 	var gotDoorID string
 	uaStub := newUADoorsStub(t, uaDoorStubConfig{
@@ -144,8 +144,8 @@ func TestMieterUnlock_BareMACPathResolvesViaThumbnail(t *testing.T) {
 	}
 }
 
-// Saison 13-07: standby path. The home screen POSTs to the
-// literal /webviewer/doors/standby/unlock; the handler reads the
+// Standby path. The home screen POSTs to the literal
+// /webviewer/doors/standby/unlock; the handler reads the
 // viewer's paired_intercom_mac and resolves from there.
 func TestMieterUnlock_StandbyUsesPairedIntercom(t *testing.T) {
 	var gotDoorID string
@@ -385,7 +385,7 @@ func TestMieterEndCall_PushesUserEnded(t *testing.T) {
 var _ = eventbus.New
 
 // findRunningViewer locates the noopViewer instance the test env
-// spawned for the seedViewer test MAC. Used by Saison-13-04.5-B
+// spawned for the seedViewer test MAC. Used by the reject-path
 // tests that need to inspect the recorded RejectDoorbell calls.
 func findRunningViewer(t *testing.T, env *testEnv, mac string) *noopViewer {
 	t.Helper()

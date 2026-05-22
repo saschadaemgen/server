@@ -18,9 +18,9 @@ const adminTestUser = "saschsa"
 const adminTestPassword = "lange-langes-passwort-1234"
 
 // loginAdmin posts a single (username, password) form to /a/login.
-// Saison 13-02-FIX4-a: rate limiter, audit log und Argon2id sind
-// transparent fuer den Caller; das Verhalten der ersten POST
-// (first-run-setup oder Login) bleibt gleich.
+// Rate limiter, audit log and Argon2id are transparent to the
+// caller; the first POST still behaves as either first-run
+// setup or a login.
 func loginAdmin(t *testing.T, env *testEnv, username, password string) {
 	t.Helper()
 	form := url.Values{}
@@ -246,8 +246,8 @@ func TestAdminWebViewers_CreateReturnsCredentials(t *testing.T) {
 	if c.Name == "" {
 		t.Errorf("response missing name: %+v", c)
 	}
-	// S13-02-FIX4-a-HOTFIX1: Login-URL ist jetzt nackt (kein
-	// ?u= / ?p= mehr); das war ein Sicherheits-Anti-Pattern.
+	// The login URL is bare (no ?u= / ?p= query); the pre-fill
+	// path was a security anti-pattern.
 	if !strings.HasSuffix(c.LoginURL, "/login") {
 		t.Errorf("login_url should be plain /login, got: %q", c.LoginURL)
 	}
@@ -298,16 +298,16 @@ func TestAdminWebViewers_ResetPassword(t *testing.T) {
 	}
 }
 
-// TestPasswordReset_InvalidatesSessions ist der HOTFIX3-Acceptance-
-// Test fuer Auto-Logout: nach Reset-PW darf KEIN viewer_session-
-// Eintrag des Viewers in der DB stehenbleiben. Login-Cookie des
-// vorher angemeldeten Mieters muss also wirkungslos sein.
+// TestPasswordReset_InvalidatesSessions is the auto-logout
+// acceptance test: after a password reset, no viewer_session
+// row of the viewer may stay in the DB. The login cookie of a
+// previously authenticated mieter must be invalid.
 func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	env.seedViewer(t)
 
-	// Mieter loggt sich ein, hat damit einen viewer_sessions-Eintrag.
+	// The mieter logs in and gets a viewer_sessions row.
 	respLogin := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	respLogin.Body.Close()
 	if respLogin.StatusCode != http.StatusSeeOther {
@@ -323,7 +323,7 @@ func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 		t.Fatalf("seed login did not create a viewer_sessions row")
 	}
 
-	// Admin macht Reset-PW.
+	// Admin performs the password reset.
 	req, _ := http.NewRequest(http.MethodPost,
 		env.ts.URL+"/a/web-viewers/"+testViewerMAC+"/reset-pw", nil)
 	req.Header.Set("Accept", "application/json")
@@ -336,7 +336,7 @@ func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 		t.Fatalf("reset-pw status = %d, want 200", resp.StatusCode)
 	}
 
-	// Sessions des Viewers sollten weg sein.
+	// The viewer's sessions should be gone.
 	var after int
 	if err := env.d.QueryRow(
 		`SELECT COUNT(*) FROM viewer_sessions WHERE viewer_mac = ?`, testViewerMAC,
@@ -348,9 +348,9 @@ func TestPasswordReset_InvalidatesSessions(t *testing.T) {
 	}
 }
 
-// TestDashboard_RealNumbers seedet Viewer + Sessions + door_events
-// und prueft dass die vier KPI-Karten echte Zahlen aus der DB
-// rendern (HOTFIX3 macht Schluss mit Fake-Werten).
+// TestDashboard_RealNumbers seeds viewers + sessions + door_events
+// and asserts that the four KPI cards render real numbers from
+// the DB rather than fake values.
 func TestDashboard_RealNumbers(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -421,7 +421,7 @@ func min(a, b int) int {
 	return b
 }
 
-// ---------- Saison 14-XX admin-edit config.changed broadcasts ----------
+// ---------- admin-edit config.changed broadcasts ----------
 
 func TestAdminWebViewers_RenameBroadcastsConfigChanged(t *testing.T) {
 	env := newTestServer(t)
@@ -606,7 +606,7 @@ func TestAdminPlaceholders_Render(t *testing.T) {
 	}
 }
 
-// ---------- Benutzer-Tab (FIX4-b) ----------
+// ---------- users tab ----------
 
 func seedAccessUsers(env *testEnv, users ...access.User) {
 	env.userStore.users = append(env.userStore.users, users...)
@@ -836,8 +836,7 @@ func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	// MAC kommt jetzt vom Server (HOTFIX4: kein MAC-Input mehr).
-	// Wir suchen den Viewer per Name.
+	// The MAC is server-generated; we look up the viewer by name.
 	info, _, err := env.viewerMgr.LookupByName(context.Background(), "Familie Mueller-Link-Test")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
@@ -847,8 +846,8 @@ func TestViewerCreate_StoresLinkedUserID(t *testing.T) {
 	}
 }
 
-// TestCreateViewer_RejectsDuplicateName (HOTFIX4): doppelter
-// normalisierter Name -> 409 Conflict.
+// TestCreateViewer_RejectsDuplicateName: a duplicate normalised
+// name returns 409 Conflict.
 func TestCreateViewer_RejectsDuplicateName(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -876,15 +875,15 @@ func TestCreateViewer_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
-// TestSetPassword_UpdatesAndInvalidatesSessions (HOTFIX4): POST
-// /a/web-viewers/{mac}/set-password setzt das Passwort und
-// loggt offene Sessions aus.
+// TestSetPassword_UpdatesAndInvalidatesSessions: POST
+// /a/web-viewers/{mac}/set-password updates the password and
+// logs out open sessions.
 func TestSetPassword_UpdatesAndInvalidatesSessions(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	env.seedViewer(t)
 
-	// Mieter loggt sich ein.
+	// The mieter logs in.
 	loginResp := env.loginViewer(t, testViewerLogin, testViewerPassword)
 	loginResp.Body.Close()
 
@@ -941,7 +940,7 @@ func TestSetPassword_UpdatesAndInvalidatesSessions(t *testing.T) {
 	}
 }
 
-// ---------- Edit + Generate-PW (Saison 13-02-FIX4-a-HOTFIX5) ----------
+// ---------- Edit + Generate-PW ----------
 
 func TestWebViewerEdit_RenamesAndChangesLink(t *testing.T) {
 	env := newTestServer(t)
@@ -1134,7 +1133,7 @@ func TestWebViewerGeneratePW_ReturnsPasswordWithoutSaving(t *testing.T) {
 	}
 }
 
-// ---------- Login-Info Endpoint (Saison 13-02-FIX4-a-HOTFIX8) ----------
+// ---------- login-info endpoint ----------
 
 func TestLoginInfoEndpoint_ReturnsURLAndQR(t *testing.T) {
 	env := newTestServer(t)

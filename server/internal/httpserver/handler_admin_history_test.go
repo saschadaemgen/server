@@ -1,4 +1,4 @@
-// Saison 14-04-Phase2: tests for the admin detail page + the
+// Tests for the admin detail page + the
 // /a/viewers/{mac}/history* endpoints.
 package httpserver
 
@@ -236,7 +236,7 @@ func TestAdminViewerHistory_PaginationAcrossPages(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-04-Phase2 dashboard viewer-filter ----------
+// ---------- dashboard viewer-filter ----------
 
 func TestAdminDashboard_FilterByViewerMACs(t *testing.T) {
 	env := newTestServer(t)
@@ -259,7 +259,7 @@ func TestAdminDashboard_FilterByViewerMACs(t *testing.T) {
 		t.Fatalf("seed B: %v", err)
 	}
 
-	// Ohne Filter: beide Events sichtbar.
+	// Without a filter both events are visible.
 	resp, err := env.client.Get(env.ts.URL + "/a/")
 	if err != nil {
 		t.Fatalf("GET dashboard: %v", err)
@@ -273,23 +273,23 @@ func TestAdminDashboard_FilterByViewerMACs(t *testing.T) {
 		t.Errorf("dashboard missing Wohnung B")
 	}
 
-	// Filter auf nur A: B ist weg.
+	// Filter to A only: B disappears.
 	resp2, err := env.client.Get(env.ts.URL + "/a/?viewer_macs=" + testViewerMAC)
 	if err != nil {
 		t.Fatalf("GET filtered dashboard: %v", err)
 	}
 	defer resp2.Body.Close()
 	body2 := readBody(t, resp2)
-	// A muss in der Recent-Events-Liste oder in der Filter-Auswahl
-	// auftauchen (beide leben in body2).
+	// A must appear in either the recent-events list or the
+	// filter selector (both live in body2).
 	if !contains(body2, testViewerName) {
 		t.Errorf("filtered dashboard missing A %q", testViewerName)
 	}
-	// Wir koennen nicht hart "Wohnung B" verbieten, weil sie auch
-	// in der "Alle Viewer"-Filter-Auswahl steht. Aber in der
-	// recent-events-table darf B nicht erscheinen. Da wir hier nur
-	// String-Match haben, pruefen wir die Anzahl der dashRecentEvent-
-	// Rows ueber den DB-Query separat.
+	// We cannot hard-forbid "Wohnung B" because it also appears
+	// in the "Alle Viewer" filter list. The recent-events table
+	// must not include B though. With only string matching here
+	// we assert the dashRecentEvent row count via the DB query
+	// separately.
 	filterArg := []string{testViewerMAC}
 	rows, err := env.history.ListRecent(context.Background(), 20, filterArg...)
 	if err != nil {
@@ -313,18 +313,17 @@ func TestAdminDashboard_FilterRejectsBogusButDoesNotError(t *testing.T) {
 	}
 }
 
-// TestAdminDashboard_FilterDropdownHasNoInlineDisplay ist der
-// Regression-Test fuer Saison 14-04-Phase2-FIX02: die FIX01-
-// Schliess-Logik greift nicht weil das Markup inline
-// "display:flex" plus das hidden-Attribut zusammen rendert.
-// Inline-Style schlaegt das User-Agent-[hidden]{display:none}.
-// Folge: dropdown.hidden=true hatte keinen sichtbaren Effekt.
+// TestAdminDashboard_FilterDropdownHasNoInlineDisplay is the
+// regression test for the dropdown-visibility bug: the original
+// close-logic did not engage because the markup rendered inline
+// "display:flex" together with the hidden attribute. Inline
+// style beats the user-agent rule [hidden]{display:none}, so
+// dropdown.hidden=true had no visible effect.
 //
-// Der Fix verschiebt die Sichtbarkeits-Steuerung auf eine
-// .is-open-Klasse. Dieser Test bewacht das: das gerenderte
-// Dropdown-Element darf weder ein inline "display:" tragen noch
-// das hidden-Attribut auf dem Dropdown-Container haben. Beides
-// wuerde den Bug zurueckbringen.
+// The fix moves the visibility control onto an .is-open class.
+// This test guards that: the rendered dropdown element must
+// carry neither an inline "display:" nor the hidden attribute
+// on the dropdown container - either would bring the bug back.
 func TestAdminDashboard_FilterDropdownHasNoInlineDisplay(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -352,14 +351,14 @@ func TestAdminDashboard_FilterDropdownHasNoInlineDisplay(t *testing.T) {
 	}
 	tag := body[tagStart : tagEnd+1]
 
-	// Pre-FIX02-Regressionen: inline display und/oder hidden-Attribut.
+	// Regression markers: inline display and/or hidden attribute.
 	if contains(tag, `display:`) || contains(tag, `display :`) {
-		t.Errorf("dropdown opening tag carries inline display style; this is the FIX02 bug:\n%s", tag)
+		t.Errorf("dropdown opening tag carries inline display style; this is the visibility-toggle bug:\n%s", tag)
 	}
 	if contains(tag, ` hidden`) || contains(tag, ` hidden=`) {
-		t.Errorf("dropdown opening tag still has the hidden attribute; that was the visibility-toggle pre-FIX02:\n%s", tag)
+		t.Errorf("dropdown opening tag still has the hidden attribute; that was the original visibility toggle:\n%s", tag)
 	}
-	// Positive: muss die FIX02-Visibility-Klasse erlauben.
+	// Positive: the class-based visibility rule must be present.
 	if !contains(body, "#dashboard-filter-dropdown.is-open") {
 		t.Errorf("expected .is-open visibility rule for the dropdown in the page CSS")
 	}

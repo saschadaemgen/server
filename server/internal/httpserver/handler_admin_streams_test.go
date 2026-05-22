@@ -1,4 +1,4 @@
-// Saison 14-01-FIX04: stream-source validator tests.
+// Stream-source validator tests.
 //
 // The validator decides whether a Source-URL passed to the
 // /a/streams admin form is shaped like a valid go2rtc source.
@@ -71,15 +71,13 @@ func TestStreamSourceValidation_EmptySource(t *testing.T) {
 	}
 }
 
-// Saison 14-01-FIX04: when the backend rejects a source via its
-// PUT-API space-check, the admin handler surfaces a friendlier
-// German-language hint that points the operator at the backend-
-// config workaround instead of leaving them with an opaque
-// "HTTP 400: source with spaces may be insecure".
-//
-// Saison 15-01 re-branding: the message no longer says "go2rtc"
-// since the same check could fire from the carvilon-streaming-
-// server too. Wording is now backend-neutral.
+// When the backend rejects a source via its PUT-API space-check,
+// the admin handler surfaces a friendlier German-language hint
+// that points the operator at the backend-config workaround
+// instead of leaving them with an opaque "HTTP 400: source with
+// spaces may be insecure". The wording is backend-neutral since
+// the same check could fire from any backend that accepts
+// free-form source URLs.
 func TestRewriteStreamBackendError_SourceWithSpaces(t *testing.T) {
 	in := errors.New("streams: PUT /api/streams?name=foo&src=ffmpeg+...: HTTP 400: source with spaces may be insecure")
 	out := rewriteStreamBackendError(in)
@@ -91,11 +89,11 @@ func TestRewriteStreamBackendError_SourceWithSpaces(t *testing.T) {
 	}
 }
 
-// Saison 15-01: Put on the transitional go2rtc backend returns
-// ErrNotConfigured because profile CRUD migrates to the carvilon-
-// streaming-server. The rewrite must surface that hint instead
-// of leaking the raw "backend URL not configured" string into
-// the admin UI flash.
+// Put on the transitional go2rtc backend returns
+// ErrNotConfigured because profile CRUD migrates to the
+// carvilon-streaming-server. The rewrite must surface that hint
+// instead of leaking the raw "backend URL not configured"
+// string into the admin UI flash.
 func TestRewriteStreamBackendError_NotConfiguredMigrationHint(t *testing.T) {
 	out := rewriteStreamBackendError(streams.ErrNotConfigured)
 	if !strings.Contains(out, "carvilon-streaming-server") {

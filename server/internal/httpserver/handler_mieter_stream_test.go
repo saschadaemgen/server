@@ -1,7 +1,7 @@
-// Saison 14-01-FIX01: focused tests for the mieter MJPEG proxy.
-// Mirrors the ESP tests in handler_esp_stream_test.go but uses
-// the cookie-session middleware so the URL-build + Authorization-
-// strip + log-summary contracts are proven for both routes.
+// Focused tests for the mieter MJPEG proxy. Mirrors the ESP
+// tests in handler_esp_stream_test.go but uses the cookie-session
+// middleware so the URL-build + Authorization-strip +
+// log-summary contracts are proven for both routes.
 package httpserver
 
 import (
@@ -122,11 +122,11 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 	}
 }
 
-// Saison 14-01-FIX03: the mieter side shares proxyMJPEGStream
-// with the ESP side, so the no-chunked invariant applies here
-// too. Browsers tolerate chunked Multipart - the test is here
-// to lock in consistent behaviour across both routes so a
-// future refactor cannot silently re-introduce chunked for one
+// The mieter side shares proxyMJPEGStream with the ESP side, so
+// the no-chunked invariant applies here too. Browsers tolerate
+// chunked Multipart - the test is here to lock in consistent
+// behaviour across both routes so a future refactor cannot
+// silently re-introduce chunked for one
 // of them.
 func TestMieterStream_NoChunkedTransferEncoding(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

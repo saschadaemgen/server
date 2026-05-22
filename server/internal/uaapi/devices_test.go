@@ -98,10 +98,10 @@ func TestListDevices_PropagatesUnauthorized(t *testing.T) {
 	}
 }
 
-// Saison 13-05-HOTFIX live regression: UDM on Sascha's anlage
-// returns devices grouped as data: [[d, d], [d]] (one array per
-// hub topology). Prior code unmarshalled directly into []Device
-// and failed with "cannot unmarshal array into Go value of type
+// Live regression: the UDM on Sascha's anlage returns devices
+// grouped as data: [[d, d], [d]] (one array per hub topology).
+// Prior code unmarshalled directly into []Device and failed
+// with "cannot unmarshal array into Go value of type
 // uaapi.Device". decodeList now flattens.
 func TestListDevices_TolerantToArrayOfArrays(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,10 +181,10 @@ func TestListDevices_UnknownShapeIncludesPayloadInError(t *testing.T) {
 	}
 }
 
-// Saison 13-05-HOTFIX2: filter rules are now broad enough to
-// catch every observed UA device_type spelling for intercoms.
-// The matrix below is the load-bearing contract; whenever live
-// surfaces a new spelling, add a row here.
+// Filter rules are now broad enough to catch every observed UA
+// device_type spelling for intercoms. The matrix below is the
+// load-bearing contract; whenever a live capture surfaces a new
+// spelling, add a row here.
 func TestIsIntercomType(t *testing.T) {
 	cases := []struct {
 		in   string

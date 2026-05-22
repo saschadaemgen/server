@@ -1,7 +1,6 @@
-// Saison 14-03-FIX03 Sub-2: coverage for the unread-doorbell
-// surface (GET endpoint, SSE broadcast on new event + on
-// mark-read) and for the canonical auto_screensaver_seconds
-// settings-form field (Sub-1a Naming-Fix).
+// Coverage for the unread-doorbell surface (GET endpoint, SSE
+// broadcast on new event + on mark-read) and for the canonical
+// auto_screensaver_seconds settings-form field.
 package httpserver
 
 import (
@@ -141,8 +140,8 @@ func TestEvents_StreamsUnreadCount(t *testing.T) {
 }
 
 // TestMieterSettingsPost_CanonicalAutoScreensaverSecondsField
-// covers the FIX03 Sub-1a frontend-rename. Posting with the
-// canonical "auto_screensaver_seconds" key works (was previously
+// covers the frontend rename. Posting with the canonical
+// "auto_screensaver_seconds" key works (was previously
 // "auto_screensaver"); the legacy alias is still accepted by
 // the existing TestMieterSettingsPost_AutoScreensaverJSON test.
 func TestMieterSettingsPost_CanonicalAutoScreensaverSecondsField(t *testing.T) {

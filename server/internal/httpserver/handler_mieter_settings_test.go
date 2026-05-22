@@ -1,6 +1,6 @@
-// Saison 14-03 tests for the inline-settings extension (the
-// auto_screensaver form field) and the new /webviewer/history.json
-// endpoint. Together they cover the runtime-facing surface the
+// Tests for the inline-settings extension (the auto_screensaver
+// form field) and the /webviewer/history.json endpoint.
+// Together they cover the runtime-facing surface the
 // modes-container relies on.
 package httpserver
 
@@ -252,10 +252,10 @@ func TestMieterHistoryJSON_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
-// TestMieterHistoryJSON_DoorNameResolved covers the saison-14-03-FIX02
-// Sub-1a fix: when UA-API knows the intercom MAC, the response
+// TestMieterHistoryJSON_DoorNameResolved covers the door-name
+// resolution: when UA-API knows the intercom MAC, the response
 // must surface the friendly door name (not the bare MAC, which
-// was the pre-FIX02 stop-gap).
+// was an earlier stop-gap).
 func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	uaStub := newUADoorsStub(t, uaDoorStubConfig{
 		doors: map[string]string{
@@ -311,9 +311,9 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	// Events are returned newest-first; order: known MAC, empty
 	// MAC, unknown MAC.
 	//
-	// FIX04 Sub-1b: in this single-door stub ALL three rows
-	// resolve to the only door's name - including the unknown
-	// MAC, which pre-FIX04 fell to the generic label.
+	// In this single-door stub ALL three rows resolve to the
+	// only door's name - including the unknown MAC, which an
+	// earlier resolver mapped to the generic label.
 	type want struct{ intercom, name string }
 	wants := []want{
 		{intercom: "28:70:4e:31:e2:9c", name: "Door door-uuid-front"},
@@ -330,8 +330,8 @@ func TestMieterHistoryJSON_DoorNameResolved(t *testing.T) {
 	}
 }
 
-// TestMieterSettingsPost_AcceptsScreenOff verifies the Saison 14-XX
-// extension: the canonical mieter POST handler now accepts the
+// TestMieterSettingsPost_AcceptsScreenOff verifies that the
+// canonical mieter POST handler accepts the
 // third idle_view_mode value (ESP-only concept but pass-through-
 // safe for the web viewer).
 func TestMieterSettingsPost_AcceptsScreenOff(t *testing.T) {
@@ -365,9 +365,9 @@ func TestMieterSettingsPost_AcceptsScreenOff(t *testing.T) {
 }
 
 // TestMieterSettingsPost_HistoryCaptureToggle covers the
-// saison-14-04-phase2 capture-disable surface. Setting "0"
-// flips the toggle and the next /webviewer/history.json call
-// returns capture_enabled:false + empty events.
+// capture-disable surface. Setting "0" flips the toggle and the
+// next /webviewer/history.json call returns
+// capture_enabled:false + empty events.
 func TestMieterSettingsPost_HistoryCaptureToggle(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)
@@ -528,13 +528,13 @@ func TestMieterHistoryJSON_RequiresSession(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-04-Phase2 history pagination + filter ----------
+// ---------- history pagination + filter ----------
 
 func TestMieterHistoryJSON_Pagination(t *testing.T) {
 	env := newTestServer(t)
 	loginMieterForTest(t, env)
 
-	// 5 Events seeden.
+	// Seed 5 events.
 	ctx := t.Context()
 	base := time.Now()
 	for i := 0; i < 5; i++ {
@@ -691,7 +691,7 @@ func TestMieterHistoryJSON_CaptureDisabledReturnsEmpty(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-04-Phase2 DELETE /webviewer/history* ----------
+// ---------- DELETE /webviewer/history* ----------
 
 func TestMieterHistoryDeleteOne_SoftHidesAndDropsOutOfList(t *testing.T) {
 	env := newTestServer(t)

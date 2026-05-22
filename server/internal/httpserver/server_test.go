@@ -34,10 +34,9 @@ import (
 	"carvilon.local/server/internal/secrets"
 )
 
-// Saison 13-02-FIX4-a-HOTFIX4: Login via Wohnungs-Name (case +
-// umlaut-tolerant). testViewerLogin ist der Name, den der
-// Mieter im Login-Form eintippt; muss ohne Normalisierung
-// mit dem DB-name matchen.
+// Login goes via Wohnungs-Name (case + umlaut tolerant).
+// testViewerLogin is the name the mieter types into the login
+// form; it must match the DB name without normalisation.
 const (
 	testViewerMAC      = "0c:ea:14:42:42:42"
 	testViewerName     = "Familie Mueller 2OG"
@@ -89,9 +88,8 @@ type testEnv struct {
 }
 
 // fakeUserStore is a deterministic in-memory access.UserStore for
-// the httpserver tests. Saison 13-02-FIX4-b: the real UA backend
-// is replaced with this fake so handler tests can seed users
-// without a network call.
+// the httpserver tests. The real UA backend is replaced with this
+// fake so handler tests can seed users without a network call.
 type fakeUserStore struct {
 	configured bool
 	users      []access.User
@@ -310,8 +308,8 @@ func (e *testEnv) seedViewer(t *testing.T) {
 	e.seedViewerAs(t, testViewerMAC, testViewerName, testViewerPassword)
 }
 
-// seedViewerAs ist die HOTFIX4-Signatur: kein separater Username
-// mehr, der Name IST der Login.
+// seedViewerAs follows the no-username schema: the name IS the
+// login key.
 func (e *testEnv) seedViewerAs(t *testing.T, mac, name, plainPW string) {
 	t.Helper()
 	infos, err := e.viewerMgr.ListViewers(context.Background())
@@ -460,8 +458,8 @@ func TestLogin_HappyPath(t *testing.T) {
 	if !strings.Contains(body, testViewerName) {
 		t.Errorf("home body missing viewer name %q", testViewerName)
 	}
-	// Saison 14-01b: home.html is now the screensaver/livestream
-	// idle-container; the old intercom-idle "Bereit" copy is gone.
+	// home.html is now the screensaver/livestream idle-container;
+	// the old intercom-idle "Bereit" copy is gone.
 	if !strings.Contains(body, `id="idle-container"`) {
 		t.Errorf("home body missing idle-container scaffold")
 	}
@@ -486,10 +484,10 @@ func TestLogin_NoSession_RendersForm(t *testing.T) {
 	}
 }
 
-// TestLogin_IgnoresQueryPrefill prueft den S13-02-FIX4-a-HOTFIX1-
-// Sicherheits-Fix: ?u= und ?p= werden vom Server-Handler NICHT
-// mehr auf das Form gemappt (Pre-Fill ist Anti-Pattern; Passwoerter
-// haben in URLs nichts zu suchen).
+// TestLogin_IgnoresQueryPrefill verifies the security fix: ?u=
+// and ?p= are no longer mapped onto the form by the server
+// handler (pre-fill is an anti-pattern; passwords have no
+// business in URLs).
 func TestLogin_IgnoresQueryPrefill(t *testing.T) {
 	env := newTestServer(t)
 	resp, err := env.client.Get(env.ts.URL + "/login?u=alice&p=hunter2")
@@ -530,9 +528,8 @@ func TestLogin_UnknownUser(t *testing.T) {
 	}
 }
 
-// TestLogin_LockedAccountShowsBanner ist der S13-02-FIX4-a-HOTFIX1
-// Acceptance-Test: nach Lockout sieht der Mieter einen orangen
-// Banner mit Hinweis auf die Hausverwaltung.
+// TestLogin_LockedAccountShowsBanner: after a lockout the mieter
+// sees an orange banner pointing at the Hausverwaltung.
 func TestLogin_LockedAccountShowsBanner(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
@@ -554,11 +551,10 @@ func TestLogin_LockedAccountShowsBanner(t *testing.T) {
 	}
 }
 
-// TestLogin_SetsCookieAndRedirects ist der S13-02-FIX4-a-HOTFIX1
-// Regression-Test fuer den live-beobachteten Bug: POST mit
-// korrekten Credentials gab HTTP 200 + Login-Form zurueck statt
-// 303 + Set-Cookie. Hier pruefen wir explizit Cookie + Redirect-
-// Headers + Audit-Log.
+// TestLogin_SetsCookieAndRedirects is the regression test for a
+// live-observed bug: POST with correct credentials returned
+// HTTP 200 + login form instead of 303 + Set-Cookie. This
+// explicitly asserts cookie + redirect headers + audit log.
 func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewer(t)
@@ -601,10 +597,9 @@ func TestLogin_SetsCookieAndRedirects(t *testing.T) {
 	}
 }
 
-// TestLogin_AllUmlautVariants (S13-02-FIX4-a-HOTFIX4): Login geht
-// via Wohnungs-Name mit normalisierter Vergleichs-Form (case +
-// Umlaute + Whitespace). Wir seeden EIN Viewer und probieren
-// alle Schreibweisen durch.
+// TestLogin_AllUmlautVariants: login goes via Wohnungs-Name with
+// a normalised comparison form (case + umlauts + whitespace).
+// We seed ONE viewer and try every spelling.
 func TestLogin_AllUmlautVariants(t *testing.T) {
 	env := newTestServer(t)
 	env.seedViewerAs(t,
@@ -734,10 +729,10 @@ func TestCookie_Flags(t *testing.T) {
 
 // ---------- Legacy redirects ----------
 
-// TestOldMRouteRedirects sichert dass alle alten /m-Pfade
-// (Bookmarks, alte QR-Codes, externe Links) mit 301 in den
-// Saison-14-02-Split aufgeloest werden: die Wurzel auf /login
-// (Form), alles andere auf /webviewer/<suffix>.
+// TestOldMRouteRedirects verifies that every legacy /m path
+// (bookmarks, old QR codes, external links) resolves with a 301
+// into the current split: the root to /login (the form),
+// everything else to /webviewer/<suffix>.
 func TestOldMRouteRedirects(t *testing.T) {
 	env := newTestServer(t)
 	cases := []struct {
@@ -767,10 +762,10 @@ func TestOldMRouteRedirects(t *testing.T) {
 	}
 }
 
-// TestOldEinloggenRouteRedirects ist das Saison-14-02-Pendant zu
-// TestOldMRouteRedirects: der Pfad /einloggen aus S13-S14-01b
-// bleibt als 301-Redirect bestehen, damit existierende Browser-
-// Bookmarks und QR-Codes nicht brechen.
+// TestOldEinloggenRouteRedirects is the pendant to
+// TestOldMRouteRedirects: the legacy /einloggen path stays as a
+// 301 redirect so existing browser bookmarks and QR codes do
+// not break.
 func TestOldEinloggenRouteRedirects(t *testing.T) {
 	env := newTestServer(t)
 	cases := []struct {
@@ -803,13 +798,12 @@ func TestOldEinloggenRouteRedirects(t *testing.T) {
 	}
 }
 
-// ---------- Modals haben modal-glass (S13-02-FIX4-a-HOTFIX2) ----------
+// ---------- modals carry modal-glass ----------
 
-// TestAllModalsHaveGlassClass rendert die Admin-Web-Viewers-Seite
-// inklusive Anlegen-Modal und prueft im HTML auf das
-// modal-glass-Element. Ohne diese Klasse schliesst das
-// library-interactions.js das Modal bei jedem Inner-Klick (s.
-// HOTFIX1- und HOTFIX2-Notes).
+// TestAllModalsHaveGlassClass renders the admin web-viewers page
+// including the create modal and asserts the presence of the
+// modal-glass element. Without that class the interactions JS
+// closes the modal on every inner click.
 func TestAllModalsHaveGlassClass(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

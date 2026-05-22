@@ -1,8 +1,8 @@
-// Saison 14-XX: tests for POST /esp/settings.
+// Tests for POST /esp/settings.
 //
-// Bearer-Auth, Partial-Update, strict Allow-Lists, config.changed
+// Bearer auth, partial update, strict allow-lists, config.changed
 // SSE broadcast. Mirrors the test patterns from esp_runtime_test.go
-// (Bearer adoption flow) and handler_mieter_unread_test.go (SSE
+// (bearer adoption flow) and handler_mieter_unread_test.go (SSE
 // observation against the test env's hub).
 package httpserver
 

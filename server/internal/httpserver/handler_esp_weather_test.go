@@ -1,13 +1,13 @@
-// Saison 14-XX: tests for GET /esp/weather.
+// Tests for GET /esp/weather.
 //
-// Bearer-Auth-Gating und identische Response-Shape wie
-// /webviewer/weather. Wir mocken open-meteo via httptest und
-// pruefen einmal ohne Bearer (401), einmal mit valider Token
-// dass die JSON-Felder im Snapshot kommen.
+// Bearer-auth gating and identical response shape as
+// /webviewer/weather. We mock open-meteo via httptest and assert
+// once without bearer (401), once with a valid token that the
+// JSON fields land in the snapshot.
 //
-// Saison 14-FIX07 erweitert die Suite um Lokalisierungs-Tests:
-// das description-Feld muss in der Sprache der viewers.language-
-// Spalte kommen, mit echten UTF-8-Umlauten (kein "Bewoelkt" mehr).
+// The suite also covers localisation: the description field must
+// come in the language of the viewers.language column, with real
+// UTF-8 umlauts (no "Bewoelkt" anymore).
 package httpserver
 
 import (
@@ -131,7 +131,7 @@ func TestESPWeather_SameShapeAsWebViewerWeather(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-FIX07: language + UTF-8 umlauts ----------
+// ---------- language + UTF-8 umlauts ----------
 
 // fetchESPWeather is a tiny helper that performs a bearer-gated
 // GET /esp/weather call against env and returns the decoded
@@ -156,11 +156,11 @@ func fetchESPWeather(t *testing.T, env *testEnv, token string) weather.Snapshot 
 	return snap
 }
 
-// TestESPWeather_DefaultsToGerman verifies FIX07's umlaut-fix: a
-// freshly-adopted ESP viewer (Language column empty) gets
-// "Bewölkt" (the FIX07 spelling) for the stub's weather_code:3,
-// not "Bewoelkt" (pre-FIX07) and not "Overcast" (would mean the
-// default flipped to en).
+// TestESPWeather_DefaultsToGerman verifies the umlaut fix: a
+// freshly adopted ESP viewer (Language column empty) gets
+// "Bewölkt" for the stub's weather_code:3, not "Bewoelkt" (the
+// ASCII placeholder) and not "Overcast" (would mean the default
+// flipped to en).
 func TestESPWeather_DefaultsToGerman(t *testing.T) {
 	env := setupEnvWithWeather(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -232,11 +232,11 @@ func TestESPWeather_LanguageFlipsLive(t *testing.T) {
 }
 
 // TestMieterWeather_RespectsLanguage covers the cookie-auth twin
-// of the ESP test above: the Mieter-Web-Viewer pulls the same
+// of the ESP test above: the mieter web viewer pulls the same
 // description string via /webviewer/weather and must respect the
-// language column the same way the ESP path does. Saison-14-FIX07
-// requirement: one tenant language source, one weather output -
-// no separate German-only path for the browser.
+// language column the same way the ESP path does. One tenant
+// language source, one weather output - no separate
+// German-only path for the browser.
 func TestMieterWeather_RespectsLanguage(t *testing.T) {
 	env := setupEnvWithWeather(t)
 	loginMieterForTest(t, env)

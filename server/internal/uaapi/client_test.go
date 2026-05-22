@@ -34,7 +34,7 @@ func assertBearerAuth(t *testing.T, r *http.Request, wantToken string) {
 	}
 }
 
-// ---------- regressions for the saison-12-04 hotfix ----------
+// ---------- regressions for the envelope.code = string fix ----------
 
 func TestEnvelope_DecodesStringCode(t *testing.T) {
 	raw := `{"code":"SUCCESS","msg":"ok","data":[]}`

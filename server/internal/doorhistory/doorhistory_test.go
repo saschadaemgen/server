@@ -10,8 +10,8 @@ import (
 	"carvilon.local/server/internal/db"
 )
 
-const testMockMAC = "0c:ea:14:42:42:42"
-const testMockMACB = "0c:ea:14:42:42:43"
+const testViewerMAC = "0c:ea:14:42:42:42"
+const testViewerMACB = "0c:ea:14:42:42:43"
 
 func newStore(t *testing.T) (*SQLStore, *db.DB) {
 	t.Helper()
@@ -23,13 +23,13 @@ func newStore(t *testing.T) (*SQLStore, *db.DB) {
 	now := int64(1747000000000)
 	if _, err := d.Exec(
 		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?)`,
-		testMockMAC, "Familie Mueller 2OG", 8100, now, now,
+		testViewerMAC, "Familie Mueller 2OG", 8100, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer A: %v", err)
 	}
 	if _, err := d.Exec(
 		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at) VALUES (?, ?, ?, 'web', ?, ?)`,
-		testMockMACB, "Wohnung 2", 8101, now, now,
+		testViewerMACB, "Wohnung 2", 8101, now, now,
 	); err != nil {
 		t.Fatalf("seed viewer B: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestInsert_RoundTrip(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	id, err := s.Insert(ctx, Event{
-		ViewerMAC:     testMockMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   TypeDoorbellStart,
 		IntercomMAC: "28:70:4e:31:e2:9c",
 		OccurredAt:  time.Unix(1747000000, 0),
@@ -53,7 +53,7 @@ func TestInsert_RoundTrip(t *testing.T) {
 	if id == 0 {
 		t.Error("Insert returned id=0")
 	}
-	events, err := s.ListForMock(ctx, testMockMAC, 10)
+	events, err := s.ListForMock(ctx, testViewerMAC, 10)
 	if err != nil {
 		t.Fatalf("ListForMock: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestInsert_RejectsEmptyFields(t *testing.T) {
 	if _, err := s.Insert(ctx, Event{EventType: TypeDoorbellStart}, nil); err == nil {
 		t.Error("Insert with empty mock_mac succeeded")
 	}
-	if _, err := s.Insert(ctx, Event{ViewerMAC: testMockMAC}, nil); err == nil {
+	if _, err := s.Insert(ctx, Event{ViewerMAC: testViewerMAC}, nil); err == nil {
 		t.Error("Insert with empty event_type succeeded")
 	}
 }
@@ -96,7 +96,7 @@ func TestUpdateCancel_MatchesNewestOpen(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	older, err := s.Insert(ctx, Event{
-		ViewerMAC:     testMockMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747000000, 0),
 		CancelToken: "tok-shared",
@@ -105,7 +105,7 @@ func TestUpdateCancel_MatchesNewestOpen(t *testing.T) {
 		t.Fatalf("insert older: %v", err)
 	}
 	newer, err := s.Insert(ctx, Event{
-		ViewerMAC:     testMockMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747001000, 0),
 		CancelToken: "tok-shared",
@@ -113,10 +113,10 @@ func TestUpdateCancel_MatchesNewestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert newer: %v", err)
 	}
-	if err := s.UpdateCancel(ctx, testMockMAC, "tok-shared", time.Unix(1747001100, 0)); err != nil {
+	if err := s.UpdateCancel(ctx, testViewerMAC, "tok-shared", time.Unix(1747001100, 0)); err != nil {
 		t.Fatalf("UpdateCancel: %v", err)
 	}
-	events, err := s.ListForMock(ctx, testMockMAC, 10)
+	events, err := s.ListForMock(ctx, testViewerMAC, 10)
 	if err != nil {
 		t.Fatalf("ListForMock: %v", err)
 	}
@@ -136,14 +136,14 @@ func TestUpdateCancel_UnknownTokenReturnsNotFound(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Insert(ctx, Event{
-		ViewerMAC:     testMockMAC,
+		ViewerMAC:     testViewerMAC,
 		EventType:   TypeDoorbellStart,
 		OccurredAt:  time.Unix(1747000000, 0),
 		CancelToken: "tok-1",
 	}, nil); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	err := s.UpdateCancel(ctx, testMockMAC, "tok-nope", time.Unix(1747001000, 0))
+	err := s.UpdateCancel(ctx, testViewerMAC, "tok-nope", time.Unix(1747001000, 0))
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("UpdateCancel for unknown token returned %v, want ErrNotFound", err)
 	}
@@ -155,7 +155,7 @@ func TestUnreadCount_OnlyUnread(t *testing.T) {
 	var ids []int64
 	for i := 0; i < 3; i++ {
 		id, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil)
@@ -164,17 +164,17 @@ func TestUnreadCount_OnlyUnread(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	n, err := s.UnreadCount(ctx, testMockMAC)
+	n, err := s.UnreadCount(ctx, testViewerMAC)
 	if err != nil {
 		t.Fatalf("UnreadCount: %v", err)
 	}
 	if n != 3 {
 		t.Errorf("UnreadCount = %d, want 3", n)
 	}
-	if err := s.MarkRead(ctx, testMockMAC, ids[:2]); err != nil {
+	if err := s.MarkRead(ctx, testViewerMAC, ids[:2]); err != nil {
 		t.Fatalf("MarkRead: %v", err)
 	}
-	n, err = s.UnreadCount(ctx, testMockMAC)
+	n, err = s.UnreadCount(ctx, testViewerMAC)
 	if err != nil {
 		t.Fatalf("UnreadCount after mark: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestMarkRead_RespectsMockScope(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	idA, err := s.Insert(ctx, Event{
-		ViewerMAC:    testMockMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000000, 0),
 	}, nil)
@@ -195,10 +195,10 @@ func TestMarkRead_RespectsMockScope(t *testing.T) {
 		t.Fatalf("insert A: %v", err)
 	}
 	// Try to mark mock A's event as read while claiming to be mock B.
-	if err := s.MarkRead(ctx, testMockMACB, []int64{idA}); err != nil {
+	if err := s.MarkRead(ctx, testViewerMACB, []int64{idA}); err != nil {
 		t.Fatalf("MarkRead cross-mock: %v", err)
 	}
-	n, err := s.UnreadCount(ctx, testMockMAC)
+	n, err := s.UnreadCount(ctx, testViewerMAC)
 	if err != nil {
 		t.Fatalf("UnreadCount A: %v", err)
 	}
@@ -212,17 +212,17 @@ func TestMarkAllRead_Resets(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil); err != nil {
 			t.Fatalf("insert: %v", err)
 		}
 	}
-	if err := s.MarkAllRead(ctx, testMockMAC, time.Unix(1747100000, 0)); err != nil {
+	if err := s.MarkAllRead(ctx, testViewerMAC, time.Unix(1747100000, 0)); err != nil {
 		t.Fatalf("MarkAllRead: %v", err)
 	}
-	n, err := s.UnreadCount(ctx, testMockMAC)
+	n, err := s.UnreadCount(ctx, testViewerMAC)
 	if err != nil {
 		t.Fatalf("UnreadCount: %v", err)
 	}
@@ -236,14 +236,14 @@ func TestListForMock_NewestFirstAndLimit(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: time.Unix(1747000000+int64(i), 0),
 		}, nil); err != nil {
 			t.Fatalf("insert %d: %v", i, err)
 		}
 	}
-	events, err := s.ListForMock(ctx, testMockMAC, 3)
+	events, err := s.ListForMock(ctx, testViewerMAC, 3)
 	if err != nil {
 		t.Fatalf("ListForMock: %v", err)
 	}
@@ -263,27 +263,27 @@ func TestListForMock_FiltersByMock(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Insert(ctx, Event{
-		ViewerMAC:    testMockMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000000, 0),
 	}, nil); err != nil {
 		t.Fatalf("insert A: %v", err)
 	}
 	if _, err := s.Insert(ctx, Event{
-		ViewerMAC:    testMockMACB,
+		ViewerMAC:    testViewerMACB,
 		EventType:  TypeDoorbellStart,
 		OccurredAt: time.Unix(1747000001, 0),
 	}, nil); err != nil {
 		t.Fatalf("insert B: %v", err)
 	}
-	got, err := s.ListForMock(ctx, testMockMAC, 10)
+	got, err := s.ListForMock(ctx, testViewerMAC, 10)
 	if err != nil {
 		t.Fatalf("ListForMock: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("len(A) = %d, want 1", len(got))
 	}
-	if got[0].ViewerMAC != testMockMAC {
+	if got[0].ViewerMAC != testViewerMAC {
 		t.Errorf("leaked mock B event into mock A list")
 	}
 }
@@ -301,12 +301,12 @@ func TestAggregateAdmin_BucketsByWindow(t *testing.T) {
 			t.Fatalf("insert: %v", err)
 		}
 	}
-	insertAt(testMockMAC, -1*time.Hour)
-	insertAt(testMockMAC, -2*time.Hour)
-	insertAt(testMockMACB, -30*time.Minute)
-	insertAt(testMockMAC, -3*24*time.Hour)
-	insertAt(testMockMAC, -10*24*time.Hour)
-	insertAt(testMockMAC, -40*24*time.Hour)
+	insertAt(testViewerMAC, -1*time.Hour)
+	insertAt(testViewerMAC, -2*time.Hour)
+	insertAt(testViewerMACB, -30*time.Minute)
+	insertAt(testViewerMAC, -3*24*time.Hour)
+	insertAt(testViewerMAC, -10*24*time.Hour)
+	insertAt(testViewerMAC, -40*24*time.Hour)
 	stats, err := s.AggregateAdmin(ctx, now)
 	if err != nil {
 		t.Fatalf("AggregateAdmin: %v", err)
@@ -320,11 +320,11 @@ func TestAggregateAdmin_BucketsByWindow(t *testing.T) {
 	if stats.Total30d != 5 {
 		t.Errorf("Total30d = %d, want 5", stats.Total30d)
 	}
-	if stats.PerMock24h[testMockMAC] != 2 {
-		t.Errorf("PerMock24h[A] = %d, want 2", stats.PerMock24h[testMockMAC])
+	if stats.PerMock24h[testViewerMAC] != 2 {
+		t.Errorf("PerMock24h[A] = %d, want 2", stats.PerMock24h[testViewerMAC])
 	}
-	if stats.PerMock24h[testMockMACB] != 1 {
-		t.Errorf("PerMock24h[B] = %d, want 1", stats.PerMock24h[testMockMACB])
+	if stats.PerMock24h[testViewerMACB] != 1 {
+		t.Errorf("PerMock24h[B] = %d, want 1", stats.PerMock24h[testViewerMACB])
 	}
 }
 
@@ -333,7 +333,7 @@ func TestAggregateAdmin_IgnoresCancelEvents(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1747100000, 0)
 	if _, err := s.Insert(ctx, Event{
-		ViewerMAC:    testMockMAC,
+		ViewerMAC:    testViewerMAC,
 		EventType:  TypeDoorbellCancel,
 		OccurredAt: now.Add(-1 * time.Hour),
 	}, nil); err != nil {
@@ -348,7 +348,7 @@ func TestAggregateAdmin_IgnoresCancelEvents(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-04-Phase2 soft-delete + pagination ----------
+// ---------- soft-delete + pagination ----------
 
 func seedThreeEvents(t *testing.T, s *SQLStore) (ids [3]int64) {
 	t.Helper()
@@ -360,7 +360,7 @@ func seedThreeEvents(t *testing.T, s *SQLStore) (ids [3]int64) {
 		base,
 	} {
 		id, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: when,
 		}, nil)
@@ -375,10 +375,10 @@ func seedThreeEvents(t *testing.T, s *SQLStore) (ids [3]int64) {
 func TestHideEvent_HidesOnlySpecifiedID(t *testing.T) {
 	s, _ := newStore(t)
 	ids := seedThreeEvents(t, s)
-	if err := s.HideEvent(context.Background(), testMockMAC, ids[1]); err != nil {
+	if err := s.HideEvent(context.Background(), testViewerMAC, ids[1]); err != nil {
 		t.Fatalf("HideEvent: %v", err)
 	}
-	events, err := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	events, err := s.ListVisible(context.Background(), testViewerMAC, ListOpts{})
 	if err != nil {
 		t.Fatalf("ListVisible: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestHideEvent_IsIdempotent(t *testing.T) {
 	s, _ := newStore(t)
 	ids := seedThreeEvents(t, s)
 	for i := 0; i < 3; i++ {
-		if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+		if err := s.HideEvent(context.Background(), testViewerMAC, ids[0]); err != nil {
 			t.Fatalf("HideEvent iter %d: %v", i, err)
 		}
 	}
@@ -408,12 +408,12 @@ func TestHideEvent_OtherViewerCannotHide(t *testing.T) {
 	// macB tries to hide one of macA's events. The cross-viewer
 	// hide must not succeed: HideEvent enforces the mock-scope via
 	// a sub-select.
-	err := s.HideEvent(context.Background(), testMockMACB, ids[0])
+	err := s.HideEvent(context.Background(), testViewerMACB, ids[0])
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("cross-viewer hide returned %v, want ErrNotFound", err)
 	}
 	// And the event is still visible for macA.
-	events, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	events, _ := s.ListVisible(context.Background(), testViewerMAC, ListOpts{})
 	if len(events) != 3 {
 		t.Errorf("ListVisible after cross-viewer hide = %d, want 3", len(events))
 	}
@@ -422,20 +422,20 @@ func TestHideEvent_OtherViewerCannotHide(t *testing.T) {
 func TestHideAllEvents_HidesEverythingForMAC(t *testing.T) {
 	s, _ := newStore(t)
 	seedThreeEvents(t, s)
-	n, err := s.HideAllEvents(context.Background(), testMockMAC)
+	n, err := s.HideAllEvents(context.Background(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("HideAllEvents: %v", err)
 	}
 	if n != 3 {
 		t.Errorf("HideAllEvents returned %d, want 3", n)
 	}
-	events, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
+	events, _ := s.ListVisible(context.Background(), testViewerMAC, ListOpts{})
 	if len(events) != 0 {
 		t.Errorf("ListVisible after HideAll = %d, want 0", len(events))
 	}
 	// Re-Aktivierung-Semantik: HideAllEvents bei einem leeren
 	// sichtbaren Set sollte 0 neu-versteckte zurueckgeben.
-	n2, err := s.HideAllEvents(context.Background(), testMockMAC)
+	n2, err := s.HideAllEvents(context.Background(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("HideAllEvents second call: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestListVisible_Pagination(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Hour),
 		}, nil); err != nil {
@@ -459,21 +459,21 @@ func TestListVisible_Pagination(t *testing.T) {
 		}
 	}
 
-	page1, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 0})
+	page1, err := s.ListVisible(ctx, testViewerMAC, ListOpts{Limit: 2, Offset: 0})
 	if err != nil {
 		t.Fatalf("page1: %v", err)
 	}
 	if len(page1) != 2 {
 		t.Errorf("page1 len = %d, want 2", len(page1))
 	}
-	page2, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 2})
+	page2, err := s.ListVisible(ctx, testViewerMAC, ListOpts{Limit: 2, Offset: 2})
 	if err != nil {
 		t.Fatalf("page2: %v", err)
 	}
 	if len(page2) != 2 {
 		t.Errorf("page2 len = %d, want 2", len(page2))
 	}
-	page3, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 4})
+	page3, err := s.ListVisible(ctx, testViewerMAC, ListOpts{Limit: 2, Offset: 4})
 	if err != nil {
 		t.Fatalf("page3: %v", err)
 	}
@@ -498,14 +498,14 @@ func TestListVisible_LimitClampedToMax(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < ListOptsMaxLimit+10; i++ {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Second),
 		}, nil); err != nil {
 			t.Fatalf("seed %d: %v", i, err)
 		}
 	}
-	got, err := s.ListVisible(ctx, testMockMAC, ListOpts{Limit: 9999})
+	got, err := s.ListVisible(ctx, testViewerMAC, ListOpts{Limit: 9999})
 	if err != nil {
 		t.Fatalf("ListVisible: %v", err)
 	}
@@ -523,7 +523,7 @@ func TestListVisible_DateRange(t *testing.T) {
 	day3 := time.Date(2026, 5, 17, 10, 0, 0, 0, time.UTC)
 	for _, t0 := range []time.Time{day1, day2, day3} {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: t0,
 		}, nil); err != nil {
@@ -531,7 +531,7 @@ func TestListVisible_DateRange(t *testing.T) {
 		}
 	}
 	// From=day2 schliesst day1 aus.
-	got, err := s.ListVisible(ctx, testMockMAC, ListOpts{From: day2})
+	got, err := s.ListVisible(ctx, testViewerMAC, ListOpts{From: day2})
 	if err != nil {
 		t.Fatalf("ListVisible from: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestListVisible_DateRange(t *testing.T) {
 		t.Errorf("From=day2 returned %d, want 2 (day2+day3)", len(got))
 	}
 	// To=day2 schliesst day3 aus aber inkludiert beide bis Ende-Tag-23:59.
-	got2, err := s.ListVisible(ctx, testMockMAC, ListOpts{To: day2})
+	got2, err := s.ListVisible(ctx, testViewerMAC, ListOpts{To: day2})
 	if err != nil {
 		t.Fatalf("ListVisible to: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestListVisible_DateRange(t *testing.T) {
 		t.Errorf("To=day2 returned %d, want 2 (day1+day2 with end-of-day cutoff)", len(got2))
 	}
 	// From + To: nur day2 sichtbar.
-	got3, err := s.ListVisible(ctx, testMockMAC, ListOpts{From: day2, To: day2})
+	got3, err := s.ListVisible(ctx, testViewerMAC, ListOpts{From: day2, To: day2})
 	if err != nil {
 		t.Fatalf("ListVisible range: %v", err)
 	}
@@ -559,10 +559,10 @@ func TestListVisible_DateRange(t *testing.T) {
 func TestCountVisible_IgnoresHidden(t *testing.T) {
 	s, _ := newStore(t)
 	ids := seedThreeEvents(t, s)
-	if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+	if err := s.HideEvent(context.Background(), testViewerMAC, ids[0]); err != nil {
 		t.Fatalf("HideEvent: %v", err)
 	}
-	n, err := s.CountVisible(context.Background(), testMockMAC, ListOpts{})
+	n, err := s.CountVisible(context.Background(), testViewerMAC, ListOpts{})
 	if err != nil {
 		t.Fatalf("CountVisible: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestHidden_SurvivesCascadeOnHardDelete(t *testing.T) {
 	s, d := newStore(t)
 	ids := seedThreeEvents(t, s)
 	ctx := context.Background()
-	if err := s.HideEvent(ctx, testMockMAC, ids[0]); err != nil {
+	if err := s.HideEvent(ctx, testViewerMAC, ids[0]); err != nil {
 		t.Fatalf("HideEvent: %v", err)
 	}
 	// Hard-delete des hidden Events. Cascade muss die hidden-Zeile
@@ -599,10 +599,10 @@ func TestHidden_SurvivesCascadeOnHardDelete(t *testing.T) {
 func TestAdminListAll_IncludesHiddenWithFlag(t *testing.T) {
 	s, _ := newStore(t)
 	ids := seedThreeEvents(t, s)
-	if err := s.HideEvent(context.Background(), testMockMAC, ids[0]); err != nil {
+	if err := s.HideEvent(context.Background(), testViewerMAC, ids[0]); err != nil {
 		t.Fatalf("HideEvent: %v", err)
 	}
-	res, err := s.AdminListAll(context.Background(), testMockMAC, ListOpts{})
+	res, err := s.AdminListAll(context.Background(), testViewerMAC, ListOpts{})
 	if err != nil {
 		t.Fatalf("AdminListAll: %v", err)
 	}
@@ -643,14 +643,14 @@ func TestAdminListAll_PaginationHasMore(t *testing.T) {
 	base := time.Unix(1747000000, 0)
 	for i := 0; i < 5; i++ {
 		if _, err := s.Insert(ctx, Event{
-			ViewerMAC:    testMockMAC,
+			ViewerMAC:    testViewerMAC,
 			EventType:  TypeDoorbellStart,
 			OccurredAt: base.Add(time.Duration(i) * time.Hour),
 		}, nil); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	res, err := s.AdminListAll(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 0})
+	res, err := s.AdminListAll(ctx, testViewerMAC, ListOpts{Limit: 2, Offset: 0})
 	if err != nil {
 		t.Fatalf("AdminListAll: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestAdminListAll_PaginationHasMore(t *testing.T) {
 	if res.TotalCount != 5 {
 		t.Errorf("TotalCount = %d, want 5", res.TotalCount)
 	}
-	res2, err := s.AdminListAll(ctx, testMockMAC, ListOpts{Limit: 2, Offset: 4})
+	res2, err := s.AdminListAll(ctx, testViewerMAC, ListOpts{Limit: 2, Offset: 4})
 	if err != nil {
 		t.Fatalf("AdminListAll page 3: %v", err)
 	}
@@ -672,7 +672,7 @@ func TestAdminListAll_PaginationHasMore(t *testing.T) {
 func TestAdminDeleteEvent_HardDeletes(t *testing.T) {
 	s, d := newStore(t)
 	ids := seedThreeEvents(t, s)
-	if err := s.AdminDeleteEvent(context.Background(), testMockMAC, ids[1]); err != nil {
+	if err := s.AdminDeleteEvent(context.Background(), testViewerMAC, ids[1]); err != nil {
 		t.Fatalf("AdminDeleteEvent: %v", err)
 	}
 	var n int
@@ -687,7 +687,7 @@ func TestAdminDeleteEvent_HardDeletes(t *testing.T) {
 func TestAdminDeleteEvent_CrossMACRejected(t *testing.T) {
 	s, _ := newStore(t)
 	ids := seedThreeEvents(t, s)
-	err := s.AdminDeleteEvent(context.Background(), testMockMACB, ids[0])
+	err := s.AdminDeleteEvent(context.Background(), testViewerMACB, ids[0])
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("cross-mac delete returned %v, want ErrNotFound", err)
 	}
@@ -697,11 +697,11 @@ func TestAdminDeleteAllForViewer_PurgesEverything(t *testing.T) {
 	s, d := newStore(t)
 	seedThreeEvents(t, s)
 	// Add a hidden marker so we can verify cascade.
-	ids, _ := s.ListVisible(context.Background(), testMockMAC, ListOpts{})
-	if err := s.HideEvent(context.Background(), testMockMAC, ids[0].ID); err != nil {
+	ids, _ := s.ListVisible(context.Background(), testViewerMAC, ListOpts{})
+	if err := s.HideEvent(context.Background(), testViewerMAC, ids[0].ID); err != nil {
 		t.Fatalf("seed hide: %v", err)
 	}
-	n, err := s.AdminDeleteAllForViewer(context.Background(), testMockMAC)
+	n, err := s.AdminDeleteAllForViewer(context.Background(), testViewerMAC)
 	if err != nil {
 		t.Fatalf("AdminDeleteAllForViewer: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestAdminDeleteAllForViewer_PurgesEverything(t *testing.T) {
 	}
 	// Hidden-Markers are also gone via FK CASCADE.
 	var hidden int
-	if err := d.QueryRow(`SELECT COUNT(*) FROM viewer_hidden_events WHERE viewer_mac = ?`, testMockMAC).Scan(&hidden); err != nil {
+	if err := d.QueryRow(`SELECT COUNT(*) FROM viewer_hidden_events WHERE viewer_mac = ?`, testViewerMAC).Scan(&hidden); err != nil {
 		t.Fatalf("count hidden: %v", err)
 	}
 	if hidden != 0 {

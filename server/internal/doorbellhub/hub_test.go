@@ -48,7 +48,7 @@ func newLoggerWithCapture() (*slog.Logger, *lockedBuffer) {
 }
 
 // fakeSource is the minimal stand-in for viewermanager.Manager.
-// Saison 12-06: the hub no longer needs LookupUserByMAC.
+// The hub does not need LookupUserByMAC.
 type fakeSource struct {
 	events  chan mock.DoorbellEvent
 	cancels chan mock.DoorbellCancelEvent
@@ -323,7 +323,7 @@ func TestStats_CountersIncrementOnPublish(t *testing.T) {
 	}
 }
 
-// ---------- History persistence (Saison 13-01) ----------
+// ---------- History persistence ----------
 
 // fakeHistory is a minimal doorhistory.Store stub: it records
 // Insert + UpdateCancel calls and exposes counters so tests can
@@ -512,7 +512,7 @@ func TestRun_PersistFailureStillDispatches(t *testing.T) {
 	}
 }
 
-// ---------- Saison 13-03: eventbus + doorbellcalls wires ----------
+// ---------- eventbus + doorbellcalls wires ----------
 
 func TestHub_PublishesToEventBus(t *testing.T) {
 	src := newFakeSource()
@@ -560,7 +560,7 @@ func TestHub_PublishesToEventBus(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-XX config.changed ----------
+// ---------- config.changed ----------
 
 func TestBroadcastConfigChanged_DispatchesToSubscriber(t *testing.T) {
 	src := newFakeSource()

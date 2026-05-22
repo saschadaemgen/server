@@ -75,8 +75,7 @@ func TestListDoors_ParsesResponse(t *testing.T) {
 	}
 }
 
-// Saison 13-05-HOTFIX: doors grouped per hub, same tolerance as
-// devices.
+// Doors come grouped per hub; same tolerance as devices.
 func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -107,9 +106,9 @@ func TestListDoors_TolerantToArrayOfArrays(t *testing.T) {
 	}
 }
 
-// Saison 13-07: extras.door_thumbnail carries the intercom MAC.
-// IntercomMAC parses it back out so carvilon can auto-resolve a
-// door by its calling intercom without admin-curated mapping.
+// extras.door_thumbnail carries the intercom MAC. IntercomMAC
+// parses it back out so carvilon can auto-resolve a door by its
+// calling intercom without admin-curated mapping.
 func TestLookupDoorForIntercom_Found(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, 200, CodeSuccess, "ok", []map[string]any{

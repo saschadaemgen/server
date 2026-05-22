@@ -1,8 +1,8 @@
-// Saison 14-XX: tests for GET /esp/unread-count.
+// Tests for GET /esp/unread-count.
 //
-// Bearer-Auth, identische Response-Shape wie /webviewer/unread-
-// count. Wir seeden door_events direkt in den History-Store und
-// pruefen die count-Antwort.
+// Bearer auth, identical response shape as
+// /webviewer/unread-count. We seed door_events directly into the
+// history store and assert the count response.
 package httpserver
 
 import (

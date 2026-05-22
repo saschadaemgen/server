@@ -12,8 +12,8 @@ import (
 
 // TestResolveWeather_GermanDefault covers the original
 // describeWMO call site (now resolveWeather with empty lang) and
-// the umlaut update: code 3 used to render "Bewoelkt", FIX07
-// switched that to "Bewölkt" with a real U+00FC.
+// the umlaut update: code 3 used to render "Bewoelkt", which was
+// later switched to "Bewölkt" with a real U+00FC.
 func TestResolveWeather_GermanDefault(t *testing.T) {
 	icon, desc := resolveWeather(3, "")
 	if icon != "cloud" || desc != "Bewölkt" {
@@ -29,7 +29,7 @@ func TestResolveWeather_GermanDefault(t *testing.T) {
 	}
 }
 
-// TestResolveWeather_English covers the FIX07 EN path: same icon,
+// TestResolveWeather_English covers the EN path: same icon,
 // English label per the curated table; unknown codes fall back to
 // "Unknown".
 func TestResolveWeather_English(t *testing.T) {
@@ -54,9 +54,9 @@ func TestResolveWeather_English(t *testing.T) {
 // "Bewölkt" with U+00F6 LATIN SMALL LETTER O WITH DIAERESIS
 // (0xC3 0xB6 in UTF-8); code 1 carries "Überwiegend klar" with
 // U+00DC LATIN CAPITAL LETTER U WITH DIAERESIS (0xC3 0x9C in
-// UTF-8). Both labels are explicit Saison-14-FIX07 fixes - the
-// pre-FIX07 tables shipped ASCII placeholders ("Bewoelkt",
-// "Heiter") that the ESP could not render with umlauts at all.
+// UTF-8). Both labels are explicit umlaut fixes - the earlier
+// tables shipped ASCII placeholders ("Bewoelkt", "Heiter") that
+// the ESP could not render with umlauts at all.
 func TestResolveWeather_UmlautBytes(t *testing.T) {
 	cases := []struct {
 		code int

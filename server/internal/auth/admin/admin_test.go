@@ -120,14 +120,14 @@ func TestLogin_UnknownUser(t *testing.T) {
 	}
 }
 
-// TestLogin_BcryptRehash setzt einen bcrypt-Hash direkt in die DB
-// (wie ein vor S13-02-FIX4-a angelegter Admin), pruft dass der
-// erste Login funktioniert und der Hash danach Argon2id-Format
-// hat.
+// TestLogin_BcryptRehash writes a bcrypt hash directly into the
+// DB (mirroring a legacy admin record), asserts that the first
+// login succeeds, and that the hash is rewritten to the
+// Argon2id format afterwards.
 func TestLogin_BcryptRehash(t *testing.T) {
 	s, d := newTestService(t)
 	now := time.Now().UnixMilli()
-	// bcrypt hash of "legacy-password-1234" cost 4 fuer Test-Speed.
+	// bcrypt hash of "legacy-password-1234" cost 4 for test speed.
 	hash, err := bcryptForTest("legacy-password-1234")
 	if err != nil {
 		t.Fatalf("bcryptForTest: %v", err)

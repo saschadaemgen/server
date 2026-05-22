@@ -20,8 +20,7 @@ import (
 // cleanly.
 func loginAndOpenEvents(t *testing.T, env *testEnv, viewerMAC string) (*bufio.Reader, *http.Response, context.CancelFunc) {
 	t.Helper()
-	// Saison 13-02-FIX4-a-HOTFIX4: Login geht via Name. Wir
-	// generieren einen einzigartigen Namen pro MAC.
+	// Login goes via Name. We generate a unique name per MAC.
 	tail := strings.ReplaceAll(viewerMAC[len(viewerMAC)-5:], ":", "")
 	viewerName := "Test Viewer " + tail
 	if _, err := env.viewerMgr.GetViewerInfo(context.Background(), viewerMAC); err != nil {
@@ -174,7 +173,7 @@ func TestEvents_StreamsDoorbellEvent(t *testing.T) {
 	if name != doorbellhub.TypeDoorbellStart {
 		t.Errorf("event name = %q, want %q", name, doorbellhub.TypeDoorbellStart)
 	}
-	// Saison 13-02-FIX3 wire format:
+	// Wire format:
 	//   { "door": "...", "ts": "RFC3339", "raw": { full hub.Event } }
 	// "raw" still carries the legacy MockMAC + RequestID fields so
 	// tests like this one can still poke at them without parsing

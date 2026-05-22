@@ -1,4 +1,4 @@
-// Saison 14-01-FIX02 tests: /esp/unlock door-resolution paths.
+// Tests for /esp/unlock door-resolution paths.
 //
 // Four scenarios from the briefing acceptance grid:
 //

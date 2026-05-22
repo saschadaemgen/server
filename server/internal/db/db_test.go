@@ -56,8 +56,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 			t.Errorf("table %s missing: %v", table, err)
 		}
 	}
-	// Saison 13-02-FIX4-a: magic_link_tokens und mock_viewers
-	// muessen weg sein.
+	// magic_link_tokens and mock_viewers must be gone after the
+	// migrations.
 	for _, gone := range []string{"magic_link_tokens", "mock_viewers", "mieter_sessions"} {
 		var name string
 		err := d.QueryRow(
@@ -202,7 +202,7 @@ func TestOpen_CreatesParentDirIfMissing(t *testing.T) {
 	}
 }
 
-// ----- viewers Tabelle (Saison 13-02-FIX4-a, Migration 006) -----
+// ----- viewers table (Migration 006) -----
 
 func TestViewers_TableExists(t *testing.T) {
 	d, err := Open(tempDBPath(t))
@@ -271,9 +271,9 @@ func TestViewers_UniquePort(t *testing.T) {
 	}
 }
 
-// HOTFIX4: viewers.username-Spalte ist abgeschafft. Test fuer
-// Uniqueness laeuft jetzt ueber den Anwendungs-Layer
-// (viewermanager-Tests pruefen ErrNameInUse).
+// The viewers.username column has been dropped. Uniqueness
+// checks now run through the application layer (viewermanager
+// tests assert ErrNameInUse).
 func TestViewers_UsernameColumnGone(t *testing.T) {
 	d, err := Open(tempDBPath(t))
 	if err != nil {

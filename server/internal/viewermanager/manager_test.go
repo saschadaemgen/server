@@ -368,7 +368,7 @@ func TestListViewers_ReturnsAll(t *testing.T) {
 
 // ---------- Shutdown ----------
 
-// ---------- SetPairedIntercomMAC (saison-13-07) ----------
+// ---------- SetPairedIntercomMAC ----------
 
 func TestSetPairedIntercomMAC_RoundTrip(t *testing.T) {
 	mgr, _ := newTestManager(t)
@@ -426,7 +426,7 @@ func TestAddViewer_PersistsPairedIntercomMAC(t *testing.T) {
 	}
 }
 
-// ---------- Hybrid web+esp goroutine spawn (saison-13-09) ----------
+// ---------- Hybrid web+esp goroutine spawn ----------
 
 // espSpec helpers an ESP-Spec with a token-hash placeholder so the
 // row passes the discovery + AddViewer pipeline shape.
@@ -448,7 +448,7 @@ func TestAddViewer_TypeESP_SpawnsGoroutine(t *testing.T) {
 		t.Fatalf("AddViewer: %v", err)
 	}
 	if got := factory.starts.Load(); got != 1 {
-		t.Fatalf("factory.starts = %d, want 1 (S13-09 hybrid spawn)", got)
+		t.Fatalf("factory.starts = %d, want 1 (hybrid spawn)", got)
 	}
 	v := factory.viewer(spec.MAC)
 	if v == nil {
@@ -562,7 +562,7 @@ func TestLoadFromDB_StartsBothWebAndESPViewers(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-XX ESP-Settings ----------
+// ---------- ESP-Settings ----------
 
 func TestSetIdleViewMode_AcceptsScreenOff(t *testing.T) {
 	mgr, _ := newTestManager(t)
@@ -699,8 +699,8 @@ func TestHistoryCaptureEnabled_DefaultsTrueWhenNull(t *testing.T) {
 		t.Fatalf("AddViewer: %v", err)
 	}
 	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
-	// Saison-14-04-Phase2-Migration setzt DEFAULT 1; ein neu
-	// angelegter Viewer hat damit immer capture=true.
+	// The history_capture_enabled column has DEFAULT 1, so a
+	// freshly created viewer always has capture=true.
 	if !info.ResolveHistoryCaptureEnabled() {
 		t.Errorf("ResolveHistoryCaptureEnabled() = false, want true (default)")
 	}
@@ -736,7 +736,7 @@ func TestSetHistoryCaptureEnabled_UnknownViewer(t *testing.T) {
 	}
 }
 
-// ---------- Saison 14-04-Phase2-FIX05 clock_layout ----------
+// ---------- clock_layout ----------
 
 func TestClockLayout_DefaultsToVerticalWhenNull(t *testing.T) {
 	mgr, _ := newTestManager(t)

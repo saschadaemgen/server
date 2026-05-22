@@ -1,7 +1,7 @@
-// Saison 14-04-Phase2-FIX02: tests for the four admin-inline-edit
-// endpoints. Covers happy-path, validation rejects, type-scoped
-// constraints (ESP fields on web -> 400), config.changed
-// broadcast and one-time token reveal.
+// Tests for the four admin-inline-edit endpoints. Covers
+// happy-path, validation rejects, type-scoped constraints (ESP
+// fields on web -> 400), config.changed broadcast and one-time
+// token reveal.
 package httpserver
 
 import (

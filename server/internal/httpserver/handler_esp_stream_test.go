@@ -1,10 +1,10 @@
-// Saison 14-01-FIX01: focused tests for the ESP MJPEG proxy.
+// Focused tests for the ESP MJPEG proxy.
 //
 // The original TestESPStream_ForwardsToBackendWithoutAuthHeader
 // already exercises the happy path; these add:
 //
 //   - TestBuildBackendStreamURL exhaustively covers the helper
-//     across the edge cases the saison-14-01 string-concat
+//     across the edge cases the earlier string-concat
 //     predecessor fumbled (trailing slash, path prefix, query
 //     fragment, empty backend).
 //   - TestESPStreamHandler_BuildsCorrectBackendURL and friends
@@ -233,11 +233,11 @@ func TestESPStreamHandler_LogsRequestSummary(t *testing.T) {
 	}
 }
 
-// Saison 14-01-FIX03: the multipart body must reach the client
-// without Go's auto-chunked transfer-encoding wrapping it. The
-// ESP firmware reads the raw socket bytes and chokes on hex-
-// length markers between frames; the proxy hijacks the connection
-// to keep the wire format clean.
+// The multipart body must reach the client without Go's
+// auto-chunked transfer-encoding wrapping it. The ESP firmware
+// reads the raw socket bytes and chokes on hex-length markers
+// between frames; the proxy hijacks the connection to keep the
+// wire format clean.
 //
 // Wire-level invariant tested in two ways:
 //
