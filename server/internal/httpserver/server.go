@@ -1,8 +1,8 @@
 // Package httpserver hosts the carvilon HTTP surface. Three trees:
 //
 //	/login        tenant login form + POST (Wohnungs-Name +
-//	              Passwort + bcrypt; saison-14-02 split off from
-//	              the old /einloggen tree).
+//	              Passwort + bcrypt; split off from the legacy
+//	              /einloggen tree).
 //	/webviewer/   tenant home (intercom, stream, settings, SSE)
 //	              and logout - everything that requires a session.
 //	/a/           admin: login + first-run setup, dashboard,
@@ -44,9 +44,9 @@ import (
 	"carvilon.local/server/internal/weather"
 )
 
-// UserStoreLike ist die schmale Sicht auf access.UserStore die
-// das Admin-UI braucht, plus ein IsConfigured-Check fuer die
-// "noch nicht eingerichtet"-UI-Pfade.
+// UserStoreLike is the narrow view of access.UserStore the admin
+// UI needs, plus an IsConfigured check for the "not configured
+// yet" UI paths.
 type UserStoreLike interface {
 	access.UserStore
 	IsConfigured() bool
@@ -69,9 +69,9 @@ type Deps struct {
 	// UA is built lazily by main once the operator has saved a
 	// base URL and token. Nil means "not configured yet".
 	UA *uaapi.Client
-	// UserStore ist der UserStore-Wrapper um den UA-Client (siehe
-	// access/ua). Nil = UA noch nicht konfiguriert; das Admin-UI
-	// zeigt dann einen Hinweis statt einer leeren Liste.
+	// UserStore is the UserStore wrapper around the UA client
+	// (see access/ua). Nil = UA not configured yet; the admin UI
+	// then shows a hint instead of an empty list.
 	UserStore UserStoreLike
 	// Hub fans doorbell events from viewermanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
@@ -93,17 +93,17 @@ type Deps struct {
 	// answer/reject/end-call endpoints arbitrate against. Nil
 	// disables the lifecycle path entirely (calls return 503).
 	DoorbellCalls *doorbellcalls.Service
-	// Streams is the video backend seam (saison-15-01). Pass any
+	// Streams is the video backend seam. Pass any
 	// streams.StreamBackend implementation; nil falls back to
-	// streams.Unconfigured() inside New so handler code never has
-	// to nil-check, only Configured(). The transitional go2rtc
-	// client lives at carvilon.local/server/internal/streams.New;
-	// the commercial carvilon-streaming-server will plug in via a
-	// build tag in a later season.
+	// streams.Unconfigured() inside New so handler code never
+	// has to nil-check, only Configured(). The transitional
+	// go2rtc client lives at
+	// carvilon.local/server/internal/streams.New; the commercial
+	// carvilon-streaming-server plugs in via a build tag.
 	Streams streams.StreamBackend
 	// Weather is the open-meteo client used by the mieter
-	// screensaver (saison-14-01b). Nil disables /webviewer/weather
-	// and /a/weather with 503; the screensaver hides its weather
+	// screensaver. Nil disables /webviewer/weather and
+	// /a/weather with 503; the screensaver hides its weather
 	// block in that case.
 	Weather *weather.Client
 	Log     *slog.Logger
@@ -159,8 +159,8 @@ func New(deps Deps) (*Server, error) {
 	if deps.EventBus == nil {
 		deps.EventBus = eventbus.New()
 	}
-	// Saison 15-01: drop nil-checks at every call site by falling
-	// back to the 503-default Unconfigured backend.
+	// Drop nil-checks at every call site by falling back to the
+	// 503-default Unconfigured backend.
 	if deps.Streams == nil {
 		deps.Streams = streams.Unconfigured()
 	}
@@ -203,53 +203,55 @@ func (s *Server) routes() {
 	// via go:embed; served with a long Cache-Control.
 	s.mux.Handle("GET /static/", staticHandler())
 
-	// Tenant tree. Saison 14-02 splits the old /einloggen entry
-	// into a login form (/login) and a logged-in viewer area
+	// Tenant tree. The old /einloggen entry is split into a
+	// login form (/login) and a logged-in viewer area
 	// (/webviewer/). Old /einloggen URLs still resolve via the
 	// 301 redirect block below.
 	s.mux.HandleFunc("GET /login", s.handleLoginGet)
 	s.mux.HandleFunc("POST /login", s.handleViewerLoginPost)
 	s.mux.HandleFunc("POST /webviewer/logout", s.handleViewerLogout)
 	s.mux.Handle("GET /webviewer/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
-	// Saison 13-03: Klingel-Lifecycle.
+	// Doorbell lifecycle.
 	s.mux.Handle("POST /webviewer/doors/{door_id}/unlock", s.requireSession(http.HandlerFunc(s.handleMieterUnlock)))
 	s.mux.Handle("POST /webviewer/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
 	s.mux.Handle("POST /webviewer/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
 	s.mux.Handle("POST /webviewer/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
-	// Saison 14-01: live MJPEG passthrough for the ringing overlay
-	// (and optionally the idle stream slot).
+	// Live MJPEG passthrough for the ringing overlay (and
+	// optionally the idle stream slot).
 	s.mux.Handle("GET /webviewer/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
-	// Saison 15-01: WebRTC signalling proxy. Browser POSTs SDP
-	// offer; we forward to streams.StreamBackend.WebRTCSignalURL
-	// for the viewer's resolved profile and stream the SDP answer
-	// back. 503 when no backend is configured.
+	// WebRTC signalling proxy. The browser POSTs an SDP offer; we
+	// forward to streams.StreamBackend.WebRTCSignalURL for the
+	// viewer's resolved profile and stream the SDP answer back.
+	// 503 when no backend is configured.
 	s.mux.Handle("POST /webviewer/offer", s.requireSession(http.HandlerFunc(s.handleMieterOffer)))
-	// Saison 14-01b: tenant settings (idle-view-mode) and weather
-	// pull for the screensaver.
+	// Tenant settings (idle-view-mode) and weather pull for the
+	// screensaver.
 	s.mux.Handle("GET /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
 	s.mux.Handle("POST /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
 	s.mux.Handle("GET /webviewer/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
-	// Saison 14-03: inline-history mode JSON feed (read-marks rows
-	// asynchronously so the browser still sees "NEU" on first open).
+	// Inline-history mode JSON feed (read-marks rows
+	// asynchronously so the browser still sees "NEU" on first
+	// open).
 	s.mux.Handle("GET /webviewer/history.json", s.requireSession(http.HandlerFunc(s.handleMieterHistoryJSON)))
-	// Saison 14-04-Phase2: Mieter-Soft-Delete (single + bulk).
-	// DELETE /webviewer/history/{event_id} versteckt einen Eintrag,
-	// DELETE /webviewer/history versteckt alle aktuell sichtbaren.
-	// Admin sieht weiter alles via /a/viewers/{mac}/history.
+	// Mieter soft-delete (single + bulk).
+	// DELETE /webviewer/history/{event_id} hides one entry,
+	// DELETE /webviewer/history hides every currently-visible
+	// row. The admin still sees everything via
+	// /a/viewers/{mac}/history.
 	s.mux.Handle("DELETE /webviewer/history/{event_id}", s.requireSession(http.HandlerFunc(s.handleMieterHistoryHideOne)))
 	s.mux.Handle("DELETE /webviewer/history", s.requireSession(http.HandlerFunc(s.handleMieterHistoryHideAll)))
-	// Saison 14-03-FIX03: read-only unread-doorbell counter for the
-	// screensaver badge. Live updates ride the SSE channel; this
-	// endpoint hydrates the initial value and recovers from SSE
+	// Read-only unread-doorbell counter for the screensaver
+	// badge. Live updates ride the SSE channel; this endpoint
+	// hydrates the initial value and recovers from SSE
 	// reconnect.
 	s.mux.Handle("GET /webviewer/unread-count", s.requireSession(http.HandlerFunc(s.handleMieterUnreadCount)))
 	s.mux.Handle("GET /webviewer", s.requireSession(http.HandlerFunc(s.handleHome)))
 	s.mux.Handle("GET /webviewer/", s.requireSession(http.HandlerFunc(s.handleHome)))
 
-	// Legacy redirects. /m was the original mieter tree (pre-S13-02-
-	// FIX4-a); /einloggen was its rename. Both stay as 301 permanent
-	// redirects to the saison-14-02 split (/login + /webviewer/*) so
-	// QR codes, browser bookmarks and stale tabs keep resolving.
+	// Legacy redirects. /m was the original mieter tree;
+	// /einloggen was its rename. Both stay as 301 permanent
+	// redirects to the /login + /webviewer/* split so QR codes,
+	// browser bookmarks and stale tabs keep resolving.
 	s.mux.HandleFunc("/m", s.redirectLegacyM)
 	s.mux.HandleFunc("/m/", s.redirectLegacyM)
 	s.mux.HandleFunc("GET /einloggen", s.redirectLegacyEinloggen)
@@ -265,12 +267,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsPost)))
 	s.mux.Handle("POST /a/settings/admin-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminPasswordPost)))
 	s.mux.Handle("POST /a/settings/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminUnlockLock)))
-	// Saison 14-01b: admin-side weather preview for the station-
-	// coordinates form in /a/settings.
+	// Admin-side weather preview for the station-coordinates
+	// form in /a/settings.
 	s.mux.Handle("POST /a/settings/station", s.requireAdminSession(http.HandlerFunc(s.handleAdminStationPost)))
 	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))
 
-	// Web-Viewer-CRUD (ersetzt das alte /a/mocks).
+	// Web-viewer CRUD (replaces the legacy /a/mocks tree).
 	s.mux.Handle("GET /a/web-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersList)))
 	s.mux.Handle("POST /a/web-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersCreate)))
 	s.mux.Handle("POST /a/web-viewers/{mac}/reset-pw", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersResetPW)))
@@ -284,10 +286,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetLink)))
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 
-	// Stream-Profile-CRUD (Saison 14-01). Proxyt die go2rtc-REST-
-	// API hinter Admin-Session. Profile-Wahl pro Viewer geschieht
-	// im Web-/ESP-Viewer-Edit-Modal; die Profile-Definition (FFmpeg-
-	// Kette etc.) lebt hier.
+	// Stream-profile CRUD. Proxies the go2rtc REST API behind the
+	// admin session. The per-viewer profile pick happens in the
+	// web-/ESP-viewer edit modal; the profile definition (ffmpeg
+	// chain etc.) lives here.
 	s.mux.Handle("GET /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsList)))
 	s.mux.Handle("GET /a/streams.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsListJSON)))
 	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsCreate)))
@@ -296,24 +298,24 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
 	s.mux.Handle("DELETE /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
 
-	// Platzhalter-Seiten fuer kommende Sub-Saison-Briefings.
+	// Placeholder pages for upcoming features.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
 
-	// Saison 13-07: JSON-Endpoint fuer das Custom-Dropdown in
-	// den Viewer-Modalen ("Verknuepfte Klingel"). Liefert die
-	// UA-API-Intercoms; die Tuer wird im Klingel-Moment
-	// automatisch via uaapi.LookupDoorForIntercom resolved.
+	// JSON endpoint for the custom dropdown in the viewer modals
+	// ("Verknuepfte Klingel"). Returns the UA-API intercoms; the
+	// door is auto-resolved at doorbell time via
+	// uaapi.LookupDoorForIntercom.
 	s.mux.Handle("GET /a/intercoms.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomsJSON)))
 
-	// ESP-Discovery (Saison 13-02-FIX4-c). Oeffentliche Endpoints
-	// ohne Auth-Header - der Token kommt erst nach erfolgreicher
-	// Adoption durch den Admin.
+	// ESP discovery. Public endpoints without an auth header -
+	// the bearer token only arrives after a successful admin
+	// adoption.
 	s.mux.HandleFunc("POST /esp/discover", s.handleESPDiscover)
 	s.mux.HandleFunc("GET /esp/discover/status", s.handleESPStatus)
 
-	// ESP-Runtime (Saison 13-02-FIX4-d). Bearer-Token-geschuetzt;
-	// Token wurde im Adoption-Flow generiert und vom ESP via
-	// /esp/discover/status abgeholt.
+	// ESP runtime. Bearer-token-protected; the token is generated
+	// during the adoption flow and picked up by the ESP via
+	// /esp/discover/status.
 	s.mux.Handle("GET /esp/config", s.requireESPBearer(http.HandlerFunc(s.handleESPConfig)))
 	s.mux.Handle("GET /esp/events", s.requireESPBearer(http.HandlerFunc(s.handleESPEvents)))
 	s.mux.Handle("GET /esp/heartbeat", s.requireESPBearer(http.HandlerFunc(s.handleESPHeartbeat)))
@@ -322,23 +324,23 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
 	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
 	s.mux.Handle("GET /esp/stream.mjpeg", s.requireESPBearer(http.HandlerFunc(s.handleESPStream)))
-	// Saison 14-XX ESP-Settings + Weather + Unread.
-	// POST /esp/settings persistiert Partial-Updates und
-	// broadcastet config.changed; /esp/weather und
-	// /esp/unread-count sind Bearer-gated-Re-Uses der
-	// Mieter-Endpoints (gleiche Response-Form, andere Auth).
+	// ESP settings + weather + unread.
+	// POST /esp/settings persists partial updates and broadcasts
+	// config.changed; /esp/weather and /esp/unread-count are
+	// bearer-gated reuses of the mieter endpoints (same
+	// response shape, different auth).
 	s.mux.Handle("POST /esp/settings", s.requireESPBearer(http.HandlerFunc(s.handleESPSettings)))
 	s.mux.Handle("GET /esp/weather", s.requireESPBearer(http.HandlerFunc(s.handleESPWeather)))
 	s.mux.Handle("GET /esp/unread-count", s.requireESPBearer(http.HandlerFunc(s.handleESPUnreadCount)))
 
-	// Saison 14-04-Phase2-FIX06: ESP-Pendant zu /webviewer/history*.
-	// Bearer-gated Soft-Delete + Paged-List. Delegieren intern an
-	// die serveHistory*-Helfer aus handler_mieter_history.go.
+	// ESP pendant to /webviewer/history*. Bearer-gated
+	// soft-delete + paged list. Internally delegate to the
+	// serveHistory* helpers in handler_mieter_history.go.
 	s.mux.Handle("GET /esp/history.json", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryList)))
 	s.mux.Handle("DELETE /esp/history/{event_id}", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteOne)))
 	s.mux.Handle("DELETE /esp/history", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteAll)))
 
-	// ESP-Viewer-Admin-Tab.
+	// ESP-viewer admin tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))
 	s.mux.Handle("GET /a/esp-viewers.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersListJSON)))
 	s.mux.Handle("POST /a/esp-viewers/adopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersAdopt)))
@@ -348,27 +350,27 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/esp-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
 	s.mux.Handle("DELETE /a/esp-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersDelete)))
 
-	// Saison 14-04-Phase2: unified per-viewer detail page +
-	// history endpoints. /a/viewers/{mac} ist die HTML-Drill-Down-
-	// Sicht aus den Listen-Seiten; die drei /history-Endpoints
-	// liefern paged JSON + Hard-Delete.
+	// Unified per-viewer detail page + history endpoints.
+	// /a/viewers/{mac} is the HTML drill-down view from the list
+	// pages; the three /history endpoints deliver paged JSON +
+	// hard-delete.
 	s.mux.Handle("GET /a/viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerDetail)))
 	s.mux.Handle("GET /a/viewers/{mac}/history", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryJSON)))
 	s.mux.Handle("DELETE /a/viewers/{mac}/history/{event_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteOne)))
 	s.mux.Handle("DELETE /a/viewers/{mac}/history", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerHistoryDeleteAll)))
 
-	// Saison 14-04-Phase2-FIX02: Admin-Inline-Edit-Endpoints fuer
-	// die Detail-Seite. Stammdaten + Settings triggern
-	// config.changed; Password ist web-only, Regen-Token ist
-	// esp-only. Beide Pruefungen leben in den Handlern.
+	// Admin inline-edit endpoints for the detail page.
+	// Stammdaten + settings trigger config.changed; password is
+	// web-only, regen-token is esp-only. Both checks live in
+	// the handlers.
 	s.mux.Handle("POST /a/viewers/{mac}/stammdaten", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerStammdaten)))
 	s.mux.Handle("POST /a/viewers/{mac}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerSettings)))
 	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
 	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))
 
-	// Benutzer-CRUD (Saison 13-02-FIX4-b). UA-Access-Developer-API
-	// ist die Source-of-Truth; alle Zugriffe gehen ueber das
-	// access.UserStore-Interface.
+	// User CRUD. The UA Access Developer API is the
+	// source-of-truth; all access goes through the
+	// access.UserStore interface.
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
 	s.mux.Handle("GET /a/users.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersListJSON)))
 	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
@@ -395,11 +397,11 @@ func (s *Server) ListenAndServe() error {
 	return http.ListenAndServeTLS(s.cfg.ListenAddr, s.cfg.CertFile, s.cfg.KeyFile, s.mux)
 }
 
-// redirectLegacyM leitet alle Anfragen unter dem alten /m-Pfad
-// (vor S13-02-FIX4-a-HOTFIX2) mit 301 nach /login bzw. /webviewer
-// weiter, inklusive Path-Suffix. Saison-14-02-Mapping:
+// redirectLegacyM forwards every request under the legacy /m
+// path with a 301 to /login or /webviewer (path suffix included).
+// Mapping:
 //
-//	/m         -> /login          (war zuvor /einloggen)
+//	/m         -> /login          (was previously /einloggen)
 //	/m/        -> /webviewer/
 //	/m/events  -> /webviewer/events
 //	/m/logout  -> /webviewer/logout
@@ -411,9 +413,9 @@ func (s *Server) redirectLegacyM(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }
 
-// redirectLegacyEinloggen mappt den Saison-13-/14-01-Pfad
-// /einloggen[/*] auf die Saison-14-02-Pfade /login + /webviewer/*.
-// 301 weil dauerhaft - Browser duerfen den Redirect cachen.
+// redirectLegacyEinloggen maps the legacy /einloggen[/*] path to
+// the current /login + /webviewer/* split. 301 because the move
+// is permanent - browsers may cache the redirect.
 func (s *Server) redirectLegacyEinloggen(w http.ResponseWriter, r *http.Request) {
 	target := mapLegacyMieterPath(r.URL.Path, "/einloggen")
 	if raw := r.URL.RawQuery; raw != "" {
@@ -423,7 +425,7 @@ func (s *Server) redirectLegacyEinloggen(w http.ResponseWriter, r *http.Request)
 }
 
 // mapLegacyMieterPath strips the legacy prefix from path and
-// returns the saison-14-02 equivalent. The bare prefix (with or
+// returns the current equivalent. The bare prefix (with or
 // without trailing slash) maps to /login (the form), every other
 // suffix maps to /webviewer<suffix>. Shared by the /m and
 // /einloggen redirect handlers so the routing table is one
