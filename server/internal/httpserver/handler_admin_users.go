@@ -16,7 +16,7 @@ const (
 	usersMaxPageSize     = 100
 )
 
-// adminUsersData ist die Payload fuer templates/admin/users.html.
+// adminUsersData is the payload for templates/admin/users.html.
 type adminUsersData struct {
 	User         adminUser
 	Configured   bool
@@ -45,7 +45,7 @@ type userRow struct {
 	HasPIN         bool
 }
 
-// adminUserDetailData fuer /a/users/{id}.
+// adminUserDetailData is the payload for /a/users/{id}.
 type adminUserDetailData struct {
 	User          adminUser
 	Configured    bool
@@ -62,9 +62,9 @@ type linkedViewerRow struct {
 	Online bool
 }
 
-// handleAdminUsersList rendert /a/users mit Pagination + Suche +
-// Status-Filter. Wenn UA-Token noch nicht konfiguriert: zeigt
-// Hinweis-Karte statt leerer Tabelle.
+// handleAdminUsersList renders /a/users with pagination + search
+// + status filter. When the UA token is not configured yet, the
+// page shows a hint card instead of an empty table.
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := adminUsersData{
@@ -107,9 +107,9 @@ func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 	s.renderAdminPage(w, "users", data)
 }
 
-// handleAdminUsersListJSON liefert die gleiche Liste als JSON.
-// Fuer AJAX-Pagination und potenziellen Dropdown im Web-Viewer-
-// Anlege-Modal.
+// handleAdminUsersListJSON returns the same list as JSON. Used
+// for AJAX pagination and for the dropdown in the web-viewer
+// create modal.
 func (s *Server) handleAdminUsersListJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if s.userStore == nil || !s.userStore.IsConfigured() {
@@ -141,7 +141,7 @@ func (s *Server) handleAdminUsersListJSON(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleAdminUsersDetail rendert /a/users/{id}.
+// handleAdminUsersDetail renders /a/users/{id}.
 func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	username := AdminUserFromContext(r.Context())
@@ -169,8 +169,8 @@ func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) 
 	s.renderAdminPage(w, "user-detail", data)
 }
 
-// handleAdminUsersCreate verarbeitet POST /a/users (Anlegen via
-// Modal-Form oder direkter POST).
+// handleAdminUsersCreate handles POST /a/users (create via the
+// modal form or a direct POST).
 func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil || !s.userStore.IsConfigured() {
 		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
@@ -204,7 +204,7 @@ func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/a/users/"+created.ID, http.StatusSeeOther)
 }
 
-// handleAdminUsersUpdate verarbeitet POST /a/users/{id}/update.
+// handleAdminUsersUpdate handles POST /a/users/{id}/update.
 func (s *Server) handleAdminUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil || !s.userStore.IsConfigured() {
 		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
@@ -229,7 +229,7 @@ func (s *Server) handleAdminUsersUpdate(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/a/users/"+id, http.StatusSeeOther)
 }
 
-// handleAdminUsersActivate / Deactivate setzen den Status.
+// handleAdminUsersActivate / Deactivate set the user status.
 func (s *Server) handleAdminUsersActivate(w http.ResponseWriter, r *http.Request) {
 	s.setUserStatus(w, r, access.StatusActive)
 }
@@ -256,7 +256,7 @@ func (s *Server) setUserStatus(w http.ResponseWriter, r *http.Request, status ac
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-// handleAdminUsersDelete loescht einen User in UA.
+// handleAdminUsersDelete deletes a user in UA.
 func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) {
 	if s.userStore == nil || !s.userStore.IsConfigured() {
 		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
@@ -278,7 +278,7 @@ func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) 
 
 // --- helpers ---
 
-// parseListParams liest page/size/q/status aus der URL.
+// parseListParams reads page / size / q / status from the URL.
 func parseListParams(r *http.Request) access.ListParams {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -295,7 +295,7 @@ func parseListParams(r *http.Request) access.ListParams {
 	statusFilter := access.Status(strings.ToLower(q.Get("status")))
 	switch statusFilter {
 	case access.StatusActive, access.StatusDeactivated, access.StatusPending:
-		// OK, behalten
+		// known status, keep as is
 	default:
 		statusFilter = ""
 	}
@@ -370,8 +370,8 @@ func accessErrorStatus(err error) int {
 	}
 }
 
-// collectLinkedViewers laedt die Web-Viewer die per
-// linked_ua_user_id auf diesen UA-User zeigen.
+// collectLinkedViewers loads the web viewers whose
+// linked_ua_user_id points at this UA user.
 func (s *Server) collectLinkedViewers(r *http.Request, userID string) []linkedViewerRow {
 	if s.viewerMgr == nil || userID == "" {
 		return nil
