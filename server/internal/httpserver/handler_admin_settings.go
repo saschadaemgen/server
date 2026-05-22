@@ -12,9 +12,9 @@ import (
 	"carvilon.local/server/internal/uaapi"
 )
 
-// adminSettingsData ist die Payload fuer das eigene Settings-
-// Template (kein Library-Snippet mehr; das Library-Template hat
-// Fake-Sektionen die wir bewusst weglassen).
+// adminSettingsData is the payload for our own settings template
+// (no library snippet anymore; the library template had fake
+// sections we deliberately leave out).
 type adminSettingsData struct {
 	User      adminUser
 	UA        uaSettingsBlock
@@ -26,8 +26,8 @@ type adminSettingsData struct {
 }
 
 // stationSettingsBlock holds the Open-Meteo coordinates the
-// mieter screensaver and the ESP weather card pull from
-// (saison-14-01b). Defaults seed Recklinghausen on a fresh DB.
+// mieter screensaver and the ESP weather card pull from.
+// Defaults seed Recklinghausen on a fresh DB.
 type stationSettingsBlock struct {
 	Lat string
 	Lon string
@@ -96,8 +96,8 @@ func (s *Server) handleAdminSettingsPost(w http.ResponseWriter, r *http.Request)
 	s.renderAdminPage(w, "settings", data)
 }
 
-// handleAdminPasswordPost erlaubt dem eingeloggten Admin sein
-// eigenes Passwort zu aendern (alt + neu + bestaetigung).
+// handleAdminPasswordPost lets the logged-in admin change their
+// own password (old + new + confirmation).
 func (s *Server) handleAdminPasswordPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -133,8 +133,8 @@ func (s *Server) handleAdminPasswordPost(w http.ResponseWriter, r *http.Request)
 	s.renderAdminPage(w, "settings", data)
 }
 
-// handleAdminUnlockLock entsperrt eine IP- oder Username-Sperre
-// auf der Settings-Seite (POST mit kind=user|ip + value).
+// handleAdminUnlockLock clears an IP- or username-based lockout
+// from the settings page (POST with kind=user|ip + value).
 func (s *Server) handleAdminUnlockLock(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -247,7 +247,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	return data
 }
 
-// humanDuration rendert "2 min" / "45 s" - knapp, fuer Listen.
+// humanDuration renders "2 min" / "45 s" - terse, for list rows.
 func humanDuration(d time.Duration) string {
 	if d <= 0 {
 		return "abgelaufen"
@@ -266,10 +266,9 @@ func minutesLabel(n int) string {
 }
 
 // handleAdminStationPost saves the operator's site coordinates
-// for the weather backend (saison-14-01b). Values are validated
-// as floats in the standard geographic ranges; on parse error
-// the existing values stay and the settings page renders a red
-// flash.
+// for the weather backend. Values are validated as floats in
+// the standard geographic ranges; on parse error the existing
+// values stay and the settings page renders a red flash.
 func (s *Server) handleAdminStationPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
