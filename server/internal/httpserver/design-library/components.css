@@ -82,7 +82,7 @@ button { font-family: inherit; }
 }
 
 .stage {
-  /* S14-03-FIX02 Sub-2b: dezenter Geraete-Rahmen. Vorher war
+  /* Sub-2b: dezenter Geraete-Rahmen. Vorher war
      nur ein einzelner 1px-hairline plus shadow-xl gestapelt -
      auf Saschas Display kaum wahrnehmbar. Jetzt vier Schichten:
        - 0.5px rgba 0.04 outer ring (kantet die Silhouette an)
@@ -1548,12 +1548,13 @@ button { font-family: inherit; }
 
 
 /* ============================================================
-   18b. CARVILON BRAND  (Saison 14-03-FIX03 V4)
+   18b. CARVILON BRAND
    ------------------------------------------------------------
    Two-line wordmark: thin wide-tracked "CARVILON" headline
-   above a centered "INTERCOM VIEWER" subline. FIX03 replaces
-   the FIX02 per-letter span gymnastics (which broke copy-paste
-   and accessibility) with a single .sub text node whose
+   above a centered "INTERCOM VIEWER" subline. The current
+   approach replaces an earlier per-letter span gymnastics
+   (which broke copy-paste and accessibility) with a single
+   .sub text node whose
    letter-spacing is measured-and-set in JS so the subline
    reaches a target ratio of the headline width (0.85 by
    default - see data-target-ratio on the .sub element).

@@ -58,7 +58,7 @@
 
         <span class="ctrl-sep" aria-hidden="true"></span>
 
-        <!-- Saison 14-03: settings button toggles the inline
+        <!-- settings button toggles the inline
              settings mode instead of navigating away. idle.js
              intercepts the click; the legacy /webviewer/settings
              page stays as fallback if JS is off. -->
@@ -79,10 +79,10 @@
     </div>
 
     <!-- Stream slot: where the camera feed renders. Always-dark.
-         Saison 14-03: four mode-layers stacked inside the existing
+         four mode-layers stacked inside the existing
          .stream slot. idle.js slides them up/down using CSS
          transforms (400ms cubic-bezier).
-         S14-03-FIX01: the four state-classes drive the push
+         the four state-classes drive the push
          animation. At any time exactly one layer is .active
          (translateY 0); the others sit at .below
          (translateY 100%) or .above (translateY -100%) plus
@@ -101,7 +101,7 @@
            data-default-mode="{{.IdleViewMode}}"
            data-auto-screensaver-seconds="{{.AutoScreensaverSeconds}}">
 
-        <!-- S14-03-FIX02 Sub-1e: shared toast slot used by the
+        <!-- Sub-1e: shared toast slot used by the
              auto-save settings flow (and reusable by future
              inline actions). Hidden until idle.js gives it a
              message via showToast(). -->
@@ -110,14 +110,14 @@
         <!-- 1. Screensaver: clock + date + weather. Default unless
              the operator persisted livestream as their default. -->
         <div class="mode-layer {{if eq .IdleViewMode "livestream"}}below hidden{{else}}active{{end}}" data-mode="screensaver">
-          <!-- Saison 14-04-Phase2-FIX04 Pixel-Style stacked clock.
+          <!-- Pixel-Style stacked clock.
                Initial-Paint via Template-Slice (HH und MM aus
                .Now "HH:MM:SS"); idle.js hydratisiert die beiden
                Elemente alle 1s via tickClock.
-               Saison 14-04-Phase2-FIX05: data-layout-Attribut
-               toggelt zwischen "vertical" (FIX04-Default) und
-               "horizontal" (klassisch mit Doppelpunkt). CSS macht
-               das ganze Layout via Selektor-Branching. -->
+               The data-layout attribute toggles between
+               "vertical" (the default) and "horizontal"
+               (classic with colon). CSS handles the layout via
+               selector branching. -->
           <div class="screensaver-clock" data-layout="{{.ClockLayout}}">
             <span class="screensaver-clock-hours">{{slice .Now 0 2}}</span>
             <span class="screensaver-clock-minutes">{{slice .Now 3 5}}</span>
@@ -137,7 +137,7 @@
             </div>
           {{end}}
 
-          <!-- Saison 14-03-FIX03 Sub-2: unread-doorbell badge.
+          <!-- unread-doorbell badge.
                Hidden by default; idle.js queries
                /webviewer/unread-count on init and listens for
                SSE unread_count events to update the number.
@@ -150,7 +150,7 @@
           </div>
         </div>
 
-        <!-- 2. Livestream: WebRTC video (Saison 15-01) primary,
+        <!-- 2. Livestream: WebRTC video () primary,
              MJPEG <img> as feature-flagged fallback.
 
              The slot wrapper carries `data-stream-slot` so
@@ -161,11 +161,11 @@
              attribute selectors on `.mieter-stream-img` /
              `.mieter-stream-video`.
 
-             Saison 14-03-FIX-1b: src on the MJPEG img stays
+             The src on the MJPEG img stays
              EMPTY at render-time; idle.js fills it from
              data-stream-src on DOMContentLoaded, so the
              multipart response never blocks page paint.
-             Saison 15-01: same lazy-load pattern for the video
+             same lazy-load pattern for the video
              - webrtc-stream.js handles the connect, no src
              attribute needed at render-time. -->
         <div class="mode-layer {{if eq .IdleViewMode "livestream"}}active{{else}}below hidden{{end}}" data-mode="livestream" data-stream-slot="livestream" data-stream-mode="idle">
@@ -178,10 +178,10 @@
                onerror="this.style.display='none'"/>
         </div>
 
-        <!-- 3. Inline settings (saison 14-03 + 14-03-FIX02).
+        <!-- 3. Inline settings (the inline-settings extension).
              Standalone /webviewer/settings stays available as
              JS-off fallback; the inline form auto-saves on every
-             radio change (FIX02-1e) with toast feedback. The
+             radio change with toast feedback. The
              form tag remains so the standalone POST contract is
              intact for the fallback page; the Save button is
              gone because JS-off users do not see the inline
@@ -194,7 +194,7 @@
               <button type="button" class="mode-close" data-action="mode-close" aria-label="Schließen">×</button>
             </header>
 
-            <!-- S14-04 Bereich C: fieldsets live inside a
+            <!-- fieldsets live inside a
                  scrollable wrapper so the footer below stays
                  pinned even when more sections land in later
                  sub-saisons. Toast covers the save-feedback
@@ -221,7 +221,7 @@
                 <label><input type="radio" name="auto_screensaver_seconds" value="600"{{if eq .AutoScreensaverSeconds 600}} checked{{end}}> 10 Minuten</label>
               </fieldset>
 
-              <!-- Saison 14-04-Phase2-FIX05 Uhr-Anzeige. Toggle
+              <!-- Uhr-Anzeige. Toggle
                    zwischen Pixel-Style (vertikal) und klassisch
                    (horizontal). Default "vertical" wenn der Mieter
                    noch nichts gewaehlt hat. -->
@@ -234,7 +234,7 @@
                 <label><input type="radio" name="clock_layout" value="horizontal"{{if eq .ClockLayout "horizontal"}} checked{{end}}> Horizontal</label>
               </fieldset>
 
-              <!-- Saison 14-04-Phase2: Verlauf-Erfassung-Toggle. Wenn
+              <!-- Verlauf-Erfassung-Toggle. Wenn
                    deaktiviert, blendet die Mieter-API alle Eintraege
                    aus (mit capture_enabled-Flag). Admin sieht weiter
                    alles via /a/viewers/{mac}/history. -->
@@ -247,7 +247,7 @@
                 <label><input type="radio" name="history_capture" value="0"{{if not .HistoryCaptureEnabled}} checked{{end}}> Deaktiviert</label>
               </fieldset>
 
-              <!-- Saison 14-04-Phase2: Verlauf leeren (Soft-Delete).
+              <!-- Verlauf leeren (Soft-Delete).
                    Zwei-Klick-Bestaetigung verdrahtet in idle.js. -->
               <fieldset class="mode-field">
                 <legend>Verlauf leeren</legend>
@@ -311,7 +311,7 @@
             Mehr laden
           </button>
 
-          <!-- Filter-Modal (Saison 14-04-Phase2). Slidet hoch
+          <!-- Filter-Modal (). Slidet hoch
                wenn aktiv; ueberlagert die Liste. -->
           <div class="mode-history-filter-modal" data-bind="history-filter-modal" hidden>
             <div class="modal-glass">
@@ -360,7 +360,7 @@
         </svg>
       </button>
 
-      <!-- Saison 14-03-FIX04 Sub-2: history button gets the
+      <!-- history button gets the
            radar-pulse + count-badge treatment. .history-btn
            hosts two .pulse-ring elements that animate only
            when .has-unread is on the button; the .action-badge

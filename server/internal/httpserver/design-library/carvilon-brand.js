@@ -1,4 +1,4 @@
-// Saison 14-03-FIX03 V4: CARVILON wordmark width-sync runtime.
+// CARVILON wordmark width-sync runtime.
 //
 // The headline ("CARVILON") and the subline ("INTERCOM VIEWER")
 // must end up at a controlled width ratio (default 0.85) so the

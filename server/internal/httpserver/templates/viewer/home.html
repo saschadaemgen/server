@@ -30,7 +30,7 @@
       }
     }
 
-    /* Saison 14-01b-FIX01 + saison 14-03 + 14-03-FIX01: idle-
+    /* Idle-screen layout. idle-
        container lebt INNERHALB des .stream-Slots aus
        intercom-idle.html. Keine fixed/viewport-Regeln, nichts auf
        body oder html. Vier .mode-layer-Geschwister sind absolut
@@ -71,10 +71,10 @@
       visibility: hidden;
       pointer-events: none;
     }
-    /* Saison 14-04-Phase2-FIX04 + FIX05: Bildschirmschoner-Uhr.
-       data-layout="vertical" (FIX04-Default Pixel-Style):
+    /* Screensaver clock.
+       data-layout="vertical" (pixel-style default):
           Stunden ueber Minuten, kein Trennzeichen, gross + eng
-       data-layout="horizontal" (FIX05 klassisches Layout):
+       data-layout="horizontal" (klassisches Layout):
           Stunden + Minuten nebeneinander, ":" via Pseudo-Element,
           kleinere Schrift + lockeres letter-spacing
        Gemeinsam: Manrope-200, tnum-Ziffern (gleichbreit),
@@ -94,7 +94,7 @@
       display: block;
     }
 
-    /* Vertical (Pixel-Style, FIX04 Default). */
+    /* Vertical (pixel-style default). */
     .screensaver-clock[data-layout="vertical"] {
       flex-direction: column;
       font-size: 144px;
@@ -102,7 +102,7 @@
       line-height: 0.85;
     }
 
-    /* Horizontal (FIX05 klassisches HH:MM). */
+    /* Horizontal (klassisches HH:MM). */
     .screensaver-clock[data-layout="horizontal"] {
       flex-direction: row;
       font-size: 96px;
@@ -137,7 +137,7 @@
       font-size: clamp(15px, 2.4vw, 20px);
       color: var(--color-text-secondary, #cbd5e1);
     }
-    /* S14-03-FIX02 Sub-1d: weather icon container. The SVG is
+    /* Sub-1d: weather icon container. The SVG is
        injected by idle.js (Lucide-shaped, stroke=currentColor)
        so we just shape the slot. The pre-fix CSS-mask approach
        relied on undefined --icon-* tokens and rendered as a
@@ -156,7 +156,7 @@
       height: 100%;
     }
 
-    /* S14-03-FIX03 Sub-2: unread-doorbell badge. Hidden via
+    /* unread-doorbell badge. Hidden via
        [hidden] attribute when count=0; idle.js toggles it on
        SSE unread_count events and initial fetch. The subtle
        pulse animation hints "es liegt etwas vor" without
@@ -202,16 +202,15 @@
       .screensaver-badge { animation: none; }
     }
 
-    /* S14-03-FIX04 Sub-2 + FIX05: history-button radar pulse
+    /* history-button radar pulse
        + count badge. Scoped to .history-btn so the design-
        library default .action-badge (a generic 8x8 dot) stays
        available for any other action button that might need it
        later.
-       FIX05 swap: alert color goes from red to the design-
-       library accent blue (same token the Schluessel button
-       uses via .action.is-primary) - red read as alarm; blue
-       matches the action-bar accent and keeps the visual
-       language consistent. */
+       Alert color is the design-library accent blue (same token
+       the Schluessel button uses via .action.is-primary) - red
+       reads as alarm; blue matches the action-bar accent and
+       keeps the visual language consistent. */
 
     .history-btn { position: relative; }
 
@@ -278,7 +277,7 @@
       object-fit: cover;
       display: block;
     }
-    /* Saison 15-01: WebRTC video sibling. Same dimensions as
+    /* WebRTC video sibling. Same dimensions as
        the MJPEG <img>. Visibility is driven by
        data-stream-mode on the wrapping mode-layer (or ringing
        overlay):
@@ -343,7 +342,7 @@
     }
     .mode-close:hover { background: rgba(255,255,255,0.06); }
 
-    /* S14-04 Bereich C: the form is the flex shell now; the
+    /* the form is the flex shell now; the
        inner .mode-settings-scroll owns the scroll so the
        footer stays pinned even when more fieldsets land in a
        later sub-saison. */
@@ -391,13 +390,14 @@
     .mode-field label:hover { background: rgba(255,255,255,0.04); }
     .mode-field input[type="radio"] { accent-color: var(--color-accent, #5b9dff); }
 
-    /* S14-03-FIX02 Sub-2a + S14-04 Bereich C: CARVILON wordmark
+    /* Sub-2a + CARVILON wordmark
        + version + hairline divider inside the inline settings
        mode-layer. Sits at the bottom because the parent .mode-
        settings is a flex-column whose middle child
        (.mode-settings-scroll) takes flex:1 and consumes the
-       extra space. The FIX02 auto-save hint paragraph above the
-       footer is gone - the toast already informs of the save. */
+       extra space. The earlier auto-save hint paragraph above
+       the footer is gone - the toast already informs of the
+       save. */
     .mode-settings-footer {
       padding-top: 12px;
       padding-bottom: 4px;
@@ -533,7 +533,7 @@
       letter-spacing: 0.04em;
     }
 
-    /* Saison 14-04-Phase2: Header-Buttons im Verlauf-Modus
+    /* Header-Buttons im Verlauf-Modus
        (Filter + Edit + Schliessen). */
     .mode-header-actions {
       display: inline-flex;
@@ -563,7 +563,7 @@
       border-color: var(--color-accent, #5b9dff);
     }
 
-    /* Saison 14-04-Phase2: Hinweis-Banner wenn capture deaktiviert. */
+    /* Hinweis-Banner wenn capture deaktiviert. */
     .mode-history-capture-off {
       padding: 12px 16px;
       margin-bottom: 12px;
@@ -576,7 +576,7 @@
     }
     .mode-history-capture-off[hidden] { display: none; }
 
-    /* Saison 14-04-Phase2: Mehr-Laden-Button im Verlauf-Modus. */
+    /* Mehr-Laden-Button im Verlauf-Modus. */
     .mode-history-load-more {
       margin-top: 8px;
       padding: 8px 16px;
@@ -591,7 +591,7 @@
     .mode-history-load-more:hover { background: rgba(255,255,255,0.08); }
     .mode-history-load-more[hidden] { display: none; }
 
-    /* Saison 14-04-Phase2: Per-Item Loeschen-Button (X) - rechts
+    /* Per-Item Loeschen-Button (X) - rechts
        neben dem When-Text, sichtbar nur im Edit-Mode. Edit-Mode
        gibt der Mode-Layer eine .is-edit-mode Klasse; das Selektor-
        Pattern hidden-by-default zieht den Knopf in den Layout-Fluss
@@ -618,7 +618,7 @@
       display: inline-flex;
     }
 
-    /* Saison 14-04-Phase2: Filter-Modal innerhalb des history-mode-
+    /* Filter-Modal innerhalb des history-mode-
        layers. Slidet von unten ein, ueberlagert die Liste. */
     .mode-history-filter-modal {
       position: absolute;
@@ -712,7 +712,7 @@
       color: #0b1220;
     }
 
-    /* Saison 14-04-Phase2: Reset-Button im Settings-Mode. */
+    /* Reset-Button im Settings-Mode. */
     .mode-reset-btn {
       align-self: flex-start;
       padding: 8px 14px;
@@ -737,8 +737,8 @@
       margin-top: 4px;
     }
 
-    /* Saison 14-03-FIX01 Sub-1c: dark scrollbar for the inline
-       modes that can overflow (settings form, history list). The
+    /* Dark scrollbar for the inline modes that can overflow
+       (settings form, history list). The
        default browser scrollbar is light and clashes with the
        pro-tool aesthetic of the rest of the slot. Firefox uses
        the standard scrollbar-* properties; Chromium / Safari need
@@ -787,7 +787,7 @@
     {{template "intercom-ringing.html" .}}
   </div>
 
-  <!-- Saison 15-01: WebRTC client loads BEFORE interactions.js
+  <!-- WebRTC client loads BEFORE interactions.js
        and idle.js so window.carvilonWebRTC is already on the
        page when those modules wire their lifecycle hooks. -->
   <script src="/static/webrtc-stream.js"></script>
@@ -795,12 +795,12 @@
   <script src="/static/idle.js"></script>
   <script src="/static/carvilon-brand.js" defer></script>
   <script>
-    // Saison 13-03-HOTFIX1: Klingel-Lifecycle-Wire-Up neu.
+    // Doorbell-lifecycle wire-up.
     //
-    // Live-Test ergab: das HOTFIX0-Schema mit Modul-Variablen +
-    // mehreren spezifischen click-Listenern feuerte zuverlaessig
-    // doorbell_start (Overlay sichtbar) ABER liess die zwei
-    // disabled-Buttons disabled. Robusterer Ansatz:
+    // An earlier scheme with module-scoped variables and several
+    // specific click listeners reliably fired doorbell_start
+    // (overlay visible) but left the two disabled buttons
+    // disabled. The robuster Ansatz:
     //
     //   1. doorbell_start: alle .ring-btn Buttons enablen UND
     //      die Anruf-Identifier direkt auf die Buttons stempeln
@@ -848,34 +848,32 @@
         disableRingButtons();
       }
 
-      // Saison 13-03-HOTFIX2: explizite EventSource statt
-      // carvilon.connectSSE-Wrapper. DevTools-Mitschnitt nach
-      // HOTFIX1 zeigte mehrere parallele eventsource-Verbindungen
-      // im Netzwerk-Tab; ein einzelner expliziter EventSource +
-      // addEventListener-Aufrufe machen den Lifecycle
-      // beobachtbar (eine Zeile im Network-Tab) und
-      // Reconnect-Loops sofort sichtbar.
+      // Explicit EventSource instead of the
+      // carvilon.connectSSE wrapper. A DevTools capture showed
+      // multiple parallel eventsource connections in the network
+      // tab; a single explicit EventSource + addEventListener
+      // calls keep the lifecycle observable (one row in the
+      // network tab) and reconnect loops immediately visible.
       var es = new EventSource('/webviewer/events');
       es.addEventListener('doorbell_start', function (e) {
         var data = {};
         try { data = JSON.parse(e.data) || {}; } catch (_) {}
-        // Saison 13-03-HOTFIX2: writeSSEEvent in handler_events.go
-        // wickelt das doorbellhub.Event in einen Envelope mit
-        // {door, ts, raw: <hub event>} ein. cancel_token und
-        // device_id liegen daher unter data.raw.*. HOTFIX1 hat das
-        // uebersehen; deshalb war das dataset auf den Buttons leer.
+        // writeSSEEvent in handler_events.go wraps the
+        // doorbellhub.Event in an envelope of
+        // {door, ts, raw: <hub event>}; cancel_token and
+        // device_id therefore live under data.raw.*.
         var raw = data.raw || {};
         var eventID = raw.cancel_token || raw.request_id || '';
         var intercomMAC = raw.device_id || data.door || '';
         if (window.console) console.log('[carvilon] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
-        // S14-03-FIX02 Sub-1b: a doorbell ring counts as user
+        // Sub-1b: a doorbell ring counts as user
         // activity and resets the auto-screensaver timer so the
         // mieter does not get slid back to the screensaver while
         // talking to the visitor.
         if (window.carvilonIdle && window.carvilonIdle.resetAutoTimer) {
           window.carvilonIdle.resetAutoTimer();
         }
-        // S14-03-FIX03 Sub-2: bump the unread-doorbell badge so
+        // bump the unread-doorbell badge so
         // the count is visible immediately on the screensaver.
         // The authoritative count arrives shortly after via the
         // unread_count SSE event (commit 6); this local bump is
@@ -897,7 +895,7 @@
       es.addEventListener('history_update', function () {
         location.reload();
       });
-      // S14-03-FIX03 Sub-2: authoritative unread-doorbell count
+      // authoritative unread-doorbell count
       // pushed from the server (after a new doorbell row lands
       // and after the async mark-read completes).
       es.addEventListener('unread_count', function (e) {
@@ -908,7 +906,7 @@
           window.carvilonIdle.updateUnreadBadge(n);
         }
       });
-      // Saison 14-XX: config.changed signalisiert eine server-
+      // config.changed signalisiert eine server-
       // seitige Settings-Mutation auf diesem viewer_mac (Mieter-
       // POST, Admin-Edit, ESP-POST). Wir holen die Seite frisch
       // statt einzelne DOM-Stellen zu patchen - Settings beruehren
@@ -917,7 +915,7 @@
       // Eine kleine Verzoegerung (180ms) sammelt nahe Multi-Field-
       // Aenderungen in einen einzigen Reload statt N kaskadierender.
       //
-      // Saison 14-04-Phase2-FIX03 Skip-Echo. Wenn der Mieter
+      // Skip-Echo. Wenn der Mieter
       // gerade selbst eine Settings-Aenderung gespeichert hat,
       // ist der Wert lokal schon im UI. Ein Reload waehrend er
       // im Settings-Modus steht reisst ihn aus dem Mode raus -
@@ -1005,7 +1003,7 @@
       });
     })();
 
-    // Saison 13-07: Standby-Unlock vom idle-screen-Schluessel-
+    // Standby-Unlock vom idle-screen-Schluessel-
     // Knopf. design-library/intercom-idle.html liefert
     // <button class="action is-primary" data-action="unlock-door">
     // ohne .ring-btn-Klasse (das ist der Bell-Overlay-Knopf).

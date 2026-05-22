@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
   <style>
-    /* Saison 14-04-Phase2-FIX01 Polish:
+    /* Polish:
        Detail-Seite uebernimmt das Apple-Style / Dark-Pro-Tool
        Vokabular des Dashboards. Stammdaten und Verlauf liegen in
        eigenen Cards (.viewer-detail-section) mit 0.5px-Border auf
@@ -94,9 +94,10 @@
     .history-meta .hidden-count { color: #facc15; }
     .history-meta .hidden-count[hidden] { display: none; }
 
-    /* Filter-Form: dark inputs + primary/secondary buttons.
-       color-scheme:dark macht den Browser-Date-Picker dunkel ohne
-       eigenen Custom-Calendar (Briefing Halde: kein Custom-Picker). */
+    /* Filter form: dark inputs + primary/secondary buttons.
+       color-scheme:dark turns the browser's native date-picker
+       dark without needing a custom calendar (the brief was
+       explicit about not building a custom picker). */
     .history-filter-form {
       display: flex;
       align-items: center;
@@ -275,7 +276,7 @@
     }
     .btn-load-more[hidden] { display: none; }
 
-    /* Saison 14-04-Phase2-FIX02: Stammdaten Edit-Mode.
+    /* Stammdaten Edit-Mode.
        Section-Header hat rechts einen Bearbeiten-Button; im
        Edit-Mode wird die <dl> ausgeblendet und ein <form> mit
        Inputs + Selects + Save/Cancel-Buttons gezeigt. */
@@ -582,8 +583,8 @@
       </div>
     </header>
 
-    <!-- Toast (Saison 14-04-Phase2-FIX02). Globaler Slot, von
-         allen Form-Pfaden gefuettert via showToast(). -->
+    <!-- Toast. Global slot, fed by every form path via
+         showToast(). -->
     <div class="admin-toast" data-bind="toast" role="status" aria-live="polite"></div>
 
     <section class="viewer-detail-section" id="stammdaten-section"
@@ -654,7 +655,7 @@
       </form>
     </section>
 
-    <!-- Saison 14-04-Phase2-FIX02 Settings-Auto-Save-Section.
+    <!-- Settings-Auto-Save-Section.
          Sichtbar fuer beide Typen; ESP-spezifische Fields nur
          wenn Type=esp. Aenderung an einem Radio/Slider feuert
          sofort fetch -> POST /a/viewers/{mac}/settings. -->
@@ -697,7 +698,7 @@
         <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
       </fieldset>
 
-      <!-- Saison 14-04-Phase2-FIX05 Uhr-Anzeige. -->
+      <!-- Uhr-Anzeige. -->
       <fieldset class="settings-field">
         <legend>Uhr-Anzeige</legend>
         <label><input type="radio" name="clock_layout" value="vertical"   {{if eq .Page.ClockLayout "vertical"}}checked{{end}}> Vertikal (Stunden über Minuten)</label>
@@ -763,7 +764,7 @@
       <button type="button" class="btn-load-more" id="history-load-more" hidden>Mehr laden</button>
     </section>
 
-    <!-- Saison 14-04-Phase2-FIX02 Modals.
+    <!-- Modals.
          Custom modal-overlay statt <dialog>-Element damit das
          Design konsistent zur restlichen Admin-UI bleibt. Alle
          Modals haben dieselbe Hide/Show-Mechanik via .is-open. -->
@@ -829,7 +830,7 @@
   </main>
 
   <script>
-    // Saison 14-04-Phase2-FIX02: Admin-Inline-Edit-Runtime.
+    // Admin-Inline-Edit-Runtime.
     //
     // Drei Blocks:
     //   1. Globaler Toast + Modal-Open/Close-Helper

@@ -128,7 +128,7 @@
     applyOpen('[data-modal="' + name + '"]', false);
   }
 
-  // Saison 15-01: WebRTC lifecycle hook for the ringing overlay.
+  // WebRTC lifecycle hook for the ringing overlay.
   // openOverlay('ringing') -> webrtc.connect on the overlay's
   // <video data-webrtc-target="ringing">. closeOverlay('ringing')
   // -> disconnect. We only react to the ringing overlay; other
@@ -374,7 +374,7 @@
     if (openOverlayEl) {
       var name = openOverlayEl.getAttribute('data-overlay');
       openOverlayEl.classList.remove('is-open');
-      // Saison 15-01: keep the WebRTC lifecycle in sync when
+      // keep the WebRTC lifecycle in sync when
       // ESC bypasses the closeOverlay helper.
       hookRingingWebRTC(name, false);
     }

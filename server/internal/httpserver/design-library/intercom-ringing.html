@@ -17,12 +17,12 @@
 
 <div class="ringing is-open" data-overlay="ringing" data-screen="ringing" data-stream-slot="ringing" data-stream-mode="idle">
 
-  <!-- Saison 15-01: WebRTC primary, MJPEG fallback. The video
+  <!-- WebRTC primary, MJPEG fallback. The video
        element is the WebRTC target; webrtc-stream.js attaches
        the live MediaStream on connect (interactions.js opens
        the overlay on doorbell_start and triggers connect).
 
-       Saison 14-01: live MJPEG fallback. Browser tears the
+       live MJPEG fallback. Browser tears the
        MJPEG response down automatically when the element is
        hidden via .ringing:not(.is-open) display:none. If the
        backend is unreachable (503 or network failure) the

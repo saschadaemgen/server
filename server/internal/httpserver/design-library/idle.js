@@ -1,4 +1,4 @@
-// Saison 14-03 + 14-03-FIX01: mieter mode-switcher runtime.
+// mieter mode-switcher runtime.
 //
 // The .stream slot in intercom-idle.html hosts four .mode-layer
 // children:
@@ -49,7 +49,7 @@
     return;
   }
 
-  // Saison 14-XX: drei persistierbare Idle-Defaults im Server-
+  // drei persistierbare Idle-Defaults im Server-
   // Vokabular (screensaver | livestream | screen_off). Der
   // Web-Viewer hat aber nur zwei Render-Pfade - screen_off ist
   // ein ESP-Hardware-Konzept (Backlight aus). Wir mappen
@@ -72,7 +72,7 @@
   }
 
   var clockEl = container.querySelector('.screensaver-clock');
-  // Saison 14-04-Phase2-FIX04 Pixel-Style: Stunden + Minuten als
+  // Pixel-Style: Stunden + Minuten als
   // zwei eigenstaendige Elemente uebereinander. tickClock setzt
   // beide separat - kein Doppelpunkt-String mehr.
   var clockHoursEl = container.querySelector('.screensaver-clock-hours');
@@ -104,9 +104,9 @@
   setInterval(tickClock, 1000);
 
   // -------------------------------------------------------------
-  // Weather refresh. Identical to S14-01b: 15-min cadence, hide
-  // the weather block on backend errors.
-  // S14-03-FIX02 Sub-1d: Lucide-shaped SVG dictionary. The
+  // Weather refresh. 15-min cadence, hide the weather block on
+  // backend errors.
+  // Lucide-shaped SVG dictionary. The
   // screensaver previously rendered weather icons via CSS mask
   // (-webkit-mask: var(--icon-cloud)) but those tokens were
   // never defined, so the icon span fell back to a solid grey
@@ -180,22 +180,20 @@
   setInterval(refreshWeather, 15 * 60 * 1000);
 
   // -------------------------------------------------------------
-  // Mode switcher (S14-03-FIX01 push animation + FIX02 Sub-1c
-  // idle-default-aware direction). Both layers travel parallel
-  // via a CSS transition on transform: the source moves from
-  // .active to .above (or .below for the return path), and the
-  // target moves from .below (or .above) to .active in the same
-  // frame. After the 400ms transition we mark the now-hidden
-  // source with .hidden so it cannot intercept clicks.
+  // Mode switcher (push animation, idle-default-aware
+  // direction). Both layers travel parallel via a CSS
+  // transition on transform: the source moves from .active to
+  // .above (or .below for the return path), and the target
+  // moves from .below (or .above) to .active in the same frame.
+  // After the 400ms transition we mark the now-hidden source
+  // with .hidden so it cannot intercept clicks.
   //
-  // Direction rule (FIX02): the IDLE mode (the mieter's persisted
+  // Direction rule: the IDLE mode (the mieter's persisted
   // default - screensaver OR livestream) is conceptually "above"
   // and parked modes sit "below". Returning to idle slides DOWN
   // (target enters from above, source leaves down); opening
   // anything else slides UP (target enters from below, source
-  // leaves up). Pre-FIX02 the direction was hard-coded to
-  // screensaver-as-home; with livestream-as-default the close
-  // direction felt wrong.
+  // leaves up).
   //
   // An animation lock (`animating`) coalesces double-clicks so a
   // second trigger before the transition finishes is dropped.
@@ -203,7 +201,7 @@
   var animating = false;
   var ANIM_MS = 420; // 400ms transition + 20ms safety margin
 
-  // S14-03-FIX06: the cam-meta chip sits in the .stream wrapper
+  // the cam-meta chip sits in the .stream wrapper
   // as a sibling of #idle-container (it is not a child of any
   // mode-layer, so opaque settings/history layers cannot hide
   // it on their own). updateStreamMetaVisibility toggles the
@@ -254,7 +252,7 @@
       targetEl.classList.add('active');
     });
 
-    // S14-03-FIX06: the cam-meta chip (`cam · DoorName` at
+    // the cam-meta chip (`cam · DoorName` at
     // bottom-left of the slot) only belongs to the screensaver
     // and livestream modes. In settings/history it would
     // shine through the opaque mode-layer because it lives in
@@ -267,7 +265,7 @@
       loadHistory();
     }
 
-    // Saison 15-01: hook the WebRTC lifecycle into the slide.
+    // hook the WebRTC lifecycle into the slide.
     // Entering livestream -> connect (best-effort, falls back to
     // MJPEG inside webrtc-stream.js on 503/error). Leaving
     // livestream -> disconnect so the backend can release the
@@ -291,11 +289,11 @@
       resetAutoTimer();
     }, ANIM_MS);
   }
-  // Back-compat alias: earlier S14-03 code called switchMode.
+  // Back-compat alias: earlier code called switchMode.
   var switchMode = setMode;
 
   // -------------------------------------------------------------
-  // Auto-screensaver timer (S14-03-FIX02 Sub-1b: "Variante B" -
+  // Auto-screensaver timer (Sub-1b: "Variante B" -
   // timer runs in ANY non-screensaver mode when both prerequisites
   // hold: idle_default is screensaver AND auto_seconds > 0).
   //
@@ -339,7 +337,7 @@
   // inputs, buttons, or the close-X are explicit and have their
   // own handlers below.
   container.addEventListener('click', function (e) {
-    // S14-03-FIX02: every tap inside the container resets the
+    // every tap inside the container resets the
     // timer, regardless of whether it triggers a mode switch
     // (taps on history rows, settings form whitespace, etc., all
     // count as user activity).
@@ -357,7 +355,7 @@
     }
   });
 
-  // S14-03-FIX02: any click anywhere in the device frame counts
+  // any click anywhere in the device frame counts
   // as user activity (topbar gear, action-bar mic/unlock, even
   // accidental misses). Cheaper than tracking the .stage element
   // and bubbles up through the existing handlers.
@@ -369,7 +367,7 @@
   window.carvilonIdle.resetAutoTimer = resetAutoTimer;
 
   // -------------------------------------------------------------
-  // Saison 14-03-FIX03 Sub-2: unread-doorbell badge runtime.
+  // unread-doorbell badge runtime.
   //
   // Three event sources feed the badge:
   //   1. initial fetch /webviewer/unread-count on page load
@@ -392,7 +390,7 @@
     badgeIconEl.innerHTML = BELL_RING_SVG;
   }
 
-  // S14-03-FIX04 Sub-2: the action-bar history button mirrors
+  // the action-bar history button mirrors
   // the count via its own badge + radar pulse. Looked up once
   // here so updateUnreadBadge does not query the DOM on every
   // call.
@@ -492,7 +490,7 @@
   });
 
   // -------------------------------------------------------------
-  // S14-03-FIX02 Sub-1e: auto-save settings on every radio
+  // Sub-1e: auto-save settings on every radio
   // change. Replaces the explicit Save button. Each change fires
   // one POST with the FULL form state so the server always sees
   // both fields; the JSON response patches local runtime state
@@ -517,7 +515,7 @@
 
   function saveSettings() {
     if (!settingsForm) return;
-    // Saison 14-04-Phase2-FIX03 Skip-Echo-Marker. Wir stempeln
+    // Skip-Echo-Marker. Wir stempeln
     // den Zeitpunkt VOR dem POST damit der gleich-darauf-folgende
     // config.changed SSE-Echo erkennen kann dass die Aenderung
     // schon aus diesem Tab kam - kein Reload, User bleibt im
@@ -526,12 +524,12 @@
     window.carvilonIdle = window.carvilonIdle || {};
     window.carvilonIdle.lastOwnSaveAt = Date.now();
 
-    // S14-03-FIX03 Sub-1a: build a urlencoded body explicitly.
-    // The previous FIX02 code passed a FormData object directly,
-    // which makes fetch use multipart/form-data. Go's
-    // r.ParseForm only populates r.PostForm for the urlencoded
-    // content-type; multipart bodies leave PostForm empty, so
-    // BOTH fields were silently ignored on save.
+    // Build a urlencoded body explicitly. An earlier version
+    // passed a FormData object directly, which makes fetch use
+    // multipart/form-data. Go's r.ParseForm only populates
+    // r.PostForm for the urlencoded content-type; multipart
+    // bodies leave PostForm empty, so BOTH fields were silently
+    // ignored on save.
     var body = new URLSearchParams();
     var inputs = settingsForm.querySelectorAll('input[type="radio"]:checked');
     for (var bi = 0; bi < inputs.length; bi++) {
@@ -559,7 +557,7 @@
           autoSeconds = resp.auto_screensaver_seconds;
           container.setAttribute('data-auto-screensaver-seconds', String(autoSeconds));
         }
-        // Saison 14-04-Phase2-FIX05: clock_layout-Echo. data-layout
+        // clock_layout-Echo. data-layout
         // auf .screensaver-clock flippt CSS-Selektor sofort um -
         // kein Reload noetig damit der Mieter den Wechsel im
         // Hintergrund sieht.
@@ -592,7 +590,7 @@
   }
 
   // -------------------------------------------------------------
-  // Inline history (Saison 14-03 + 14-04-Phase2).
+  // Inline history ().
   //
   // 14-04-Phase2 erweitert die einfache "alle Eintraege laden"
   // Logik um:
@@ -696,7 +694,7 @@
         }
         historyState.offset = resp.next_offset || (historyState.offset + events.length);
 
-        // S14-03-FIX03 Sub-2: opening history marks rows read on
+        // opening history marks rows read on
         // the server, also wenn Pagination genutzt wird.
         if (!append) updateUnreadBadge(0);
       })
@@ -923,7 +921,7 @@
     hydrateLivestream();
   }
 
-  // Saison 15-01: when livestream is the persisted default, the
+  // when livestream is the persisted default, the
   // page renders with that layer .active from the start - setMode
   // never fires for it. Kick the WebRTC connect manually so the
   // first-paint experience matches the post-toggle one.

@@ -108,7 +108,7 @@
       </table>
     </div>
 
-    <!-- Anlegen-Modal. Saison 13-02-FIX4-a-HOTFIX4 hat die Maske
+    <!-- Anlegen-Modal. hat die Maske
          radikal vereinfacht: Wohnungs-Name + optional Passwort +
          optional Verknuepfung. MAC wird intern erzeugt. -->
     <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true" aria-labelledby="create-viewer-title">
@@ -188,7 +188,7 @@
       </div>
     </div>
 
-    <!-- Bearbeiten-Modal. Saison 13-02-FIX4-a-HOTFIX5: einheitlicher
+    <!-- Bearbeiten-Modal. einheitlicher
          Edit-Pfad fuer Name, Passwort und Verknuepfung. Passwort leer
          lassen = nicht aendern; "Neu generieren"-Knopf befuellt das
          Feld ohne zu speichern. Speichern-Klick schickt alles in
@@ -334,8 +334,8 @@
         if (modal) modal.classList.add('is-open');
       });
 
-      // ---- Show/Hide Passwort-Feld lebt global in _nav.html
-      //      (HOTFIX6); hier kein page-local Handler mehr. ----
+      // ---- The show/hide password field lives globally in
+      //      _nav.html; no page-local handler here. ----
 
       // ---- Bearbeiten-Modal Open ----
       document.addEventListener('click', function (e) {
@@ -391,7 +391,7 @@
             ssel.dispatchEvent(new Event('change', { bubbles: true }));
           }
         }
-        // Saison 13-02-FIX4-a-HOTFIX8: Login-Link + QR lazy nachladen.
+        // Login-Link + QR lazy nachladen.
         var urlInput = modal.querySelector('#edit-login-url');
         var qrSlot = modal.querySelector('#edit-qr-code');
         if (urlInput) urlInput.value = '';
@@ -644,7 +644,7 @@
         // Die library-interactions.js prueft modal-glass als Inner-
         // Container, sonst schliesst sie bei JEDEM Klick im Modal.
         //
-        // Saison 13-02-FIX4-a-HOTFIX4: Username-Spalte fliegt raus
+        // Username-Spalte fliegt raus
         // (Name ist der Login). Passwort hat einen "Bearbeiten"-
         // Knopf, MAC steht auf dem Wrapper damit der Save-Pfad sie
         // findet.

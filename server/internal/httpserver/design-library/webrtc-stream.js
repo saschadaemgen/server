@@ -1,4 +1,4 @@
-// Saison 15-01: WebRTC video client for the carvilon webviewer.
+// WebRTC video client for the carvilon webviewer.
 //
 // Replaces the MJPEG <img> as the primary live-view path. The
 // browser POSTs an SDP offer to /webviewer/offer; the server
@@ -20,7 +20,7 @@
 // pagehide + beforeunload listeners run disconnect() as a safety
 // net so a stale PeerConnection cannot keep the camera mic open
 // after the user navigates away. This pattern is non-negotiable
-// (Saison 11 lesson: UA-Intercom-WebRTC-Teardown ist
+// (Lesson from MQTT capture: UA-Intercom-WebRTC-Teardown ist
 // unzuverlaessig, Mock-UI muss eigenes track.stop + pc.close
 // machen, see CLAUDE.md sektion 11.9).
 (function () {

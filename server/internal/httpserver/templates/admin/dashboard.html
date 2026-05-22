@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
   <style>
-    /* Saison 14-04-Phase2-FIX01: Filter-Aktiv-Indikator am
+    /* Filter-Aktiv-Indikator am
        Filter-Button. .filter-btn-is-active hebt den Button mit
        Akzent-Farbe hervor; .filter-btn-count rendert das
        Badge mit der Anzahl ausgewaehlter Viewer. */
@@ -36,13 +36,13 @@
       line-height: 1;
     }
 
-    /* Saison 14-04-Phase2-FIX02 ECHTER Filter-Dropdown-Fix.
-       FIX01-Bug: das Markup hatte inline style="display:flex"
-       UND das hidden-Attribut. Inline-Style schlaegt das
-       User-Agent-[hidden]{display:none}; das Dropdown ist immer
-       sichtbar gewesen, egal was dropdown.hidden setzte.
-       FIX02 verschiebt alle Styles in den style-Block und
-       toggelt Sichtbarkeit ueber eine .is-open-Klasse. */
+    /* Filter-dropdown visibility.
+       The earlier markup carried inline style="display:flex"
+       together with the hidden attribute. Inline style beats
+       the user-agent rule [hidden]{display:none}; the dropdown
+       was always visible regardless of dropdown.hidden.
+       All styles now live in the style block and visibility is
+       toggled via an .is-open class. */
     .dashboard-filter {
       margin-left: auto;
       position: relative;
@@ -185,9 +185,9 @@
         <h2 class="app-card-title">Letzte Klingel-Ereignisse</h2>
         <span class="badge">letzte 20</span>
         {{if .Page.AnyFilter}}<span class="badge" style="background: rgba(91,157,255,0.15); color: var(--color-accent);">Filter aktiv</span>{{end}}
-        <!-- Saison 14-04-Phase2: Filter-Dropdown. JS-only, ohne
+        <!-- Filter-Dropdown. JS-only, ohne
              JS funktioniert die Page weiter (alle Eintraege).
-             FIX01: Schliess-Logik (Apply + Outside + ESC) plus
+             Schliess-Logik (Apply + Outside + ESC) plus
              Aktiv-Indikator (.is-active + Count-Badge wenn nicht
              alle Viewer ausgewaehlt sind). -->
         <div class="dashboard-filter">
@@ -241,13 +241,13 @@
     </section>
 
     <script>
-      // Saison 14-04-Phase2 + FIX01 + FIX02: Dashboard-Filter-Dropdown.
+      // Dashboard filter dropdown.
       //
-      // FIX02 echter Bug-Fix: das Sichtbarkeits-Toggle laeuft jetzt
-      // ueber die .is-open-Klasse statt das hidden-Attribut. Pre-
-      // FIX02 hatte das Markup inline-Style mit display:flex - dieser
-      // Spezifitaets-Sieger hat das User-Agent-[hidden]{display:none}
-      // ueberschrieben, weshalb das Dropdown nie versteckt wurde.
+      // The visibility toggle runs via the .is-open class instead
+      // of the hidden attribute. An earlier markup carried inline
+      // style with display:flex - that specificity winner
+      // overrode the user-agent rule [hidden]{display:none},
+      // which is why the dropdown was never hidden.
       //
       // Verhalten:
       //   - Klick Filter-Button: Dropdown auf/zu

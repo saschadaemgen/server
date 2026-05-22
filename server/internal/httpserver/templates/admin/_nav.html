@@ -1,6 +1,6 @@
 {{define "admin-nav"}}
 <style>
-  /* Saison 13-02-FIX4-a-HOTFIX4: dunkles Theme fuer Select-
+  /* dunkles Theme fuer Select-
      Dropdowns. Browser-default ist meist weiss, das bricht die
      Library-Aesthetik. Hier global (in jeder Admin-Seite via
      admin-nav-Partial eingebunden) ohne die Library-Files
@@ -28,7 +28,7 @@
     color: var(--color-text);
   }
 
-  /* Saison 13-02-FIX4-a-HOTFIX5: Custom-Dropdown.
+  /* Custom-Dropdown.
      Native <select> ist auf manchen OS (Safari macOS, Firefox
      Linux) nicht zuverlaessig dunkel zwingbar. Wir nutzen
      Progressive-Enhancement: das echte <select> bleibt hidden
@@ -37,7 +37,7 @@
 
   .dropdown { position: relative; width: 100%; }
   .dropdown > select[data-dropdown-target] {
-    /* Saison 13-02-FIX4-a-HOTFIX6: strikte visually-hidden-
+    /* strikte visually-hidden-
        Konvention. Vorher: nur clip + 1x1px, das hat in Modals
        trotzdem als heller Balken durchgeschimmert (Chromium auf
        Windows). Jetzt: clip + clip-path + Margin-Negativ +
@@ -91,7 +91,7 @@
   .dropdown-caret { flex: none; opacity: 0.7; }
 
   .dropdown-panel {
-    /* Saison 13-02-FIX4-a-HOTFIX6: das Panel wird beim Oeffnen
+    /* das Panel wird beim Oeffnen
        via JS in document.body verschoben (Portal-Pattern) und
        inline mit position:fixed + top/left/width gesetzt. Die
        Defaults hier sind nur fuer den geschlossenen Zustand
@@ -99,7 +99,7 @@
        Die overflow:hidden des Modal-Glass kann das Panel nicht
        mehr clippen, weil es im Body liegt.
 
-       Saison 13-02-FIX4-a-HOTFIX7: konkrete Farben statt
+       konkrete Farben statt
        var(--color-surface-1), weil das eine 4%-Alpha-translucente
        Weiss-Fuellung ist. Inside .modal-glass (bg rgba(22,22,26,
        0.94)) sah das dunkel aus; portaliert auf body schimmert
@@ -143,7 +143,7 @@
     overflow-y: auto;
     flex: 1;
     background-color: #0e1014 !important;
-    /* Saison 13-02-FIX4-a-HOTFIX8: dunkle Scrollbar. Firefox
+    /* dunkle Scrollbar. Firefox
        nutzt scrollbar-width + scrollbar-color, Chromium und
        Edge die ::-webkit-scrollbar-Pseudoelemente. */
     scrollbar-width: thin;
@@ -188,7 +188,7 @@
     font-style: italic;
   }
 
-  /* Saison 13-02-FIX4-a-HOTFIX8: kleiner Icon-Knopf fuer
+  /* kleiner Icon-Knopf fuer
      Tabellen-Spalten ("Link kopieren" etc.). Bewusst neutral
      gehalten damit er nicht mit den primary/secondary Buttons
      der Library konkurriert. */
@@ -222,7 +222,7 @@
     <span class="carvilon-brand sz-sm" aria-hidden="true">
       <span class="name">CARVILON</span>
       <span class="sub-wrap">
-        <!-- S14-04 Sub-B: subtitle ratio bumped to 0.95 for the
+        <!-- subtitle ratio bumped to 0.95 for the
              longer 23-char "INTERCOM ADMINISTRATION" so the
              letter-spacing JS does not have to compress it
              into negative tracking. -->
@@ -259,11 +259,11 @@
     </form>
   </div>
 </nav>
-<!-- Saison 14-03-FIX03 V4: CARVILON brand width-sync runtime,
+<!-- CARVILON brand width-sync runtime,
      measured and applied to every .carvilon-brand on the page. -->
 <script src="/static/carvilon-brand.js" defer></script>
 <script>
-  // Saison 13-02-FIX4-a-HOTFIX5: Custom-Dropdown-Component.
+  // Custom-Dropdown-Component.
   //
   // Markup-Vertrag:
   //   <div class="dropdown" data-dropdown
@@ -286,7 +286,7 @@
     if (window.carvilon.dropdownInit) return; // doppelt-Init verhindern
 
     var openInstance = null;
-    // Saison 13-02-FIX4-a-HOTFIX7: closeOpen muss den vollen
+    // closeOpen muss den vollen
     // Teardown machen, sonst bleibt das Panel als Waise im body
     // wenn Modal mit X/Esc/Backdrop geschlossen wird. Vorher
     // setzte closeOpen nur die is-open-Klasse am Container, das
@@ -465,7 +465,7 @@
       inst.list.innerHTML = html;
     }
 
-    // Saison 13-02-FIX4-a-HOTFIX6: Portal-Pattern.
+    // Portal-Pattern.
     // Beim Open verschieben wir das Panel in document.body und
     // positionieren es per getBoundingClientRect(). Das entkommt
     // dem overflow:hidden des Modal-Glass-Containers und stellt
@@ -505,7 +505,7 @@
       inst.trigger.setAttribute('aria-expanded', 'true');
       inst.search.value = '';
       inst.active = 0;
-      // Saison 13-02-FIX4-a-HOTFIX7: Owner-ID-Tracking. Falls
+      // Owner-ID-Tracking. Falls
       // ein Modal-Close-Pfad das Panel direkt ueber dem body
       // sucht (Fallback), kann er via data-dropdown-owner den
       // urspruenglichen Container wiederfinden und das Panel
@@ -570,7 +570,7 @@
         if (!li) return;
         select(inst, li.getAttribute('data-value'), li.textContent);
       });
-      // Saison 13-02-FIX4-a-HOTFIX6: Keydown auf der Panel-Seite
+      // Keydown auf der Panel-Seite
       // damit die Pfeiltasten auch dann greifen wenn der Fokus auf
       // dem Search-Input liegt (der ist im Portal-Mode ein Sibling
       // von body, nicht mehr ein Nachfahre von inst.el).
@@ -604,11 +604,11 @@
     }
 
     // Globaler Klick-Outside-Handler.
-    // Saison 13-02-FIX4-a-HOTFIX6: Panel lebt im Portal-Mode als
+    // Panel lebt im Portal-Mode als
     // Sibling von body, daher muss die Innen-Check beides
     // beruecksichtigen (Container UND Panel).
     //
-    // Saison 13-02-FIX4-a-HOTFIX7: mousedown statt click, plus
+    // mousedown statt click, plus
     // Capture-Phase. Im Live-Test feuerte der bubble-click-Handler
     // nicht zuverlaessig, weil die design-library ihren eigenen
     // click-Handler hat (interactions.js) und Option-Klicks bei
@@ -622,13 +622,13 @@
       closeOpen();
     }, true);
 
-    // Saison 13-02-FIX4-a-HOTFIX6: Scroll und Resize wuerden die
+    // Scroll und Resize wuerden die
     // Panel-Position einfrieren (top/left aus getBoundingClientRect
     // wandern nicht mit). Wir schliessen daher lieber. capture:true
     // beim scroll damit auch Scrolls in beliebigen Containern
     // greifen, nicht nur window.
     //
-    // Saison 13-02-FIX4-a-HOTFIX8: das hat aber zu frueh
+    // das hat aber zu frueh
     // geschlossen wenn der Mieter in der Optionen-Liste selbst
     // scrollte. Filter: Scrolls innerhalb des Panels ignorieren.
     function closeOnScroll(e) {
@@ -655,7 +655,7 @@
       }
     });
 
-    // Saison 13-02-FIX4-a-HOTFIX7: Modal-Close fegt Waisen mit.
+    // Modal-Close fegt Waisen mit.
     // Wenn ein [data-modal] seine is-open-Klasse verliert (X-Knopf,
     // Esc, Backdrop-Klick, Library-API closeModal), schliessen wir
     // jedes verbliebene offene Panel via closeOpen, und greifen
@@ -748,7 +748,7 @@
     mo.observe(document.body, { childList: true, subtree: true });
   })();
 
-  // Saison 13-02-FIX4-a-HOTFIX6: globaler Passwort-Show-Toggle.
+  // globaler Passwort-Show-Toggle.
   // Vorher hingen die toggle-pw-Handler in der page-local IIFE
   // von web-viewers.html. Im Live-Test feuerten sie nicht
   // zuverlaessig (vermutlich Race mit interactions.js
@@ -756,7 +756,7 @@
   // document mit closest() ist robust gegen DOM-Reihenfolge
   // und Modal-Reopen.
   //
-  // Saison 13-02-FIX4-a-HOTFIX7: drei Target-Strategien plus
+  // drei Target-Strategien plus
   // stopPropagation, damit das Toggle auch dann findet wenn
   // data-target nicht aufloest (z.B. weil Modal-Inject noch
   // im Gange ist) und nicht durch andere Handler kaputtgemacht
@@ -813,7 +813,7 @@
     });
   })();
 
-  // Saison 13-02-FIX4-a-HOTFIX8: globaler Copy-Link-Handler.
+  // globaler Copy-Link-Handler.
   // Bedient sowohl die Tabellen-Icon-Knoepfe (data-url) als auch
   // den "Kopieren"-Knopf im Edit-Modal (data-target auf das
   // URL-Input-Feld). Zwei-Sekunden-Erfolgs-Feedback via

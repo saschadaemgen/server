@@ -56,7 +56,7 @@
     .info-row { display: flex; justify-content: space-between; padding: var(--space-2) 0; }
     .info-row .k { color: var(--color-text-tertiary); }
 
-    /* S14-03-FIX02 Sub-2a: CARVILON brand + version footer. */
+    /* Sub-2a: CARVILON brand + version footer. */
     .settings-footer {
       margin-top: var(--space-6);
       display: flex;
@@ -120,8 +120,8 @@
           <span class="sub" data-target-ratio="0.85">INTERCOM WEB VIEWER</span>
         </span>
       </span>
-      <!-- TODO(saison-15+): pull from a Go build var (ldflags
-           -X) instead of a hardcoded string. -->
+      <!-- TODO: pull from a Go build var (ldflags -X) instead
+           of a hardcoded string. -->
       <span class="settings-version">Version 1.0</span>
     </footer>
   </main>
