@@ -1,17 +1,16 @@
-// Saison 14-04-Phase2: Admin-Detail-Seite + Admin-History-Endpoints.
+// Admin detail page plus admin-side history endpoints.
 //
 // Routes:
 //
-//	GET    /a/viewers/{mac}                  Detail-Seite (HTML)
+//	GET    /a/viewers/{mac}                  detail page (HTML)
 //	GET    /a/viewers/{mac}/history          paged JSON
-//	DELETE /a/viewers/{mac}/history/{event}  Hard-Delete einzeln
-//	DELETE /a/viewers/{mac}/history          Hard-Delete alle
+//	DELETE /a/viewers/{mac}/history/{event}  hard-delete one
+//	DELETE /a/viewers/{mac}/history          hard-delete all
 //
-// Die Detail-Seite ist die einheitliche Drill-Down-Sicht fuer
-// Web- und ESP-Viewer (Type wird im Template branched). Die
-// History-JSON-Endpoints liefern AdminListResult mit
-// hidden-Markern; Hard-Delete kaskadiert via FK auf
-// viewer_hidden_events.
+// The detail page is the unified drill-down view for web and
+// ESP viewers (the type is branched in the template). The
+// history JSON endpoints return AdminListResult with hidden-
+// markers; hard-delete cascades via FK on viewer_hidden_events.
 package httpserver
 
 import (
@@ -25,11 +24,11 @@ import (
 	"carvilon.local/server/internal/viewermanager"
 )
 
-// adminViewerDetailData ist die Payload fuer
-// templates/admin/viewer-detail.html. ServerSide rendern wir nur
-// die Stammdaten + Filter-Maske + Skelett der History-Section;
-// die History-Tabelle wird via /a/viewers/{mac}/history.json
-// vom Browser nachgeladen.
+// adminViewerDetailData is the payload for
+// templates/admin/viewer-detail.html. Server-side we only render
+// the base data + filter mask + skeleton of the history section;
+// the history table is fetched by the browser via
+// /a/viewers/{mac}/history.json.
 type adminViewerDetailData struct {
 	User                  adminUser
 	MAC                   string
@@ -46,14 +45,13 @@ type adminViewerDetailData struct {
 	HistoryCaptureEnabled bool
 	ESPModel              string
 	ESPFwVersion          string
-	// Saison 14-04-Phase2-FIX02: ESP-spezifische Settings fuer
-	// das Settings-Auto-Save-Form. Nur sinnvoll wenn Type == "esp".
+	// ESP-specific settings for the settings auto-save form.
+	// Only meaningful when Type == "esp".
 	ScreenOffAfterSec int
 	BrightnessIdle    int
 	Language          string
-	// Saison 14-04-Phase2-FIX05 clock-layout.
 	ClockLayout       string
-	BackHref          string // "/a/web-viewers" oder "/a/esp-viewers"
+	BackHref          string // "/a/web-viewers" or "/a/esp-viewers"
 	BackLabel         string
 }
 
@@ -142,8 +140,8 @@ func (s *Server) handleAdminViewerHistoryJSON(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Admin-Default: 50 (briefing 8). Client-Override per ?limit=
-	// bleibt respektiert (validiert auf 1..50 im Parser).
+	// Admin default: 50. Client override via ?limit= is
+	// respected (validated to 1..50 in the parser).
 	if opts.Limit == 0 {
 		opts.Limit = adminViewerHistoryDefaultLimit
 	}
@@ -183,9 +181,9 @@ func (s *Server) handleAdminViewerHistoryJSON(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// adminViewerHistoryDefaultLimit ist die Page-Size auf der
-// Admin-Detail-Seite. Briefing 8 verlangt 50 Pro-Page-Default;
-// ListOptsMaxLimit (50) ist gleichzeitig die Obergrenze.
+// adminViewerHistoryDefaultLimit is the page size on the admin
+// detail page. Per-page default is 50; ListOptsMaxLimit (50) is
+// also the upper bound.
 const adminViewerHistoryDefaultLimit = 50
 
 func writeAdminViewerHistoryJSON(w http.ResponseWriter, resp adminViewerHistoryResponse) {
@@ -237,8 +235,8 @@ func (s *Server) handleAdminViewerHistoryDeleteAll(w http.ResponseWriter, r *htt
 		http.Error(w, "Loeschen fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Unread-Count broadcast: pro Mieter-Side sind alle Eintraege
-	// weg, der Badge faellt auf 0.
+	// Unread-count broadcast: from the mieter side all entries are
+	// gone, the badge falls to 0.
 	if s.hub != nil {
 		s.hub.BroadcastUnreadCount(r.Context(), mac)
 	}
@@ -249,11 +247,11 @@ func (s *Server) handleAdminViewerHistoryDeleteAll(w http.ResponseWriter, r *htt
 	})
 }
 
-// parseMACPathValue extrahiert und validiert den {mac}-Pfad-
-// Parameter. Liefert false (mit 400-Response geschrieben) wenn die
-// MAC nicht dem colon-lowercase-Format entspricht. Gemeinsamer
-// Helper damit alle vier History-Handler nicht denselben Boilerplate
-// duplizieren.
+// parseMACPathValue extracts and validates the {mac} path
+// parameter. Returns false (with 400-response already written)
+// when the MAC does not match the colon-lowercase format. Shared
+// helper so all four history handlers do not duplicate the same
+// boilerplate.
 func parseMACPathValue(w http.ResponseWriter, r *http.Request) (string, bool) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
