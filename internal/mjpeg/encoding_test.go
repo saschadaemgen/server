@@ -59,6 +59,11 @@ func TestEncodeSpec_OutputArgs_Order(t *testing.T) {
 		"-r", "9",
 		"-c:v", "mjpeg",
 		"-q:v", "6",
+		// S6-06: -flags +bitexact MUST follow the codec selection
+		// (-c:v mjpeg) so it applies to the right encoder context.
+		// Removing this is what the ESP-P4 HW JPEG decoder cannot
+		// tolerate.
+		"-flags", "+bitexact",
 		"-f", "mjpeg",
 	}
 	if len(args) != len(want) {
@@ -67,6 +72,38 @@ func TestEncodeSpec_OutputArgs_Order(t *testing.T) {
 	for i := range want {
 		if args[i] != want[i] {
 			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+// TestEncodeSpec_OutputArgs_HasBitexactFlag is the dedicated S6-06
+// canary. If anyone removes the -flags +bitexact pair (e.g. while
+// "tidying" the args list), the ESP-P4 HW JPEG decoder regresses
+// immediately and the screen goes black again. The test fails LOUDLY
+// before that lands so the briefing's reasoning surfaces in the diff.
+func TestEncodeSpec_OutputArgs_HasBitexactFlag(t *testing.T) {
+	args := EncodeSpec{Width: 800, Height: 1280, FPS: 12, Quality: 6}.OutputArgs()
+
+	var foundFlags, foundBitexact bool
+	for i, a := range args {
+		if a == "-flags" && i+1 < len(args) {
+			foundFlags = true
+			if args[i+1] == "+bitexact" {
+				foundBitexact = true
+			}
+		}
+	}
+	if !foundFlags || !foundBitexact {
+		t.Fatalf("missing `-flags +bitexact` — the ESP-P4 HW JPEG decoder rejects libavcodec's COM marker; do not drop this. args=%v", args)
+	}
+
+	// And it MUST be -flags (codec-level), not -fflags (format-level).
+	// The format-level flag does NOT suppress the COM marker (the
+	// briefing's S6-06 hexdump comparison proved this). Catch a
+	// well-meaning "but they're synonyms!" rewrite.
+	for _, a := range args {
+		if a == "-fflags" {
+			t.Errorf("OutputArgs uses -fflags (format-level); the COM-marker suppression requires CODEC-level -flags. args=%v", args)
 		}
 	}
 }

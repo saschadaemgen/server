@@ -44,6 +44,27 @@ func (s EncodeSpec) Validate() error {
 // side of the pipeline: filter chain + codec + format. The caller (the
 // [Encoder]) prepends the static input arguments (`-f h264 -i pipe:0`
 // etc.) and finishes with the output target (`pipe:1`).
+//
+// S6-06 — `-flags +bitexact`:
+//
+// libavcodec's MJPEG encoder by default inserts a COM marker (JPEG
+// segment 0xFFFE) carrying the encoder's version string, e.g.
+// `Lavc62.28.101`. The Espressif-P4 hardware JPEG decoder (ESP-IDF
+// jpeg-driver) rejects this segment with
+// `jpeg_parse_com_marker: COM marker data underflow` — every frame
+// drops, the ESP screen stays black. Live-confirmed against
+// .187:8555 in the S6-06 briefing.
+//
+// `-flags +bitexact` at the CODEC level (vs. `-fflags +bitexact` at
+// the format/muxer level, which has no effect on this segment)
+// suppresses the vendor string and therefore the entire COM marker.
+// Encode quality is unchanged — only the metadata segment goes away,
+// proven by the 18-byte file-size delta that exactly matches the
+// COM-header overhead (2 marker + 2 length + 14 "Lavc62.28.101\0").
+//
+// Lives in OutputArgs() so all three MJPEG profiles (mjpeg_hq,
+// mjpeg_bal, mjpeg_fast) inherit it through SpecFromProfile — one
+// fix, three profiles.
 func (s EncodeSpec) OutputArgs() []string {
 	return []string{
 		"-an", // no audio
@@ -51,6 +72,9 @@ func (s EncodeSpec) OutputArgs() []string {
 		"-r", strconv.Itoa(s.FPS),
 		"-c:v", "mjpeg",
 		"-q:v", strconv.Itoa(s.Quality),
+		// S6-06: suppress the libavcodec COM marker that the ESP-P4
+		// HW decoder rejects. See doc comment above.
+		"-flags", "+bitexact",
 		"-f", "mjpeg",
 	}
 }
