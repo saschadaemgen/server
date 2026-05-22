@@ -4,7 +4,7 @@
 // viewers table on boot, starts the goroutines, multiplexes their
 // event channels, and handles admin-driven add / remove operations.
 //
-// Saison 13-02-FIX4-a: the persistence table is now `viewers`
+// The persistence table is `viewers`
 // (was mock_viewers) and rows can be of type 'web' or 'esp'. The
 // manager only spawns goroutines for type 'web'; ESP viewers are
 // authenticated separately and run on real hardware.
@@ -63,7 +63,7 @@ type Viewer interface {
 	Cancels() <-chan mock.DoorbellCancelEvent
 	MAC() string
 	// RejectDoorbell publishes a /call_admin_result RPC to UDM so
-	// the intercom stops ringing immediately. Saison 13-04.5-B.
+	// the intercom stops ringing immediately.
 	RejectDoorbell(intercomMAC string) error
 }
 
@@ -78,47 +78,44 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 
 // ViewerSpec describes one persisted viewer.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: Username-Slot ist abgeschafft;
-// der Wohnungs-Name ist der Login.
-// Saison 13-02-FIX4-c: ESPModel / ESPFwVersion / ESPTokenHash
-// werden nur bei Type='esp' beachtet. Bei TypeWeb bleiben sie
-// leer.
+// There is no separate username column; the Wohnungs-Name is the
+// login itself. ESPModel / ESPFwVersion / ESPTokenHash are only
+// honoured for Type='esp'; on TypeWeb they stay empty.
 type ViewerSpec struct {
 	MAC            string
 	Name           string
 	ServicePort    uint16
 	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	LinkedUAUserID string // optional UA-Access-User-Verknuepfung
+	LinkedUAUserID string // optional UA-Access-User link
 	ESPModel       string
 	ESPFwVersion   string
 	ESPTokenHash   string
 	// PairedIntercomMAC is the UA-API intercom this viewer is
-	// paired with for the standby "Tuer auf"-Knopf (saison-13-07).
-	// Empty string = no pairing, standby button is inert. Stored
-	// colon-form lowercase ("28:70:4e:31:e2:9c").
+	// paired with for the standby "Tuer auf" button. Empty string
+	// = no pairing, standby button is inert. Stored colon-form
+	// lowercase ("28:70:4e:31:e2:9c").
 	PairedIntercomMAC string
 	// StreamProfile is the go2rtc profile name this viewer's
-	// /stream.mjpeg proxy resolves to (saison-14-01). Empty
-	// string = convention fallback (TypeESP -> "intercom_esp",
-	// TypeWeb -> "intercom_browser"). The admin /a/streams UI
-	// manages the actual go2rtc YAML side; here we only remember
-	// which profile each viewer requested.
+	// /stream.mjpeg proxy resolves to. Empty string = convention
+	// fallback (TypeESP -> "intercom_esp", TypeWeb ->
+	// "intercom_browser"). The admin /a/streams UI manages the
+	// actual go2rtc YAML side; here we only remember which
+	// profile each viewer requested.
 	StreamProfile string
 	// IdleViewMode chooses which idle UI the mieter browser
-	// renders by default (saison-14-01b). "" or "screensaver"
-	// render clock + date + weather; "livestream" puts the
-	// MJPEG img directly. Tap toggles temporarily, reload goes
-	// back to the persisted default.
-	// Saison 14-XX added "screen_off" as a third valid value
-	// (ESP backlight off; web viewers render it like screensaver).
+	// renders by default. "" or "screensaver" render clock +
+	// date + weather; "livestream" puts the MJPEG img directly;
+	// "screen_off" turns the ESP backlight off (web viewers
+	// render it identical to "screensaver"). Tap toggles
+	// temporarily, reload returns to the persisted default.
 	IdleViewMode string
-	// AutoScreensaverSeconds enables the saison-14-03 auto-
-	// fallback timer: if the mieter has switched to livestream /
-	// settings / history mode and stays idle for this many
-	// seconds, the runtime slides back to the screensaver.
-	// nil = disabled. Only effective when IdleViewMode is
-	// "screensaver" (otherwise there is nothing to fall back
-	// to). Stored as INTEGER NULL in the DB.
+	// AutoScreensaverSeconds enables the auto-fallback timer: if
+	// the mieter has switched to livestream / settings / history
+	// mode and stays idle for this many seconds, the runtime
+	// slides back to the screensaver. nil = disabled. Only
+	// effective when IdleViewMode is "screensaver"; otherwise
+	// there is nothing to fall back to. Stored as INTEGER NULL
+	// in the DB.
 	AutoScreensaverSeconds *int
 }
 
@@ -136,24 +133,24 @@ type ViewerInfo struct {
 	ESPFwVersion           string
 	HasESPToken            bool
 	Running                bool
-	PairedIntercomMAC      string // saison-13-07 standby pairing
-	StreamProfile          string // saison-14-01 go2rtc profile override
-	IdleViewMode           string // saison-14-01b "screensaver", "livestream" or "screen_off" (S14-XX); "" = default screensaver
-	AutoScreensaverSeconds *int   // saison-14-03 auto-fallback timer; nil/0 = disabled
-	// Saison 14-XX ESP-Settings (also accessible to web viewers
-	// for the "language" choice; the two display-hardware fields
-	// are only honoured by ESP firmware).
+	PairedIntercomMAC      string // standby intercom pairing
+	StreamProfile          string // go2rtc profile override
+	IdleViewMode           string // "screensaver", "livestream" or "screen_off"; "" = default screensaver
+	AutoScreensaverSeconds *int   // auto-fallback timer; nil/0 = disabled
+	// ESP settings (also accessible to web viewers for the
+	// "language" choice; the two display-hardware fields are only
+	// honoured by ESP firmware).
 	BrightnessIdle    *int // 0..100; nil = use DefaultBrightnessIdle
 	ScreenOffAfterSec *int // seconds; nil/0 = backlight stays on
 	Language          string // "de"/"en"; "" = use DefaultLanguage
-	// Saison 14-04-Phase2 history-capture toggle. nil = treat as
-	// true (default); explicit false comes from the mieter
-	// settings page. ResolveHistoryCaptureEnabled hides the NULL
-	// detail from callers.
+	// History-capture toggle. nil = treat as true (default);
+	// explicit false comes from the mieter settings page.
+	// ResolveHistoryCaptureEnabled hides the NULL detail from
+	// callers.
 	HistoryCaptureEnabled *bool
-	// Saison 14-04-Phase2-FIX05 clock layout. "" = use Default
-	// (vertical, Pixel-Style FIX04); explicit "horizontal" or
-	// "vertical" come from mieter / admin / esp settings POSTs.
+	// Clock layout. "" = use Default (vertical, Pixel-Style);
+	// explicit "horizontal" or "vertical" come from mieter /
+	// admin / esp settings POSTs.
 	ClockLayout string
 }
 
@@ -161,10 +158,9 @@ type ViewerInfo struct {
 // screensaver); the helper below picks the right string for the
 // template and the /esp/config JSON.
 //
-// Saison 14-XX added IdleViewModeScreenOff: ESP firmware turns
-// the backlight off; web viewers render the slot identical to
-// IdleViewModeScreensaver (the concept of "display off" does not
-// apply to a browser tab).
+// IdleViewModeScreenOff turns the ESP backlight off; web viewers
+// render the slot identical to IdleViewModeScreensaver (the
+// concept of "display off" does not apply to a browser tab).
 const (
 	IdleViewModeScreensaver = "screensaver"
 	IdleViewModeLivestream  = "livestream"
@@ -195,8 +191,6 @@ func (v *ViewerInfo) ResolveIdleViewMode() string {
 // browser runtime treats 0 as "no auto-fallback"; the same is
 // true when the viewer's idle_view_mode is "livestream"
 // (handled client-side, not in the DB).
-//
-// Saison 14-03.
 func (v *ViewerInfo) ResolveAutoScreensaverSeconds() int {
 	if v == nil || v.AutoScreensaverSeconds == nil {
 		return 0
@@ -204,15 +198,14 @@ func (v *ViewerInfo) ResolveAutoScreensaverSeconds() int {
 	return *v.AutoScreensaverSeconds
 }
 
-// Saison 14-XX ESP-Settings: Defaults + Allow-Lists.
+// ESP-settings defaults + allow-lists.
 //
-// Defaults werden im Resolver-Layer angewandt damit ein nicht-
-// gesetzter Wert (NULL in der DB) konsistent zwischen Web- und
-// ESP-Pfad denselben Default sieht; die Migration legt KEINE
-// DDL-Defaults an.
+// Defaults are applied in the resolver layer so an unset value
+// (NULL in the DB) sees the same default on the web and ESP
+// paths; the migration deliberately does NOT add DDL defaults.
 const (
 	DefaultBrightnessIdle    = 70
-	DefaultScreenOffAfterSec = 0 // 0 = Backlight bleibt an
+	DefaultScreenOffAfterSec = 0 // 0 = backlight stays on
 	DefaultLanguage          = "de"
 )
 
@@ -228,17 +221,17 @@ var ScreenOffAfterSecAllowed = []int{0, 30, 60, 300, 600, 1800}
 // the ESP firmware string tables.
 var LanguageAllowed = []string{"de", "en"}
 
-// Saison 14-04-Phase2-FIX05: Clock-Layout-Praeferenz.
-// "vertical"  = FIX04 Pixel-Style HH ueber MM
-// "horizontal" = klassisch HH:MM mit Doppelpunkt
+// Clock-layout preference for the screensaver clock:
+//   "vertical"   = Pixel-Style with HH stacked above MM
+//   "horizontal" = classic HH:MM with colon
 const (
 	ClockLayoutVertical   = "vertical"
 	ClockLayoutHorizontal = "horizontal"
 	DefaultClockLayout    = ClockLayoutVertical
 )
 
-// ClockLayoutAllowed ist die strict Allow-List fuer alle
-// Settings-Setter (Web + ESP + Admin).
+// ClockLayoutAllowed is the strict allow-list for every settings
+// setter (web + ESP + admin).
 var ClockLayoutAllowed = []string{ClockLayoutHorizontal, ClockLayoutVertical}
 
 // ResolveBrightnessIdle returns the persisted idle-brightness or
@@ -272,10 +265,10 @@ func (v *ViewerInfo) ResolveLanguage() string {
 }
 
 // ResolveHistoryCaptureEnabled returns the persisted toggle or
-// true when the column is NULL (= legacy row that pre-dates
-// Saison 14-04-Phase2). The mieter UI hides the whole history
-// section when false; the server still writes door_events rows
-// so the admin trail remains complete.
+// true when the column is NULL (= legacy row that pre-dates the
+// toggle). The mieter UI hides the whole history section when
+// false; the server still writes door_events rows so the admin
+// trail remains complete.
 func (v *ViewerInfo) ResolveHistoryCaptureEnabled() bool {
 	if v == nil || v.HistoryCaptureEnabled == nil {
 		return true
@@ -283,9 +276,9 @@ func (v *ViewerInfo) ResolveHistoryCaptureEnabled() bool {
 	return *v.HistoryCaptureEnabled
 }
 
-// ResolveClockLayout liefert "horizontal" oder "vertical".
-// NULL / empty in der DB faellt auf DefaultClockLayout
-// (vertical, FIX04-Pixel-Style). Saison 14-04-Phase2-FIX05.
+// ResolveClockLayout returns "horizontal" or "vertical". A
+// NULL / empty column falls back to DefaultClockLayout
+// (vertical, Pixel-Style).
 func (v *ViewerInfo) ResolveClockLayout() string {
 	if v == nil {
 		return DefaultClockLayout
@@ -310,7 +303,7 @@ func (v *ViewerInfo) ResolveClockLayout() string {
 //     because Type is constrained to web/esp by the schema check)
 //
 // Convention is in lock-step with the go2rtc.yaml.example shipped
-// with saison-14-01. Renaming a profile in go2rtc without updating
+// with the repo. Renaming a profile in go2rtc without updating
 // the matching default here will leave new viewers pointed at a
 // missing source until the admin picks one in /a/streams.
 func (v *ViewerInfo) ResolveStreamProfile() string {
@@ -402,12 +395,11 @@ func (m *Manager) Events() <-chan mock.DoorbellEvent { return m.eventCh }
 func (m *Manager) Cancels() <-chan mock.DoorbellCancelEvent { return m.cancelCh }
 
 // LoadFromDB reads every web- and esp-type row from viewers and
-// starts a Mock-Goroutine per row. Called once at server boot.
+// starts a mock goroutine per row. Called once at server boot.
 //
-// Saison 13-09: ESP-type rows are no longer skipped. Their
-// goroutine handles the UDM-side adoption + Stage 1+4+5+6 stack
-// the same way web-type rows do; the type distinction matters
-// only at the auth surface. See AddViewer for the matching
+// ESP-type rows are spawned with the same UDM-side stack as
+// web-type rows (Stage 1+4+5+6); the type distinction only
+// matters at the auth surface. See AddViewer for the matching
 // runtime spawn path.
 func (m *Manager) LoadFromDB(ctx context.Context) error {
 	rows, err := m.db.QueryContext(ctx,
@@ -458,9 +450,9 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 // spawns its goroutine. Returns ErrMACInUse, ErrPortInUse or
 // ErrNameInUse on collision with an existing row.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: Name-Uniqueness ist normalisiert
-// (case + Umlaute + Whitespace), damit zwei Eintraege "Familie
-// Mueller" und "FAMILIE MUELLER" als Duplikat erkannt werden.
+// Name uniqueness is normalised (case + umlauts + whitespace),
+// so two entries "Familie Mueller" and "FAMILIE MUELLER" are
+// caught as duplicates.
 func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	if err := validateSpec(spec); err != nil {
 		return err
@@ -484,10 +476,9 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 			return ErrNameInUse
 		}
 	}
-	// In-Memory hat seit S13-09 die laufenden web- UND esp-type-
-	// Viewer. Vor LoadFromDB persistierte Reihen muessen trotzdem
-	// direkt aus der DB geprueft werden (weil der Map vor dem
-	// Boot-Reload leer ist).
+	// In-memory holds both running web- and esp-type viewers,
+	// but rows persisted before LoadFromDB still need a direct
+	// DB check (the map is empty before the boot reload).
 	if exists, err := m.nameExistsLocked(ctx, specKey, spec.MAC); err != nil {
 		return err
 	} else if exists {
@@ -498,13 +489,13 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 		return err
 	}
 
-	// Saison 13-09: spawn the mock-goroutine for both web- and
-	// esp-type viewers. The type distinction matters for the
+	// Spawn the mock goroutine for both web- and esp-type
+	// viewers. The type distinction matters for the
 	// browser-vs-bearer auth surface (web has cookie sessions
 	// from /webviewer, esp has bearer tokens at /esp/), but on
 	// the UDM-facing side both run the same Stage 1+4+5+6 stack
-	// so that the ESP-Hardware can subscribe to /esp/events and
-	// receive doorbell.ring frames the same way the web-Mieter
+	// so that the ESP hardware can subscribe to /esp/events and
+	// receive doorbell.ring frames the same way the web tenant
 	// does on /webviewer/events.
 	if spec.Type == TypeWeb || spec.Type == TypeESP {
 		if err := m.startViewerLocked(spec); err != nil {
@@ -550,8 +541,8 @@ func (m *Manager) RemoveViewer(ctx context.Context, mac string) error {
 	return nil
 }
 
-// Rename updates the viewer's display name in-place. Doppelte
-// normalisierte Namen werden zurueckgewiesen (ErrNameInUse).
+// Rename updates the viewer's display name in place. Duplicate
+// normalised names are rejected with ErrNameInUse.
 func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	if newName == "" {
 		return errors.New("viewermanager: name must not be empty")
@@ -603,7 +594,7 @@ func (m *Manager) LookupForReject(mac string) (Viewer, error) {
 // (the lifecycle row was already updated in doorbellcalls before
 // this gets called).
 //
-// Saison 13-04.5-B: lets the mieter "Ignorieren" / "Anruf beenden"
+// This is what lets the mieter "Ignorieren" / "Anruf beenden"
 // endpoints silence the intercom hardware immediately instead of
 // waiting for the 30-second UDM-side timeout.
 func (m *Manager) RejectDoorbellOnViewer(mac, intercomMAC string) error {
@@ -634,18 +625,17 @@ func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
 	return nil
 }
 
-// LookupByName findet den Web-Viewer dessen Name (case-insensitive,
-// umlaut-tolerant, whitespace-tolerant) der Eingabe entspricht.
+// LookupByName finds the web viewer whose name (case-insensitive,
+// umlaut-tolerant, whitespace-tolerant) matches the input.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: ersetzt LookupByUsername. Der
-// Wohnungs-Name IST jetzt der Login; Mieter darf "Familie
-// Mueller 2OG", "familie mueller 2og" oder "Dämgen" tippen und
-// findet jedes Mal denselben Eintrag.
+// The Wohnungs-Name IS the login: a tenant typing
+// "Familie Mueller 2OG", "familie mueller 2og" or "Dämgen" must
+// hit the same row every time.
 //
-// Implementation: alle Web-Viewer rauslesen und in Go vergleichen.
-// Bei <1000 Wohnungen pro Server vernachlaessigbar; SQLite hat
-// kein Built-in fuer "deutsche Umlaute aufloesen und collapse
-// whitespace", deshalb keine WHERE-Klausel.
+// Implementation: read every web viewer and compare in Go.
+// Negligible for <1000 apartments per server; SQLite has no
+// built-in for "expand German umlauts and collapse whitespace",
+// so there is no usable WHERE clause.
 func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, string, error) {
 	target := NormalizeName(name)
 	if target == "" {
@@ -739,9 +729,9 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 	return nil, "", ErrViewerNotFound
 }
 
-// nameExistsLocked prueft ob ein Eintrag mit dem normalisierten
-// Namen schon existiert. excludeMAC darf der MAC des aktuellen
-// Subjects sein (fuer Rename-Pfade); leer = alles pruefen.
+// nameExistsLocked checks whether a row with the normalised name
+// already exists. excludeMAC may be the current subject's MAC
+// (used by the rename path); empty means check every row.
 func (m *Manager) nameExistsLocked(ctx context.Context, target, excludeMAC string) (bool, error) {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name FROM viewers`)
@@ -1000,10 +990,9 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 }
 
 // SetPairedIntercomMAC updates a viewer's paired intercom (the
-// standby "Tuer auf"-Knopf source). Empty string clears the
-// pairing - standby button becomes inert until set again.
-//
-// Saison 13-07. Pair value is normalised to lowercase + trimmed
+// source for the standby "Tuer auf" button). Empty string clears
+// the pairing - the standby button becomes inert until set
+// again. The pair value is normalised to lowercase + trimmed
 // before write so future LookupDoorForIntercom calls match
 // regardless of how the admin typed the MAC.
 func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC string) error {
@@ -1032,8 +1021,6 @@ func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC str
 // stored trimmed; no further validation here, because go2rtc may
 // hold profiles we are not aware of (and the admin UI already
 // limits the input to the live profile list).
-//
-// Saison 14-01.
 func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) error {
 	now := m.opts.Now().UnixMilli()
 	trimmed := strings.TrimSpace(profile)
@@ -1060,9 +1047,9 @@ func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) err
 // Any non-empty value other than IdleViewModeScreensaver /
 // IdleViewModeLivestream / IdleViewModeScreenOff is rejected so
 // we never persist garbage that a future template lookup would
-// not recognise.
-//
-// Saison 14-01b; saison 14-XX added "screen_off" for ESP backlight.
+// not recognise. "screen_off" is honoured by ESP firmware
+// (backlight off); web viewers render it identical to the
+// screensaver.
 func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 	trimmed := strings.TrimSpace(mode)
 	switch trimmed {
@@ -1090,9 +1077,8 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 	return nil
 }
 
-// SetBrightnessIdle persistiert die ESP-Idle-Helligkeit (Range
-// 0..100). Werte ausserhalb der Range werden zurueckgewiesen.
-// Saison 14-XX.
+// SetBrightnessIdle persists the ESP idle-brightness (range
+// 0..100). Values outside the range are rejected.
 func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) error {
 	if value < 0 || value > 100 {
 		return fmt.Errorf("viewermanager: brightness_idle %d must be in 0..100", value)
@@ -1110,18 +1096,18 @@ func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) 
 	}
 	m.mu.Lock()
 	if _, ok := m.viewers[mac]; ok {
-		// ViewerSpec haelt brightness_idle nicht; aktualisierung
-		// lazy beim naechsten loadInfo. Lock-Release nur fuer den
-		// existence-Check noetig (keine cache-Mutation).
+		// ViewerSpec does not hold brightness_idle; the value is
+		// refreshed lazily on the next loadInfo. The lock release
+		// is only needed for the existence check (no cache
+		// mutation).
 	}
 	m.mu.Unlock()
 	return nil
 }
 
-// SetScreenOffAfterSec persistiert den ESP-Backlight-Off-Timer.
-// Werte ausserhalb ScreenOffAfterSecAllowed werden zurueckgewiesen.
-// 0 disabled das Feature und speichert SQL NULL.
-// Saison 14-XX.
+// SetScreenOffAfterSec persists the ESP backlight-off timer.
+// Values outside ScreenOffAfterSecAllowed are rejected. 0
+// disables the feature and stores SQL NULL.
 func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value int) error {
 	allowed := false
 	for _, v := range ScreenOffAfterSecAllowed {
@@ -1152,10 +1138,9 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 	return nil
 }
 
-// SetClockLayout persistiert die Mieter-Praeferenz fuer die
-// Bildschirmschoner-Uhr-Anzeige. Strict gegen ClockLayoutAllowed
-// gepruefte Werte; alles andere -> Fehler.
-// Saison 14-04-Phase2-FIX05.
+// SetClockLayout persists the tenant preference for the
+// screensaver clock layout. Values are strictly checked against
+// ClockLayoutAllowed; anything else returns an error.
 func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed != "" {
@@ -1185,13 +1170,12 @@ func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 	return nil
 }
 
-// SetHistoryCaptureEnabled persistiert den Mieter-Datenschutz-
-// Toggle. true = Mieter sieht den Verlauf wieder; false = die
-// Mieter-API liefert eine leere Liste (mit capture_enabled-Flag).
-// Admin-Pfade sind unbeeinflusst - der Toggle aendert nur was
-// die Mieter-UI rendert.
-//
-// Saison 14-04-Phase2.
+// SetHistoryCaptureEnabled persists the tenant privacy toggle.
+// true = tenant sees the history again; false = the tenant API
+// returns an empty list with capture_enabled=false. Admin paths
+// are unaffected - the toggle only changes what the tenant UI
+// renders, the server still writes door_events rows so the audit
+// trail remains complete.
 func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enabled bool) error {
 	var stored int64
 	if enabled {
@@ -1211,10 +1195,9 @@ func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enab
 	return nil
 }
 
-// SetLanguage persistiert die UI-Sprache. Werte ausserhalb der
-// Allow-Liste werden zurueckgewiesen. Empty erlaubt = "auf
-// Default zuruecksetzen" (NULL in der DB).
-// Saison 14-XX.
+// SetLanguage persists the UI language. Values outside the
+// allow-list are rejected. An empty value is allowed and means
+// "reset to default" (NULL in the DB).
 func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed != "" {
@@ -1245,8 +1228,8 @@ func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 }
 
 // AutoScreensaverSecondsAllowed is the closed set of values the
-// saison-14-03 inline-settings form may persist. 0 means "off"
-// and is stored as SQL NULL; the others are seconds.
+// inline-settings form may persist. 0 means "off" and is stored
+// as SQL NULL; the others are seconds.
 var AutoScreensaverSecondsAllowed = []int{0, 30, 60, 300, 600}
 
 // SetAutoScreensaverSeconds updates the auto-fallback timer for
@@ -1255,8 +1238,6 @@ var AutoScreensaverSecondsAllowed = []int{0, 30, 60, 300, 600}
 // Other values are rejected up-front so a future regression on
 // the POST handler does not let arbitrary integers reach the
 // browser runtime.
-//
-// Saison 14-03.
 func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, seconds int) error {
 	allowed := false
 	for _, v := range AutoScreensaverSecondsAllowed {
@@ -1335,10 +1316,10 @@ func (m *Manager) SiblingESPMACs(ctx context.Context, mac string) ([]string, err
 	return out, rows.Err()
 }
 
-// TouchESPSeen aktualisiert nur updated_at fuer einen ESP-Viewer.
-// Wird vom /esp/heartbeat-Fallback und vom /esp/state-Endpoint
-// genutzt, damit das Admin-Dashboard ein "zuletzt gesehen"
-// rendern kann ohne dass jeder Poll andere Spalten anfasst.
+// TouchESPSeen only updates updated_at for an ESP viewer. Used by
+// the /esp/heartbeat fallback and the /esp/state endpoint so the
+// admin dashboard can render a "zuletzt gesehen" without every
+// poll touching other columns.
 func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
@@ -1354,9 +1335,9 @@ func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
 	return nil
 }
 
-// SetESPTokenHash speichert einen frisch generierten Token-Hash
-// fuer einen adoptierten ESP-Viewer. Die alte token-hash-Zeile
-// wird einfach ueberschrieben (Token-Rotation).
+// SetESPTokenHash stores a freshly generated token hash for an
+// adopted ESP viewer. The previous token-hash row is overwritten
+// (token rotation).
 func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
@@ -1373,14 +1354,14 @@ func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
 	return nil
 }
 
-// LookupESPMACByToken vergleicht einen vom ESP praesentierten
-// Klartext-Bearer-Token gegen alle adoptierten ESP-Viewer und
-// liefert die MAC des passenden Geraets. Verify nutzt
-// crypto/subtle.ConstantTimeCompare. Bei <100 ESP-Viewern pro
-// Server (realistisch fuer eine Wohnanlage) ist die linear-
-// scan-Strategie billig genug; in einer spaeteren Saison kann
-// das auf indizierten Hash-Lookup umgestellt werden, sobald
-// Multi-Tenant-Server gewachsen sind.
+// LookupESPMACByToken compares the clear-text bearer token
+// presented by an ESP against every adopted ESP viewer and
+// returns the MAC of the matching device. Verify uses
+// crypto/subtle.ConstantTimeCompare. With <100 ESP viewers per
+// server (realistic for a single residential complex), the
+// linear-scan strategy is cheap enough; this can switch to an
+// indexed hash lookup once a deployment grows into the
+// multi-tenant range.
 func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (string, error) {
 	if presented == "" {
 		return "", ErrViewerNotFound
@@ -1411,9 +1392,9 @@ func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (st
 	return "", ErrViewerNotFound
 }
 
-// LookupESPTokenHash gibt den Token-Hash fuer einen adoptierten
-// ESP-Viewer zurueck. Wird in FIX4-d von der Bearer-Auth-
-// Middleware genutzt; in FIX4-c nur fuer die Status-Poll-Logik.
+// LookupESPTokenHash returns the token hash for an adopted ESP
+// viewer. Used by the bearer-auth middleware on the /esp/ tree
+// and by the discovery status-poll logic.
 func (m *Manager) LookupESPTokenHash(ctx context.Context, mac string) (string, error) {
 	var hash sql.NullString
 	err := m.db.QueryRowContext(ctx,
@@ -1428,8 +1409,8 @@ func (m *Manager) LookupESPTokenHash(ctx context.Context, mac string) (string, e
 	return hashOrEmpty(hash), nil
 }
 
-// SetLinkedUAUserID updates the optional UA-User-Verknuepfung.
-// Empty userID clears the link. Web-Viewer-Edit-Pfad nutzt das.
+// SetLinkedUAUserID updates the optional UA-user link. An empty
+// userID clears the link. Used by the web-viewer edit path.
 func (m *Manager) SetLinkedUAUserID(ctx context.Context, mac, userID string) error {
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
@@ -1560,8 +1541,8 @@ func nullable(s string) any {
 
 // nullableInt mirrors nullable for pointer-to-int spec fields:
 // nil and 0 both become SQL NULL, anything else stores the int.
-// Saison 14-03 uses this for AutoScreensaverSeconds where 0 is
-// the same as "feature off".
+// AutoScreensaverSeconds uses this because 0 is the same as
+// "feature off".
 func nullableInt(p *int) any {
 	if p == nil || *p == 0 {
 		return nil
