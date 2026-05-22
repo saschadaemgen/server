@@ -57,7 +57,7 @@ type Config struct {
 	// reverse-proxy forwards to (saison-13-08). Empty means the
 	// endpoint returns 503 - useful while the go2rtc / Protect
 	// integration is still being plumbed.
-	// Example: "http://127.0.0.1:1984/api/stream.mjpeg?src=front-door"
+	// Example: "http://127.0.0.1:8555/api/stream.mjpeg?src=front-door"
 	StreamBackendURL string
 }
 

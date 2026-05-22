@@ -48,8 +48,8 @@ func TestBuildBackendStreamURL(t *testing.T) {
 		{
 			name:    "multiple trailing slashes",
 			base:    "http://127.0.0.1:1984///",
-			profile: "intercom_browser",
-			want:    "http://127.0.0.1:1984/api/stream.mjpeg?src=intercom_browser",
+			profile: "mjpeg_bal",
+			want:    "http://127.0.0.1:1984/api/stream.mjpeg?src=mjpeg_bal",
 		},
 		{
 			name:    "path prefix preserved",

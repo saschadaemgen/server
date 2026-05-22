@@ -60,7 +60,7 @@ func TestListDecodesGo2RTCShape(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"intercom_esp": {"producers":[{"url":"rtsps://example/x"}],"consumers":[{"id":1},{"id":2}]},
-			"intercom_browser": {"producers":[{"url":"ffmpeg:src#video=mjpeg"}],"consumers":[]}
+			"mjpeg_bal": {"producers":[{"url":"ffmpeg:src#video=mjpeg"}],"consumers":[]}
 		}`))
 	}))
 	defer srv.Close()
@@ -74,11 +74,11 @@ func TestListDecodesGo2RTCShape(t *testing.T) {
 		t.Fatalf("want 2 profiles, got %d", len(profiles))
 	}
 	// Sorted alphabetically by Name.
-	if profiles[0].Name != "intercom_browser" || profiles[1].Name != "intercom_esp" {
+	if profiles[0].Name != "intercom_esp" || profiles[1].Name != "mjpeg_bal" {
 		t.Fatalf("unexpected order: %+v", profiles)
 	}
-	if profiles[1].Consumers != 2 {
-		t.Fatalf("intercom_esp consumers: want 2, got %d", profiles[1].Consumers)
+	if profiles[0].Consumers != 2 {
+		t.Fatalf("intercom_esp consumers: want 2, got %d", profiles[0].Consumers)
 	}
 	// Structured fields stay empty for the transitional go2rtc
 	// backend.

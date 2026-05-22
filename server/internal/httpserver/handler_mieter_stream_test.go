@@ -56,9 +56,9 @@ func TestMieterStreamHandler_BuildsCorrectBackendURL(t *testing.T) {
 		t.Errorf("backend path = %q, want /api/stream.mjpeg", sawPath)
 	}
 	// A type='web' viewer with empty stream_profile resolves to
-	// intercom_browser via the type-default convention.
-	if sawQuery != "src=intercom_browser" {
-		t.Errorf("backend query = %q, want src=intercom_browser", sawQuery)
+	// mjpeg_bal via the type-default convention.
+	if sawQuery != "src=mjpeg_bal" {
+		t.Errorf("backend query = %q, want src=mjpeg_bal", sawQuery)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 		`msg="stream proxy"`,
 		`route=/webviewer/stream.mjpeg`,
 		`label=mieter`,
-		`profile=intercom_browser`,
+		`profile=mjpeg_bal`,
 		`viewer_mac=` + testViewerMAC,
 	} {
 		if !strings.Contains(logged, fragment) {

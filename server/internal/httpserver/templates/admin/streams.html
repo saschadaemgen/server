@@ -34,10 +34,10 @@
     {{if not .Page.Configured}}
       <div class="app-card">
         <div class="app-card-body" style="padding: var(--space-5); text-align: center;">
-          <h2 class="app-card-title">go2rtc nicht konfiguriert</h2>
+          <h2 class="app-card-title">Stream-Backend nicht konfiguriert</h2>
           <p style="color: var(--color-text-tertiary); margin-top: var(--space-3);">
-            Setze die Umgebungsvariable <code>UNIFIX_STREAM_BACKEND_URL</code> auf die Basis-URL deiner go2rtc-Instanz
-            (typischerweise <code>http://127.0.0.1:1984</code>) und starte den Server neu.
+            Setze die Umgebungsvariable <code>CARVILON_STREAM_BACKEND_URL</code> auf die Basis-URL des Stream-Servers
+            (typischerweise <code>http://127.0.0.1:8555</code>) und starte den Server neu.
           </p>
           <p style="color: var(--color-text-tertiary); margin-top: var(--space-2);">
             Bis dahin liefern <code>/esp/stream.mjpeg</code> und <code>/webviewer/stream.mjpeg</code> einen 503.

@@ -293,19 +293,20 @@ func (v *ViewerInfo) ResolveClockLayout() string {
 	}
 }
 
-// ResolveStreamProfile picks the go2rtc stream profile name for
-// this viewer. Order:
+// ResolveStreamProfile picks the stream profile name for this
+// viewer. Order:
 //
 //  1. explicit StreamProfile if non-empty
 //  2. TypeESP -> "intercom_esp"
-//  3. TypeWeb -> "intercom_browser"
+//  3. TypeWeb -> "mjpeg_bal"
 //  4. fallback "intercom_default" (defensive; should not happen
 //     because Type is constrained to web/esp by the schema check)
 //
-// Convention is in lock-step with the go2rtc.yaml.example shipped
-// with the repo. Renaming a profile in go2rtc without updating
-// the matching default here will leave new viewers pointed at a
-// missing source until the admin picks one in /a/streams.
+// Convention is in lock-step with the profiles the streaming
+// server ships. Renaming a profile on the backend without
+// updating the matching default here will leave new viewers
+// pointed at a missing source until the admin picks one in
+// /a/streams.
 func (v *ViewerInfo) ResolveStreamProfile() string {
 	if v == nil {
 		return "intercom_default"
@@ -317,7 +318,7 @@ func (v *ViewerInfo) ResolveStreamProfile() string {
 	case TypeESP:
 		return "intercom_esp"
 	case TypeWeb:
-		return "intercom_browser"
+		return "mjpeg_bal"
 	}
 	return "intercom_default"
 }
