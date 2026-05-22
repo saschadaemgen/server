@@ -11,10 +11,9 @@ import (
 	"carvilon.local/server/internal/auth/ratelimit"
 )
 
-// adminLoginPageData matches the Claude-Design admin-login.html
-// snippet contract. It carries an optional Error string and a
-// CSRFToken slot we keep present even though our auth pipeline
-// has no CSRF middleware yet (later season work).
+// adminLoginPageData carries an optional Error string and a
+// CSRFToken slot. CSRF middleware is not wired yet; the slot
+// stays present so the template stays stable when it lands.
 type adminLoginPageData struct {
 	Error     string
 	CSRFToken string
@@ -31,10 +30,9 @@ func (s *Server) handleAdminLoginGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAdminLoginPost handles login (and first-run setup as a
-// silent side-effect when no admin exists yet). Saison 13-02-FIX4-a
-// fuegt Rate-Limit + Login-Audit hinzu; das Hashing fliesst durch
-// den admin-Service (Argon2id-Default, bcrypt-Rehash beim ersten
-// Login).
+// silent side-effect when no admin exists yet). Rate-limit and
+// login-audit run inline here; hashing flows through the admin
+// service (Argon2id default, bcrypt rehash on first login).
 func (s *Server) handleAdminLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -158,9 +156,9 @@ func (s *Server) renderAdminPage(w http.ResponseWriter, name string, data any) {
 	}
 }
 
-// navEnvelope ist die aeussere Hulle, die jedes Page-Template
-// bekommt: ActiveNav fuer die Navigation, User fuer die User-Bubble,
-// Page fuer den Body. Templates referenzieren den Body als .Page.X.
+// navEnvelope is the outer wrapper every page template receives:
+// ActiveNav for the navigation, User for the user-bubble, Page
+// for the body. Templates reference the body as .Page.X.
 type navEnvelope struct {
 	ActiveNav string
 	User      adminUser
@@ -184,11 +182,10 @@ func navSlotFor(name string) string {
 	case "settings":
 		return "settings"
 	case "viewer-detail":
-		// Saison 14-04-Phase2: Detail-Seite gehoert nicht zu einem
-		// einzelnen Nav-Slot - sie ist die Drill-Down-Sicht aus
-		// web-viewers / esp-viewers. Wir markieren keinen Slot;
-		// der Back-Link im Header fuehrt den Admin zurueck zur
-		// Liste.
+		// The detail page does not belong to a single nav slot -
+		// it is the drill-down view from web-viewers / esp-viewers.
+		// We mark no slot; the back-link in the header brings the
+		// admin back to the list.
 		return ""
 	default:
 		return ""
