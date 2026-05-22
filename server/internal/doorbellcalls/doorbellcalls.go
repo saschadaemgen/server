@@ -1,8 +1,8 @@
 // Package doorbellcalls owns the per-call lifecycle row in the
-// doorbell_calls table (Saison 13-03 migration 010). It is the
-// race-free arbiter that decides which viewer "wins" the answer
-// when more than one phone, tablet, browser tab or ESP-display
-// is ringing for the same household.
+// doorbell_calls table (Migration 010). It is the race-free
+// arbiter that decides which viewer "wins" the answer when more
+// than one phone, tablet, browser tab or ESP display is ringing
+// for the same household.
 //
 // Wire-up:
 //
