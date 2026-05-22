@@ -26,8 +26,9 @@ var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
 // servicePortStart is the first port the auto-allocator hands out.
 const servicePortStart = 8100
 
-// adminWebViewersData ist die Payload fuer das templates/admin/web-viewers.html
-// Template (eigene Implementierung, kein Library-Snippet).
+// adminWebViewersData is the payload for the
+// templates/admin/web-viewers.html template (a hand-written
+// page, not a library snippet).
 type adminWebViewersData struct {
 	User      adminUser
 	Viewers   []webViewerRow
@@ -74,9 +75,9 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 	data := adminWebViewersData{
 		User: adminUser{Name: adminUserName, Initials: initialsOf(adminUserName)},
 	}
-	// User-IDs sammeln und in einem Call beim UserStore aufloesen,
-	// damit die Liste die Verknuepfungs-Spalte ohne N+1-Requests
-	// rendern kann.
+	// Collect the user IDs and resolve them with a single
+	// UserStore call so the list can render the link column
+	// without N+1 requests.
 	userNames := map[string]string{}
 	if s.userStore != nil && s.userStore.IsConfigured() {
 		needed := map[string]bool{}
@@ -124,7 +125,8 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 	return data, nil
 }
 
-// credentialsResponse ist die JSON-Antwort nach Anlegen / Reset.
+// credentialsResponse is the JSON envelope returned after create
+// / reset.
 type credentialsResponse struct {
 	MAC      string `json:"mac"`
 	Name     string `json:"name"`
@@ -133,12 +135,12 @@ type credentialsResponse struct {
 	QRSVG    string `json:"qr_svg"`
 }
 
-// handleAdminWebViewersCreate legt einen neuen Web-Viewer an.
+// handleAdminWebViewersCreate creates a new web viewer.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: radikal vereinfachte Maske. Der
-// Wohnungs-Name ist der einzige Pflicht-Input, plus optional
-// das Passwort (leer = Server generiert) und optional
-// linked_ua_user_id. MAC wird intern erzeugt.
+// The form is intentionally minimal: the Wohnungs-Name is the
+// only required input, plus an optional password (empty = the
+// server generates one) and an optional linked_ua_user_id. The
+// MAC is generated server-side.
 func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "ungueltige Formular-Daten", http.StatusBadRequest)
@@ -208,21 +210,20 @@ func (s *Server) handleAdminWebViewersCreate(w http.ResponseWriter, r *http.Requ
 	s.respondCredentials(w, r, resp)
 }
 
-// handleAdminWebViewersResetPW erzeugt ein neues Zufalls-Passwort
-// und invalidiert alle alten Sessions des Viewers. Fuer den
-// "Passwort vergessen"-Pfad.
+// handleAdminWebViewersResetPW generates a new random password
+// and invalidates every existing session for the viewer. Used by
+// the "Passwort vergessen" path.
 func (s *Server) handleAdminWebViewersResetPW(w http.ResponseWriter, r *http.Request) {
 	s.changePassword(w, r, "")
 }
 
-// handleAdminWebViewersSetPassword setzt ein vom Admin manuell
-// vorgegebenes Passwort. Body: { password: "..." }. Wirkung wie
-// Reset-PW (Hash speichern, Sessions invalidieren), aber das
-// Passwort ist vorgegeben.
+// handleAdminWebViewersSetPassword stores a password chosen by
+// the admin. Body: { password: "..." }. Same effect as the
+// reset-pw path (store the hash, revoke sessions), but the value
+// is supplied instead of generated.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: keine Mindest-Anforderungen an
-// das Passwort - das hier ist eine Klingel-Anlage, kein Online-
-// Banking. Admin darf "1234" eingeben wenn er will.
+// No minimum-strength requirements: this is a doorbell deployment,
+// not online banking. The admin may type "1234" if they wish.
 func (s *Server) handleAdminWebViewersSetPassword(w http.ResponseWriter, r *http.Request) {
 	pw := ""
 	if r.Header.Get("Content-Type") == "application/json" {
@@ -248,8 +249,8 @@ func (s *Server) handleAdminWebViewersSetPassword(w http.ResponseWriter, r *http
 	s.changePassword(w, r, pw)
 }
 
-// changePassword ist der gemeinsame Code-Pfad fuer Reset-PW
-// (manualPW="") und Set-Password (manualPW vorgegeben).
+// changePassword is the shared code path for both reset-pw
+// (manualPW="") and set-password (manualPW provided).
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, manualPW string) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -278,8 +279,8 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, manualPW
 	s.respondCredentials(w, r, resp)
 }
 
-// handleAdminWebViewersUnlock hebt die Rate-Limit-Sperre fuer den
-// Viewer-Login auf.
+// handleAdminWebViewersUnlock lifts the rate-limit lockout on the
+// viewer login.
 func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -311,7 +312,7 @@ func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// handleAdminWebViewersRename benennt den Viewer um.
+// handleAdminWebViewersRename renames the viewer.
 func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -336,23 +337,23 @@ func (s *Server) handleAdminWebViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Rename fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Saison 14-XX: Rename veraendert die UnitName-Anzeige im
-	// Mieter-Home und im /esp/config-JSON.
+	// Rename changes the UnitName surfaced by the mieter home
+	// page and by the /esp/config JSON.
 	if s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// handleAdminWebViewersEdit ist der atomische Edit-Pfad fuer
-// Name + Passwort + Verknuepfung in EINEM Request. Body
-// (form-encoded oder JSON): name (Pflicht), password (leer =
-// nicht aendern), linked_ua_user_id (leer = keine Verknuepfung).
+// handleAdminWebViewersEdit is the atomic edit path that touches
+// name + password + link in ONE request. Body (form-encoded or
+// JSON): name (required), password (empty = keep current),
+// linked_ua_user_id (empty = no link).
 //
-// Saison 13-02-FIX4-a-HOTFIX5: ersetzt die drei einzelnen
-// Endpoints rename / set-password / link aus dem Bearbeiten-
-// Modal-Flow. Hintergrund: Single-Save-Klick mit klarer
-// Erwartung welche Felder genau geaendert wurden.
+// Replaces the three separate rename / set-password / link
+// endpoints that the edit modal used to call. The single-save
+// click carries a clear expectation of which fields actually
+// changed.
 func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -457,10 +458,10 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Passwort als letztes, damit ein Hash-Fehler die schon
-	// gespeicherten Name- und Link-Aenderungen nicht zurueckwirft
-	// (wir muessen sowieso roll-forward operieren, weil SQLite
-	// ohne SAVEPOINT kein partielles Rollback unterstuetzt).
+	// Password last, so that a hash failure does not undo the
+	// already-stored name and link changes (we have to roll
+	// forward anyway because SQLite without SAVEPOINT cannot
+	// do a partial rollback here).
 	var resp credentialsResponse
 	if pwChanged {
 		resp, err = s.storePasswordForViewer(r.Context(), info.MAC, newName, newPW, r)
@@ -483,12 +484,12 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		"stream_profile_changed", streamProfileChanged,
 	)
 
-	// Saison 14-XX: config.changed broadcasten sobald eine
-	// renderwirksame Aenderung passiert ist. Passwort-Wechsel
-	// invalidiert Sessions, deshalb dort kein Broadcast (Browser
-	// ist gleich auf /login redirected). Stream-Profil + Paired-
-	// Intercom + Link beeinflussen Config-JSON / Stream-URL und
-	// triggern darum den Broadcast.
+	// Broadcast config.changed whenever a render-relevant field
+	// was touched. A password change invalidates sessions, so
+	// the broadcast is intentionally skipped on that branch (the
+	// browser is redirected to /login anyway). Stream profile,
+	// paired intercom and link all affect the config JSON or the
+	// stream URL and therefore trigger the broadcast.
 	configChanged := nameChanged || linkChanged || pairedChanged || streamProfileChanged
 	if configChanged && s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
@@ -519,11 +520,10 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// handleAdminWebViewersLoginInfo liefert den fertigen Mieter-
-// Login-Link plus einen QR-Code-SVG fuer einen einzelnen
-// Web-Viewer. Wird vom Edit-Modal-JS lazy beim Oeffnen abgerufen.
-// Beide Felder kommen aus existierender Bauchemie:
-// buildLoginURL() und renderQRSVG() (Saison 13-02-FIX4-a).
+// handleAdminWebViewersLoginInfo returns the ready-made tenant
+// login link plus a QR-code SVG for one web viewer. Called lazily
+// from the edit-modal JS when the modal opens. Both fields come
+// out of existing helpers: buildLoginURL() and renderQRSVG().
 func (s *Server) handleAdminWebViewersLoginInfo(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -552,10 +552,10 @@ func (s *Server) handleAdminWebViewersLoginInfo(w http.ResponseWriter, r *http.R
 	})
 }
 
-// handleAdminWebViewersGeneratePW liefert ein frisches Zufalls-
-// Passwort OHNE es zu speichern. Das UI uebernimmt es ins
-// Passwort-Feld; gespeichert wird erst beim "Speichern"-Klick
-// im Bearbeiten-Modal.
+// handleAdminWebViewersGeneratePW returns a fresh random password
+// WITHOUT persisting it. The UI copies the value into the
+// password field; the actual write happens on the next
+// "Speichern" click in the edit modal.
 func (s *Server) handleAdminWebViewersGeneratePW(w http.ResponseWriter, r *http.Request) {
 	pw, err := password.Generate()
 	if err != nil {
@@ -567,8 +567,8 @@ func (s *Server) handleAdminWebViewersGeneratePW(w http.ResponseWriter, r *http.
 	_ = json.NewEncoder(w).Encode(map[string]string{"password": pw})
 }
 
-// handleAdminWebViewersSetLink setzt oder loescht die
-// Verknuepfung viewer.linked_ua_user_id. Empty user_id loescht.
+// handleAdminWebViewersSetLink sets or clears
+// viewer.linked_ua_user_id. An empty user_id clears the link.
 func (s *Server) handleAdminWebViewersSetLink(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -592,8 +592,8 @@ func (s *Server) handleAdminWebViewersSetLink(w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// handleAdminWebViewersDelete loescht einen Viewer (Sessions
-// kaskadieren via FK).
+// handleAdminWebViewersDelete deletes a viewer; viewer_sessions
+// cascade via FK.
 func (s *Server) handleAdminWebViewersDelete(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -616,15 +616,15 @@ func (s *Server) handleAdminWebViewersDelete(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/web-viewers", http.StatusSeeOther)
 }
 
-// storePasswordForViewer hasht das Passwort mit Argon2id+Pepper,
-// schreibt den Hash, und gibt das Klartext-Passwort plus QR-Code
-// zurueck. Wenn manualPW leer ist, wird intern eines via
-// password.Generate erzeugt; sonst nimmt der Caller-vorgegebene
-// Wert direkt.
+// storePasswordForViewer hashes the password with Argon2id +
+// pepper, writes the hash, and returns the clear-text password
+// plus a QR code. If manualPW is empty, one is generated via
+// password.Generate; otherwise the caller-supplied value is
+// taken as-is.
 //
-// Saison 13-02-FIX4-a-HOTFIX4: KEINE Mindest-Anforderungen an
-// das vom Admin getippte Passwort. Klingel-Anlage, kein Online-
-// Banking. Admin darf "1234" eingeben wenn er will.
+// No minimum-strength requirements on the admin-typed password:
+// doorbell deployment, not online banking. The admin may type
+// "1234" if they wish.
 func (s *Server) storePasswordForViewer(ctx context.Context, mac, name, manualPW string, r *http.Request) (credentialsResponse, error) {
 	pw := manualPW
 	if pw == "" {
@@ -657,11 +657,10 @@ func (s *Server) storePasswordForViewer(ctx context.Context, mac, name, manualPW
 	}, nil
 }
 
-// buildLoginURL liefert nur die nackte Login-URL fuer den QR-Code.
-// Pre-Fill ist raus (Anti-Pattern, HOTFIX1); URL lag seit
-// S13-HOTFIX2 auf /einloggen und wandert mit Saison 14-02 auf
-// /login (Tenant-Tree-Split: /login fuer die Form, /webviewer/
-// fuer den eingeloggten Bereich).
+// buildLoginURL returns the bare login URL used by the QR code.
+// Username pre-fill was removed as an anti-pattern. The URL now
+// resolves to /login (the form), with /webviewer/ holding the
+// logged-in area after a successful sign-in.
 func (s *Server) buildLoginURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
