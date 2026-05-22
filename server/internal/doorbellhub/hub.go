@@ -3,25 +3,24 @@
 // cancels from the manager and fans them out to every subscriber
 // registered for the receiving mock's MAC.
 //
-// Saison 12-06 refactor: subscribers are indexed by mock_mac
-// (not ua_user_id). The Source interface no longer carries a
-// LookupUserByMAC indirection; the routing key is right there
-// on the incoming event.
+// Subscribers are indexed by mock_mac (not ua_user_id). The
+// Source interface carries no LookupUserByMAC indirection; the
+// routing key is right there on the incoming event.
 //
-// Saison 13-01: the hub also writes every start/cancel to the
-// door_events table via the doorhistory.Store. Persistence
-// happens BEFORE the SSE fan-out so the new event_id can land in
-// the start frame. A persistence failure is logged but does NOT
-// abort the dispatch (availability beats audit completeness for
-// the doorbell live channel; the warn log surfaces the gap).
+// The hub also writes every start/cancel to the door_events
+// table via the doorhistory.Store. Persistence happens BEFORE
+// the SSE fan-out so the new event_id can land in the start
+// frame. A persistence failure is logged but does NOT abort the
+// dispatch (availability beats audit completeness for the
+// doorbell live channel; the warn log surfaces the gap).
 //
-// Saison 13-03: the hub now also publishes every start/cancel
-// to the eventbus.Bus (so adopted ESP-Viewers get the same
-// doorbell.ring/doorbell.cancel push their web-viewer cousins
-// already see) and calls into doorbellcalls.Service to track
-// the active-call lifecycle row that the answer/reject/end-call
-// endpoints arbitrate against. Both wires are best-effort: a
-// nil bus or nil calls service degrades to the prior behavior.
+// Every start/cancel is also published to the eventbus.Bus, so
+// adopted ESP viewers get the same doorbell.ring/doorbell.cancel
+// push their web-viewer counterparts already see. The hub also
+// calls into doorbellcalls.Service to track the active-call
+// lifecycle row that the answer/reject/end-call endpoints
+// arbitrate against. Both wires are best-effort: a nil bus or
+// nil calls service degrades to the prior behaviour.
 //
 // Sends to subscriber channels are non-blocking; a backed-up
 // browser is dropped with a warn log and a Stats counter bump
@@ -63,20 +62,19 @@ const subscriberBuffer = 8
 
 // Event is the wire shape sent to the browser. JSON-encoded
 // inside an SSE `data:` line. EventID is set on doorbell_start
-// frames (Saison 13-01) so the browser can mark the event as
-// read without an extra DB round-trip; doorbell_cancel frames
-// leave it zero.
+// frames so the browser can mark the event as read without an
+// extra DB round-trip; doorbell_cancel frames leave it zero.
 //
-// Saison 14-03-FIX03 Sub-2: UnreadCount carries the
-// per-mock unread-doorbell count for TypeUnreadCount frames.
-// Other event types leave it at the zero value.
+// UnreadCount carries the per-mock unread-doorbell count for
+// TypeUnreadCount frames. Other event types leave it at the
+// zero value.
 type Event struct {
-	Type        string `json:"type"`
-	EventID     int64  `json:"event_id,omitempty"`
-	// Saison 15-03: Go-Feldname auf ViewerMAC umbenannt, der
-	// json-Tag "mock_mac" bleibt absichtlich (Wire-Format-
-	// Stabilitaet; der Tag-Rename folgt koordiniert mit Firmware-
-	// und JS-Seite).
+	Type    string `json:"type"`
+	EventID int64  `json:"event_id,omitempty"`
+	// Go field renamed to ViewerMAC; the json tag "mock_mac"
+	// stays deliberately for wire-format stability. The tag
+	// rename will follow coordinated with the firmware + JS
+	// sides.
 	ViewerMAC   string `json:"mock_mac"`
 	RequestID   string `json:"request_id"`
 	DeviceID    string `json:"device_id,omitempty"`
@@ -88,12 +86,13 @@ type Event struct {
 
 // Event type names. Browser code listens for these.
 //
-// Saison 14-XX TypeConfigChanged: signal-only event that a
-// per-viewer setting has been mutated server-side (the mieter
-// hit /webviewer/settings, the admin hit /a/web-viewers/{mac}/edit,
-// the ESP hit /esp/settings, ...). Subscribers refetch whatever
-// they care about; the event itself carries no payload beyond the
-// type so receivers cannot drift into reading stale fields.
+// TypeConfigChanged is a signal-only event meaning that a
+// per-viewer setting has been mutated server-side (the tenant
+// hit /webviewer/settings, the admin hit
+// /a/web-viewers/{mac}/edit, the ESP hit /esp/settings, ...).
+// Subscribers refetch whatever they care about; the event itself
+// carries no payload beyond the type so receivers cannot drift
+// into reading stale fields.
 const (
 	TypeDoorbellStart  = "doorbell_start"
 	TypeDoorbellCancel = "doorbell_cancel"
@@ -125,27 +124,25 @@ type Hub struct {
 	eventsDropped atomic.Int64
 }
 
-// Options carries the optional Saison 13-03 dependencies. A
-// zero Options keeps Saison 12 behavior; Bus enables the
-// parallel eventbus push for ESP-Viewers; Calls enables the
+// Options carries the optional dependencies. A zero Options
+// keeps the SSE-only behaviour; Bus enables the parallel
+// eventbus push for ESP viewers; Calls enables the
 // doorbell_calls lifecycle row writes.
 type Options struct {
 	Bus   *eventbus.Bus
 	Calls *doorbellcalls.Service
 }
 
-// New constructs a Hub. Pass viewermanager.Manager as the source
-// and a doorhistory.Store for persistence; history may be nil
-// in narrow test setups (the hub then skips DB writes).
-//
-// Saison 13-03: NewWithOptions adds the EventBus + DoorbellCalls
-// wires. New is preserved as a thin shim so existing callers
-// (and the Saison-12 hub_test.go) keep compiling.
+// New constructs a Hub with no optional extras. Pass
+// viewermanager.Manager as the source and a doorhistory.Store
+// for persistence; history may be nil in narrow test setups
+// (the hub then skips DB writes). Kept as a thin shim so older
+// callers keep compiling; production code uses NewWithOptions.
 func New(src Source, history doorhistory.Store, log *slog.Logger) *Hub {
 	return NewWithOptions(src, history, log, Options{})
 }
 
-// NewWithOptions builds a Hub with the optional Saison-13-03
+// NewWithOptions builds a Hub with the EventBus + DoorbellCalls
 // extras populated.
 func NewWithOptions(src Source, history doorhistory.Store, log *slog.Logger, opts Options) *Hub {
 	if log == nil {
@@ -230,10 +227,10 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 	}
 	h.broadcast(ev.ViewerMAC, hubEvent)
 	h.publishToBus(ev.ViewerMAC, "doorbell.ring", hubEvent)
-	// Saison 14-03-FIX03 Sub-2: every new doorbell row also
-	// raises the unread count. Broadcast a separate SSE frame so
-	// the screensaver badge updates without the browser doing
-	// a /webviewer/unread-count round-trip.
+	// Every new doorbell row also raises the unread count.
+	// Broadcast a separate SSE frame so the screensaver badge
+	// updates without the browser doing a
+	// /webviewer/unread-count round-trip.
 	h.BroadcastUnreadCount(ctx, ev.ViewerMAC)
 }
 
@@ -289,11 +286,11 @@ func (h *Hub) endCallTimeout(ctx context.Context, ev mock.DoorbellCancelEvent) {
 	}
 }
 
-// publishToBus serializes the doorbell_start/_cancel hub event
-// into the JSON shape the ESP firmware reads via SSE (matches
-// the briefing TEIL A.3 sample). event_id on the wire is the
-// stable cancel_token, not the doorhistory id, because the
-// HTTP-answer/reject endpoints look the row up by cancel_token.
+// publishToBus serialises the doorbell_start/_cancel hub event
+// into the JSON shape the ESP firmware reads via SSE. event_id
+// on the wire is the stable cancel_token, not the doorhistory
+// id, because the HTTP answer/reject endpoints look the row up
+// by cancel_token.
 func (h *Hub) publishToBus(mockMAC, eventType string, hubEvent Event) {
 	if h.bus == nil {
 		return
@@ -396,7 +393,7 @@ func (h *Hub) broadcast(mockMAC string, ev Event) {
 // payload itself is empty (`{}`) so the receivers cannot drift
 // into reading stale fields.
 //
-// Saison 14-XX. Filter is per-viewer-MAC so no cross-tenant leak.
+// The filter is per-viewer-MAC, so no cross-tenant leak.
 func (h *Hub) BroadcastConfigChanged(ctx context.Context, viewerMAC string) {
 	if viewerMAC == "" {
 		return
@@ -420,7 +417,6 @@ func (h *Hub) BroadcastConfigChanged(ctx context.Context, viewerMAC string) {
 //     completes (count just went down to 0)
 //
 // No-op if history is unwired (test stubs) or the query fails.
-// Saison 14-03-FIX03 Sub-2.
 func (h *Hub) BroadcastUnreadCount(ctx context.Context, mockMAC string) {
 	if h.history == nil || mockMAC == "" {
 		return
@@ -440,8 +436,8 @@ func (h *Hub) BroadcastUnreadCount(ctx context.Context, mockMAC string) {
 }
 
 // Publish lets callers feed events into the hub bypassing the
-// source channels. Tests use it directly; saison 14 will wire
-// a webhook receiver through the same path. Persistence is the
+// source channels. Tests use it directly; a future webhook
+// receiver is planned to use the same path. Persistence is the
 // caller's job in this path because the payload shape there is
 // driven by the webhook envelope, not by the mock DoorbellEvent.
 func (h *Hub) Publish(mockMAC string, ev Event) {
