@@ -16,16 +16,14 @@ type adminUser struct {
 	Initials string
 }
 
-// adminDashboardData traegt die KPI-Karten plus zwei Listen
-// (Klingel-Events + Login-Audit). Saison 13-02-FIX4-a-HOTFIX3:
-// alle Zahlen kommen aus der DB, keine Fake-Werte mehr.
-// Saison 13-02-FIX4-a-HOTFIX5: ESP-Viewer-Kachel (Live-Stats)
-// plus ESP-Pager-Platzhalter.
-// Saison 14-04-Phase2: AllViewers + SelectedMACs + AnyFilter
-// versorgen das Filter-Dropdown im Dashboard-Header. AllViewers
-// ist die Liste fuer das Multi-Select, SelectedMACs ist der aktuell
-// aktive Filter, AnyFilter true wenn mindestens ein Viewer
-// abgewaehlt wurde.
+// adminDashboardData carries the KPI cards plus two lists
+// (doorbell events + login audit). All numbers come from the DB,
+// no fake values. The ESP-viewer tile reads live stats; the
+// ESP-pager block is a placeholder for now. AllViewers +
+// SelectedMACs + AnyFilter feed the filter dropdown in the
+// dashboard header: AllViewers is the list for the multi-select,
+// SelectedMACs is the currently active filter, AnyFilter is true
+// when at least one viewer is deselected.
 type adminDashboardData struct {
 	User              adminUser
 	WebViewersTotal   int
@@ -50,7 +48,7 @@ type adminDashboardData struct {
 	AnyFilter     bool
 }
 
-// dashViewerOption ist ein Eintrag im Filter-Dropdown.
+// dashViewerOption is one entry in the filter dropdown.
 type dashViewerOption struct {
 	MAC      string
 	Name     string
@@ -88,10 +86,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		SelectedMACs: map[string]bool{},
 	}
 
-	// Saison 14-04-Phase2: ?viewer_macs=mac1,mac2 filtert die
-	// "Letzte 20 Klingel-Anrufe"-Liste. Unbekannte / falsch-
-	// formatierte MACs werden still verworfen (kein 400 - das
-	// Filter-UI ist eine Bequemlichkeit, kein Auth-Surface).
+	// ?viewer_macs=mac1,mac2 filters the "Letzte 20 Klingel-Anrufe"
+	// list. Unknown / malformed MACs are silently dropped (no 400 -
+	// the filter UI is a convenience, not an auth surface).
 	selectedSet := parseViewerMACsFilter(r.URL.Query().Get("viewer_macs"))
 	data.SelectedMACs = selectedSet
 	data.AnyFilter = len(selectedSet) > 0
@@ -120,9 +117,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// ESP-Pending-Statistik plus juengster Discovery-Zeitstempel
-	// kommen direkt aus esp_pending_devices. Stiller Fail (Tabelle
-	// fehlt) blendet die Kachel-Werte einfach mit 0 aus.
+	// ESP-pending stats plus the most recent discovery timestamp
+	// come straight from esp_pending_devices. Silent failure
+	// (table missing) just shows the tile values as 0.
 	if s.platformCfg != nil {
 		var (
 			pending     sql.NullInt64
@@ -157,10 +154,10 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		if n, err := s.history.CountSince(r.Context(), now.Add(-7*24*time.Hour)); err == nil {
 			data.Events7d = n
 		}
-		// Filter weiterreichen wenn der Admin ein Subset ausgewaehlt
-		// hat. AnyFilter=false (= "alle Viewer") laesst den
-		// variadic-Slice leer; ListRecent verhaelt sich dann wie
-		// pre-Saison-14-04-Phase2.
+		// Pass the filter through when the admin selected a subset.
+		// AnyFilter=false (= "all viewers") leaves the variadic
+		// slice empty; ListRecent then behaves like the unfiltered
+		// default.
 		var filterArg []string
 		if data.AnyFilter {
 			filterArg = make([]string, 0, len(selectedSet))
@@ -207,9 +204,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	s.renderAdminPage(w, "dashboard", data)
 }
 
-// formatRelativeGerman rendert eine relative Zeit-Angabe fuer
-// Dashboard-Listen: "vor 12 Sek", "vor 3 Min", "vor 2 h", "vor 4 d".
-// Aelteres ($ge 7 Tage) wird absolut formatiert.
+// formatRelativeGerman renders a relative time hint for dashboard
+// lists: "vor 12 Sek", "vor 3 Min", "vor 2 h", "vor 4 d".
+// Anything older (>= 7 days) is formatted absolutely.
 func formatRelativeGerman(t, now time.Time) string {
 	d := now.Sub(t)
 	switch {
@@ -268,11 +265,11 @@ func doorNameFromIntercom(mac string) string {
 	return mac
 }
 
-// parseViewerMACsFilter validiert und kanonisiert das
-// ?viewer_macs=mac1,mac2 Query-Parameter. Liefert ein Set zum
-// schnellen Lookup. Unbekannte / fehlerhafte MACs werden still
-// gedroppt - das Filter-UI ist eine Bequemlichkeit, kein
-// Sicherheits-Gate; der Admin sieht so oder so alles.
+// parseViewerMACsFilter validates and canonicalises the
+// ?viewer_macs=mac1,mac2 query parameter. Returns a set for
+// fast lookup. Unknown / malformed MACs are silently dropped -
+// the filter UI is a convenience, not a security gate; the
+// admin sees everything anyway.
 func parseViewerMACsFilter(raw string) map[string]bool {
 	out := map[string]bool{}
 	if strings.TrimSpace(raw) == "" {
