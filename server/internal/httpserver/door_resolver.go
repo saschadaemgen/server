@@ -1,7 +1,6 @@
-// Saison 14-03-FIX02 + FIX03: shared helpers that resolve an
-// intercom MAC (the only thing door_events stores per row) into
-// a human door name (what the mieter actually wants to read in
-// the history list).
+// Shared helpers that resolve an intercom MAC (the only thing
+// door_events stores per row) into a human door name (what the
+// mieter actually wants to read in the history list).
 //
 // Both the synchronous /webviewer home render and the JSON
 // /webviewer/history.json endpoint render up to ViewerHistoryLimit
@@ -11,20 +10,20 @@
 // (intercom-MAC map + the full door list), and let every row
 // resolve against the cached snapshot.
 //
-// FIX03 Sub-1b: door_events does not yet carry a door_id column
-// (TODO for a later saison schema change), so door_unlocked
-// rows triggered via the developer-API often have an empty
-// intercom_mac. For those rows resolveDoorName falls back to
-// the single existing door's name when the installation has
-// exactly one door; multi-door setups get a generic "Tuer"
-// label and will need the schema-level door_id once a customer
-// actually has more than one door per viewer.
+// door_events does not yet carry a door_id column (TODO for a
+// later schema change), so door_unlocked rows triggered via
+// the developer-API often have an empty intercom_mac. For
+// those rows resolveDoorName falls back to the single existing
+// door's name when the installation has exactly one door;
+// multi-door setups get a generic "Tuer" label and will need
+// the schema-level door_id once a customer actually has more
+// than one door per viewer.
 //
-// The bare MAC is NEVER returned anymore - the FIX02 last-
-// resort "show the MAC" path turned out to confuse users more
-// than it informed them (they cannot map an arbitrary
-// 12-hex string to a real door anyway). Unknown known-MAC
-// rows now also get the generic "Tuer" label.
+// The bare MAC is NEVER returned anymore - the original "show
+// the MAC" last-resort path turned out to confuse users more
+// than it informed them (they cannot map an arbitrary 12-hex
+// string to a real door anyway). Unknown known-MAC rows now
+// also get the generic "Tuer" label.
 package httpserver
 
 import (
@@ -37,8 +36,8 @@ import (
 // have no intercom MAC and live in a multi-door installation
 // (single-door installs use the actual door name).
 //
-// FIX04 Sub-1c: real "ue" umlaut in the user-facing string;
-// ASCII spelling stays in comments and log fields only.
+// Convention: real "ue" umlaut in the user-facing string; ASCII
+// spelling stays in comments and log fields only.
 const genericDoorName = "Tür"
 
 // doorMeta is the cached snapshot used by resolveDoorName. The
@@ -53,8 +52,6 @@ type doorMeta struct {
 // loadDoorMeta makes the one UA-API round-trip per render and
 // builds both views. Empty/zero on error so callers do not
 // need to nil-check.
-//
-// Replaces the FIX02-era loadIntercomDoorNames helper.
 func (s *Server) loadDoorMeta(ctx context.Context) doorMeta {
 	if s.ua == nil {
 		return doorMeta{intercomToName: map[string]string{}}
@@ -78,12 +75,11 @@ func (s *Server) loadDoorMeta(ctx context.Context) doorMeta {
 
 // doorShortName picks the user-facing label for a uaapi.Door,
 // preferring the short `name` over the hierarchical `full_name`.
-// FIX02 used uaapi.DisplayName() which inverted the priority and
-// surfaced UA's "<Hub-Device> - <Floor> - <Door>" path strings
-// to the mieter. uaapi.DisplayName stays unchanged for admin
-// callers that actually want the full path.
-//
-// Saison 14-03-FIX04 Sub-1a.
+// An earlier version went through uaapi.DisplayName() which
+// inverted the priority and surfaced UA's "<Hub-Device> -
+// <Floor> - <Door>" path strings to the mieter.
+// uaapi.DisplayName stays unchanged for admin callers that
+// actually want the full path.
 func doorShortName(d uaapi.Door) string {
 	if d.Name != "" {
 		return d.Name
@@ -95,16 +91,16 @@ func doorShortName(d uaapi.Door) string {
 }
 
 // resolveDoorName picks the best label for a history row.
-// Order (FIX04 Sub-1b):
+// Order:
 //
 //  1. Single-door installation: the one door is the answer
 //     regardless of the row's intercom field. Covers BOTH the
 //     empty-intercom case (door_unlocked via developer-API)
 //     AND the unknown-intercom case (UA-API can no longer
-//     resolve the MAC for some reason). FIX03 used the generic
-//     "Tuer" label in the unknown-intercom-with-single-door
-//     case which is silly when we know there's exactly one
-//     candidate.
+//     resolve the MAC for some reason). An earlier version
+//     used the generic "Tuer" label in the unknown-intercom-
+//     with-single-door case, which is silly when we know
+//     there's exactly one candidate.
 //  2. Known intercom MAC -> the mapped door name (typical case
 //     for doorbell_start, where the intercom MAC was captured
 //     in the /remote_view RPC).
