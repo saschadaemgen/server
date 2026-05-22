@@ -7,9 +7,8 @@
 // link feature was retired with Migration 006 and the
 // `magic_link_tokens` table is gone with it.
 //
-// Since Saison 12-06 the tenant routing key is the viewer's MAC;
-// tenant identity in the UniFi Access Developer API is
-// administered separately.
+// The tenant routing key is the viewer's MAC; tenant identity in
+// the UniFi Access Developer API is administered separately.
 package db
 
 import (
@@ -47,7 +46,7 @@ func Open(path string) (*DB, error) {
 	// keeps per-connection pragmas (foreign_keys) effective and
 	// avoids "database is locked" surprises under contention.
 	// Platform write volume is low enough that this is not a
-	// performance concern in saison 12.
+	// performance concern.
 	sqlDB.SetMaxOpenConns(1)
 
 	if err := sqlDB.Ping(); err != nil {
