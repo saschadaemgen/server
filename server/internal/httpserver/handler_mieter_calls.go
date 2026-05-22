@@ -1,6 +1,6 @@
-// Saison 13-03: Mieter-side call-lifecycle endpoints. Routes
-// live under /webviewer/* (renamed from /einloggen/* by
-// Saison 14-02) and require an active mieter session.
+// Mieter-side call-lifecycle endpoints. Routes live under
+// /webviewer/* (renamed from the legacy /einloggen/* tree) and
+// require an active mieter session.
 //
 //	POST /webviewer/doors/{id}/unlock   relay UA-API door unlock
 //	POST /webviewer/answer              CAS-style answer + cancel-push
@@ -41,9 +41,9 @@ import (
 //     MAC carried in the SSE doorbell_start.device_id frame.
 //
 // In both branches the door UUID is auto-resolved via
-// uaapi.LookupDoorForIntercom (saison-13-07): the UA-API's
-// extras.door_thumbnail field embeds the calling intercom MAC.
-// No more admin-curated platform_config mapping needed.
+// uaapi.LookupDoorForIntercom: the UA-API's extras.door_thumbnail
+// field embeds the calling intercom MAC, so no admin-curated
+// platform_config mapping is needed.
 func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	viewerMAC := ViewerMACFromContext(r.Context())
 	if viewerMAC == "" {
@@ -303,9 +303,9 @@ func decodeCallBody(r *http.Request) (callLifecycleRequest, error) {
 // up to the browser - the local lifecycle is already correct and
 // the intercom will time out on its own as fallback.
 //
-// Saison 13-04.5-B. The intercom MAC comes from the doorbell_calls
-// row's device_id (populated by doorbellhub.startCall when the
-// /remote_view RPC arrived).
+// The intercom MAC comes from the doorbell_calls row's device_id
+// (populated by doorbellhub.startCall when the /remote_view RPC
+// arrived).
 func (s *Server) notifyUDMReject(ctx context.Context, eventID, viewerMAC string) {
 	if s.calls == nil || s.viewerMgr == nil {
 		return
