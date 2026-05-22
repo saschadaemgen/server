@@ -106,10 +106,11 @@ type HubOptions struct {
 	// Logger receives diagnostic output.
 	Logger *log.Logger
 
-	// SubscriberBuffer is the per-viewer AU channel depth. Default 30
-	// — at the briefing's GoP=1s that buys ~30 s of catch-up before
-	// dropping kicks in. ESP/WLAN can spike; we'd rather skip a
-	// keyframe than block the encoder thread.
+	// SubscriberBuffer is the per-viewer AU channel depth. Default 2
+	// (S6-07: was 30 — same latency-capacity issue as the MJPEG hub.
+	// At 15 fps the old default added up to 2 s of capacity; with
+	// drop-on-overflow we keep the fan-out resilient to a wedged
+	// client but no longer build up perceptible lag).
 	SubscriberBuffer int
 
 	// EncoderInputBuf / EncoderOutputBuf — buffers on the encoder side.
@@ -140,7 +141,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		opts.FFmpegPath = "ffmpeg"
 	}
 	if opts.SubscriberBuffer <= 0 {
-		opts.SubscriberBuffer = 30
+		// S6-07: low-latency default — see HubOptions doc and the
+		// mirror change in internal/mjpeg.HubOptions.
+		opts.SubscriberBuffer = 2
 	}
 
 	encFactory := opts.EncoderFactory

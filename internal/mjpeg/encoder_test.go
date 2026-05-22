@@ -93,6 +93,19 @@ func TestNewEncoder_AppliesDefaults(t *testing.T) {
 	}
 }
 
+// TestEncoderDefaults_LowLatencySized locks the post-S6-07 buffer
+// sizes so a "the channels look small, surely we can bump them"
+// drive-by doesn't quietly bring back the 2 s lag.
+func TestEncoderDefaults_LowLatencySized(t *testing.T) {
+	const maxLatencyTolerantBuf = 4
+	if defaultInputBuf > maxLatencyTolerantBuf {
+		t.Errorf("defaultInputBuf = %d, want <= %d (S6-07 latency floor)", defaultInputBuf, maxLatencyTolerantBuf)
+	}
+	if defaultOutputBuf > maxLatencyTolerantBuf {
+		t.Errorf("defaultOutputBuf = %d, want <= %d (S6-07 latency floor)", defaultOutputBuf, maxLatencyTolerantBuf)
+	}
+}
+
 func TestNewEncoder_DefaultLabel(t *testing.T) {
 	enc, err := NewEncoder(EncoderOptions{
 		Spec: EncodeSpec{Width: 100, Height: 100, FPS: 10, Quality: 5},
@@ -102,6 +115,37 @@ func TestNewEncoder_DefaultLabel(t *testing.T) {
 	}
 	if enc.Label() == "" {
 		t.Error("empty label should be replaced with a default")
+	}
+}
+
+// TestBuildFFmpegArgs_HasLowDelayFlags is the S6-07 latency-floor
+// canary. The MJPEG endpoint had ~2 s of perceived latency vs.
+// go2rtc's reference; the diagnosis (S6-07 briefing) pinpointed
+// missing `-flags +low_delay` at the codec/decoder level. go2rtc
+// applies BOTH `-fflags nobuffer` (format) AND `-flags low_delay`
+// (codec) on every RTSP/HTTP input — we now do the same.
+//
+// If anyone drops one of these flags while "tidying" the args,
+// latency regresses immediately. The test fails LOUDLY with a
+// briefing-anchored message before that lands.
+func TestBuildFFmpegArgs_HasLowDelayFlags(t *testing.T) {
+	args := buildFFmpegArgs(EncodeSpec{Width: 800, Height: 1280, FPS: 12, Quality: 6})
+	joined := strings.Join(args, " ")
+
+	// Format-level (demuxer "don't buffer").
+	if !strings.Contains(joined, "-fflags +nobuffer") {
+		t.Errorf("missing -fflags +nobuffer (format-level low-delay); args=%v", args)
+	}
+	// Codec-level (decoder low-delay mode).
+	if !strings.Contains(joined, "-flags +low_delay") {
+		t.Errorf("missing -flags +low_delay (codec-level low-delay); the ~2s MJPEG lag was traced to this in S6-07. args=%v", args)
+	}
+	// Both flags must appear BEFORE the -i pipe:0 input, otherwise
+	// they apply to the wrong context.
+	iLowDelay := strings.Index(joined, "-flags +low_delay")
+	iInput := strings.Index(joined, "-i pipe:0")
+	if iLowDelay < 0 || iInput < 0 || iLowDelay > iInput {
+		t.Errorf("-flags +low_delay must precede -i pipe:0; args=%v", args)
 	}
 }
 

@@ -64,9 +64,12 @@ type EncoderOptions struct {
 	OutputBuf  int // output channel size, default 4
 }
 
+// S6-07: same low-latency channel-depth defaults as internal/mjpeg.
+// 2 frames each (~130 ms @ 15 fps) lets a single-frame jitter spike
+// through without piling up multiple frames of perceptible lag.
 const (
-	defaultInputBuf  = 8
-	defaultOutputBuf = 4
+	defaultInputBuf  = 2
+	defaultOutputBuf = 2
 )
 
 // NewEncoder validates options and returns an un-started Encoder.
@@ -163,7 +166,12 @@ func buildFFmpegArgs(s EncodeSpec) []string {
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostats",
+		// S6-04: format-level demuxer "don't buffer".
 		"-fflags", "+nobuffer",
+		// S6-07: codec-level decoder "low-delay mode". See
+		// internal/mjpeg/encoder.go for the go2rtc-comparison rationale;
+		// same camera, same fix.
+		"-flags", "+low_delay",
 		// S6-04: PTS = arrival wallclock — see internal/mjpeg/encoder.go
 		// for the long-form reasoning. Same camera, same fix.
 		"-use_wallclock_as_timestamps", "1",

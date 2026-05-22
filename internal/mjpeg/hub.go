@@ -125,8 +125,8 @@ type HubOptions struct {
 	// Logger receives diagnostic output.
 	Logger *log.Logger
 
-	// SubscriberBuffer is the per-viewer JPEG channel depth. Default 30
-	// (≈3.3 s at 9 fps).
+	// SubscriberBuffer is the per-viewer JPEG channel depth. Default 2
+	// (S6-07: was 30 ≈ 2 s @ 15 fps — see the constant doc below).
 	SubscriberBuffer int
 
 	// EncoderInputBuf / EncoderOutputBuf — buffers on the encoder side.
@@ -167,7 +167,15 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		opts.FFmpegPath = "ffmpeg"
 	}
 	if opts.SubscriberBuffer <= 0 {
-		opts.SubscriberBuffer = 30
+		// S6-07: was 30 — but at 15 fps that's a 2-second latency
+		// CAPACITY, exactly what the live-measured MJPEG lag came in at.
+		// go2rtc has effectively 0 (synchronous TCP backpressure); we
+		// keep the non-blocking drop discipline (so one slow viewer
+		// doesn't stall the encoder for the others) but cap the queue
+		// at 2 frames. At 15 fps that's ~130 ms of slack — enough to
+		// ride out a TCP write hiccup, far below the perceptible
+		// latency floor.
+		opts.SubscriberBuffer = 2
 	}
 
 	encFactory := opts.EncoderFactory

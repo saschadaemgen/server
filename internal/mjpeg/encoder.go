@@ -77,9 +77,17 @@ type EncoderOptions struct {
 	OutputBuf  int // output channel size, default 4
 }
 
+// S6-07: encoder-side channel depths sized for low latency. The
+// encoder runs in-process at near-line-rate; the channels exist only
+// to absorb a single-frame jitter spike, not to queue.
+//
+// Before S6-07: InputBuf=8, OutputBuf=4 — together a worst-case
+// 12 frames of slack which, combined with the hub subscriber buffer
+// of 30, made up the ~2 s lag the ESP-Chat measured. Now both at 2
+// (~130 ms @ 15 fps).
 const (
-	defaultInputBuf  = 8
-	defaultOutputBuf = 4
+	defaultInputBuf  = 2
+	defaultOutputBuf = 2
 )
 
 // NewEncoder constructs an Encoder. It does not contact ffmpeg yet —
@@ -186,12 +194,26 @@ func (e *Encoder) Start() error {
 // `-use_wallclock_as_timestamps 1` tells the demuxer to use the
 // arrival wallclock as PTS instead, so PTS-time tracks reality 1:1
 // and -r at output reflects true wallclock fps.
+//
+// S6-07 fix — `-flags +low_delay`:
+//
+// go2rtc applies BOTH `-fflags nobuffer` (format-level) AND
+// `-flags low_delay` (codec-level) on every RTSP input. The format
+// flag we already had (S6-04). The codec flag tells the H.264
+// DECODER not to wait for reorder-buffer fill before emitting
+// frames — even though our profiles are -bf 0 / no B-frames, the
+// default decoder still allocates a small reorder buffer which
+// adds 1-2 frames of latency per session. Same camera, same RTSP
+// stream, same depacketizer; we just match go2rtc here.
 func buildFFmpegArgs(s EncodeSpec) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostats",
+		// S6-04: format-level demuxer "don't buffer".
 		"-fflags", "+nobuffer",
+		// S6-07: codec-level decoder "low-delay mode".
+		"-flags", "+low_delay",
 		// S6-04: PTS = arrival wallclock — see the doc comment above.
 		"-use_wallclock_as_timestamps", "1",
 		// Input: raw H.264 Annex-B on stdin.
