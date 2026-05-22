@@ -1,16 +1,14 @@
-// Saison 14-01: real MJPEG passthrough.
-// Saison 14-01-FIX01: switch URL construction to url.Parse so a
-// trailing slash on CARVILON_STREAM_BACKEND_URL (legacy alias:
-// UNIFIX_STREAM_BACKEND_URL) or a stray query fragment cannot
-// break the path, and add structured logging per request
-// (route + profile + backend + viewer_mac) so the operator can
+// Real MJPEG passthrough. URL construction goes through url.Parse
+// so a trailing slash on CARVILON_STREAM_BACKEND_URL (legacy
+// alias: UNIFIX_STREAM_BACKEND_URL) or a stray query fragment
+// cannot break the path. Structured logging per request
+// (route + profile + backend + viewer_mac) lets the operator
 // see in /tmp/carvilon.log what each stream request resolved to.
 //
 // The ESP firmware pulls an MJPEG stream from /esp/stream.mjpeg
-// after authenticating with its bearer token. Saison 13-08 shipped
-// a generic single-host reverse proxy; saison 14-01 swaps that out
-// for a profile-aware passthrough so the admin can hand different
-// viewers different bandwidths via the /a/streams UI.
+// after authenticating with its bearer token. The passthrough is
+// profile-aware so the admin can hand different viewers
+// different bandwidths via the /a/streams UI.
 //
 // Behaviour:
 //
@@ -126,8 +124,8 @@ func (s *Server) proxyMJPEGStream(w http.ResponseWriter, r *http.Request, profil
 	}
 	defer resp.Body.Close()
 
-	// Saison 14-01-FIX03: hijack the underlying TCP connection
-	// and write the response wire bytes directly.
+	// Hijack the underlying TCP connection and write the
+	// response wire bytes directly.
 	//
 	// Background: Go's standard http.ResponseWriter wraps any
 	// streaming body of unknown length in Transfer-Encoding:
