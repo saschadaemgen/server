@@ -43,8 +43,8 @@ type Service struct {
 
 // New reads the secrets master-key env-var and parses it as 64
 // hex characters. The canonical name is CARVILON_SECRETS_KEY;
-// the legacy UNIFIX_SECRETS_KEY is still accepted as a Saison-14
-// rename transition alias. Returns ErrNoKey if neither is set.
+// the legacy UNIFIX_SECRETS_KEY is still accepted as a rename
+// transition alias. Returns ErrNoKey if neither is set.
 func New() (*Service, error) {
 	raw := os.Getenv(envKey)
 	if raw == "" {
