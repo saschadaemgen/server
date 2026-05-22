@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-05-22T10:56:11.2623517Z",
+  "global": {
+    "clients": 1,
+    "frames_sent_total": 360,
+    "bytes_sent_total": 5625000,
+    "transcoder_cpu_percent": 17.4
+  },
+  "profiles": {
+    "mjpeg_bal": {
+      "profile": "mjpeg_bal",
+      "codec": "mjpeg",
+      "clients": 1,
+      "frames_sent": 360,
+      "frames_dropped": 3,
+      "bytes_sent": 5625000,
+      "avg_fps": 12,
+      "avg_bitrate_kbps": 1500,
+      "source_frames": 450,
+      "source_fps": 15
+    }
+  },
+  "clients": [
+    {
+      "id": 1,
+      "profile": "mjpeg_bal",
+      "codec": "mjpeg",
+      "remote_addr": "10.0.0.42:54321",
+      "connected_at": "2026-05-22T10:55:41.2623517Z",
+      "uptime_sec": 30,
+      "frames_sent": 360,
+      "frames_dropped": 3,
+      "bytes_sent": 5625000,
+      "avg_fps": 12,
+      "avg_bitrate_kbps": 1500,
+      "last_frame_at": "2026-05-22T10:56:11.2623517Z"
+    }
+  ]
+}
