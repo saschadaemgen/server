@@ -13,9 +13,8 @@ import (
 	"carvilon.local/server/internal/viewermanager"
 )
 
-// nullable mapped einen leeren string auf SQL-NULL, fuer Spalten
-// die optional sind. Kleiner Helper damit die ESP-INSERTs ohne
-// COALESCE-Friemelei auskommen.
+// nullable maps an empty string to SQL NULL for optional columns.
+// Small helper so the ESP INSERTs do not need COALESCE plumbing.
 func nullable(s string) any {
 	if s == "" {
 		return nil
@@ -38,9 +37,10 @@ type espStatusResponse struct {
 	Config json.RawMessage `json:"config,omitempty"` // FIX4-d fuellt das mit echten Werten
 }
 
-// handleESPDiscover ist der erste Touch eines neuen ESP-Geraets.
-// Kein Auth-Header, keine Session. Server speichert MAC + Meta in
-// esp_pending_devices; Admin entscheidet im /a/esp-viewers-Tab.
+// handleESPDiscover is the first touch of a new ESP device. No
+// auth header, no session. The server stores MAC + meta in
+// esp_pending_devices; the admin decides in the /a/esp-viewers
+// tab.
 func (s *Server) handleESPDiscover(w http.ResponseWriter, r *http.Request) {
 	var body espDiscoverRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -54,9 +54,9 @@ func (s *Server) handleESPDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	capsJSON, _ := json.Marshal(body.Capabilities)
 
-	// Wenn das Geraet schon in viewers steht (adoptiert): nichts
-	// in esp_pending machen. Status-Poll holt sich den Token aus
-	// viewers / dem Handoff-Slot.
+	// If the device is already in viewers (adopted): do not touch
+	// esp_pending. The status poll fetches its token from
+	// viewers / the handoff slot.
 	if info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err == nil && info.Type == viewermanager.TypeESP {
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -92,12 +92,12 @@ func (s *Server) handleESPDiscover(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleESPStatus poll-Endpoint fuer das ESP. Liefert pending /
-// adopted / rejected. Beim ersten "adopted"-Hit wird der Klartext-
-// Token aus esp_pending_devices.adopted_token_cleartext ausgeliefert
-// und der pending-Eintrag dann geloescht. Nachfolgende Polls liefern
-// "adopted" OHNE Token (das ESP soll den Token in NVS gespeichert
-// haben).
+// handleESPStatus is the poll endpoint for the ESP. Returns
+// pending / adopted / rejected. On the first "adopted" hit the
+// cleartext token from esp_pending_devices.adopted_token_cleartext
+// is delivered and the pending row is then deleted. Subsequent
+// polls return "adopted" WITHOUT a token (the ESP is expected to
+// have stored it in NVS).
 func (s *Server) handleESPStatus(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.URL.Query().Get("device_id"))
 	if !macFormat.MatchString(mac) {
@@ -106,22 +106,22 @@ func (s *Server) handleESPStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	// Adoption-Check via viewers-Lookup.
+	// Adoption check via viewers lookup.
 	info, vErr := s.viewerMgr.GetViewerInfo(r.Context(), mac)
 	if vErr == nil && info.Type == viewermanager.TypeESP {
-		// Klartext-Token-Handoff einmalig aus pending lesen.
+		// Read the cleartext token handoff once from pending.
 		var tokenCT sql.NullString
 		_ = s.sessionsDB().QueryRowContext(r.Context(),
 			`SELECT adopted_token_cleartext FROM esp_pending_devices WHERE mac = ?`,
 			mac).Scan(&tokenCT)
-		// last_poll_at aktualisieren (falls pending row noch da).
+		// Update last_poll_at (if the pending row still exists).
 		_, _ = s.sessionsDB().ExecContext(r.Context(),
 			`UPDATE esp_pending_devices SET last_poll_at = ? WHERE mac = ?`,
 			time.Now().UnixMilli(), mac)
 		resp := espStatusResponse{Status: "adopted", Config: json.RawMessage(`{}`)}
 		if tokenCT.Valid && tokenCT.String != "" {
 			resp.Token = tokenCT.String
-			// Token wurde abgeholt - pending-Zeile loeschen.
+			// Token picked up - delete the pending row.
 			_, _ = s.sessionsDB().ExecContext(r.Context(),
 				`DELETE FROM esp_pending_devices WHERE mac = ?`, mac)
 		}
@@ -130,6 +130,7 @@ func (s *Server) handleESPStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// In pending?
+	// (still queued, not yet adopted by the admin).
 	var (
 		rejectedAt sql.NullInt64
 	)
@@ -157,7 +158,7 @@ func (s *Server) handleESPStatus(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Admin (/a/esp-viewers) ----------
 
-// espPendingRow ist eine Zeile in der Pending-Liste.
+// espPendingRow is one row in the pending list.
 type espPendingRow struct {
 	MAC          string `json:"mac"`
 	Model        string `json:"model"`
@@ -167,7 +168,7 @@ type espPendingRow struct {
 	Rejected     bool   `json:"rejected"`
 }
 
-// espAdoptedRow ist eine Zeile in der Adoptiert-Tabelle.
+// espAdoptedRow is one row in the adopted table.
 type espAdoptedRow struct {
 	MAC            string `json:"mac"`
 	Name           string `json:"name"`
@@ -179,7 +180,7 @@ type espAdoptedRow struct {
 	StreamProfile  string `json:"stream_profile"`
 }
 
-// adminESPViewersData ist die Payload fuer templates/admin/esp-viewers.html.
+// adminESPViewersData is the payload for templates/admin/esp-viewers.html.
 type adminESPViewersData struct {
 	User      adminUser
 	Pending   []espPendingRow
@@ -198,9 +199,9 @@ func (s *Server) handleAdminESPViewersList(w http.ResponseWriter, r *http.Reques
 	s.renderAdminPage(w, "esp-viewers", data)
 }
 
-// handleAdminESPViewersListJSON liefert die gleichen Daten als
-// JSON. Frontend pollt diesen Endpoint alle paar Sekunden um die
-// Pending-Liste zu aktualisieren.
+// handleAdminESPViewersListJSON returns the same data as JSON.
+// The frontend polls this endpoint every few seconds to keep
+// the pending list fresh.
 func (s *Server) handleAdminESPViewersListJSON(w http.ResponseWriter, r *http.Request) {
 	data, err := s.buildESPViewersData(r)
 	if err != nil {
@@ -220,7 +221,7 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 	data := adminESPViewersData{
 		User: adminUser{Name: adminName, Initials: initialsOf(adminName)},
 	}
-	// Pending-Liste laden.
+	// Load the pending list.
 	rows, err := s.sessionsDB().QueryContext(r.Context(),
 		`SELECT mac, COALESCE(model, ''), COALESCE(fw_version, ''),
 		        discovered_at, last_poll_at, rejected_at
@@ -250,7 +251,7 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 		return data, err
 	}
 
-	// Adoptierte ESP-Viewer aus viewers.
+	// Adopted ESP viewers from the viewers table.
 	infos, err := s.viewerMgr.ListViewers(r.Context())
 	if err != nil {
 		return data, err
@@ -314,7 +315,7 @@ func (s *Server) lookupUANames(r *http.Request, ids []string) map[string]string 
 	return out
 }
 
-// adoptRequest ist der JSON-Body fuer POST /a/esp-viewers/adopt.
+// espAdoptRequest is the JSON body for POST /a/esp-viewers/adopt.
 type espAdoptRequest struct {
 	MAC               string `json:"mac"`
 	Name              string `json:"name"`
@@ -330,11 +331,11 @@ type espAdoptResponse struct {
 	TokenPreview string `json:"token_preview"`
 }
 
-// handleAdminESPViewersAdopt verschiebt einen Eintrag aus
-// esp_pending_devices in viewers (type='esp') und generiert
-// einen Bearer-Token. Der Klartext-Token bleibt in
-// esp_pending_devices.adopted_token_cleartext zwischengeparkt
-// bis der ESP ihn beim naechsten Status-Poll abholt.
+// handleAdminESPViewersAdopt moves a row from esp_pending_devices
+// into viewers (type='esp') and generates a bearer token. The
+// cleartext token is parked in
+// esp_pending_devices.adopted_token_cleartext until the ESP
+// picks it up on its next status poll.
 func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Request) {
 	var body espAdoptRequest
 	if r.Header.Get("Content-Type") == "application/json" {
@@ -370,10 +371,10 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// pending-Eintrag holen (model + fw_version uebernehmen). Falls
-	// die Zeile nicht existiert (manueller Adopt), gehen wir mit
-	// leeren ESP-Meta-Feldern in viewers - der ESP fuellt sie beim
-	// naechsten Discover-Call nach.
+	// Fetch the pending entry (carry model + fw_version through).
+	// If the row does not exist (manual adopt), we proceed with
+	// empty ESP-meta fields in viewers - the ESP fills them in on
+	// its next discover call.
 	var model, fwVersion sql.NullString
 	err := s.sessionsDB().QueryRowContext(r.Context(),
 		`SELECT COALESCE(model,''), COALESCE(fw_version,'') FROM esp_pending_devices WHERE mac = ?`,
@@ -423,9 +424,9 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Token-Handoff-Slot: pending-Zeile (falls vorhanden) updaten,
-	// sonst erzeugen. Beim naechsten ESP-Status-Poll wird der
-	// Klartext ausgeliefert und die Zeile geloescht.
+	// Token-handoff slot: update the pending row (if present),
+	// otherwise create it. On the next ESP status poll the
+	// cleartext is delivered and the row is deleted.
 	now := time.Now().UnixMilli()
 	_, err = s.sessionsDB().ExecContext(r.Context(),
 		`INSERT INTO esp_pending_devices
@@ -450,9 +451,9 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleAdminESPViewersReject markiert das pending-Geraet als
-// rejected. Bleibt in der Tabelle damit der naechste ESP-Status-
-// Poll "rejected" zurueckliefern kann.
+// handleAdminESPViewersReject marks the pending device as
+// rejected. It stays in the table so the next ESP status poll
+// can return "rejected".
 func (s *Server) handleAdminESPViewersReject(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -480,7 +481,7 @@ func (s *Server) handleAdminESPViewersReject(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/esp-viewers", http.StatusSeeOther)
 }
 
-// handleAdminESPViewersRename benennt den ESP-Viewer um.
+// handleAdminESPViewersRename renames the ESP viewer.
 func (s *Server) handleAdminESPViewersRename(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -509,17 +510,16 @@ func (s *Server) handleAdminESPViewersRename(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Rename fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// Saison 14-XX: ESP-Geraet zieht den neuen UnitName via
-	// /esp/config nach.
+	// The ESP device pulls the new UnitName via /esp/config.
 	if s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
 	http.Redirect(w, r, "/a/esp-viewers", http.StatusSeeOther)
 }
 
-// handleAdminESPViewersRegenerateToken erzeugt einen neuen
-// Bearer-Token; der alte ist sofort ungueltig. Der ESP holt den
-// neuen Klartext beim naechsten Status-Poll.
+// handleAdminESPViewersRegenerateToken generates a new bearer
+// token; the old one is invalid immediately. The ESP picks up
+// the new cleartext on its next status poll.
 func (s *Server) handleAdminESPViewersRegenerateToken(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -541,8 +541,8 @@ func (s *Server) handleAdminESPViewersRegenerateToken(w http.ResponseWriter, r *
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// Klartext in pending-Handoff parken (Token-Pickup beim
-	// naechsten Status-Poll).
+	// Park the cleartext in the pending handoff slot (the ESP
+	// picks it up on its next status poll).
 	now := time.Now().UnixMilli()
 	_, err = s.sessionsDB().ExecContext(r.Context(),
 		`INSERT INTO esp_pending_devices
@@ -564,7 +564,7 @@ func (s *Server) handleAdminESPViewersRegenerateToken(w http.ResponseWriter, r *
 	})
 }
 
-// handleAdminESPViewersDelete loescht einen adoptierten ESP-Viewer.
+// handleAdminESPViewersDelete deletes an adopted ESP viewer.
 func (s *Server) handleAdminESPViewersDelete(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {
@@ -580,7 +580,7 @@ func (s *Server) handleAdminESPViewersDelete(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Loeschen fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	// pending-Eintrag mit aufraeumen falls vorhanden.
+	// Sweep up the pending row too if it still exists.
 	_, _ = s.sessionsDB().ExecContext(r.Context(),
 		`DELETE FROM esp_pending_devices WHERE mac = ?`, mac)
 	if r.Method == http.MethodDelete || wantsJSON(r) {
