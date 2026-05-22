@@ -2,10 +2,10 @@ package httpserver
 
 import "net/http"
 
-// placeholderData ist die Payload fuer die "kommt bald"-Seiten
-// (esp-viewers, users, esp-pager). Saison 13-02-FIX4-a haengt
-// diese Routen schon im Menue, damit der naechste Sub-Brief
-// (FIX4-b/c/d) sie nur noch mit Funktionalitaet fuellen muss.
+// placeholderData is the payload for the "kommt bald" pages
+// (esp-viewers, users, esp-pager). The routes are already wired
+// in the nav so a future sub-briefing only has to fill them
+// with functionality.
 type placeholderData struct {
 	User      adminUser
 	Title     string

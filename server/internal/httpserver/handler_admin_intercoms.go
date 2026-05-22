@@ -1,7 +1,7 @@
-// Saison 13-07: tiny JSON endpoint that lets the viewer edit /
-// adopt modals populate their "Verknuepfte Klingel"-Dropdown
-// without having to ship the full intercom-mapping page. Returns
-// the live UA-API intercom list filtered by uaapi.ListIntercoms.
+// Tiny JSON endpoint that lets the viewer edit / adopt modals
+// populate their "Verknuepfte Klingel" dropdown without having
+// to ship the full intercom-mapping page. Returns the live
+// UA-API intercom list filtered by uaapi.ListIntercoms.
 package httpserver
 
 import (

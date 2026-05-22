@@ -1,5 +1,4 @@
-// Saison 14-03-FIX03 Sub-2: read-side endpoint for the
-// screensaver unread-doorbell badge.
+// Read-side endpoint for the screensaver unread-doorbell badge.
 //
 // Route: GET /webviewer/unread-count (requireSession)
 // Body:  {"count": N}

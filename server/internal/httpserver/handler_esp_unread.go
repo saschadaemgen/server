@@ -1,9 +1,9 @@
-// Saison 14-XX: GET /esp/unread-count.
+// GET /esp/unread-count.
 //
-// Bearer-Auth-gating, identische Response wie
-// /webviewer/unread-count: {"count": N}. Beide Endpoints lesen
-// aus doorhistory.UnreadCount; die Auth-Mechanik (Cookie vs
-// Bearer) ist der einzige Unterschied.
+// Bearer-auth gated reuse with the same response shape as
+// /webviewer/unread-count ({"count": N}). Both endpoints read
+// from doorhistory.UnreadCount; the auth mechanism (cookie vs
+// bearer) is the only difference.
 package httpserver
 
 import (

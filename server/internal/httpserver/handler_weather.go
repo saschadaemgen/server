@@ -1,4 +1,4 @@
-// Saison 14-01b: weather endpoints shared by mieter and admin.
+// Weather endpoints shared by mieter and admin.
 //
 //	GET /webviewer/weather   tenant pull (session cookie auth);
 //	                         consumed by idle.js every 15 minutes
@@ -36,11 +36,11 @@ const (
 	defaultStationLon = 7.1959
 )
 
-// resolveTenantLanguage figures out the UI language for the calling
-// surface so weather descriptions can be localized per viewer
-// (Saison 14-FIX07). The Mieter-Web-Viewer hands us a viewer MAC
-// via the session context, the /esp/-tree via the bearer context;
-// the admin /a/weather surface has no tenant association and gets
+// resolveTenantLanguage figures out the UI language for the
+// calling surface so weather descriptions can be localised per
+// viewer. The Mieter web viewer hands us a viewer MAC via the
+// session context, the /esp/ tree via the bearer context; the
+// admin /a/weather surface has no tenant association and gets
 // the default (German) fallback. Errors from the lookup degrade
 // to the default - the screensaver should never break just
 // because the language column had a hiccup.

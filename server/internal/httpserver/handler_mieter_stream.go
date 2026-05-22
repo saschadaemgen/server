@@ -1,14 +1,13 @@
-// Saison 14-01: tenant MJPEG passthrough.
-// Saison 14-01-FIX01: structured per-request logging, consistent
-// with handler_esp_stream.go.
+// Tenant MJPEG passthrough with structured per-request logging,
+// consistent with handler_esp_stream.go.
 //
 // The mieter ringing overlay renders an <img src="/webviewer/
 // stream.mjpeg"> while a doorbell call is active, plus the
-// idle-livestream mode (saison-14-01b) keeps it open whenever
-// the screensaver is toggled off. This handler resolves the
-// calling tenant's mock-viewer, picks its stream profile, and
-// proxies the live MJPEG body from go2rtc with the same
-// flush-per-chunk + url.Parse core used by /esp/stream.mjpeg.
+// idle-livestream mode keeps it open whenever the screensaver
+// is toggled off. This handler resolves the calling tenant's
+// mock viewer, picks its stream profile, and proxies the live
+// MJPEG body from go2rtc with the same flush-per-chunk +
+// url.Parse core used by /esp/stream.mjpeg.
 //
 // Auth is the regular session cookie middleware (requireSession);
 // no admin path, no API token. Browsers that drop credentials on

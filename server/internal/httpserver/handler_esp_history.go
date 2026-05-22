@@ -1,22 +1,21 @@
-// Saison 14-04-Phase2-FIX06: ESP-Pendant zu /webviewer/history*.
+// ESP-side pendant to /webviewer/history*.
 //
-// Drei Endpoints, alle Bearer-gated:
+// Three endpoints, all bearer-gated:
 //
-//	GET    /esp/history.json          paged JSON-Liste
-//	DELETE /esp/history/{event_id}    Soft-Delete einzeln
-//	DELETE /esp/history               Soft-Delete alle
+//	GET    /esp/history.json          paged JSON list
+//	DELETE /esp/history/{event_id}    soft-delete one
+//	DELETE /esp/history               soft-delete all
 //
-// Pattern: Bearer-Lookup laeuft im requireESPBearer-Middleware
-// (server.go), MAC sitzt im Request-Context. Hier holen wir den
-// MAC raus und delegieren an die serveHistory*-Helfer aus
-// handler_mieter_history.go - identische Validierung, identische
-// Response-Form, identische Soft-Delete-Semantik wie auf der
-// Mieter-Web-Seite. Der einzige Unterschied zwischen Mieter und
-// ESP ist die Auth-Mechanik.
+// Pattern: the bearer lookup runs in the requireESPBearer
+// middleware (server.go), so the MAC sits on the request
+// context. The handlers below pull the MAC and delegate to the
+// serveHistory* helpers in handler_mieter_history.go - identical
+// validation, identical response shape, identical soft-delete
+// semantics as on the Mieter web side. The only difference
+// between mieter and ESP is the auth mechanism.
 //
-// /esp/settings akzeptiert ab FIX06 zusaetzlich history_capture
-// (boolean); der dortige Handler liest die ESP-only-Logik (siehe
-// handler_esp_settings.go).
+// /esp/settings additionally accepts history_capture (boolean);
+// see handler_esp_settings.go for the ESP-only logic.
 package httpserver
 
 import (

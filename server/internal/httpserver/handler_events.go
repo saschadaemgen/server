@@ -24,8 +24,8 @@ const defaultEventsHeartbeat = 30 * time.Second
 // subscription and closes the events channel so no goroutine
 // leaks behind the listener.
 //
-// Saison 12-06: subscriptions are keyed by mock_mac, matching
-// the new mock-centric routing model.
+// Subscriptions are keyed by mock_mac, matching the mock-centric
+// routing model.
 func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	mockMAC := MockMACFromContext(r.Context())
 	if mockMAC == "" {
@@ -46,7 +46,7 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
-	// nginx-spezifisch: keine Buffer-Bildung am Proxy.
+	// nginx-specific: tell the proxy not to buffer this response.
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
@@ -86,8 +86,8 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeSSEEvent emits one SSE record per the Claude-Design
-// library contract (S13-02-FIX3):
+// writeSSEEvent emits one SSE record per the design-library
+// contract:
 //
 //	event: doorbell_start
 //	data:  { "door": "Hauseingang", "ts": "2026-05-13T23:36:14Z" }
@@ -97,13 +97,13 @@ func (s *Server) handleMieterEvents(w http.ResponseWriter, r *http.Request) {
 // also keep the legacy fields available under nested "raw" so
 // future frontends can opt in without a hub change.
 //
-// Saison 14-03-FIX03 Sub-2: TypeUnreadCount frames use a
-// dedicated minimal payload {"count": N} so the
-// screensaver badge does not have to dig through .raw.
+// TypeUnreadCount frames use a dedicated minimal payload
+// {"count": N} so the screensaver badge does not have to dig
+// through .raw.
 //
-// Saison 14-XX: TypeConfigChanged ships an empty `{}` payload -
-// receivers refetch from the relevant config endpoint rather
-// than reading any field on the event itself.
+// TypeConfigChanged ships an empty `{}` payload - receivers
+// refetch from the relevant config endpoint rather than reading
+// any field on the event itself.
 //
 // The empty line at the end is required by the SSE protocol.
 func writeSSEEvent(w http.ResponseWriter, ev doorbellhub.Event) error {
