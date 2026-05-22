@@ -1,6 +1,5 @@
-// Saison 14-01: admin CRUD for stream profiles.
-// Saison 15-01: surface migrated behind the streams.StreamBackend
-// seam; profile CRUD is transitional.
+// Admin CRUD for stream profiles. The surface sits behind the
+// streams.StreamBackend seam; profile CRUD is transitional.
 //
 // The page lives under /a/streams and renders against whichever
 // backend the operator has wired. With the public-build default
@@ -39,10 +38,10 @@ import (
 var streamProfileNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 // validStreamSchemes is the allow-list every Source-URL must
-// match. Saison 14-01-FIX04: switch from a generic "no spaces"
-// rule (which never existed in carvilon-code but is enforced by
-// go2rtc) to a scheme-aware check so the ffmpeg:-syntax can
-// carry literal spaces in its raw=-argument list.
+// match. The check is scheme-aware rather than a generic
+// "no spaces" rule so the ffmpeg:-syntax can carry literal
+// spaces in its raw=-argument list (go2rtc itself enforces the
+// no-spaces rule on the other schemes).
 var validStreamSchemes = []string{
 	"rtsp://", "rtsps://", "rtspx://",
 	"http://", "https://",
@@ -101,11 +100,11 @@ func validateStreamSource(src string) error {
 // backend error messages into a German-language hint so the
 // admin UI flash is useful out of the box.
 //
-// Saison 15-01: ErrNotConfigured from Put is the migration
-// signal. The transitional go2rtc client stubs Put because
-// profile CRUD moves to the carvilon-streaming-server; the new
-// structured form lands once that backend is wired. Until then
-// the operator gets a clear hint instead of a generic 502.
+// ErrNotConfigured from Put is the migration signal. The
+// transitional go2rtc client stubs Put because profile CRUD
+// moves to the carvilon-streaming-server; the new structured
+// form lands once that backend is wired. Until then the
+// operator gets a clear hint instead of a generic 502.
 //
 // The legacy "source with spaces may be insecure" mapping from
 // the go2rtc PUT path stays in place for the historical Update
@@ -154,9 +153,9 @@ type adminStreamEditData struct {
 }
 
 // streamDefault is one preset the admin can click to pre-fill the
-// create-form with a known-good ffmpeg pipeline. Saison 14-01
-// ships three (intercom_esp, intercom_browser, intercom_high) but
-// the operator can add their own profiles freely afterwards.
+// create-form with a known-good ffmpeg pipeline. We ship three
+// (intercom_esp, intercom_browser, intercom_high) but the
+// operator can add their own profiles freely afterwards.
 type streamDefault struct {
 	Name        string
 	Label       string
@@ -244,12 +243,12 @@ func (s *Server) handleAdminStreamsCreate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
-	// Saison 15-01: the new Put signature takes a structured
-	// Profile. Until the structured admin form lands (follow-up
-	// briefing), we park the legacy source string in Description
-	// so the new streaming server can later parse it back. The
-	// transitional go2rtc client returns ErrNotConfigured here -
-	// rewriteStreamBackendError surfaces the migration hint.
+	// The new Put signature takes a structured Profile. Until
+	// the structured admin form lands, we park the legacy source
+	// string in Description so the new streaming server can later
+	// parse it back. The transitional go2rtc client returns
+	// ErrNotConfigured here - rewriteStreamBackendError surfaces
+	// the migration hint.
 	prof := streams.Profile{Name: name, Description: source}
 	if err := s.streams.Put(r.Context(), prof); err != nil {
 		status := http.StatusBadGateway
@@ -320,8 +319,8 @@ func (s *Server) handleAdminStreamsUpdate(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error()+".", http.StatusBadRequest)
 		return
 	}
-	// Saison 15-01: same transitional pattern as Create. Once the
-	// structured form lands, the source string is replaced by the
+	// Same transitional pattern as Create. Once the structured
+	// form lands, the source string is replaced by the
 	// CameraID/Quality/Usage triple.
 	prof := streams.Profile{Name: name, Description: source}
 	if err := s.streams.Put(r.Context(), prof); err != nil {
