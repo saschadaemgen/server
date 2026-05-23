@@ -53,6 +53,7 @@ func TestProfile_Validate_BadFields(t *testing.T) {
 		{"bad Usage", func(p *Profile) { p.Usage = "fridge" }, "Usage"},
 		{"empty Codec", func(p *Profile) { p.Codec = "" }, "Codec"},
 		{"bad Codec", func(p *Profile) { p.Codec = "av1" }, "Codec"},
+		{"bad Encryption", func(p *Profile) { p.Encryption = "rot13" }, "Encryption"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -237,6 +238,46 @@ func TestRegistry_EmptyIsOK(t *testing.T) {
 	}
 	if _, err := r.Get("anything"); !errors.Is(err, ErrUnknownProfile) {
 		t.Errorf("Get on empty: %v, want ErrUnknownProfile", err)
+	}
+}
+
+// TestProfile_Validate_Encryption covers the S6-12 field: empty value
+// is the canonical "default-tls" form, "tls" and "srtp" are explicitly
+// accepted, anything else errors. The matrix exercises both
+// transcoded and passthrough profiles so the encryption check doesn't
+// accidentally couple to other codec-specific logic.
+func TestProfile_Validate_Encryption(t *testing.T) {
+	for _, base := range []struct {
+		name string
+		p    Profile
+	}{
+		{"passthrough base", goodProfile},
+		{"mjpeg base", goodMJPEGProfile},
+	} {
+		t.Run(base.name, func(t *testing.T) {
+			for _, enc := range []Encryption{"", EncryptionTLS, EncryptionSRTP} {
+				t.Run("ok/"+string(enc), func(t *testing.T) {
+					p := base.p
+					p.Encryption = enc
+					if err := p.Validate(); err != nil {
+						t.Errorf("Encryption=%q should validate; got %v", enc, err)
+					}
+				})
+			}
+			for _, enc := range []Encryption{"TLS", "tls ", "wireguard", "1"} {
+				t.Run("bad/"+string(enc), func(t *testing.T) {
+					p := base.p
+					p.Encryption = enc
+					err := p.Validate()
+					if err == nil {
+						t.Fatalf("Encryption=%q should error", enc)
+					}
+					if !strings.Contains(err.Error(), "Encryption") {
+						t.Errorf("error %q should mention 'Encryption'", err.Error())
+					}
+				})
+			}
+		})
 	}
 }
 

@@ -47,6 +47,43 @@ const (
 	QualityLow    Quality = "low"
 )
 
+// Encryption selects the wire-protection model for the camera-side
+// (Protect → streaming-server) hop. New in S6-12 — making it per-
+// profile lets the admin steer SRTP on/off per camera through the
+// HTTP API rather than via a single global env var.
+//
+// Values match the unifi.Encryption type byte-for-byte; the source
+// factory in cmd/spike casts profile.Encryption → unifi.Encryption.
+//
+//   - "tls"  — TLS tunnel only, plain RTP inside (default; the
+//              go2rtc rtspx://-equivalent path that's been in use
+//              for years against UniFi cameras).
+//   - "srtp" — SDES per RFC 4568 (S6-11). SRTP master key in
+//              cleartext in the SDP; per-packet AES-CM-128 +
+//              HMAC-SHA1-80. See internal/source/unifi/srtp.go.
+//   - ""     — treated as "tls". Lets pre-S6-12 DB rows without
+//              the column still be valid.
+type Encryption string
+
+const (
+	EncryptionTLS  Encryption = "tls"
+	EncryptionSRTP Encryption = "srtp"
+)
+
+// EffectiveEncryption returns the canonical wire-protection mode for
+// this profile — empty maps to the default ([EncryptionTLS]), every
+// other validated value passes through. Use this everywhere the
+// admin / external observer (GET output, source-registry Key) needs
+// a concrete value; the underlying [Profile.Encryption] field is
+// left as-is in the DB so explicit-empty and explicit-tls remain
+// distinguishable for migration tooling.
+func (p Profile) EffectiveEncryption() Encryption {
+	if p.Encryption == "" {
+		return EncryptionTLS
+	}
+	return p.Encryption
+}
+
 // Codec is the wire format the streaming-server emits for this profile.
 // New in S6-01 — beforehand the codec was implicit (MJPEG for ESP,
 // H.264-passthrough for browser). Making it explicit lets arbitrary
@@ -113,6 +150,12 @@ type Profile struct {
 	Height        int
 	FPS           int
 	EncodeQuality int
+
+	// S6-12: wire-protection mode for the camera-side hop. See the
+	// [Encryption] type doc. Empty value is treated as the default
+	// (TLS) so old DB rows pre-dating S6-12 stay valid; Validate
+	// accepts "", "tls", and "srtp" and rejects everything else.
+	Encryption Encryption
 }
 
 // ErrUnknownProfile is returned by [Registry.Get] when the name is not
@@ -154,6 +197,14 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("profile %q: Codec is required", p.Name)
 	default:
 		return fmt.Errorf("profile %q: invalid Codec %q (want h264_passthrough/mjpeg/h264_cbp)", p.Name, p.Codec)
+	}
+	// S6-12: Encryption is OPTIONAL. Empty value flows through as the
+	// canonical default ("tls") at the source-factory level.
+	switch p.Encryption {
+	case "", EncryptionTLS, EncryptionSRTP:
+		// ok
+	default:
+		return fmt.Errorf("profile %q: invalid Encryption %q (want tls/srtp or empty)", p.Name, p.Encryption)
 	}
 	if p.Codec != CodecH264Passthrough {
 		if p.Width <= 0 || p.Width > 8192 {

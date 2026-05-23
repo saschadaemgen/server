@@ -79,6 +79,9 @@ type Profile struct {
 	Height        int    `json:"height"`
 	FPS           int    `json:"fps"`
 	EncodeQuality int    `json:"encode_quality"`
+	// S6-12: wire-protection mode for the camera-side hop. "tls" /
+	// "srtp" / "" (empty == default tls). See profile.Encryption.
+	Encryption string `json:"encryption"`
 }
 
 // Camera mirrors carvilon-server streams.Camera field-by-field
@@ -336,9 +339,17 @@ func (b *Backend) Configured() bool { return true }
 // known-limitation re. per-profile vs per-camera accounting.
 func (b *Backend) toWire(p profile.Profile) Profile {
 	consumers := 0
-	if b.opts.Sources.Has(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)}) {
-		h := b.opts.Sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
-		consumers = h.SubscriberCount()
+	// S6-12: the source-registry key now includes Encryption so two
+	// modes on the same camera get distinct hubs. Mirror the
+	// canonicalisation server.canonicalEncryption uses ("" → "tls")
+	// so a profile with empty encryption finds its hub.
+	enc := string(p.Encryption)
+	if enc == "" {
+		enc = string(profile.EncryptionTLS)
+	}
+	key := sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality), Encryption: enc}
+	if b.opts.Sources.Has(key) {
+		consumers = b.opts.Sources.HubFor(key).SubscriberCount()
 	}
 	return Profile{
 		Name:          p.Name,
@@ -352,6 +363,7 @@ func (b *Backend) toWire(p profile.Profile) Profile {
 		Height:        p.Height,
 		FPS:           p.FPS,
 		EncodeQuality: p.EncodeQuality,
+		Encryption:    string(p.Encryption),
 	}
 }
 
@@ -369,6 +381,7 @@ func (b *Backend) fromWire(in Profile) (profile.Profile, error) {
 		Height:        in.Height,
 		FPS:           in.FPS,
 		EncodeQuality: in.EncodeQuality,
+		Encryption:    profile.Encryption(in.Encryption),
 	}
 	if err := p.Validate(); err != nil {
 		return profile.Profile{}, err

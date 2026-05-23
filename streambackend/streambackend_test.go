@@ -439,6 +439,7 @@ func TestProfile_WireTags(t *testing.T) {
 		Height:        1280,
 		FPS:           12,
 		EncodeQuality: 6,
+		Encryption:    "srtp",
 	}
 	buf, err := json.Marshal(in)
 	if err != nil {
@@ -456,6 +457,7 @@ func TestProfile_WireTags(t *testing.T) {
 		`"height":1280`,
 		`"fps":12`,
 		`"encode_quality":6`,
+		`"encryption":"srtp"`,
 	} {
 		if !strings.Contains(string(buf), want) {
 			t.Errorf("Profile JSON missing %q: %s", want, buf)

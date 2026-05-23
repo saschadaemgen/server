@@ -292,8 +292,25 @@ func TestRegistry_CloseShutsDownAllHubs(t *testing.T) {
 }
 
 func TestKey_String(t *testing.T) {
-	k := Key{CameraID: "abc", Quality: "high"}
-	if got := k.String(); got != "abc:high" {
-		t.Errorf("String() = %q, want %q", got, "abc:high")
+	// S6-12: Key.String() now includes the Encryption mode so log
+	// lines disambiguate same-camera/same-quality pulls that differ
+	// only in transport.
+	k := Key{CameraID: "abc", Quality: "high", Encryption: "tls"}
+	if got := k.String(); got != "abc:high/tls" {
+		t.Errorf("String() = %q, want %q", got, "abc:high/tls")
+	}
+}
+
+// TestKey_DistinctEncryptionGetsDistinctHub is the S6-12 anti-mix-up
+// canary. Two profiles on the same camera/quality but with different
+// encryption modes MUST land in different map slots in the Registry,
+// otherwise the second subscriber would silently inherit the first's
+// transport (and either fail to decrypt or fail to authenticate
+// every packet).
+func TestKey_DistinctEncryptionGetsDistinctHub(t *testing.T) {
+	tlsKey := Key{CameraID: "abc", Quality: "high", Encryption: "tls"}
+	srtpKey := Key{CameraID: "abc", Quality: "high", Encryption: "srtp"}
+	if tlsKey == srtpKey {
+		t.Errorf("two Keys with different Encryption compared equal (%+v); they must hash to different map slots", tlsKey)
 	}
 }

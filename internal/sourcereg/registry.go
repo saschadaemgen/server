@@ -31,14 +31,33 @@ import (
 	"carvilon.local/stream/internal/source"
 )
 
-// Key identifies a unique upstream pull: one camera at one quality.
+// Key identifies a unique upstream pull. Sized so that distinct
+// transport configurations get distinct hubs:
+//
+//   - CameraID + Quality — same camera, different quality tiers go
+//     to different pulls (UniFi delivers distinct streams per tier).
+//   - Encryption — S6-12. Two profiles on the same (CameraID,Quality)
+//     but with different encryption modes get DIFFERENT hubs.
+//     Without this split, the first-arriving subscriber's mode would
+//     silently win for everyone joining the same hub later, and a
+//     well-meaning "tune one profile to srtp" would either get plain
+//     RTP that fails to decrypt or vice versa. The cost is one extra
+//     ffmpeg/source pull when an admin runs a mixed-mode setup — a
+//     rare and intentional case.
+//
+// Callers should pass the canonical Encryption value ("tls" or
+// "srtp", not ""); the source factory normalises "" → "tls" at the
+// streaming-server boundary before building the Key.
 type Key struct {
-	CameraID string
-	Quality  string
+	CameraID   string
+	Quality    string
+	Encryption string
 }
 
 // String renders the key for log lines.
-func (k Key) String() string { return fmt.Sprintf("%s:%s", k.CameraID, k.Quality) }
+func (k Key) String() string {
+	return fmt.Sprintf("%s:%s/%s", k.CameraID, k.Quality, k.Encryption)
+}
 
 // Factory builds a fresh, un-Started [source.VideoSource] for the
 // given key. Called by the hub at the moment a subscriber arrives on

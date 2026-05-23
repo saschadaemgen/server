@@ -265,6 +265,35 @@ func TestPut_RejectsInvalidProfile(t *testing.T) {
 	}
 }
 
+// TestPutGetRoundTrip_Encryption covers the S6-12 column: a profile
+// with encryption=srtp must round-trip byte-identical, including the
+// canonical "" → "" preservation (the SourceFactory at the unifi
+// boundary normalises "" to "tls"; the store layer doesn't second-
+// guess this).
+func TestPutGetRoundTrip_Encryption(t *testing.T) {
+	s := openMem(t)
+	ctx := context.Background()
+	for _, enc := range []profile.Encryption{"", profile.EncryptionTLS, profile.EncryptionSRTP} {
+		t.Run(string("enc="+enc), func(t *testing.T) {
+			in := mkMJPEGProfile("p_" + string(enc))
+			in.Encryption = enc
+			if err := s.Put(ctx, in); err != nil {
+				t.Fatalf("Put: %v", err)
+			}
+			out, err := s.Get(ctx, in.Name)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if out.Encryption != enc {
+				t.Errorf("Encryption round-trip: got %q, want %q", out.Encryption, enc)
+			}
+			if out != in {
+				t.Errorf("full round-trip mismatch:\ngot:  %+v\nwant: %+v", out, in)
+			}
+		})
+	}
+}
+
 // TestPutGetRoundTrip_TranscodedCodec covers the S6-01 columns: a profile
 // with codec=mjpeg + width/height/fps/encode_quality must round-trip
 // byte-identical through the DB.

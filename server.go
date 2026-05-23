@@ -270,6 +270,20 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return s, nil
 }
 
+// sourceKeyFor builds the per-pull key for a given profile, baking in
+// the S6-12 encryption split so mixed modes on the same camera get
+// distinct hubs (otherwise the first-arriving subscriber's mode
+// would win for everyone). Uses [profile.Profile.EffectiveEncryption]
+// to canonicalise empty → "tls" so legacy DB rows hash to the same
+// slot as explicit-tls profiles.
+func sourceKeyFor(p profile.Profile) sourcereg.Key {
+	return sourcereg.Key{
+		CameraID:   p.CameraID,
+		Quality:    string(p.Quality),
+		Encryption: string(p.EffectiveEncryption()),
+	}
+}
+
 // mjpegEntryFor implements the resolver the [mjpeg.Hub] needs: turn a
 // profile name into an Entry (encode spec + source hub).
 //
@@ -298,7 +312,7 @@ func (s *Server) mjpegEntryFor(name string) (mjpeg.Entry, error) {
 	if err != nil {
 		return mjpeg.Entry{}, err
 	}
-	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	srcHub := s.sources.HubFor(sourceKeyFor(p))
 	return mjpeg.Entry{Spec: spec, Source: &hubAdapter{h: srcHub}}, nil
 }
 
@@ -320,7 +334,7 @@ func (s *Server) h264espEntryFor(name string) (h264esp.Entry, error) {
 	if err != nil {
 		return h264esp.Entry{}, err
 	}
-	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	srcHub := s.sources.HubFor(sourceKeyFor(p))
 	return h264esp.Entry{Spec: spec, Source: &h264espHubAdapter{h: srcHub}}, nil
 }
 
@@ -424,7 +438,7 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srcHub := s.sources.HubFor(sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality)})
+	srcHub := s.sources.HubFor(sourceKeyFor(p))
 	sub, err := srcHub.Subscribe()
 	if err != nil {
 		http.Error(w, "subscribe: "+err.Error(), http.StatusServiceUnavailable)
@@ -741,11 +755,16 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			_, _ = io.WriteString(w, ",")
 		}
+		// S6-12: surface the EFFECTIVE encryption (empty → "tls") so
+		// admin clients see a concrete value. The PUT body still
+		// accepts empty as the "use default" sentinel.
 		fmt.Fprintf(w,
 			`{"name":%q,"camera_id":%q,"quality":%q,"usage":%q,"description":%q,`+
-				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d}`,
+				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d,`+
+				`"encryption":%q}`,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
 			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+			string(p.EffectiveEncryption()),
 		)
 	}
 	_, _ = io.WriteString(w, "]")
@@ -800,6 +819,7 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		Height:        body.Height,
 		FPS:           body.FPS,
 		EncodeQuality: body.EncodeQuality,
+		Encryption:    profile.Encryption(body.Encryption),
 	}
 	if err := p.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -880,6 +900,9 @@ type profileJSON struct {
 	Height        int    `json:"height"`
 	FPS           int    `json:"fps"`
 	EncodeQuality int    `json:"encode_quality"`
+	// S6-12: optional. "tls" / "srtp" / "" (= default tls). Validate
+	// rejects other values with 400.
+	Encryption string `json:"encryption"`
 }
 
 // handleStats implements GET /stream/stats — the JSON snapshot of the

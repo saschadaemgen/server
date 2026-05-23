@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-23T13:21:43.8310165Z",
+  "generated_at": "2026-05-23T21:18:04.5611004Z",
   "global": {
     "clients": 1,
     "frames_sent_total": 360,
@@ -26,14 +26,14 @@
       "profile": "mjpeg_bal",
       "codec": "mjpeg",
       "remote_addr": "10.0.0.42:54321",
-      "connected_at": "2026-05-23T13:21:13.8310165Z",
+      "connected_at": "2026-05-23T21:17:34.5611004Z",
       "uptime_sec": 30,
       "frames_sent": 360,
       "frames_dropped": 3,
       "bytes_sent": 5625000,
       "avg_fps": 12,
       "avg_bitrate_kbps": 1500,
-      "last_frame_at": "2026-05-23T13:21:43.8310165Z"
+      "last_frame_at": "2026-05-23T21:18:04.5611004Z"
     }
   ]
 }

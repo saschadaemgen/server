@@ -1,8 +1,15 @@
 # Stream-Server HTTP API — S6-08 inventory for carvilon-admin docking
 
 Status: **factual inventory** of what the server speaks today. Reflects the
-S6-09 snake_case unification: GET and PUT now use the same field names, a
-profile object fetched via GET can be PUT back verbatim.
+S6-09 snake_case unification (GET and PUT share the same field names; a
+profile object fetched via GET can be PUT back verbatim) and the S6-12
+encryption field.
+
+**Schema is final as of S6-12.** The full profile field set is now
+`{name, camera_id, quality, usage, description, codec, width, height,
+fps, encode_quality, encryption}`. No more fields planned. The
+master-chat can build the admin CRUD UI against this shape with
+confidence that it won't grow again before S7.
 
 Server listens on `CARVILON_STREAM_LISTEN` (default `:8555`).
 
@@ -35,17 +42,18 @@ body shape; the live `handleProfiles` Fprintf format in `server.go`):
 | `height`         | number | output pixels (0 for `h264_passthrough`)               |
 | `fps`            | number | target frame rate (0 for `h264_passthrough`)           |
 | `encode_quality` | number | mjpeg q:v / h264 CRF (0 for `h264_passthrough`)        |
+| `encryption`     | string | wire-protection on camera-side hop: `tls` (default) or `srtp`. **GET always returns the effective value** (`""` in storage → `"tls"` on the wire) so admin UIs see a concrete mode. |
 
 **Live sample** (the spike's S6-03 default-set on the intercom; reproduced
 byte-for-byte by `go run ./cmd/gen-docs` → `docs/api-sample-profiles-list.json`):
 
 ```json
 [
-  {"name":"h264_cbp","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26","codec":"h264_cbp","width":800,"height":1280,"fps":15,"encode_quality":26},
-  {"name":"intercom_web","camera_id":"679573e101080b03e4000424","quality":"high","usage":"browser","description":"Intercom (browser reference, H.264 passthrough via WebRTC)","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encode_quality":0},
-  {"name":"mjpeg_bal","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)","codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6},
-  {"name":"mjpeg_fast","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)","codec":"mjpeg","width":640,"height":1024,"fps":18,"encode_quality":6},
-  {"name":"mjpeg_hq","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)","codec":"mjpeg","width":800,"height":1280,"fps":10,"encode_quality":4}
+  {"name":"h264_cbp","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26","codec":"h264_cbp","width":800,"height":1280,"fps":15,"encode_quality":26,"encryption":"tls"},
+  {"name":"intercom_web","camera_id":"679573e101080b03e4000424","quality":"high","usage":"browser","description":"Intercom (browser reference, H.264 passthrough via WebRTC)","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encode_quality":0,"encryption":"tls"},
+  {"name":"mjpeg_bal","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)","codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6,"encryption":"tls"},
+  {"name":"mjpeg_fast","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)","codec":"mjpeg","width":640,"height":1024,"fps":18,"encode_quality":6,"encryption":"tls"},
+  {"name":"mjpeg_hq","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)","codec":"mjpeg","width":800,"height":1280,"fps":10,"encode_quality":4,"encryption":"tls"}
 ]
 ```
 
@@ -87,6 +95,7 @@ matches GET output 1:1 as of S6-09):
 | `height`         | number | iff codec≠passthrough | 1..8192                                |
 | `fps`            | number | iff codec≠passthrough | 1..60                                  |
 | `encode_quality` | number | iff codec≠passthrough | 1..51                                  |
+| `encryption`     | string | no                    | `tls` / `srtp` / `""` (empty = default tls). S6-12. |
 
 **Responses:**
 

@@ -170,13 +170,30 @@ func main() {
 	}
 
 	// --- Source factory + Protect-API client -------------------------------
+	//
+	// S6-12: the source factory now reads the encryption mode from the
+	// per-pull Key (which the server populated from the triggering
+	// profile's Encryption field). The UNIFI_ENCRYPTION env var stays
+	// as a fallback: when a profile doesn't carry an explicit mode
+	// (empty value, which server.canonicalEncryption maps to "tls"
+	// before building the Key), the env can still flip the global
+	// default. Profile value > env value > "tls".
 	srcFactory := func(key sourcereg.Key) (source.VideoSource, error) {
+		modeForKey := key.Encryption
+		if modeForKey == "" {
+			// Belt-and-braces; in practice server.canonicalEncryption
+			// always sets a value before this point.
+			modeForKey = encryption
+		}
+		if modeForKey == "" {
+			modeForKey = string(unifi.EncryptionTLS)
+		}
 		return unifi.NewSource(unifi.Options{
 			NVRHost:    nvrHost,
 			APIKey:     apiKey,
 			CameraID:   key.CameraID,
 			Quality:    key.Quality,
-			Encryption: unifi.Encryption(encryption),
+			Encryption: unifi.Encryption(modeForKey),
 			Logger:     logger,
 		})
 	}

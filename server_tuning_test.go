@@ -117,6 +117,58 @@ func TestProfilePut_URLNameWinsOverBodyName(t *testing.T) {
 	}
 }
 
+// TestProfilePut_AcceptsValidEncryption — S6-12 happy path for the new
+// field. Tls/srtp/empty all go through; the persisted profile carries
+// the right value.
+func TestProfilePut_AcceptsValidEncryption(t *testing.T) {
+	for _, enc := range []string{"", "tls", "srtp"} {
+		t.Run("enc="+enc, func(t *testing.T) {
+			fw := &fakeWriter{}
+			srv := freshServer(t, ServerOptions{ProfileWriter: fw})
+			body := strings.NewReader(`{
+				"camera_id":"abc","quality":"high","usage":"esp",
+				"codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6,
+				"encryption":"` + enc + `"
+			}`)
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/api/profiles/x", body)
+			req.SetPathValue("name", "x")
+			srv.handleProfilePut(rr, req)
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("encryption=%q: status=%d body=%s", enc, rr.Code, rr.Body.String())
+			}
+			if len(fw.puts) != 1 {
+				t.Fatalf("PutProfile called %d times", len(fw.puts))
+			}
+			if got := string(fw.puts[0].Encryption); got != enc {
+				t.Errorf("persisted Encryption = %q, want %q", got, enc)
+			}
+		})
+	}
+}
+
+// TestProfilePut_RejectsInvalidEncryption — anything outside {tls,srtp,""}
+// gets a 400 from profile.Validate.
+func TestProfilePut_RejectsInvalidEncryption(t *testing.T) {
+	fw := &fakeWriter{}
+	srv := freshServer(t, ServerOptions{ProfileWriter: fw})
+	body := strings.NewReader(`{
+		"camera_id":"abc","quality":"high","usage":"esp",
+		"codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6,
+		"encryption":"wireguard"
+	}`)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/profiles/x", body)
+	req.SetPathValue("name", "x")
+	srv.handleProfilePut(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (invalid encryption); body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Encryption") {
+		t.Errorf("error body should mention Encryption: %s", rr.Body.String())
+	}
+}
+
 func TestProfilePut_RejectsInvalidCodec(t *testing.T) {
 	fw := &fakeWriter{}
 	srv := freshServer(t, ServerOptions{ProfileWriter: fw})
@@ -193,6 +245,45 @@ func TestProfileDelete_Unknown404(t *testing.T) {
 	}
 }
 
+// TestSourceKeyFor_EncryptionDistinct covers the S6-12 invariant that
+// two profiles on the SAME camera+quality but with different
+// encryption modes get DIFFERENT source-registry Keys — and therefore
+// different hubs, different ffmpeg pulls, different SRTP-vs-TLS
+// negotiation. If this ever returned equal keys, a freshly-tuned
+// SRTP profile would silently inherit a still-running TLS pull (or
+// vice versa) and every packet would fail.
+func TestSourceKeyFor_EncryptionDistinct(t *testing.T) {
+	p := profile.Profile{
+		Name:     "x", CameraID: "abc", Quality: profile.QualityHigh,
+		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
+	}
+	p.Encryption = profile.EncryptionTLS
+	tls := sourceKeyFor(p)
+	p.Encryption = profile.EncryptionSRTP
+	srtp := sourceKeyFor(p)
+	if tls == srtp {
+		t.Fatalf("tls (%v) and srtp (%v) profiles on the same camera got the same Key — they MUST split into different hubs", tls, srtp)
+	}
+}
+
+// TestSourceKeyFor_EmptyMeansTLS — canonicalisation: a profile with
+// encryption="" (the in-store default for old rows) must produce the
+// SAME Key as a profile with encryption="tls". Otherwise the hub
+// would split on a meaningless distinction and the fan-out would
+// degrade for legacy data.
+func TestSourceKeyFor_EmptyMeansTLS(t *testing.T) {
+	p := profile.Profile{
+		Name: "x", CameraID: "abc", Quality: profile.QualityHigh,
+		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
+	}
+	empty := sourceKeyFor(p) // Encryption=""
+	p.Encryption = profile.EncryptionTLS
+	tls := sourceKeyFor(p)
+	if empty != tls {
+		t.Errorf("empty Encryption (%v) should canonicalise to tls (%v) so old DB rows share the hub with explicit-tls profiles", empty, tls)
+	}
+}
+
 func TestProfileDelete_Disabled503(t *testing.T) {
 	srv := freshServer(t, ServerOptions{})
 	rr := httptest.NewRecorder()
@@ -214,6 +305,7 @@ func TestProfileDelete_Disabled503(t *testing.T) {
 // failed at PUT with 400. Now both speak snake_case.
 func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 	// Seed one realistic profile (MJPEG, all encode-params populated).
+	// S6-12: also set Encryption so the round-trip exercises that field.
 	seed := profile.Profile{
 		Name:          "mjpeg_bal",
 		CameraID:      "679573e101080b03e4000424",
@@ -225,6 +317,7 @@ func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 		Height:        1280,
 		FPS:           12,
 		EncodeQuality: 6,
+		Encryption:    profile.EncryptionSRTP,
 	}
 	reg, err := profile.NewRegistry([]profile.Profile{seed})
 	if err != nil {
@@ -250,11 +343,15 @@ func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 	}
 	entry := list[0]
 
-	// Sanity: the field names MUST be snake_case (S6-09 contract).
-	for _, want := range []string{"name", "camera_id", "quality", "usage", "description", "codec", "width", "height", "fps", "encode_quality"} {
+	// Sanity: the field names MUST be snake_case (S6-09 contract +
+	// S6-12 encryption).
+	for _, want := range []string{"name", "camera_id", "quality", "usage", "description", "codec", "width", "height", "fps", "encode_quality", "encryption"} {
 		if _, ok := entry[want]; !ok {
 			t.Errorf("GET entry missing snake_case field %q; got: %v", want, entry)
 		}
+	}
+	if got := entry["encryption"]; got != "srtp" {
+		t.Errorf("GET encryption = %v, want %q (seeded value must survive)", got, "srtp")
 	}
 	for _, forbidden := range []string{"cameraID", "encodeQuality"} {
 		if _, ok := entry[forbidden]; ok {

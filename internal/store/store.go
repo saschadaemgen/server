@@ -139,6 +139,12 @@ var migrations = []string{
 	        encode_quality=6
 	  WHERE codec=''
 	    AND usage='esp'`,
+
+	// S6-12: encryption per profile. Default '' is interpreted as 'tls'
+	// at the source-factory boundary (Validate accepts '' as the
+	// canonical default; the SourceFactory normalises before passing
+	// to the unifi package).
+	`ALTER TABLE profiles ADD COLUMN encryption     TEXT    NOT NULL DEFAULT ''`,
 }
 
 // runMigrations applies the migrations slice top-to-bottom. ALTER
@@ -203,8 +209,8 @@ func (s *Store) Put(ctx context.Context, p profile.Profile) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO profiles (
 			name, camera_id, quality, usage, description,
-			codec, width, height, fps, encode_quality
-		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?)
+			codec, width, height, fps, encode_quality, encryption
+		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?,  ?)
 		ON CONFLICT(name) DO UPDATE SET
 			camera_id      = excluded.camera_id,
 			quality        = excluded.quality,
@@ -214,10 +220,11 @@ func (s *Store) Put(ctx context.Context, p profile.Profile) error {
 			width          = excluded.width,
 			height         = excluded.height,
 			fps            = excluded.fps,
-			encode_quality = excluded.encode_quality
+			encode_quality = excluded.encode_quality,
+			encryption     = excluded.encryption
 	`,
 		p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
-		string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+		string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality, string(p.Encryption),
 	)
 	if err != nil {
 		return fmt.Errorf("store: put %q: %w", p.Name, err)
@@ -229,14 +236,14 @@ func (s *Store) Put(ctx context.Context, p profile.Profile) error {
 func (s *Store) Get(ctx context.Context, name string) (profile.Profile, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT name, camera_id, quality, usage, description,
-		       codec, width, height, fps, encode_quality
+		       codec, width, height, fps, encode_quality, encryption
 		FROM profiles WHERE name = ?
 	`, name)
 	var p profile.Profile
-	var q, u, c string
+	var q, u, c, enc string
 	if err := row.Scan(
 		&p.Name, &p.CameraID, &q, &u, &p.Description,
-		&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality,
+		&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality, &enc,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return profile.Profile{}, ErrNotFound
@@ -246,6 +253,7 @@ func (s *Store) Get(ctx context.Context, name string) (profile.Profile, error) {
 	p.Quality = profile.Quality(q)
 	p.Usage = profile.Usage(u)
 	p.Codec = profile.Codec(c)
+	p.Encryption = profile.Encryption(enc)
 	return p, nil
 }
 
@@ -270,7 +278,7 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 func (s *Store) List(ctx context.Context) ([]profile.Profile, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, camera_id, quality, usage, description,
-		       codec, width, height, fps, encode_quality
+		       codec, width, height, fps, encode_quality, encryption
 		FROM profiles ORDER BY name
 	`)
 	if err != nil {
@@ -280,16 +288,17 @@ func (s *Store) List(ctx context.Context) ([]profile.Profile, error) {
 	var out []profile.Profile
 	for rows.Next() {
 		var p profile.Profile
-		var q, u, c string
+		var q, u, c, enc string
 		if err := rows.Scan(
 			&p.Name, &p.CameraID, &q, &u, &p.Description,
-			&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality,
+			&c, &p.Width, &p.Height, &p.FPS, &p.EncodeQuality, &enc,
 		); err != nil {
 			return nil, fmt.Errorf("store: list scan: %w", err)
 		}
 		p.Quality = profile.Quality(q)
 		p.Usage = profile.Usage(u)
 		p.Codec = profile.Codec(c)
+		p.Encryption = profile.Encryption(enc)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -334,8 +343,8 @@ func (s *Store) SeedIfEmpty(ctx context.Context, ps []profile.Profile) (int, err
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO profiles (
 			name, camera_id, quality, usage, description,
-			codec, width, height, fps, encode_quality
-		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?)
+			codec, width, height, fps, encode_quality, encryption
+		) VALUES (?, ?, ?, ?, ?,  ?, ?, ?, ?, ?,  ?)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("store: seed prepare: %w", err)
@@ -349,7 +358,7 @@ func (s *Store) SeedIfEmpty(ctx context.Context, ps []profile.Profile) (int, err
 		}
 		if _, err := stmt.ExecContext(ctx,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
-			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality, string(p.Encryption),
 		); err != nil {
 			return 0, fmt.Errorf("store: seed insert %q: %w", p.Name, err)
 		}
