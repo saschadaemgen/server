@@ -17,14 +17,11 @@ import (
 	"carvilon.local/server/internal/auth/esptoken"
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/viewerstore"
 )
 
 // macFormat matches lowercase colon-form MACs (e.g. 0c:ea:14:42:42:42).
 var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
-
-// servicePortStart mirrors the constant used by the admin UI
-// auto-allocator. Keep these two in sync if ever changed.
-const servicePortStart = 8100
 
 func runESP(args []string) error {
 	if len(args) < 1 {
@@ -93,22 +90,20 @@ func runESPAdopt(args []string, out io.Writer) error {
 		return fmt.Errorf("generate token: %w", err)
 	}
 
-	port, err := nextFreeServicePort(context.Background(), d)
+	port, err := viewerstore.NextFreeServicePort(context.Background(), d.DB)
 	if err != nil {
 		return fmt.Errorf("allocate service port: %w", err)
 	}
 
-	now := time.Now().UnixMilli()
-	_, err = d.ExecContext(context.Background(),
-		`INSERT INTO viewers
-		   (mac, name, service_port, type, esp_token_hash,
-		    esp_pending, paired_intercom_mac, linked_ua_user_id,
-		    created_at, updated_at)
-		 VALUES (?, ?, ?, 'esp', ?, 0, ?, ?, ?, ?)`,
-		macLower, nameTrimmed, int64(port), hash,
-		intercomLower, mieterTrimmed, now, now,
-	)
-	if err != nil {
+	if err := viewerstore.Insert(context.Background(), d.DB, viewerstore.InsertSpec{
+		MAC:               macLower,
+		Name:              nameTrimmed,
+		ServicePort:       port,
+		Type:              "esp",
+		ESPTokenHash:      hash,
+		PairedIntercomMAC: intercomLower,
+		LinkedUAUserID:    mieterTrimmed,
+	}, time.Now().UnixMilli()); err != nil {
 		return fmt.Errorf("insert viewer: %w", err)
 	}
 
@@ -128,19 +123,3 @@ func runESPAdopt(args []string, out io.Writer) error {
 	return nil
 }
 
-// nextFreeServicePort mirrors the admin-UI helper of the same
-// name. SELECTs MAX(service_port) and adds one, falling back to
-// servicePortStart for an empty table.
-func nextFreeServicePort(ctx context.Context, d *db.DB) (uint16, error) {
-	var max int64
-	err := d.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(service_port), 0) FROM viewers`,
-	).Scan(&max)
-	if err != nil {
-		return 0, err
-	}
-	if max < servicePortStart {
-		return servicePortStart, nil
-	}
-	return uint16(max + 1), nil
-}

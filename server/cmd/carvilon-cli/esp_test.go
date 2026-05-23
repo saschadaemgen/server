@@ -8,6 +8,7 @@ import (
 
 	"carvilon.local/server/internal/auth/esptoken"
 	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/viewerstore"
 )
 
 // runAdoptForTest runs the adopt subcommand against a fresh
@@ -79,8 +80,8 @@ func TestESPAdopt_PersistsRowAndPrintsToken(t *testing.T) {
 	if linkedUser != "ua-user-42" {
 		t.Errorf("linked_ua_user_id = %q", linkedUser)
 	}
-	if port < servicePortStart {
-		t.Errorf("port = %d, want >= %d", port, servicePortStart)
+	if port < int64(viewerstore.ServicePortStart) {
+		t.Errorf("port = %d, want >= %d", port, viewerstore.ServicePortStart)
 	}
 	if !esptoken.Verify(tok, hash) {
 		t.Errorf("printed token does not match stored hash")
