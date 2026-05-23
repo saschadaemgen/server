@@ -1,8 +1,8 @@
 # Stream-Server HTTP API — S6-08 inventory for carvilon-admin docking
 
-Status: **factual inventory** of what the server speaks today (commit `74939be` +
-working tree). No code changes recommended in this doc — only the truth, so
-the carvilon-side admin can be plugged in correctly.
+Status: **factual inventory** of what the server speaks today. Reflects the
+S6-09 snake_case unification: GET and PUT now use the same field names, a
+profile object fetched via GET can be PUT back verbatim.
 
 Server listens on `CARVILON_STREAM_LISTEN` (default `:8555`).
 
@@ -20,32 +20,32 @@ Server listens on `CARVILON_STREAM_LISTEN` (default `:8555`).
   status `200`. Body is a JSON **array** of profile objects, ordered
   alphabetically by `name`.
 
-**Field names — camelCase** (this is the live `handleProfiles` Fprintf format
-in `server.go`):
+**Field names — snake_case** (S6-09 unified the GET output with the PUT
+body shape; the live `handleProfiles` Fprintf format in `server.go`):
 
-| field         | type   | notes                                                  |
-| ------------- | ------ | ------------------------------------------------------ |
-| `name`        | string | client `?src=` key                                     |
-| `cameraID`    | string | UniFi Protect camera identifier (**camelCase**)        |
-| `quality`     | string | `high` / `medium` / `low`                              |
-| `usage`       | string | `browser` / `esp`                                      |
-| `description` | string | admin UI label, may be empty                           |
-| `codec`       | string | `h264_passthrough` / `mjpeg` / `h264_cbp`              |
-| `width`       | number | output pixels (0 for `h264_passthrough`)               |
-| `height`      | number | output pixels (0 for `h264_passthrough`)               |
-| `fps`         | number | target frame rate (0 for `h264_passthrough`)           |
-| `encodeQuality` | number | mjpeg q:v / h264 CRF (0 for `h264_passthrough`, **camelCase**) |
+| field            | type   | notes                                                  |
+| ---------------- | ------ | ------------------------------------------------------ |
+| `name`           | string | client `?src=` key                                     |
+| `camera_id`      | string | UniFi Protect camera identifier                        |
+| `quality`        | string | `high` / `medium` / `low`                              |
+| `usage`          | string | `browser` / `esp`                                      |
+| `description`    | string | admin UI label, may be empty                           |
+| `codec`          | string | `h264_passthrough` / `mjpeg` / `h264_cbp`              |
+| `width`          | number | output pixels (0 for `h264_passthrough`)               |
+| `height`         | number | output pixels (0 for `h264_passthrough`)               |
+| `fps`            | number | target frame rate (0 for `h264_passthrough`)           |
+| `encode_quality` | number | mjpeg q:v / h264 CRF (0 for `h264_passthrough`)        |
 
 **Live sample** (the spike's S6-03 default-set on the intercom; reproduced
 byte-for-byte by `go run ./cmd/gen-docs` → `docs/api-sample-profiles-list.json`):
 
 ```json
 [
-  {"name":"h264_cbp","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26","codec":"h264_cbp","width":800,"height":1280,"fps":15,"encodeQuality":26},
-  {"name":"intercom_web","cameraID":"679573e101080b03e4000424","quality":"high","usage":"browser","description":"Intercom (browser reference, H.264 passthrough via WebRTC)","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encodeQuality":0},
-  {"name":"mjpeg_bal","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)","codec":"mjpeg","width":800,"height":1280,"fps":12,"encodeQuality":6},
-  {"name":"mjpeg_fast","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)","codec":"mjpeg","width":640,"height":1024,"fps":18,"encodeQuality":6},
-  {"name":"mjpeg_hq","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)","codec":"mjpeg","width":800,"height":1280,"fps":10,"encodeQuality":4}
+  {"name":"h264_cbp","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26","codec":"h264_cbp","width":800,"height":1280,"fps":15,"encode_quality":26},
+  {"name":"intercom_web","camera_id":"679573e101080b03e4000424","quality":"high","usage":"browser","description":"Intercom (browser reference, H.264 passthrough via WebRTC)","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encode_quality":0},
+  {"name":"mjpeg_bal","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)","codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6},
+  {"name":"mjpeg_fast","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)","codec":"mjpeg","width":640,"height":1024,"fps":18,"encode_quality":6},
+  {"name":"mjpeg_hq","camera_id":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)","codec":"mjpeg","width":800,"height":1280,"fps":10,"encode_quality":4}
 ]
 ```
 
@@ -62,27 +62,31 @@ mux routes nothing for it and falls through to the embedded file server
   (Go 1.22 method+path routing). `405` for anything else on that path.
 - **Body:** `application/json` (server reads up to 64 KiB, calls
   `dec.DisallowUnknownFields()` — typos or extra keys cause `400`).
-- **Name resolution:** URL wins; a `"name"` key in the body would be
-  rejected by `DisallowUnknownFields`. There is NO `"name"` field in the
-  PUT body shape.
+- **Name resolution:** URL wins. A `"name"` key in the body is now
+  TOLERATED (S6-09: needed so a GET array entry can be PUT back
+  verbatim) but silently ignored — the URL path identifies the
+  profile, period. Any other unknown field still triggers `400` via
+  `DisallowUnknownFields`.
 - **Persistence:** writes to SQLite (`profile.PutProfile`) AND refreshes
   the in-memory `profile.Registry`. New `?src=` lookups see the change
   immediately; existing viewers stay on their current hub until they
   disconnect.
 
-**Body fields — snake_case** (this is `profileJSON` in `server.go`):
+**Body fields — snake_case** (this is `profileJSON` in `server.go`,
+matches GET output 1:1 as of S6-09):
 
-| field            | type   | required           | notes                                  |
-| ---------------- | ------ | ------------------ | -------------------------------------- |
-| `camera_id`      | string | yes                | **snake_case** (cf. list's `cameraID`) |
-| `quality`        | string | yes                | `high` / `medium` / `low`              |
-| `usage`          | string | yes                | `browser` / `esp`                      |
-| `description`    | string | no                 | empty string allowed                   |
+| field            | type   | required           | notes                                     |
+| ---------------- | ------ | ------------------ | ----------------------------------------- |
+| `name`           | string | no                 | tolerated for round-trip; URL still wins  |
+| `camera_id`      | string | yes                |                                           |
+| `quality`        | string | yes                | `high` / `medium` / `low`                 |
+| `usage`          | string | yes                | `browser` / `esp`                         |
+| `description`    | string | no                 | empty string allowed                      |
 | `codec`          | string | yes                | `h264_passthrough` / `mjpeg` / `h264_cbp` |
-| `width`          | number | iff codec≠passthrough | 1..8192                              |
-| `height`         | number | iff codec≠passthrough | 1..8192                              |
-| `fps`            | number | iff codec≠passthrough | 1..60                                |
-| `encode_quality` | number | iff codec≠passthrough | 1..51 (**snake_case**)               |
+| `width`          | number | iff codec≠passthrough | 1..8192                                |
+| `height`         | number | iff codec≠passthrough | 1..8192                                |
+| `fps`            | number | iff codec≠passthrough | 1..60                                  |
+| `encode_quality` | number | iff codec≠passthrough | 1..51                                  |
 
 **Responses:**
 
@@ -193,33 +197,27 @@ Also informational:
 
 ---
 
-## 4. Known inconsistencies (carvilon-admin will trip on these)
+## 4. Field-name unification (S6-09 — resolved)
 
-### 4.1 LIST returns camelCase, PUT expects snake_case
+Earlier (pre-S6-09) the GET output used camelCase (`cameraID`,
+`encodeQuality`) while the PUT body expected snake_case (`camera_id`,
+`encode_quality`), so a naïve GET → modify → PUT broke with a `400`
+from `DisallowUnknownFields`. **Resolved:** both endpoints now speak
+snake_case (the field names listed in §1.1 and §1.3), and PUT
+tolerates a `name` key in the body (URL still wins). The carvilon-
+admin client can take a GET array entry and PUT it back verbatim.
 
-| Field on the wire | GET `/api/profiles`     | PUT body                |
-| ----------------- | ----------------------- | ----------------------- |
-| Camera identifier | `cameraID`              | `camera_id`             |
-| Encoder quality   | `encodeQuality`         | `encode_quality`        |
-| (others)          | lowercase               | lowercase               |
+The S6-09 round-trip is locked down by
+`TestProfiles_GetPut_RoundTrip` in `server_tuning_test.go`.
 
-A naïve round-trip — fetch profile X via GET, change one field, send it
-back via PUT — **does not work** out of the box. PUT's
-`DisallowUnknownFields` rejects `cameraID` and `encodeQuality` with a
-`400`. The admin client must rename two keys.
+### Other API limits (not bugs, just shape)
 
-Original commit history: the GET handler hand-rolls JSON with camelCase
-keys (server.go), the PUT handler defines a separate `profileJSON` struct
-with snake_case tags. Both predate this briefing; not changed here per
-scope (§6 of the briefing).
-
-### 4.2 No HTTP create endpoint
-
-`POST /api/profiles` does not exist. Use `PUT /api/profiles/{newname}`.
-
-### 4.3 No single-profile GET
-
-Clients need to fetch the array and filter locally.
+- **No HTTP create endpoint.** `POST /api/profiles` does not exist —
+  use `PUT /api/profiles/{newname}`, which is an upsert. A name that
+  doesn't exist yet is created; one that does is updated.
+- **No single-profile GET.** Clients fetch the array and filter
+  locally. The list is small (typically <10 profiles); a dedicated
+  endpoint isn't worth the surface area today.
 
 ---
 
@@ -300,8 +298,8 @@ excludes either fix from this S6-08 inventory.
 
 | Method | Path                        | Body          | Response                | Notes |
 | ------ | --------------------------- | ------------- | ----------------------- | ----- |
-| GET    | `/api/profiles`             | —             | JSON array (camelCase)  | profile list |
-| PUT    | `/api/profiles/{name}`      | JSON snake_case | 204 / 400 / 503     | upsert |
+| GET    | `/api/profiles`             | —             | JSON array (snake_case) | profile list |
+| PUT    | `/api/profiles/{name}`      | JSON snake_case | 204 / 400 / 503     | upsert, GET output PUT-able verbatim |
 | DELETE | `/api/profiles/{name}`      | —             | 204 / 404 / 503         | live viewers keep going |
 | POST   | `/offer?src=<name>`         | SDP offer     | `application/sdp` answer | h264_passthrough only |
 | GET    | `/api/stream.mjpeg?src=<name>` | —          | `multipart/x-mixed-replace` | mjpeg only |

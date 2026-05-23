@@ -345,9 +345,12 @@ func writeProfilesListSample(path string) error {
 		} else {
 			io.WriteString(&buf, "\n  ")
 		}
+		// S6-09: snake_case to match server.go::handleProfiles AND
+		// PUT /api/profiles/{name}'s body shape. GET output and PUT
+		// input are now bit-compatible.
 		fmt.Fprintf(&buf,
-			`{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q,`+
-				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encodeQuality":%d}`,
+			`{"name":%q,"camera_id":%q,"quality":%q,"usage":%q,"description":%q,`+
+				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d}`,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
 			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
 		)

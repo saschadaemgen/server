@@ -41,9 +41,9 @@
 // Multi-camera quick-start (CARVILON_PROFILES_JSON overrides everything):
 //
 //	$env:CARVILON_PROFILES_JSON = '[
-//	  {"name":"intercom_browser","cameraID":"abc","quality":"high","usage":"browser","codec":"h264_passthrough","description":"Intercom"},
-//	  {"name":"intercom_mjpeg",  "cameraID":"abc","quality":"high","usage":"esp","codec":"mjpeg","width":800,"height":1280,"fps":12,"encodeQuality":6},
-//	  {"name":"ai360_browser",   "cameraID":"def","quality":"high","usage":"browser","codec":"h264_passthrough","description":"AI 360"}
+//	  {"name":"intercom_browser","camera_id":"abc","quality":"high","usage":"browser","codec":"h264_passthrough","description":"Intercom"},
+//	  {"name":"intercom_mjpeg",  "camera_id":"abc","quality":"high","usage":"esp","codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6},
+//	  {"name":"ai360_browser",   "camera_id":"def","quality":"high","usage":"browser","codec":"h264_passthrough","description":"AI 360"}
 //	]'
 //	go run .\cmd\spike
 //

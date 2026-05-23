@@ -124,7 +124,8 @@ scope for S6-07:
    at AFTER latency. Source-side fps cap is not blocking the door.
 2. `/api/profiles` GET returns `cameraID` / `encodeQuality` (camel),
    PUT expects `camera_id` / `encode_quality` (snake). Inconsistent.
-   Small follow-up — noted, not fixed here.
+   Small follow-up — noted, not fixed here. **(Resolved in S6-09 —
+   both endpoints now speak snake_case; see `docs/profile-api.md`.)**
 
 ## Verification on a live server
 

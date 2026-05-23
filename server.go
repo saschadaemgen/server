@@ -727,17 +727,23 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// Hand-roll JSON to avoid pulling encoding/json into the mainline
-	// hot path. The output is stable, ordered by profile name. S6-01
-	// adds the codec quintet so the admin UI can show / edit the encode
-	// parameters that drive the ESP measurement campaign.
+	// hot path. The output is stable, ordered by profile name.
+	//
+	// S6-09: field names are snake_case to match PUT /api/profiles/{name}'s
+	// body shape exactly. A client can therefore take a single entry
+	// from this list, modify a field, and PUT it back without renaming
+	// any keys — round-trip is bit-compatible. See TestProfiles_GetPut_RoundTrip
+	// for the live contract. Field set:
+	//   name, camera_id, quality, usage, description,
+	//   codec, width, height, fps, encode_quality.
 	_, _ = io.WriteString(w, "[")
 	for i, p := range all {
 		if i > 0 {
 			_, _ = io.WriteString(w, ",")
 		}
 		fmt.Fprintf(w,
-			`{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q,`+
-				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encodeQuality":%d}`,
+			`{"name":%q,"camera_id":%q,"quality":%q,"usage":%q,"description":%q,`+
+				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d}`,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
 			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
 		)
@@ -856,7 +862,15 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 // wire shape use (snake_case). Kept private to server.go — outside
 // callers go through streambackend.Profile, which has the same field
 // set but adds the runtime Consumers count.
+//
+// S6-09: `name` is now an accepted-but-ignored field so a client can
+// take an entry from `GET /api/profiles` and send it back to
+// `PUT /api/profiles/{name}` verbatim — the URL path stays
+// authoritative for the identity, the body's `name` is tolerated
+// for round-trip ergonomics. DisallowUnknownFields stays on so
+// genuine typos in OTHER field names still surface as 400.
 type profileJSON struct {
+	Name          string `json:"name"` // accepted but ignored; URL wins
 	CameraID      string `json:"camera_id"`
 	Quality       string `json:"quality"`
 	Usage         string `json:"usage"`
