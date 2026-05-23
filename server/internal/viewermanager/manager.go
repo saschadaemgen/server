@@ -990,6 +990,45 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 	return nil
 }
 
+// setColumnExec wraps the UPDATE + updated_at + RowsAffected
+// pattern shared by the per-column setter family
+// (SetBrightnessIdle, SetClockLayout, SetIdleViewMode, ...).
+// The caller supplies the column name as a Go string constant
+// at the call site (never from user input) and the already-
+// prepared DB value (int64, string, sql.NullString, nil, ...).
+// The error wrapping uses `op` as a short tag so the wrapped
+// message stays recognisable per call site.
+func (m *Manager) setColumnExec(ctx context.Context, op, mac, column string, dbValue any) error {
+	now := m.opts.Now().UnixMilli()
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE viewers SET `+column+` = ?, updated_at = ? WHERE mac = ?`,
+		dbValue, now, mac)
+	if err != nil {
+		return fmt.Errorf("viewermanager: %s: %w", op, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrViewerNotFound
+	}
+	return nil
+}
+
+// updateCachedSpec runs mutate against the cached ViewerSpec
+// under m.mu if the viewer is present in the cache. No-op when
+// the viewer is not cached (e.g. setter racing a RemoveViewer).
+// Used by setters whose field is mirrored in the cache; setters
+// for fields that live only in ViewerInfo (BrightnessIdle,
+// ScreenOffAfterSec, Language, HistoryCaptureEnabled,
+// ClockLayout) skip this and rely on the next GetViewerInfo to
+// pick up the fresh DB value.
+func (m *Manager) updateCachedSpec(mac string, mutate func(*ViewerSpec)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry, ok := m.viewers[mac]; ok {
+		mutate(&entry.spec)
+	}
+}
+
 // SetPairedIntercomMAC updates a viewer's paired intercom (the
 // source for the standby "Tuer auf" button). Empty string clears
 // the pairing - the standby button becomes inert until set
@@ -997,22 +1036,11 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 // before write so future LookupDoorForIntercom calls match
 // regardless of how the admin typed the MAC.
 func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC string) error {
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET paired_intercom_mac = ?, updated_at = ? WHERE mac = ?`,
-		strings.ToLower(strings.TrimSpace(intercomMAC)), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set paired intercom: %w", err)
+	normalised := strings.ToLower(strings.TrimSpace(intercomMAC))
+	if err := m.setColumnExec(ctx, "set paired intercom", mac, "paired_intercom_mac", normalised); err != nil {
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	m.mu.Lock()
-	if entry, ok := m.viewers[mac]; ok {
-		entry.spec.PairedIntercomMAC = strings.ToLower(strings.TrimSpace(intercomMAC))
-	}
-	m.mu.Unlock()
+	m.updateCachedSpec(mac, func(s *ViewerSpec) { s.PairedIntercomMAC = normalised })
 	return nil
 }
 
@@ -1023,23 +1051,11 @@ func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC str
 // hold profiles we are not aware of (and the admin UI already
 // limits the input to the live profile list).
 func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) error {
-	now := m.opts.Now().UnixMilli()
 	trimmed := strings.TrimSpace(profile)
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET stream_profile = ?, updated_at = ? WHERE mac = ?`,
-		nullable(trimmed), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set stream profile: %w", err)
+	if err := m.setColumnExec(ctx, "set stream profile", mac, "stream_profile", nullable(trimmed)); err != nil {
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	m.mu.Lock()
-	if entry, ok := m.viewers[mac]; ok {
-		entry.spec.StreamProfile = trimmed
-	}
-	m.mu.Unlock()
+	m.updateCachedSpec(mac, func(s *ViewerSpec) { s.StreamProfile = trimmed })
 	return nil
 }
 
@@ -1059,22 +1075,10 @@ func (m *Manager) SetIdleViewMode(ctx context.Context, mac, mode string) error {
 		return fmt.Errorf("viewermanager: idle view mode %q must be %q, %q or %q",
 			trimmed, IdleViewModeScreensaver, IdleViewModeLivestream, IdleViewModeScreenOff)
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET idle_view_mode = ?, updated_at = ? WHERE mac = ?`,
-		nullable(trimmed), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set idle view mode: %w", err)
+	if err := m.setColumnExec(ctx, "set idle view mode", mac, "idle_view_mode", nullable(trimmed)); err != nil {
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	m.mu.Lock()
-	if entry, ok := m.viewers[mac]; ok {
-		entry.spec.IdleViewMode = trimmed
-	}
-	m.mu.Unlock()
+	m.updateCachedSpec(mac, func(s *ViewerSpec) { s.IdleViewMode = trimmed })
 	return nil
 }
 
@@ -1084,24 +1088,7 @@ func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) 
 	if value < 0 || value > 100 {
 		return fmt.Errorf("viewermanager: brightness_idle %d must be in 0..100", value)
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET brightness_idle = ?, updated_at = ? WHERE mac = ?`,
-		int64(value), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set brightness idle: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	// brightness_idle lives only in ViewerInfo (loaded fresh per
-	// GetViewerInfo / LookupByName), never in the ViewerSpec
-	// cache, so there is no cache field to update under m.mu. The
-	// RowsAffected check above already serves as the existence
-	// guard. Same pattern as SetScreenOffAfterSec, SetClockLayout,
-	// SetHistoryCaptureEnabled, SetLanguage.
-	return nil
+	return m.setColumnExec(ctx, "set brightness idle", mac, "brightness_idle", int64(value))
 }
 
 // SetScreenOffAfterSec persists the ESP backlight-off timer.
@@ -1123,18 +1110,7 @@ func (m *Manager) SetScreenOffAfterSec(ctx context.Context, mac string, value in
 	if value > 0 {
 		stored = int64(value)
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET screen_off_after_sec = ?, updated_at = ? WHERE mac = ?`,
-		stored, now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set screen off after sec: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	return nil
+	return m.setColumnExec(ctx, "set screen off after sec", mac, "screen_off_after_sec", stored)
 }
 
 // SetClockLayout persists the tenant preference for the
@@ -1155,18 +1131,7 @@ func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 				trimmed, ClockLayoutAllowed)
 		}
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET clock_layout = ?, updated_at = ? WHERE mac = ?`,
-		nullable(trimmed), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set clock layout: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	return nil
+	return m.setColumnExec(ctx, "set clock layout", mac, "clock_layout", nullable(trimmed))
 }
 
 // SetHistoryCaptureEnabled persists the tenant privacy toggle.
@@ -1180,18 +1145,7 @@ func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enab
 	if enabled {
 		stored = 1
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET history_capture_enabled = ?, updated_at = ? WHERE mac = ?`,
-		stored, now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set history capture: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	return nil
+	return m.setColumnExec(ctx, "set history capture", mac, "history_capture_enabled", stored)
 }
 
 // SetLanguage persists the UI language. Values outside the
@@ -1212,18 +1166,7 @@ func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 				trimmed, LanguageAllowed)
 		}
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET language = ?, updated_at = ? WHERE mac = ?`,
-		nullable(trimmed), now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set language: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	return nil
+	return m.setColumnExec(ctx, "set language", mac, "language", nullable(trimmed))
 }
 
 // AutoScreensaverSecondsAllowed is the closed set of values the
@@ -1253,27 +1196,17 @@ func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, sec
 	if seconds > 0 {
 		stored = int64(seconds)
 	}
-	now := m.opts.Now().UnixMilli()
-	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET auto_screensaver_seconds = ?, updated_at = ? WHERE mac = ?`,
-		stored, now, mac)
-	if err != nil {
-		return fmt.Errorf("viewermanager: set auto screensaver: %w", err)
+	if err := m.setColumnExec(ctx, "set auto screensaver", mac, "auto_screensaver_seconds", stored); err != nil {
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrViewerNotFound
-	}
-	m.mu.Lock()
-	if entry, ok := m.viewers[mac]; ok {
+	m.updateCachedSpec(mac, func(s *ViewerSpec) {
 		if seconds > 0 {
 			v := seconds
-			entry.spec.AutoScreensaverSeconds = &v
+			s.AutoScreensaverSeconds = &v
 		} else {
-			entry.spec.AutoScreensaverSeconds = nil
+			s.AutoScreensaverSeconds = nil
 		}
-	}
-	m.mu.Unlock()
+	})
 	return nil
 }
 
