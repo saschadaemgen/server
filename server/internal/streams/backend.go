@@ -1,12 +1,12 @@
-// Saison 15-01: open-core seam between the carvilon HTTP layer
-// and the video backend.
+// Open-core seam between the carvilon HTTP layer and the video
+// backend.
 //
 // The public build ships with a 503-default backend so it
 // compiles, boots, and degrades cleanly without any commercial
-// streaming server linked in. A future commercial build will
-// bind the private carvilon-streaming-server to this same
-// interface via a build tag - the public repo MUST NEVER import
-// that server directly.
+// streaming server linked in. The commercial build binds the
+// private carvilon-streaming-server to this same interface via
+// the carvilon_stream build tag - the public repo MUST NEVER
+// import that server directly.
 //
 // Two implementations live in this package today:
 //
@@ -14,11 +14,12 @@
 //     is empty, every CRUD call returns ErrNotConfigured, and
 //     Configured() is false so the admin UI renders its hint
 //     banner instead of an error.
-//   - the go2rtc Client (transitional): MJPEG-Stream + profile
-//     List still go through go2rtc until the eigene streaming
-//     server takes over; profile CRUD is already stubbed to
-//     ErrNotConfigured because that surface moves to the new
-//     server.
+//   - Client: the transitional REST client that talks to the
+//     stream-server (default base URL http://127.0.0.1:8555).
+//     Read-side (List, Get, Delete via /api/profiles[/{name}])
+//     plus MJPEG + WebRTC URL builders are live; Put is a stub
+//     while the stream-server's GET/PUT field-name casing is
+//     still being unified.
 //
 // The interface is the single contract every consumer (admin
 // /a/streams page, mieter MJPEG/WebRTC proxies, ESP MJPEG proxy)

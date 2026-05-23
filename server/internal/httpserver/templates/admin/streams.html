@@ -15,15 +15,7 @@
     <header class="page-header">
       <div class="page-title-stack">
         <h1 class="page-title">Stream-Profile</h1>
-        <p class="page-subtitle">go2rtc-Konfiguration pro Endgeraet. Profile-Aenderungen wirken live ohne Server-Restart.</p>
-      </div>
-      <div class="page-actions">
-        {{if .Page.Configured}}
-          <button class="btn btn-primary" type="button" data-action="open-create">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-            Profil anlegen
-          </button>
-        {{end}}
+        <p class="page-subtitle">Stream-Profile vom Stream-Server (read-only; Bearbeitung folgt, sobald der Stream-Server seine GET/PUT-Feldnamen vereinheitlicht hat).</p>
       </div>
     </header>
 
@@ -48,30 +40,31 @@
       <div class="app-card">
         <div class="app-card-head">
           <h2 class="app-card-title">Aktive Profile (<span>{{len .Page.Profiles}}</span>)</h2>
-          <span class="badge" title="go2rtc REST-API hinter Admin-Session"><code>{{.Page.BackendURL}}</code></span>
+          <span class="badge" title="Stream-Server REST-API"><code>{{.Page.BackendURL}}</code></span>
         </div>
         {{if .Page.Profiles}}
           <table class="app-table">
             <thead>
               <tr>
                 <th>Profil-Name</th>
-                <th>Source-URL</th>
-                <th style="text-align:center;">Aktive Konsumenten</th>
-                <th style="text-align:right;">Aktionen</th>
+                <th>Codec</th>
+                <th>Nutzung</th>
+                <th>Aufloesung</th>
+                <th style="text-align:right;">FPS</th>
+                <th style="text-align:right;">Konsumenten</th>
               </tr>
             </thead>
             <tbody>
               {{range .Page.Profiles}}
                 <tr>
                   <td><strong>{{.Name}}</strong></td>
-                  <td><code style="font-size: var(--fs-sm); color: var(--color-text-tertiary); word-break: break-all;">{{.Source}}</code></td>
-                  <td style="text-align:center;">{{.Consumers}}</td>
-                  <td style="text-align:right; white-space:nowrap;">
-                    <a class="btn btn-secondary btn-sm" href="/a/streams/{{.Name}}">Bearbeiten</a>
-                    <form method="post" action="/a/streams/{{.Name}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Profil {{.Name}} endgueltig loeschen? Aktive Konsumenten verlieren ihren Stream.');">
-                      <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
-                    </form>
+                  <td><code style="font-size: var(--fs-sm);">{{.Codec}}</code></td>
+                  <td>{{.Usage}}</td>
+                  <td style="white-space:nowrap;">
+                    {{if and .Width .Height}}{{.Width}} &times; {{.Height}}{{else}}&mdash;{{end}}
                   </td>
+                  <td style="text-align:right;">{{if .FPS}}{{.FPS}}{{else}}&mdash;{{end}}</td>
+                  <td style="text-align:right;">{{.Consumers}}</td>
                 </tr>
               {{end}}
             </tbody>
@@ -79,90 +72,13 @@
         {{else}}
           <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
             <p>Noch kein Profil konfiguriert.</p>
-            <p style="font-size: var(--fs-sm);">Klick "Profil anlegen" und nutze einen der Vorlage-Knoepfe um schnell ein ESP- oder Browser-Profil zu erzeugen.</p>
+            <p style="font-size: var(--fs-sm);">Profile werden direkt auf dem Stream-Server gepflegt; sobald die Schreib-API vereinheitlicht ist, ergaenzt sich hier ein Anlegen-Formular.</p>
           </div>
         {{end}}
-      </div>
-
-      <!-- Create-Modal -->
-      <div class="modal-scrim" data-modal="create-stream" role="dialog" aria-modal="true" aria-labelledby="create-stream-title">
-        <div class="modal-glass">
-          <form method="post" action="/a/streams">
-            <header class="modal-header">
-              <div>
-                <h2 id="create-stream-title" class="modal-title">Stream-Profil anlegen</h2>
-                <p class="modal-sub">Wirkt sofort. Bestehende Konsumenten reconnecten beim naechsten Frame.</p>
-              </div>
-              <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-              </button>
-            </header>
-            <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
-              <div class="field">
-                <label class="field-label" for="stream-name">Profil-Name</label>
-                <input class="input" id="stream-name" name="name" type="text" required maxlength="64" pattern="[A-Za-z0-9_.-]+" placeholder="z.B. intercom_esp"/>
-                <span class="field-hint">Buchstaben, Zahlen, '_', '-' oder '.' (1-64 Zeichen).</span>
-              </div>
-              <div class="field">
-                <label class="field-label" for="stream-source">Source-URL</label>
-                <textarea class="input" id="stream-source" name="source" required rows="3" style="font-family: var(--font-mono); font-size: var(--fs-sm);" placeholder="ffmpeg:intercom_high#video=mjpeg#width=800#height=1280#raw=-r 9 -q:v 6"></textarea>
-                <span class="field-hint">Beliebige go2rtc-Source-Syntax (rtsps://, ffmpeg:, http://, ...).</span>
-              </div>
-              <div class="field">
-                <label class="field-label">Vorlagen</label>
-                <div style="display:flex; flex-direction:column; gap:var(--space-2);">
-                  {{range .Page.Defaults}}
-                    <button class="btn btn-secondary btn-sm" type="button"
-                            data-template-name="{{.Name}}"
-                            data-template-source="{{.Source}}"
-                            title="{{.Description}}"
-                            style="text-align:left;">
-                      <strong>{{.Name}}</strong>: {{.Label}}
-                    </button>
-                  {{end}}
-                </div>
-                <span class="field-hint">Klick befuellt Name und Source-Felder mit Konvention.</span>
-              </div>
-            </div>
-            <footer class="modal-footer">
-              <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
-              <button class="btn btn-primary" type="submit">Anlegen</button>
-            </footer>
-          </form>
-        </div>
       </div>
     {{end}}
   </main>
 
   <script src="/static/interactions.js"></script>
-  <script>
-    (function () {
-      document.addEventListener('click', function (e) {
-        var open = e.target.closest('[data-action="open-create"]');
-        if (open) {
-          e.preventDefault();
-          var modal = document.querySelector('[data-modal="create-stream"]');
-          if (modal) modal.classList.add('is-open');
-          return;
-        }
-        var close = e.target.closest('[data-action="close-modal"]');
-        if (close) {
-          var m = close.closest('.modal-scrim');
-          if (m) m.classList.remove('is-open');
-          return;
-        }
-        var tmpl = e.target.closest('[data-template-source]');
-        if (tmpl) {
-          e.preventDefault();
-          var modal = tmpl.closest('.modal-scrim');
-          if (!modal) return;
-          var nameEl = modal.querySelector('#stream-name');
-          var srcEl = modal.querySelector('#stream-source');
-          if (nameEl && !nameEl.value) nameEl.value = tmpl.dataset.templateName || '';
-          if (srcEl) srcEl.value = tmpl.dataset.templateSource || '';
-        }
-      });
-    })();
-  </script>
 </body>
 </html>

@@ -62,7 +62,6 @@ var adminLibraryFor = map[string][]string{
 	"user-detail": {},
 	"esp-pager":   {},
 	"streams":       {},
-	"stream-edit":   {},
 	"viewer-detail": {},
 }
 

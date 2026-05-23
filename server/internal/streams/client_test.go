@@ -52,16 +52,22 @@ func TestConfiguredReportsTrue(t *testing.T) {
 	}
 }
 
-func TestListDecodesGo2RTCShape(t *testing.T) {
+// List talks to the stream-server's GET /api/profiles endpoint
+// which returns a JSON array of profile objects with camelCase
+// keys (name, cameraID, quality, usage, description, codec,
+// width, height, fps, encodeQuality, consumers). The client
+// decodes them directly into []Profile and sorts by Name for
+// stable admin-UI rendering.
+func TestListDecodesArrayShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/streams" {
+		if r.URL.Path != "/api/profiles" {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"intercom_esp": {"producers":[{"url":"rtsps://example/x"}],"consumers":[{"id":1},{"id":2}]},
-			"mjpeg_bal": {"producers":[{"url":"ffmpeg:src#video=mjpeg"}],"consumers":[]}
-		}`))
+		_, _ = w.Write([]byte(`[
+			{"name":"mjpeg_bal","cameraID":"cam-1","codec":"mjpeg","width":800,"height":1280,"fps":9,"encodeQuality":6,"consumers":0},
+			{"name":"intercom_web","cameraID":"cam-1","codec":"h264_passthrough","consumers":2,"usage":"webrtc"}
+		]`))
 	}))
 	defer srv.Close()
 
@@ -74,22 +80,33 @@ func TestListDecodesGo2RTCShape(t *testing.T) {
 		t.Fatalf("want 2 profiles, got %d", len(profiles))
 	}
 	// Sorted alphabetically by Name.
-	if profiles[0].Name != "intercom_esp" || profiles[1].Name != "mjpeg_bal" {
+	if profiles[0].Name != "intercom_web" || profiles[1].Name != "mjpeg_bal" {
 		t.Fatalf("unexpected order: %+v", profiles)
 	}
-	if profiles[0].Consumers != 2 {
-		t.Fatalf("intercom_esp consumers: want 2, got %d", profiles[0].Consumers)
+	if profiles[0].Codec != "h264_passthrough" {
+		t.Errorf("intercom_web codec = %q, want h264_passthrough", profiles[0].Codec)
 	}
-	// Structured fields stay empty for the transitional go2rtc
-	// backend.
-	if profiles[0].CameraID != "" || profiles[0].Quality != "" || profiles[0].Usage != "" {
-		t.Errorf("transitional Profile should leave structured fields empty, got %+v", profiles[0])
+	if profiles[0].Consumers != 2 {
+		t.Errorf("intercom_web consumers = %d, want 2", profiles[0].Consumers)
+	}
+	if profiles[0].Usage != "webrtc" {
+		t.Errorf("intercom_web usage = %q, want webrtc", profiles[0].Usage)
+	}
+	if profiles[1].Width != 800 || profiles[1].Height != 1280 || profiles[1].FPS != 9 {
+		t.Errorf("mjpeg_bal dims = %dx%d @%d, want 800x1280 @9",
+			profiles[1].Width, profiles[1].Height, profiles[1].FPS)
+	}
+	if profiles[1].EncodeQuality != 6 {
+		t.Errorf("mjpeg_bal encodeQuality = %d, want 6", profiles[1].EncodeQuality)
+	}
+	if profiles[1].CameraID != "cam-1" {
+		t.Errorf("mjpeg_bal cameraID = %q, want cam-1", profiles[1].CameraID)
 	}
 }
 
-// Put returns ErrNotConfigured because profile CRUD is migrating
-// to the carvilon-streaming-server. The admin UI flashes the
-// migration message; no go2rtc REST call is made.
+// Put stays a stub while the stream-server's GET/PUT field-name
+// casing is being unified. The admin UI does not call it; if a
+// caller invokes Put it must NOT reach the backend.
 func TestPutIsTransitionalStub(t *testing.T) {
 	hit := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -110,7 +127,7 @@ func TestPutIsTransitionalStub(t *testing.T) {
 		t.Fatalf("Put: want ErrNotConfigured, got %v", err)
 	}
 	if hit {
-		t.Error("Put hit go2rtc REST; should be a local stub")
+		t.Error("Put hit the backend; should be a local stub")
 	}
 }
 
@@ -128,9 +145,10 @@ func TestGetMapsNotFound(t *testing.T) {
 }
 
 func TestDeleteRequestsBackend(t *testing.T) {
-	var calledPath string
+	var calledMethod, calledPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calledPath = r.URL.Path + "?" + r.URL.RawQuery
+		calledMethod = r.Method
+		calledPath = r.URL.Path
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -139,15 +157,19 @@ func TestDeleteRequestsBackend(t *testing.T) {
 	if err := c.Delete(context.Background(), "intercom_high"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	want := "/api/streams?src=intercom_high"
+	if calledMethod != http.MethodDelete {
+		t.Errorf("delete method = %q, want DELETE", calledMethod)
+	}
+	want := "/api/profiles/intercom_high"
 	if calledPath != want {
 		t.Fatalf("delete path: want %q got %q", want, calledPath)
 	}
 }
 
-// go2rtc has no Protect connection; ListCameras returns an empty
-// slice so the admin UI's camera-dropdown can render an "Quelle
-// waehlbar ab Stream-Server"-Hinweis.
+// The transitional client has no Protect connection of its own;
+// ListCameras returns an empty slice so the admin UI's
+// camera-dropdown can render an "Quelle waehlbar ab
+// Stream-Server"-Hinweis.
 func TestListCamerasIsEmpty(t *testing.T) {
 	c, _ := New("http://127.0.0.1:1984/")
 	cams, err := c.ListCameras(context.Background())

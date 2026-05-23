@@ -31,24 +31,27 @@ package streams
 // the eventual commercial UI renders. Today only Description is
 // shown to the operator in the minimal /a/streams list.
 //
-// Saison 15-07 (ADR-STREAM-01): the codec / dimension / fps /
-// encode-quality fields were added to mirror the carvilon-
-// streaming-server S6-01 profile model. The transitional
-// go2rtc client + Unconfigured default leave them at the zero
-// value; the commercial wrapper (build-tag carvilon_stream)
-// maps them to the private profile registry via
-// fromPrivateProfile / toPrivateProfile. Codec is one of
-// "h264_passthrough" / "mjpeg" / "h264_cbp"; Width / Height /
-// FPS apply to mjpeg + h264_cbp; EncodeQuality is the -q:v for
-// mjpeg or the CRF for h264_cbp.
+// The codec / dimension / fps / encode-quality fields mirror the
+// carvilon-streaming-server profile model. The Unconfigured
+// default leaves them at the zero value; the commercial wrapper
+// (build-tag carvilon_stream) maps them to the private profile
+// registry via fromPrivateProfile / toPrivateProfile. Codec is
+// one of "h264_passthrough" / "mjpeg" / "h264_cbp"; Width /
+// Height / FPS apply to mjpeg + h264_cbp; EncodeQuality is the
+// -q:v for mjpeg or the CRF for h264_cbp.
 //
 // Consumers is the live count of clients currently pulling the
 // profile, useful for the admin UI ("3 active viewers"). The
-// go2rtc client fills it from /api/streams; the unconfigured
-// default leaves it zero.
+// unconfigured default leaves it zero.
+//
+// JSON tags match the stream-server's GET /api/profiles wire
+// shape (camelCase). The S15-23 read-side switch (go2rtc map ->
+// array) keeps this single struct for both sides; the
+// stream-chat is still unifying GET/PUT field names, so write-
+// side wiring is intentionally deferred.
 type Profile struct {
 	Name          string `json:"name"`
-	CameraID      string `json:"camera_id"`
+	CameraID      string `json:"cameraID"`
 	Quality       string `json:"quality"`
 	Usage         string `json:"usage"`
 	Description   string `json:"description"`
@@ -56,6 +59,6 @@ type Profile struct {
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
 	FPS           int    `json:"fps"`
-	EncodeQuality int    `json:"encode_quality"`
+	EncodeQuality int    `json:"encodeQuality"`
 	Consumers     int    `json:"consumers"`
 }

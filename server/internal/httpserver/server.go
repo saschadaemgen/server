@@ -286,17 +286,14 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetLink)))
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 
-	// Stream-profile CRUD. Proxies the go2rtc REST API behind the
-	// admin session. The per-viewer profile pick happens in the
-	// web-/ESP-viewer edit modal; the profile definition (ffmpeg
-	// chain etc.) lives here.
+	// Stream-profile read-only list. The stream-server owns the
+	// profile registry; this page renders /api/profiles for
+	// operator visibility. The per-viewer profile pick happens in
+	// the web-/ESP-viewer edit modal (fed by /a/streams.json).
+	// Write surface (PUT/DELETE) will land once the stream-server
+	// unifies GET/PUT field-name casing.
 	s.mux.Handle("GET /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsList)))
 	s.mux.Handle("GET /a/streams.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsListJSON)))
-	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsCreate)))
-	s.mux.Handle("GET /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsEdit)))
-	s.mux.Handle("POST /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsUpdate)))
-	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
-	s.mux.Handle("DELETE /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsDelete)))
 
 	// Placeholder pages for upcoming features.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
