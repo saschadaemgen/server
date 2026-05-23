@@ -1095,14 +1095,12 @@ func (m *Manager) SetBrightnessIdle(ctx context.Context, mac string, value int) 
 	if n == 0 {
 		return ErrViewerNotFound
 	}
-	m.mu.Lock()
-	if _, ok := m.viewers[mac]; ok {
-		// ViewerSpec does not hold brightness_idle; the value is
-		// refreshed lazily on the next loadInfo. The lock release
-		// is only needed for the existence check (no cache
-		// mutation).
-	}
-	m.mu.Unlock()
+	// brightness_idle lives only in ViewerInfo (loaded fresh per
+	// GetViewerInfo / LookupByName), never in the ViewerSpec
+	// cache, so there is no cache field to update under m.mu. The
+	// RowsAffected check above already serves as the existence
+	// guard. Same pattern as SetScreenOffAfterSec, SetClockLayout,
+	// SetHistoryCaptureEnabled, SetLanguage.
 	return nil
 }
 
