@@ -168,7 +168,18 @@ func NewHub(opts HubOptions) (*Hub, error) {
 // it to an Entry — propagate its error verbatim (typically
 // [profile.ErrUnknownProfile] for unknown names, which the HTTP layer
 // maps to 404).
+//
+// S6-10: see internal/mjpeg/hub.go::Subscribe — same live-spec
+// semantics. A PUT-driven change to the h264_cbp profile's
+// fps / size / CRF takes effect on the next Subscribe; the stale
+// encoder is retired while existing subscribers finish out at the
+// old spec.
 func (h *Hub) Subscribe(name string) (*Subscriber, error) {
+	entry, err := h.entryFor(name)
+	if err != nil {
+		return nil, err
+	}
+
 	h.mu.Lock()
 	if isClosed(h.closed) {
 		h.mu.Unlock()
@@ -176,8 +187,17 @@ func (h *Hub) Subscribe(name string) (*Subscriber, error) {
 	}
 
 	sess := h.sessions[name]
+	if sess != nil && sess.spec != entry.Spec {
+		h.logger.Printf("h264esp: session %q spec changed (was %dx%d@%dfps CRF=%d, now %dx%d@%dfps CRF=%d); retiring stale encoder, starting fresh",
+			name,
+			sess.spec.Width, sess.spec.Height, sess.spec.FPS, sess.spec.Quality,
+			entry.Spec.Width, entry.Spec.Height, entry.Spec.FPS, entry.Spec.Quality)
+		delete(h.sessions, name)
+		sess = nil
+	}
+
 	if sess == nil {
-		newSess, err := h.startSessionLocked(name)
+		newSess, err := h.startSessionLockedWithEntry(name, entry)
 		if err != nil {
 			h.mu.Unlock()
 			return nil, err
@@ -216,15 +236,14 @@ func (h *Hub) Close() error {
 	return nil
 }
 
-func (h *Hub) startSessionLocked(name string) (*session, error) {
+// startSessionLockedWithEntry must be called with h.mu held. See
+// internal/mjpeg/hub.go::startSessionLockedWithEntry for the rationale;
+// same shape, same S6-10 spec-stash invariant.
+func (h *Hub) startSessionLockedWithEntry(name string, entry Entry) (*session, error) {
 	// S6-04: notify before the encoder spawns so the source-counter
 	// gets reset before the forwarder's first frame lands.
 	if h.onSessionStart != nil {
 		h.onSessionStart(name)
-	}
-	entry, err := h.entryFor(name)
-	if err != nil {
-		return nil, err
 	}
 	if entry.Source == nil {
 		return nil, fmt.Errorf("h264esp: profile %q has no Source", name)
@@ -260,11 +279,13 @@ func (h *Hub) startSessionLocked(name string) (*session, error) {
 		cancel:     cancel,
 		done:       make(chan struct{}),
 		subBufSize: h.subBufSize,
+		spec:       entry.Spec, // S6-10: spec stash for Subscribe-time mismatch check
 	}
 	go sess.runForwarder()
 	go sess.run()
 
-	h.logger.Printf("h264esp: session %q started", name)
+	h.logger.Printf("h264esp: session %q started (%dx%d @ %dfps CRF=%d)",
+		name, entry.Spec.Width, entry.Spec.Height, entry.Spec.FPS, entry.Spec.Quality)
 	return sess, nil
 }
 
@@ -291,6 +312,7 @@ type session struct {
 	done   chan struct{}
 
 	subBufSize int
+	spec       EncodeSpec // S6-10: spec the encoder was spawned with
 }
 
 type addSubReq struct {

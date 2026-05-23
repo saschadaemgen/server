@@ -498,3 +498,163 @@ func TestHub_NilEntryForRejected(t *testing.T) {
 		t.Fatal("expected error for nil EntryFor")
 	}
 }
+
+// --- S6-10: spec-change retiring -----------------------------------------------
+
+// TestHub_SpecChangeRetiresOldSession is the S6-10 contract. After a
+// PUT /api/profiles changes a profile's EncodeSpec, the NEXT
+// Subscribe must spin up a fresh encoder with the new spec — not
+// join the long-lived old session and silently keep the old fps.
+//
+// Construction: a resolver whose returned spec we can mutate.
+// Sequence:
+//  1. Subscribe → spawns encoder #1 with spec A (fps 12).
+//  2. Mutate the spec to B (fps 30) while session #1 is still alive
+//     (subscriber #1 didn't disconnect — this models a long-lived
+//     ESP connection + a freshly-arriving parallel client).
+//  3. Subscribe again → MUST observe the spec change and spawn
+//     encoder #2 with spec B.
+//  4. Old subscriber keeps streaming on the old encoder.
+//  5. The hub.sessions map now points to the NEW session for that name.
+func TestHub_SpecChangeRetiresOldSession(t *testing.T) {
+	src := newFakeSource()
+	encs := make(map[string]*fakeEncoder)
+
+	// Mutable spec source — the resolver reads it on every entry-for
+	// call. This is the test-side analogue of "PUT updated the
+	// profile registry".
+	var (
+		specMu      sync.Mutex
+		currentSpec = EncodeSpec{Width: 800, Height: 1280, FPS: 12, Quality: 6}
+	)
+	getSpec := func() EncodeSpec {
+		specMu.Lock()
+		defer specMu.Unlock()
+		return currentSpec
+	}
+	setSpec := func(s EncodeSpec) {
+		specMu.Lock()
+		defer specMu.Unlock()
+		currentSpec = s
+	}
+
+	// Each fake encoder gets a unique tag we can assert on. The
+	// encoder factory pushes them into a slice (so we can prove
+	// "exactly 2 encoders existed" rather than reusing one).
+	var encoders []*fakeEncoder
+	factory := func(label string, spec EncodeSpec) (encoderIface, error) {
+		fe := newFakeEncoder(label, spec)
+		encoders = append(encoders, fe)
+		encs[label] = fe
+		return fe, nil
+	}
+
+	h, err := NewHub(HubOptions{
+		EntryFor: func(name string) (Entry, error) {
+			if name != "mjpeg_bal" {
+				return Entry{}, profile.ErrUnknownProfile
+			}
+			return Entry{Spec: getSpec(), Source: src}, nil
+		},
+		EncoderFactory:   factory,
+		Logger:           quietHubLogger(),
+		SubscriberBuffer: 4,
+	})
+	if err != nil {
+		t.Fatalf("NewHub: %v", err)
+	}
+	defer h.Close()
+
+	// Step 1: first subscriber.
+	sub1, err := h.Subscribe("mjpeg_bal")
+	if err != nil {
+		t.Fatalf("Subscribe #1: %v", err)
+	}
+	if len(encoders) != 1 {
+		t.Fatalf("after first Subscribe: encoder count = %d, want 1", len(encoders))
+	}
+	if got := encoders[0].spec.FPS; got != 12 {
+		t.Errorf("encoder #1 spawned with FPS=%d, want 12", got)
+	}
+
+	// Step 2: mutate spec (simulates PUT /api/profiles/mjpeg_bal fps=30).
+	setSpec(EncodeSpec{Width: 800, Height: 1280, FPS: 30, Quality: 4})
+
+	// Step 3: second subscriber arrives AFTER the spec change.
+	// Pre-S6-10 this would have joined encoder #1 (fps=12). Now it
+	// must trigger a fresh encoder.
+	sub2, err := h.Subscribe("mjpeg_bal")
+	if err != nil {
+		t.Fatalf("Subscribe #2: %v", err)
+	}
+	if len(encoders) != 2 {
+		t.Fatalf("after spec-change Subscribe: encoder count = %d, want 2", len(encoders))
+	}
+	if got := encoders[1].spec.FPS; got != 30 {
+		t.Errorf("encoder #2 spawned with FPS=%d, want 30 (the new spec)", got)
+	}
+	if got := encoders[1].spec.Quality; got != 4 {
+		t.Errorf("encoder #2 spawned with Quality=%d, want 4", got)
+	}
+
+	// Step 4: old subscriber still receives frames on encoder #1.
+	encoders[0].emit([]byte{0xFF, 0xD8, 0x12, 0xFF, 0xD9})
+	select {
+	case <-sub1.Frames():
+		// good
+	case <-time.After(time.Second):
+		t.Error("sub1 did not receive a frame from the OLD encoder; existing viewers must keep streaming on the retired session")
+	}
+
+	// Step 5: new subscriber receives frames on encoder #2.
+	encoders[1].emit([]byte{0xFF, 0xD8, 0x30, 0xFF, 0xD9})
+	select {
+	case <-sub2.Frames():
+		// good
+	case <-time.After(time.Second):
+		t.Error("sub2 did not receive a frame from the NEW encoder")
+	}
+
+	// Step 6: a THIRD subscriber should also land on encoder #2
+	// (the new session is the one in the map now).
+	sub3, err := h.Subscribe("mjpeg_bal")
+	if err != nil {
+		t.Fatalf("Subscribe #3: %v", err)
+	}
+	if len(encoders) != 2 {
+		t.Errorf("after Subscribe #3: encoder count = %d, want 2 (joined new session, no third encoder)", len(encoders))
+	}
+	// Cleanup.
+	sub1.Close()
+	sub2.Close()
+	sub3.Close()
+}
+
+// TestHub_SpecUnchangedJoinsExistingSession is the inverse: if the
+// EncodeSpec hasn't changed since the session started, a new
+// Subscribe must JOIN the existing encoder — not spawn a duplicate.
+// That's the fan-out invariant.
+func TestHub_SpecUnchangedJoinsExistingSession(t *testing.T) {
+	src := newFakeSource()
+	encs := make(map[string]*fakeEncoder)
+	h, _ := testHub(t, src, encs)
+	defer h.Close()
+
+	var subs []*Subscriber
+	for i := 0; i < 5; i++ {
+		s, err := h.Subscribe("intercom_esp")
+		if err != nil {
+			t.Fatalf("Subscribe #%d: %v", i, err)
+		}
+		subs = append(subs, s)
+	}
+	defer func() {
+		for _, s := range subs {
+			s.Close()
+		}
+	}()
+
+	if len(encs) != 1 {
+		t.Errorf("encoder count = %d, want 1 (fan-out invariant broken — every Subscribe spawned a new encoder)", len(encs))
+	}
+}

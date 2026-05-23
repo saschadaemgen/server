@@ -200,7 +200,30 @@ func NewHub(opts HubOptions) (*Hub, error) {
 // it to an Entry — propagate its error verbatim (typically
 // [profile.ErrUnknownProfile] for unknown names, which the HTTP layer
 // maps to 404).
+//
+// S6-10 live-spec semantics: every Subscribe resolves the current
+// EncodeSpec from the profile registry FIRST, then compares it against
+// the spec of any existing session for this profile name. On mismatch
+// (a PUT /api/profiles/{name} changed fps / size / quality since the
+// session started), the existing session is RETIRED — removed from
+// the name → session map so no new subscriber can join it. Its
+// already-attached subscribers keep streaming at the old spec until
+// they disconnect; the new subscriber gets a fresh session with the
+// new spec.
+//
+// Why this matters: the ffmpeg encoder freezes its args (-r, -q:v,
+// scale=WxH) at spawn time. Without this check, a fresh HTTP client
+// connecting after a PUT would silently keep getting the old spec
+// because Subscribe joined the long-lived old session.
 func (h *Hub) Subscribe(name string) (*Subscriber, error) {
+	// Resolve the current Entry OUTSIDE h.mu (entryFor reads the
+	// profile registry, which has its own lock). Unknown profile or
+	// resolver-side errors propagate.
+	entry, err := h.entryFor(name)
+	if err != nil {
+		return nil, err
+	}
+
 	h.mu.Lock()
 	if isClosed(h.closed) {
 		h.mu.Unlock()
@@ -208,8 +231,23 @@ func (h *Hub) Subscribe(name string) (*Subscriber, error) {
 	}
 
 	sess := h.sessions[name]
+	if sess != nil && sess.spec != entry.Spec {
+		// S6-10: encode parameters changed since the session started.
+		// Retire the stale session so this Subscribe (and any future
+		// one) gets a fresh encoder with the new spec. The retired
+		// session's goroutines keep running for its existing
+		// subscribers; teardown's removeSession call will find the
+		// map slot pointing elsewhere and leave the new entry alone.
+		h.logger.Printf("mjpeg: session %q spec changed (was %dx%d@%dfps q=%d, now %dx%d@%dfps q=%d); retiring stale encoder, starting fresh",
+			name,
+			sess.spec.Width, sess.spec.Height, sess.spec.FPS, sess.spec.Quality,
+			entry.Spec.Width, entry.Spec.Height, entry.Spec.FPS, entry.Spec.Quality)
+		delete(h.sessions, name)
+		sess = nil
+	}
+
 	if sess == nil {
-		newSess, err := h.startSessionLocked(name)
+		newSess, err := h.startSessionLockedWithEntry(name, entry)
 		if err != nil {
 			h.mu.Unlock()
 			return nil, err
@@ -251,20 +289,21 @@ func (h *Hub) Close() error {
 	return nil
 }
 
-// startSessionLocked must be called with h.mu held. It resolves the
-// profile name to its Entry, subscribes to the upstream source, spawns
-// an encoder, and starts the session goroutines.
+// startSessionLockedWithEntry must be called with h.mu held. Given an
+// already-resolved Entry (Subscribe pre-resolves so it can detect
+// spec changes against the existing session), it subscribes to the
+// upstream source, spawns an encoder with this Entry's spec, and
+// starts the session goroutines.
 //
 // S6-04: fires onSessionStart BEFORE the encoder launches so the
 // observer (stats.Registry) can reset its per-profile source counter
 // before the forwarder's first onSourceAU call lands.
-func (h *Hub) startSessionLocked(name string) (*session, error) {
+//
+// S6-10: the spec is stored on the session struct so Subscribe can
+// compare it against future entries and retire stale encoders.
+func (h *Hub) startSessionLockedWithEntry(name string, entry Entry) (*session, error) {
 	if h.onSessionStart != nil {
 		h.onSessionStart(name)
-	}
-	entry, err := h.entryFor(name)
-	if err != nil {
-		return nil, err
 	}
 	if entry.Source == nil {
 		return nil, fmt.Errorf("mjpeg: profile %q has no Source", name)
@@ -300,11 +339,13 @@ func (h *Hub) startSessionLocked(name string) (*session, error) {
 		cancel:     cancel,
 		done:       make(chan struct{}),
 		subBufSize: h.subBufSize,
+		spec:       entry.Spec, // S6-10: for change-detection in Subscribe
 	}
 	go sess.runForwarder()
 	go sess.run()
 
-	h.logger.Printf("mjpeg: session %q started", name)
+	h.logger.Printf("mjpeg: session %q started (%dx%d @ %dfps q=%d)",
+		name, entry.Spec.Width, entry.Spec.Height, entry.Spec.FPS, entry.Spec.Quality)
 	return sess, nil
 }
 
@@ -321,6 +362,12 @@ func (h *Hub) removeSession(name string, want *session) {
 // session is the per-profile state. One run goroutine owns the
 // subscriber list and routes JPEG frames; one forwarder goroutine pumps
 // H.264 AUs from upstream into the encoder's input channel.
+//
+// S6-10: the spec field carries the EncodeSpec the encoder was spawned
+// with. Hub.Subscribe reads it back and compares against the profile's
+// current spec; on mismatch the session is retired (its goroutines
+// finish out for already-attached subscribers; new ones go to a fresh
+// session).
 type session struct {
 	name string
 	hub  *Hub
@@ -336,6 +383,7 @@ type session struct {
 	done   chan struct{}
 
 	subBufSize int
+	spec       EncodeSpec
 }
 
 type addSubReq struct {

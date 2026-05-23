@@ -339,3 +339,122 @@ func TestHub_CloseTearsDownEverything(t *testing.T) {
 		t.Error("encoder still open after Close")
 	}
 }
+
+// TestHub_SpecChangeRetiresOldSession — S6-10 counterpart to the mjpeg
+// test of the same name. PUT /api/profiles/h264_cbp changes
+// fps / CRF / size while an existing client is still connected; the
+// next Subscribe must spawn a fresh encoder with the new spec, not
+// join the long-lived old one.
+func TestHub_SpecChangeRetiresOldSession(t *testing.T) {
+	src := newFakeSource()
+
+	var (
+		specMu      sync.Mutex
+		currentSpec = EncodeSpec{Width: 800, Height: 1280, FPS: 15, Quality: 26}
+	)
+	getSpec := func() EncodeSpec {
+		specMu.Lock()
+		defer specMu.Unlock()
+		return currentSpec
+	}
+	setSpec := func(s EncodeSpec) {
+		specMu.Lock()
+		defer specMu.Unlock()
+		currentSpec = s
+	}
+
+	var encoders []*fakeEncoder
+	factory := func(label string, sp EncodeSpec) (encoderIface, error) {
+		fe := newFakeEncoder(label, sp)
+		encoders = append(encoders, fe)
+		return fe, nil
+	}
+
+	h, err := NewHub(HubOptions{
+		EntryFor: func(name string) (Entry, error) {
+			if name != "h264_cbp" {
+				return Entry{}, errors.New("unknown profile")
+			}
+			return Entry{Spec: getSpec(), Source: src}, nil
+		},
+		EncoderFactory:   factory,
+		Logger:           quietHubLogger(),
+		SubscriberBuffer: 4,
+	})
+	if err != nil {
+		t.Fatalf("NewHub: %v", err)
+	}
+	defer h.Close()
+
+	sub1, err := h.Subscribe("h264_cbp")
+	if err != nil {
+		t.Fatalf("Subscribe #1: %v", err)
+	}
+	if len(encoders) != 1 {
+		t.Fatalf("after first Subscribe: encoder count = %d, want 1", len(encoders))
+	}
+	if got := encoders[0].spec.FPS; got != 15 {
+		t.Errorf("encoder #1 FPS = %d, want 15", got)
+	}
+
+	// Simulate PUT /api/profiles/h264_cbp with new fps + CRF.
+	setSpec(EncodeSpec{Width: 800, Height: 1280, FPS: 30, Quality: 22})
+
+	sub2, err := h.Subscribe("h264_cbp")
+	if err != nil {
+		t.Fatalf("Subscribe #2: %v", err)
+	}
+	if len(encoders) != 2 {
+		t.Fatalf("after spec-change Subscribe: encoder count = %d, want 2 (fresh encoder)", len(encoders))
+	}
+	if got := encoders[1].spec.FPS; got != 30 {
+		t.Errorf("encoder #2 FPS = %d, want 30 (new spec)", got)
+	}
+	if got := encoders[1].spec.Quality; got != 22 {
+		t.Errorf("encoder #2 Quality = %d, want 22", got)
+	}
+
+	// Old subscriber still receives AUs from encoder #1; new from #2.
+	encoders[0].emit([]byte{0x00, 0x00, 0x00, 0x01, 0x65, 0x01})
+	select {
+	case <-sub1.Frames():
+	case <-time.After(time.Second):
+		t.Error("sub1 did not receive from OLD encoder")
+	}
+	encoders[1].emit([]byte{0x00, 0x00, 0x00, 0x01, 0x65, 0x02})
+	select {
+	case <-sub2.Frames():
+	case <-time.After(time.Second):
+		t.Error("sub2 did not receive from NEW encoder")
+	}
+
+	sub1.Close()
+	sub2.Close()
+}
+
+// TestHub_SpecUnchangedJoinsExistingSession — inverse: same spec
+// means the fan-out invariant holds.
+func TestHub_SpecUnchangedJoinsExistingSession(t *testing.T) {
+	src := newFakeSource()
+	encs := make(map[string]*fakeEncoder)
+	h := testHub(t, src, encs)
+	defer h.Close()
+
+	var subs []*Subscriber
+	for i := 0; i < 4; i++ {
+		s, err := h.Subscribe("h264_cbp")
+		if err != nil {
+			t.Fatalf("Subscribe #%d: %v", i, err)
+		}
+		subs = append(subs, s)
+	}
+	defer func() {
+		for _, s := range subs {
+			s.Close()
+		}
+	}()
+
+	if len(encs) != 1 {
+		t.Errorf("encoder count = %d, want 1 (same-spec subscribes must share)", len(encs))
+	}
+}
