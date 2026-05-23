@@ -55,13 +55,16 @@ import (
 //     UniFi cameras and has been the established CARVILON setup for the
 //     ESP project. Default.
 //
-//   - EncryptionSRTP — TLS tunnel PLUS per-packet SRTP, with the master
-//     key delivered via MIKEY in the SDP. Reserved for a future
-//     implementation (gortsplib has the MIKEY parser, but the SRTP
-//     decrypt path is only auto-activated when the camera advertises
-//     RTP/SAVP in the m= line, which UniFi does not — see S1-07
-//     evaluation). Currently rejected with an explicit error so the
-//     intent is visible in the type today.
+//   - EncryptionSRTP — TLS tunnel PLUS per-packet SRTP/SDES (RFC 4568).
+//     UniFi's ?enableSrtp endpoint delivers the SRTP master key in
+//     CLEARTEXT in the SDP via `a=crypto:` (NOT MIKEY — the Saison-1
+//     evaluation got the protocol wrong; the MIKEY-RE-Chat verified
+//     the actual scheme is SDES, end of 2026). Per-packet AES-CM
+//     decryption + HMAC-SHA1-80 authentication happens in
+//     [srtpReceiver]; the cleartext payload feeds the same H.264
+//     depacketizer as the TLS mode. See internal/source/unifi/srtp.go
+//     for the crypto, and the S6-11 briefing for the live verification
+//     chain (RFC 3711 B.3 vectors + Python reference + Intercom run).
 //
 // Security rationale for the default (TLS-only):
 //
@@ -78,11 +81,18 @@ const (
 	EncryptionSRTP Encryption = "srtp"
 )
 
-// ErrEncryptionSRTPNotImplemented is returned by NewSource when
-// Encryption is set to EncryptionSRTP. The type accepts the value so
-// callers can wire the switch today; the actual MIKEY+SRTP decrypt is a
-// separate, larger piece of work (Weg B in the S1-07 evaluation).
-var ErrEncryptionSRTPNotImplemented = errors.New("unifi: Encryption=srtp not yet implemented (Weg B; MIKEY+SRTP requires gortsplib internals or a wrapper layer — see S1-07)")
+// ErrEncryptionSRTPNotImplemented existed in S1..S6-10 as a sentinel
+// for the not-yet-built EncryptionSRTP path. S6-11 implements that
+// path via SDES (NOT MIKEY — see the Encryption doc). The sentinel
+// is kept exported as a deprecated alias so any external caller that
+// was checking `errors.Is(err, ErrEncryptionSRTPNotImplemented)`
+// keeps compiling. The sentinel is no longer returned by NewSource;
+// any code that relied on it firing should be revisited.
+//
+// Deprecated: SRTP/SDES is now implemented. NewSource accepts
+// EncryptionSRTP and the SDES master key is parsed from the SDP at
+// Start time.
+var ErrEncryptionSRTPNotImplemented = errors.New("unifi: Encryption=srtp not yet implemented (superseded by S6-11)")
 
 // Options configures a [Source]. All three required fields hold secrets
 // or device identifiers and MUST come from runtime env, never from a
@@ -109,10 +119,17 @@ type Options struct {
 	// stream. See [Encryption] for the available modes and the security
 	// rationale for the default (EncryptionTLS).
 	//
-	// Empty string is treated as EncryptionTLS. EncryptionSRTP currently
-	// returns [ErrEncryptionSRTPNotImplemented]; the field exists today
-	// so callers can wire the switch and so a future SRTP implementation
-	// plugs in without refactoring the API.
+	// Empty string is treated as EncryptionTLS. As of S6-11 EncryptionSRTP
+	// is implemented (SDES; the SDP carries the master key in cleartext).
+	//
+	// THIS is the single control point for the wire-protection mode —
+	// the admin-side switch the master-chat will eventually build sets
+	// this field. Today: cmd/spike populates it from the
+	// UNIFI_ENCRYPTION env var; the source factory in cmd/spike/main.go
+	// is the one place that reads the env. To move the switch to a
+	// per-profile setting later, expand profile.Profile to carry an
+	// Encryption field and have the factory read it from there. No
+	// other code path inside the package reads the env var.
 	Encryption Encryption
 
 	// Logger receives diagnostic output. If nil, the default logger.
@@ -143,6 +160,12 @@ type Source struct {
 	client  *gortsplib.Client
 	h264Fmt *format.H264
 	params  source.H264Params
+
+	// S6-11: per-packet SRTP receiver, nil in EncryptionTLS mode.
+	// Wraps the SDES-derived session keys + the ROC for the single
+	// SSRC the UniFi video track uses. Read-only after Start; writes
+	// happen only inside the gortsplib RTP callback goroutine.
+	srtp *srtpReceiver
 
 	// Access-unit assembly state. The OnPacketRTP callback is the only
 	// goroutine that touches these, so no mutex is needed.
@@ -179,10 +202,8 @@ func NewSource(opts Options) (*Source, error) {
 	switch opts.Encryption {
 	case "":
 		opts.Encryption = EncryptionTLS
-	case EncryptionTLS:
-		// supported
-	case EncryptionSRTP:
-		return nil, ErrEncryptionSRTPNotImplemented
+	case EncryptionTLS, EncryptionSRTP:
+		// both supported (S6-11)
 	default:
 		return nil, fmt.Errorf("unifi: unknown Encryption value %q (expected %q or %q)",
 			opts.Encryption, EncryptionTLS, EncryptionSRTP)
@@ -226,11 +247,14 @@ func (s *Source) Start(ctx context.Context) error {
 	}
 	s.opts.Logger.Printf("unifi: got RTSPS URL for camera %s (token redacted)", s.opts.CameraID)
 
-	// TLS mode: strip ?enableSrtp before handing the URL to gortsplib.
-	// The Protect API attaches the parameter unconditionally; without it
-	// UniFi delivers plain RTP inside the TLS tunnel (go2rtc rtspx://-
-	// equivalent path). This makes the depacketizer work against a stream
-	// our toolchain can decode end-to-end. See S1-07 for the trade-off.
+	// Encryption-mode URL massage. UniFi's Protect API attaches
+	// `?enableSrtp` unconditionally:
+	//
+	//   - EncryptionTLS  → strip it. Camera then sends plain RTP
+	//     inside the TLS tunnel (the historical go2rtc rtspx:// path).
+	//   - EncryptionSRTP → keep it. Camera sends SDES-encrypted
+	//     RTP packets; the SDP carries the master key inline and
+	//     we decrypt per-packet in handlePacket.
 	if s.opts.Encryption == EncryptionTLS {
 		rtspURL = stripEnableSrtp(rtspURL)
 	}
@@ -275,6 +299,39 @@ func (s *Source) Start(ctx context.Context) error {
 		desc.KeyMgmtMikey != nil,
 		medi.KeyMgmtMikey != nil,
 	)
+
+	// S6-11: in SRTP mode, derive the per-session keys from the SDES
+	// inline key in the SDP before SETUP. The receiver is then ready
+	// the moment the first RTP packet lands in handlePacket. Failure
+	// here means the SDP didn't carry the expected `a=crypto:` line
+	// for the video track — surface as a Start error rather than
+	// silently falling through to plain-RTP decode (which would emit
+	// garbage NALs).
+	if s.opts.Encryption == EncryptionSRTP {
+		keysalt, err := extractSDESVideoKey(resp.Body)
+		if err != nil {
+			client.Close()
+			return fmt.Errorf("unifi: SRTP key from SDP: %w", err)
+		}
+		// NEVER log the keysalt bytes themselves. Just confirm shape.
+		rx, err := newSRTPReceiver(keysalt[:16], keysalt[16:30])
+		if err != nil {
+			// Wipe the key from memory before returning (best-effort
+			// — Go's GC handles the rest).
+			for i := range keysalt {
+				keysalt[i] = 0
+			}
+			client.Close()
+			return fmt.Errorf("unifi: SRTP receiver: %w", err)
+		}
+		s.srtp = rx
+		// Wipe master key/salt — the receiver has the derived session
+		// keys; the master is no longer needed.
+		for i := range keysalt {
+			keysalt[i] = 0
+		}
+		s.opts.Logger.Printf("unifi: SRTP receiver armed (session keys derived; master key wiped from heap)")
+	}
 
 	sps, pps := h264Fmt.SafeParams()
 	s.params = source.H264Params{
@@ -340,7 +397,31 @@ func (s *Source) wait(ctx context.Context) {
 // --- RTP → access-unit assembly --------------------------------------------
 
 func (s *Source) handlePacket(client *gortsplib.Client, medi *description.Media, pkt *rtp.Packet) {
-	nalus, err := s.depack.Decode(pkt.SequenceNumber, pkt.Payload)
+	payload := pkt.Payload
+
+	// S6-11: if we're in SRTP mode, the payload that gortsplib gave us
+	// is the SDES-encrypted body + 10-byte HMAC tag. Reconstruct the
+	// wire packet (header + that payload) and hand it to srtpReceiver
+	// for AES-CM decrypt + HMAC verify. Cleartext body then flows
+	// through the same H.264 depacketizer as the TLS path.
+	if s.srtp != nil {
+		wire, err := pkt.Marshal()
+		if err != nil {
+			s.drops.Record(fmt.Errorf("srtp: marshal wire: %w", err))
+			return
+		}
+		clear, err := s.srtp.process(wire)
+		if err != nil {
+			// ErrSRTPAuth and ErrSRTPMalformed both end up here.
+			// droplog rate-limits so a hostile stream can't flood
+			// the log.
+			s.drops.Record(err)
+			return
+		}
+		payload = clear
+	}
+
+	nalus, err := s.depack.Decode(pkt.SequenceNumber, payload)
 	if err != nil {
 		if errors.Is(err, h264.ErrIncomplete) {
 			// FU mid-flight; not a drop.

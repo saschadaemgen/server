@@ -1,7 +1,6 @@
 package unifi
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -103,15 +102,27 @@ func TestNewSource_EncryptionTLSExplicit(t *testing.T) {
 	}
 }
 
-func TestNewSource_EncryptionSRTPNotImplemented(t *testing.T) {
-	_, err := NewSource(Options{
+func TestNewSource_EncryptionSRTPAccepted(t *testing.T) {
+	// S6-11: SRTP is now implemented (SDES, not MIKEY — see srtp.go).
+	// NewSource must ACCEPT the value; the actual SRTP key derivation
+	// happens at Start time once the SDP is on hand. This test would
+	// previously have asserted that NewSource ERRORED with the sentinel.
+	src, err := NewSource(Options{
 		NVRHost:    "host",
 		APIKey:     "k",
 		CameraID:   "c",
 		Encryption: EncryptionSRTP,
 	})
-	if !errors.Is(err, ErrEncryptionSRTPNotImplemented) {
-		t.Errorf("got err=%v, want ErrEncryptionSRTPNotImplemented", err)
+	if err != nil {
+		t.Fatalf("NewSource(EncryptionSRTP) errored: %v (S6-11: should accept)", err)
+	}
+	if src.opts.Encryption != EncryptionSRTP {
+		t.Errorf("Encryption = %q, want %q", src.opts.Encryption, EncryptionSRTP)
+	}
+	// The SRTP receiver is NOT armed yet — that happens in Start
+	// (needs the SDP). The field must be nil until then.
+	if src.srtp != nil {
+		t.Error("SRTP receiver was armed at construction; should only happen in Start after DESCRIBE")
 	}
 }
 
