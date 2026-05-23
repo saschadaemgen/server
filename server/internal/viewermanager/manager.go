@@ -297,16 +297,22 @@ func (v *ViewerInfo) ResolveClockLayout() string {
 // viewer. Order:
 //
 //  1. explicit StreamProfile if non-empty
-//  2. TypeESP -> "intercom_esp"
-//  3. TypeWeb -> "mjpeg_bal"
+//  2. TypeESP -> "intercom_esp"  (MJPEG, served via /esp/stream.mjpeg)
+//  3. TypeWeb -> "intercom_web"  (H.264 passthrough for WebRTC, served via /offer)
 //  4. fallback "intercom_default" (defensive; should not happen
 //     because Type is constrained to web/esp by the schema check)
 //
 // Convention is in lock-step with the profiles the streaming
-// server ships. Renaming a profile on the backend without
-// updating the matching default here will leave new viewers
-// pointed at a missing source until the admin picks one in
-// /a/streams.
+// server ships. Two transports, two default profiles:
+//   - Web viewers go via WebRTC; the /offer endpoint only accepts
+//     h264_passthrough sources, and the canonical such profile is
+//     intercom_web. mjpeg_bal would 400 here because it is MJPEG.
+//   - ESP devices keep the MJPEG passthrough; intercom_esp is the
+//     low-bandwidth MJPEG profile sized for the ESP32-P4 display.
+//
+// Renaming a profile on the backend without updating the matching
+// default here will leave new viewers pointed at a missing source
+// until the admin picks one in /a/streams.
 func (v *ViewerInfo) ResolveStreamProfile() string {
 	if v == nil {
 		return "intercom_default"
@@ -318,7 +324,7 @@ func (v *ViewerInfo) ResolveStreamProfile() string {
 	case TypeESP:
 		return "intercom_esp"
 	case TypeWeb:
-		return "mjpeg_bal"
+		return "intercom_web"
 	}
 	return "intercom_default"
 }
