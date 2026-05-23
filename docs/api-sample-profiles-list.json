@@ -1,0 +1,7 @@
+[
+  {"name":"h264_cbp","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26","codec":"h264_cbp","width":800,"height":1280,"fps":15,"encodeQuality":26},
+  {"name":"intercom_web","cameraID":"679573e101080b03e4000424","quality":"high","usage":"browser","description":"Intercom (browser reference, H.264 passthrough via WebRTC)","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encodeQuality":0},
+  {"name":"mjpeg_bal","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)","codec":"mjpeg","width":800,"height":1280,"fps":12,"encodeQuality":6},
+  {"name":"mjpeg_fast","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)","codec":"mjpeg","width":640,"height":1024,"fps":18,"encodeQuality":6},
+  {"name":"mjpeg_hq","cameraID":"679573e101080b03e4000424","quality":"high","usage":"esp","description":"ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)","codec":"mjpeg","width":800,"height":1280,"fps":10,"encodeQuality":4}
+]

@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"carvilon.local/stream/internal/mjpeg"
+	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/stats"
 )
 
@@ -48,6 +50,11 @@ func main() {
 		die("mjpeg wire format: %v", err)
 	}
 	fmt.Println("wrote docs/mjpeg-wire-format.md")
+
+	if err := writeProfilesListSample(filepath.Join(outDir, "api-sample-profiles-list.json")); err != nil {
+		die("profiles list sample: %v", err)
+	}
+	fmt.Println("wrote docs/api-sample-profiles-list.json")
 }
 
 // writeIdleSnapshot writes the empty-state snapshot — the JSON shape
@@ -267,6 +274,86 @@ func buildWireFormatDoc(wire, jpeg1, jpeg2 []byte) string {
 	fmt.Fprintln(&b, "framing bytes will not.")
 
 	return b.String()
+}
+
+// writeProfilesListSample produces the exact byte sequence the live
+// `GET /api/profiles` endpoint emits for the spike's S6-03 default
+// profile set. The format string MUST stay in lock-step with
+// `handleProfiles` in server.go — both render the same hand-rolled
+// JSON (camelCase fields, ordered by profile name).
+//
+// Used by S6-08 documentation. The carvilon-admin parser compares
+// against THIS sample to build a compatible decoder.
+func writeProfilesListSample(path string) error {
+	// Mirrors cmd/spike/main.go::defaultMeasurementProfileSet — repeated
+	// here so this tool doesn't depend on the cmd/spike main package
+	// (which can't be imported). If the spike's defaults drift, regen.
+	const cam = "679573e101080b03e4000424"
+	defaults := []profile.Profile{
+		{
+			Name: "intercom_web", CameraID: cam,
+			Quality: profile.QualityHigh, Usage: profile.UsageBrowser,
+			Description: "Intercom (browser reference, H.264 passthrough via WebRTC)",
+			Codec:       profile.CodecH264Passthrough,
+		},
+		{
+			Name: "mjpeg_hq", CameraID: cam,
+			Quality: profile.QualityHigh, Usage: profile.UsageESP,
+			Description: "ESP: MJPEG, 800x1280 @ 10 fps, q:v 4 (high quality)",
+			Codec:       profile.CodecMJPEG,
+			Width:       800, Height: 1280, FPS: 10, EncodeQuality: 4,
+		},
+		{
+			Name: "mjpeg_bal", CameraID: cam,
+			Quality: profile.QualityHigh, Usage: profile.UsageESP,
+			Description: "ESP: MJPEG, 800x1280 @ 12 fps, q:v 6 (balanced)",
+			Codec:       profile.CodecMJPEG,
+			Width:       800, Height: 1280, FPS: 12, EncodeQuality: 6,
+		},
+		{
+			Name: "mjpeg_fast", CameraID: cam,
+			Quality: profile.QualityHigh, Usage: profile.UsageESP,
+			Description: "ESP: MJPEG, 640x1024 @ 18 fps, q:v 6 (fast)",
+			Codec:       profile.CodecMJPEG,
+			Width:       640, Height: 1024, FPS: 18, EncodeQuality: 6,
+		},
+		{
+			Name: "h264_cbp", CameraID: cam,
+			Quality: profile.QualityHigh, Usage: profile.UsageESP,
+			Description: "ESP: H.264 Constrained Baseline, 800x1280 @ 15 fps, CRF 26",
+			Codec:       profile.CodecH264CBP,
+			Width:       800, Height: 1280, FPS: 15, EncodeQuality: 26,
+		},
+	}
+
+	// Sort like profile.Registry.All() does (alphabetical by Name).
+	reg, err := profile.NewRegistry(defaults)
+	if err != nil {
+		return fmt.Errorf("registry: %w", err)
+	}
+	all := reg.All()
+
+	var buf bytes.Buffer
+	// Mirrors server.go handleProfiles - same format string, same
+	// argument order. The "indented for human eyes" version follows
+	// the wire layout with newlines after each entry; the wire form
+	// is one continuous line.
+	io.WriteString(&buf, "[")
+	for i, p := range all {
+		if i > 0 {
+			io.WriteString(&buf, ",\n  ")
+		} else {
+			io.WriteString(&buf, "\n  ")
+		}
+		fmt.Fprintf(&buf,
+			`{"name":%q,"cameraID":%q,"quality":%q,"usage":%q,"description":%q,`+
+				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encodeQuality":%d}`,
+			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
+			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
+		)
+	}
+	io.WriteString(&buf, "\n]\n")
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 func die(format string, args ...any) {
