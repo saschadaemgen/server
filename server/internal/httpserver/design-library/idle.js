@@ -266,19 +266,23 @@
     }
 
     // hook the WebRTC lifecycle into the slide.
-    // Entering livestream -> connect (best-effort, falls back to
-    // MJPEG inside webrtc-stream.js on 503/error). Leaving
-    // livestream -> disconnect so the backend can release the
-    // consumer slot. Triggered in parallel with the slide; the
-    // visual transition does not wait for the WebRTC handshake.
+    // Entering livestream -> connect once (best-effort, falls
+    // back to MJPEG inside webrtc-stream.js on 503/error); the
+    // isActive() guard keeps the call idempotent so re-entering
+    // livestream while a PC is already up is a NoOp. We do NOT
+    // tear down when leaving livestream - the PC stays warm
+    // across mode switches so toggling screensaver/settings/
+    // history does not trigger a fresh SDP+ICE handshake on
+    // return. pagehide/beforeunload in webrtc-stream.js handles
+    // the final teardown when the tab actually goes away.
     if (window.carvilonWebRTC) {
       if (target === 'livestream' && activeMode !== 'livestream') {
         var nextVideo = layers.livestream
           ? layers.livestream.querySelector('video[data-webrtc-target="livestream"]')
           : null;
-        if (nextVideo) window.carvilonWebRTC.connect(nextVideo);
-      } else if (activeMode === 'livestream' && target !== 'livestream') {
-        window.carvilonWebRTC.disconnect();
+        if (nextVideo && !window.carvilonWebRTC.isActive()) {
+          window.carvilonWebRTC.connect(nextVideo);
+        }
       }
     }
 

@@ -114,9 +114,12 @@
     if (current && current.video !== videoEl) {
       disconnect();
     } else if (current && current.video === videoEl) {
-      // Reconnect on the same element: tear down first so we
-      // do not stack PCs.
-      disconnect();
+      // Already connected to this element: NoOp. The idle-mode
+      // setter calls connect() defensively on every entry into
+      // livestream; we honor the existing PC so the consumer
+      // slot stays warm and we avoid the SDP+ICE+keyframe
+      // handshake on every screensaver toggle.
+      return;
     }
 
     var slot = slotFor(videoEl);
