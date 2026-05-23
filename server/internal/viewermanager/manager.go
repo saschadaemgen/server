@@ -33,6 +33,7 @@ import (
 	"carvilon.local/server/internal/auth/esptoken"
 	"carvilon.local/server/internal/db"
 	"carvilon.local/server/internal/normalize"
+	"carvilon.local/server/internal/viewerstore"
 )
 
 // Channel buffer for the multiplexed event streams. The manager
@@ -970,31 +971,20 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 // --- internal helpers ---
 
 func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error {
-	now := m.opts.Now().UnixMilli()
-	_, err := m.db.ExecContext(ctx,
-		`INSERT INTO viewers
-		   (mac, name, service_port, type, linked_ua_user_id,
-		    esp_model, esp_fw_version, esp_token_hash,
-		    paired_intercom_mac, stream_profile, idle_view_mode,
-		    auto_screensaver_seconds,
-		    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		spec.MAC, spec.Name, int64(spec.ServicePort),
-		spec.Type,
-		nullable(spec.LinkedUAUserID),
-		nullable(spec.ESPModel),
-		nullable(spec.ESPFwVersion),
-		nullable(spec.ESPTokenHash),
-		strings.ToLower(strings.TrimSpace(spec.PairedIntercomMAC)),
-		nullable(strings.TrimSpace(spec.StreamProfile)),
-		nullable(strings.TrimSpace(spec.IdleViewMode)),
-		nullableInt(spec.AutoScreensaverSeconds),
-		now, now,
-	)
-	if err != nil {
-		return fmt.Errorf("viewermanager: insert: %w", err)
-	}
-	return nil
+	return viewerstore.Insert(ctx, m.db.DB, viewerstore.InsertSpec{
+		MAC:                    spec.MAC,
+		Name:                   spec.Name,
+		ServicePort:            spec.ServicePort,
+		Type:                   spec.Type,
+		LinkedUAUserID:         spec.LinkedUAUserID,
+		ESPModel:               spec.ESPModel,
+		ESPFwVersion:           spec.ESPFwVersion,
+		ESPTokenHash:           spec.ESPTokenHash,
+		PairedIntercomMAC:      spec.PairedIntercomMAC,
+		StreamProfile:          spec.StreamProfile,
+		IdleViewMode:           spec.IdleViewMode,
+		AutoScreensaverSeconds: spec.AutoScreensaverSeconds,
+	}, m.opts.Now().UnixMilli())
 }
 
 // setColumnExec wraps the UPDATE + updated_at + RowsAffected
@@ -1476,17 +1466,6 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
-}
-
-// nullableInt mirrors nullable for pointer-to-int spec fields:
-// nil and 0 both become SQL NULL, anything else stores the int.
-// AutoScreensaverSeconds uses this because 0 is the same as
-// "feature off".
-func nullableInt(p *int) any {
-	if p == nil || *p == 0 {
-		return nil
-	}
-	return int64(*p)
 }
 
 func hashOrEmpty(h sql.NullString) string {

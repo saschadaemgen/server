@@ -19,13 +19,11 @@ import (
 	"carvilon.local/server/internal/password"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/viewermanager"
+	"carvilon.local/server/internal/viewerstore"
 )
 
 // macFormat matches the lowercase colon form, e.g. 0c:ea:14:42:42:42.
 var macFormat = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
-
-// servicePortStart is the first port the auto-allocator hands out.
-const servicePortStart = 8100
 
 // adminWebViewersData is the payload for the
 // templates/admin/web-viewers.html template (a hand-written
@@ -680,40 +678,12 @@ func (s *Server) respondCredentials(w http.ResponseWriter, r *http.Request, c cr
 	_ = s.tpl.renderPartial(w, "credentials-modal", c)
 }
 
+// nextFreeServicePort is a thin wrapper around viewerstore so the
+// admin handlers do not have to reach across packages for every
+// allocator call. The CLI uses the same viewerstore helper from
+// its separate process.
 func (s *Server) nextFreeServicePort(ctx context.Context) (uint16, error) {
-	var maxPort sqlNullInt
-	err := s.platformCfg.DB().QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(service_port), 0) FROM viewers`,
-	).Scan(&maxPort.Int)
-	if err != nil {
-		return 0, err
-	}
-	if maxPort.Int < servicePortStart {
-		return servicePortStart, nil
-	}
-	return uint16(maxPort.Int + 1), nil
-}
-
-// sqlNullInt scans COALESCE results without dragging database/sql
-// into every caller.
-type sqlNullInt struct {
-	Int int64
-}
-
-func (n *sqlNullInt) Scan(src any) error {
-	if src == nil {
-		n.Int = 0
-		return nil
-	}
-	switch v := src.(type) {
-	case int64:
-		n.Int = v
-	case int:
-		n.Int = int64(v)
-	default:
-		return fmt.Errorf("nextFreeServicePort: unexpected type %T", src)
-	}
-	return nil
+	return viewerstore.NextFreeServicePort(ctx, s.platformCfg.DB())
 }
 
 // wantsJSON peeks at the Accept header to decide whether to
