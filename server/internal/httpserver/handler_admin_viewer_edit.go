@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/auth/esptoken"
+	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/viewermanager"
 )
 
@@ -68,7 +69,7 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "Mieter-Name fehlt oder zu lang (max 64 Zeichen).", http.StatusBadRequest)
 			return
 		}
-		if viewermanager.NormalizeName(name) != viewermanager.NormalizeName(info.Name) {
+		if normalize.ViewerName(name) != normalize.ViewerName(info.Name) {
 			if err := s.viewerMgr.Rename(r.Context(), mac, name); err != nil {
 				switch {
 				case errors.Is(err, viewermanager.ErrNameInUse):

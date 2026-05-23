@@ -29,9 +29,10 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/viewermanager"
+	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // Login goes via Wohnungs-Name (case + umlaut tolerant).
@@ -610,7 +611,7 @@ func TestLogin_AllUmlautVariants(t *testing.T) {
 
 	for _, typed := range []string{"Daemgen", "daemgen", "DAEMGEN", "Dämgen", "  Daemgen  "} {
 		t.Run(typed, func(t *testing.T) {
-			env.srv.viewerLimiter.ClearUser(viewermanager.NormalizeName(typed))
+			env.srv.viewerLimiter.ClearUser(normalize.ViewerName(typed))
 			resp := env.loginViewer(t, typed, "TestPw-1234567X")
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusSeeOther {

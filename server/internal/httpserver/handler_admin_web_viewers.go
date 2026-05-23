@@ -15,9 +15,10 @@ import (
 	"carvilon.local/server/internal/access"
 	"carvilon.local/server/internal/auth/argon2id"
 	"carvilon.local/server/internal/auth/loginaudit"
-	"carvilon.local/server/internal/viewermanager"
+	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/password"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // macFormat matches the lowercase colon form, e.g. 0c:ea:14:42:42:42.
@@ -102,7 +103,7 @@ func (s *Server) buildWebViewersData(r *http.Request) (adminWebViewersData, erro
 		if info.Type != viewermanager.TypeWeb {
 			continue
 		}
-		nameKey := viewermanager.NormalizeName(info.Name)
+		nameKey := normalize.ViewerName(info.Name)
 		row := webViewerRow{
 			MAC:               info.MAC,
 			Name:              info.Name,
@@ -292,7 +293,7 @@ func (s *Server) handleAdminWebViewersUnlock(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
 		return
 	}
-	nameKey := viewermanager.NormalizeName(info.Name)
+	nameKey := normalize.ViewerName(info.Name)
 	if s.viewerLimiter != nil && nameKey != "" {
 		s.viewerLimiter.ClearUser(nameKey)
 	}
@@ -411,7 +412,7 @@ func (s *Server) handleAdminWebViewersEdit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	nameChanged := viewermanager.NormalizeName(info.Name) != viewermanager.NormalizeName(newName)
+	nameChanged := normalize.ViewerName(info.Name) != normalize.ViewerName(newName)
 	pwChanged := newPW != ""
 	linkChanged := info.LinkedUAUserID != newLink
 	pairedChanged := info.PairedIntercomMAC != newPaired

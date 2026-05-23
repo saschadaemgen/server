@@ -32,6 +32,7 @@ import (
 	"carvilon.local/mock"
 	"carvilon.local/server/internal/auth/esptoken"
 	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/normalize"
 )
 
 // Channel buffer for the multiplexed event streams. The manager
@@ -474,12 +475,12 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 	if _, exists := m.viewers[spec.MAC]; exists {
 		return ErrMACInUse
 	}
-	specKey := NormalizeName(spec.Name)
+	specKey := normalize.ViewerName(spec.Name)
 	for _, e := range m.viewers {
 		if e.spec.ServicePort == spec.ServicePort {
 			return ErrPortInUse
 		}
-		if NormalizeName(e.spec.Name) == specKey {
+		if normalize.ViewerName(e.spec.Name) == specKey {
 			return ErrNameInUse
 		}
 	}
@@ -556,7 +557,7 @@ func (m *Manager) Rename(ctx context.Context, mac, newName string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	exists, err := m.nameExistsLocked(ctx, NormalizeName(newName), mac)
+	exists, err := m.nameExistsLocked(ctx, normalize.ViewerName(newName), mac)
 	if err != nil {
 		return err
 	}
@@ -644,7 +645,7 @@ func (m *Manager) SetPasswordHash(ctx context.Context, mac, hash string) error {
 // built-in for "expand German umlauts and collapse whitespace",
 // so there is no usable WHERE clause.
 func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, string, error) {
-	target := NormalizeName(name)
+	target := normalize.ViewerName(name)
 	if target == "" {
 		return nil, "", ErrViewerNotFound
 	}
@@ -703,7 +704,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			v := capture.Int64 != 0
 			info.HistoryCaptureEnabled = &v
 		}
-		if NormalizeName(info.Name) != target {
+		if normalize.ViewerName(info.Name) != target {
 			continue
 		}
 		info.ServicePort = uint16(port)
@@ -754,7 +755,7 @@ func (m *Manager) nameExistsLocked(ctx context.Context, target, excludeMAC strin
 		if mac == excludeMAC {
 			continue
 		}
-		if NormalizeName(name) == target {
+		if normalize.ViewerName(name) == target {
 			return true, nil
 		}
 	}

@@ -9,7 +9,7 @@ import (
 	"carvilon.local/server/internal/auth/loginaudit"
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
-	"carvilon.local/server/internal/viewermanager"
+	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
 )
 
@@ -57,7 +57,7 @@ func (s *Server) handleViewerLoginPost(w http.ResponseWriter, r *http.Request) {
 	// Wohnungs-Name. The audit log and limiter bucket use the
 	// normalised value as the stable key.
 	nameRaw := strings.TrimSpace(r.PostForm.Get("username"))
-	lookupKey := viewermanager.NormalizeName(nameRaw)
+	lookupKey := normalize.ViewerName(nameRaw)
 	password := r.PostForm.Get("password")
 	ip := clientIP(r)
 	ua := r.UserAgent()
