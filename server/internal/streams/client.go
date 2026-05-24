@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,11 +29,12 @@ var ErrProfileNotFound = errors.New("streams: profile not found")
 //
 // Public-build transitional implementation of the StreamBackend
 // interface. Stream URLs (MJPEG via /api/stream.mjpeg, WebRTC via
-// /offer) and the read-side surface (List via /api/profiles, Get
-// via /api/profiles/{name}, Delete via /api/profiles/{name}) talk
-// to the stream-server. Put currently returns ErrNotConfigured
-// while GET and PUT field names on the server are still being
-// unified; the admin UI is read-only against this client.
+// /offer) plus the full CRUD surface against /api/profiles talk
+// to the stream-server. The wire shape is the 11-field
+// snake_case profile schema documented on Profile; GET and PUT
+// share that schema verbatim so the admin UI can round-trip a
+// payload it just fetched.
+//
 // ListCameras returns empty because the transitional client has
 // no Protect connection of its own (the commercial backend wraps
 // the private streaming server which does).
@@ -98,14 +100,12 @@ func (c *Client) WebRTCSignalURL(profile string) string {
 
 // List asks the stream-server for every configured profile via
 // GET /api/profiles. The wire format is a JSON array of profile
-// objects (camelCase keys); we sort by Name for stable admin-UI
-// rendering.
+// objects (snake_case keys, see Profile); we sort by Name for
+// stable admin-UI rendering.
 //
-// Saison 15-23: switched from the legacy go2rtc shape
-// (map under /api/streams) to the array under /api/profiles. The
-// stream-chat is still unifying the GET/PUT field names; until
-// that lands the carvilon admin UI is read-only against this
-// endpoint and Put returns ErrNotConfigured.
+// Saison 15-25: the stream-server unified GET / PUT field names
+// at snake_case, so List, Get and Put all decode / encode the
+// same Profile struct without any key translation.
 func (c *Client) List(ctx context.Context) ([]Profile, error) {
 	body, err := c.do(ctx, http.MethodGet, "/api/profiles", nil)
 	if err != nil {
@@ -140,23 +140,37 @@ func (c *Client) Get(ctx context.Context, name string) (Profile, error) {
 	return p, nil
 }
 
-// Put is intentionally a stub until the stream-chat unifies the
-// GET/PUT field names on the server side. Until then a best-
-// effort PUT could silently lose fields under either casing, so
-// the admin UI stays read-only and Put returns ErrNotConfigured.
+// Put creates or replaces a profile via PUT /api/profiles/{name}.
+// The body is the 11-field snake_case Profile envelope; the
+// stream-server runs DisallowUnknownFields against it, so the
+// Profile struct here is held to exactly those fields.
 //
-// The stream-server already exposes PUT /api/profiles/{name}
-// with a snake_case body today; once GET/PUT agree we wire it
-// here in a follow-up briefing.
-func (c *Client) Put(_ context.Context, _ Profile) error {
-	return ErrNotConfigured
+// Wire contract: 204 No Content on success, 400 with a plain-
+// text reason on validation error (passed through verbatim so
+// the admin UI can show the operator what the server rejected),
+// 503 when the stream-server itself is down. The Name in the
+// spec MUST match the path; the caller assembles that.
+func (c *Client) Put(ctx context.Context, p Profile) error {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return fmt.Errorf("streams: put: empty profile name")
+	}
+	body, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("streams: encode put: %w", err)
+	}
+	respBody, err := c.do(ctx, http.MethodPut,
+		"/api/profiles/"+url.PathEscape(name), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	_ = respBody.Close()
+	return nil
 }
 
 // Delete removes a profile via DELETE /api/profiles/{name}.
 // Maps 404 to ErrProfileNotFound so the admin UI can render
-// "schon weg" instead of a generic error. Kept functional for
-// the future write-side wiring; the current admin UI does not
-// call it.
+// "schon weg" instead of a generic error.
 func (c *Client) Delete(ctx context.Context, name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("streams: delete: empty name")
@@ -188,6 +202,9 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (i
 		return nil, fmt.Errorf("streams: build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("streams: %s %s: %w", method, path, err)

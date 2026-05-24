@@ -51,7 +51,7 @@
                 <th>Nutzung</th>
                 <th>Aufloesung</th>
                 <th style="text-align:right;">FPS</th>
-                <th style="text-align:right;">Konsumenten</th>
+                <th>Medien</th>
               </tr>
             </thead>
             <tbody>
@@ -64,7 +64,7 @@
                     {{if and .Width .Height}}{{.Width}} &times; {{.Height}}{{else}}&mdash;{{end}}
                   </td>
                   <td style="text-align:right;">{{if .FPS}}{{.FPS}}{{else}}&mdash;{{end}}</td>
-                  <td style="text-align:right;">{{.Consumers}}</td>
+                  <td>{{if eq .Encryption "srtp"}}SRTP{{else if eq .Encryption "tls"}}TLS{{else}}&mdash;{{end}}</td>
                 </tr>
               {{end}}
             </tbody>

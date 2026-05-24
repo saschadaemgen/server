@@ -37,8 +37,9 @@ type adminStreamsData struct {
 }
 
 // streamRow is one row in the admin profile list. Fields mirror
-// the stream-server's /api/profiles entry shape so the template
-// can render them without further mapping.
+// the stream-server's /api/profiles entry shape (the 11-field
+// snake_case schema on streams.Profile) so the template can
+// render them without further mapping.
 type streamRow struct {
 	Name          string
 	Codec         string
@@ -49,7 +50,8 @@ type streamRow struct {
 	EncodeQuality int
 	CameraID      string
 	Description   string
-	Consumers     int
+	Quality       string
+	Encryption    string
 }
 
 // streamBackendBaseURL is a soft accessor for the operator-facing
@@ -110,7 +112,8 @@ func (s *Server) buildStreamsData(r *http.Request) adminStreamsData {
 			EncodeQuality: p.EncodeQuality,
 			CameraID:      p.CameraID,
 			Description:   p.Description,
-			Consumers:     p.Consumers,
+			Quality:       p.Quality,
+			Encryption:    p.Encryption,
 		})
 	}
 	return data

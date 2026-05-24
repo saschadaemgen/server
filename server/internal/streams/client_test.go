@@ -2,9 +2,12 @@ package streams
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -53,11 +56,10 @@ func TestConfiguredReportsTrue(t *testing.T) {
 }
 
 // List talks to the stream-server's GET /api/profiles endpoint
-// which returns a JSON array of profile objects with camelCase
-// keys (name, cameraID, quality, usage, description, codec,
-// width, height, fps, encodeQuality, consumers). The client
-// decodes them directly into []Profile and sorts by Name for
-// stable admin-UI rendering.
+// which returns a JSON array of profile objects with snake_case
+// keys (the 11-field schema on Profile). The client decodes them
+// directly into []Profile and sorts by Name for stable admin-UI
+// rendering.
 func TestListDecodesArrayShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/profiles" {
@@ -65,8 +67,8 @@ func TestListDecodesArrayShape(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[
-			{"name":"mjpeg_bal","cameraID":"cam-1","codec":"mjpeg","width":800,"height":1280,"fps":9,"encodeQuality":6,"consumers":0},
-			{"name":"intercom_web","cameraID":"cam-1","codec":"h264_passthrough","consumers":2,"usage":"webrtc"}
+			{"name":"mjpeg_bal","camera_id":"cam-1","quality":"low","usage":"esp","description":"","codec":"mjpeg","width":800,"height":1280,"fps":9,"encode_quality":6,"encryption":"tls"},
+			{"name":"intercom_web","camera_id":"cam-1","quality":"high","usage":"browser","description":"","codec":"h264_passthrough","width":0,"height":0,"fps":0,"encode_quality":0,"encryption":"srtp"}
 		]`))
 	}))
 	defer srv.Close()
@@ -86,48 +88,135 @@ func TestListDecodesArrayShape(t *testing.T) {
 	if profiles[0].Codec != "h264_passthrough" {
 		t.Errorf("intercom_web codec = %q, want h264_passthrough", profiles[0].Codec)
 	}
-	if profiles[0].Consumers != 2 {
-		t.Errorf("intercom_web consumers = %d, want 2", profiles[0].Consumers)
+	if profiles[0].Usage != "browser" {
+		t.Errorf("intercom_web usage = %q, want browser", profiles[0].Usage)
 	}
-	if profiles[0].Usage != "webrtc" {
-		t.Errorf("intercom_web usage = %q, want webrtc", profiles[0].Usage)
+	if profiles[0].Encryption != "srtp" {
+		t.Errorf("intercom_web encryption = %q, want srtp", profiles[0].Encryption)
 	}
 	if profiles[1].Width != 800 || profiles[1].Height != 1280 || profiles[1].FPS != 9 {
 		t.Errorf("mjpeg_bal dims = %dx%d @%d, want 800x1280 @9",
 			profiles[1].Width, profiles[1].Height, profiles[1].FPS)
 	}
 	if profiles[1].EncodeQuality != 6 {
-		t.Errorf("mjpeg_bal encodeQuality = %d, want 6", profiles[1].EncodeQuality)
+		t.Errorf("mjpeg_bal encode_quality = %d, want 6", profiles[1].EncodeQuality)
 	}
 	if profiles[1].CameraID != "cam-1" {
-		t.Errorf("mjpeg_bal cameraID = %q, want cam-1", profiles[1].CameraID)
+		t.Errorf("mjpeg_bal camera_id = %q, want cam-1", profiles[1].CameraID)
+	}
+	if profiles[1].Encryption != "tls" {
+		t.Errorf("mjpeg_bal encryption = %q, want tls", profiles[1].Encryption)
 	}
 }
 
-// Put stays a stub while the stream-server's GET/PUT field-name
-// casing is being unified. The admin UI does not call it; if a
-// caller invokes Put it must NOT reach the backend.
-func TestPutIsTransitionalStub(t *testing.T) {
-	hit := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hit = true
-		w.WriteHeader(http.StatusOK)
+// Put sends the full 11-field snake_case envelope to the
+// stream-server. The test pins the path (PathEscape on the
+// profile name), the method, the Content-Type header, and the
+// JSON body shape so a future cross-language refactor cannot
+// silently drop a field.
+func TestPutSendsSnakeCaseBody(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotCT     string
+		gotBody   map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
 
 	c, _ := New(srv.URL)
+	auto := 6
 	err := c.Put(context.Background(), Profile{
-		Name:        "intercom_esp",
-		CameraID:    "cam-1",
-		Quality:     "low",
-		Usage:       "esp",
-		Description: "ESP profile",
+		Name:          "intercom esp",
+		CameraID:      "cam-1",
+		Quality:       "low",
+		Usage:         "esp",
+		Description:   "ESP-Pull",
+		Codec:         "mjpeg",
+		Width:         800,
+		Height:        1280,
+		FPS:           9,
+		EncodeQuality: auto,
+		Encryption:    "srtp",
 	})
-	if !errors.Is(err, ErrNotConfigured) {
-		t.Fatalf("Put: want ErrNotConfigured, got %v", err)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %q, want PUT", gotMethod)
+	}
+	// r.URL.Path is the decoded form; what matters is the
+	// PathEscape round-trip, which Go's server side normalises
+	// back to a space.
+	if gotPath != "/api/profiles/intercom esp" {
+		t.Errorf("path = %q, want decoded form of PathEscape(name)", gotPath)
+	}
+	if !strings.HasPrefix(gotCT, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+	// Exactly the 11 snake_case keys, no extras.
+	wantKeys := []string{
+		"name", "camera_id", "quality", "usage", "description",
+		"codec", "width", "height", "fps", "encode_quality",
+		"encryption",
+	}
+	if len(gotBody) != len(wantKeys) {
+		t.Errorf("body has %d keys, want %d (%v)", len(gotBody), len(wantKeys), gotBody)
+	}
+	for _, k := range wantKeys {
+		if _, ok := gotBody[k]; !ok {
+			t.Errorf("body missing key %q", k)
+		}
+	}
+	if gotBody["encryption"] != "srtp" {
+		t.Errorf("encryption = %v, want srtp", gotBody["encryption"])
+	}
+	if v, _ := gotBody["encode_quality"].(float64); v != 6 {
+		t.Errorf("encode_quality = %v, want 6", gotBody["encode_quality"])
+	}
+}
+
+// Put surfaces 400-validation errors verbatim so the admin UI
+// can show the operator what the stream-server rejected.
+func TestPutSurfacesValidationError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "encryption must be tls or srtp", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL)
+	err := c.Put(context.Background(), Profile{Name: "x", Encryption: "garbage"})
+	if err == nil {
+		t.Fatal("Put: want error on HTTP 400, got nil")
+	}
+	if !strings.Contains(err.Error(), "encryption must be tls or srtp") {
+		t.Errorf("Put: error %q does not carry server reason", err)
+	}
+}
+
+// Put rejects an empty name locally without touching the
+// backend.
+func TestPutRejectsEmptyName(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL)
+	if err := c.Put(context.Background(), Profile{Name: "   "}); err == nil {
+		t.Fatal("want error on empty name, got nil")
 	}
 	if hit {
-		t.Error("Put hit the backend; should be a local stub")
+		t.Error("backend was hit; empty-name guard must be local")
 	}
 }
 

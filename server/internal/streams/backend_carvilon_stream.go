@@ -92,12 +92,12 @@ func fromPrivateProfile(p private.Profile) Profile {
 		Quality:       p.Quality,
 		Usage:         p.Usage,
 		Description:   p.Description,
-		Consumers:     p.Consumers,
 		Codec:         p.Codec,
 		Width:         p.Width,
 		Height:        p.Height,
 		FPS:           p.FPS,
 		EncodeQuality: p.EncodeQuality,
+		Encryption:    p.Encryption,
 	}
 }
 
@@ -113,6 +113,7 @@ func toPrivateProfile(p Profile) private.Profile {
 		Height:        p.Height,
 		FPS:           p.FPS,
 		EncodeQuality: p.EncodeQuality,
+		Encryption:    p.Encryption,
 	}
 }
 
