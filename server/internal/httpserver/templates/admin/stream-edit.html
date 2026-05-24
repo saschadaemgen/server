@@ -130,19 +130,26 @@
         </div>
 
         <div class="field">
-          <label class="field-label" for="f-encryption">Medien-Verschluesselung</label>
-          <div class="dropdown" data-dropdown
-               data-dropdown-source="inline"
-               data-dropdown-value="{{.Page.Profile.Encryption}}">
-            <select id="f-encryption" name="encryption" data-dropdown-target>
-              <option value="tls"  {{if eq .Page.Profile.Encryption "tls"}}selected{{end}}>TLS (Leitung verschluesselt)</option>
-              <option value="srtp" {{if eq .Page.Profile.Encryption "srtp"}}selected{{end}}>SRTP (Leitung + Medien verschluesselt)</option>
-            </select>
+          <label class="field-label">Quellen-Verschluesselung</label>
+          <!-- read-only: encryption betrifft die Strecke Kamera ->
+               Stream-Server (Quelle), nicht die Auslieferung an
+               ESP/Browser. Wird am Stream-Server bestimmt, hier
+               nur als Info angezeigt. Der aktuelle Wert wird beim
+               Save unveraendert durchgereicht, damit ein bereits
+               gesetztes srtp-Profil nicht versehentlich auf den
+               Default zurueckfaellt. -->
+          <div style="display:flex; align-items:center; gap:var(--space-2);">
+            {{if eq .Page.Profile.Encryption "srtp"}}
+              <code>SRTP</code>
+            {{else if eq .Page.Profile.Encryption "tls"}}
+              <code>TLS</code>
+            {{else}}
+              <code style="color: var(--color-text-tertiary);">(Server-Default)</code>
+            {{end}}
+            <input type="hidden" name="encryption" value="{{.Page.Profile.Encryption}}">
           </div>
           <span class="field-hint">
-            TLS: Transport ist verschluesselt, im LAN ausreichend.
-            SRTP: zusaetzlich werden die Medien-Pakete verschluesselt (fuer Internet- oder Cloud-Zugriff).
-            Aenderung greift beim naechsten Client-Reconnect.
+            Verschluesselung der Kamera-Quelle. Wird am Stream-Server bestimmt, hier nur Anzeige.
           </span>
         </div>
 

@@ -159,7 +159,10 @@ func profileToRow(p streams.Profile) streamRow {
 
 // handleAdminStreamNew renders the create-form (an empty edit
 // template with IsNew == true). Defaults that map to the most
-// common shape: codec mjpeg, usage esp, encryption tls.
+// common shape: codec mjpeg, usage esp. Encryption is left empty
+// so the stream-server's source-side default takes over - it is
+// not a per-profile knob on the consumer side (see the read-only
+// row in stream-edit.html for the rationale).
 func (s *Server) handleAdminStreamNew(w http.ResponseWriter, r *http.Request) {
 	if !s.streamsConfiguredOr503(w) {
 		return
@@ -169,9 +172,8 @@ func (s *Server) handleAdminStreamNew(w http.ResponseWriter, r *http.Request) {
 		User:  adminUser{Name: username, Initials: initialsOf(username)},
 		IsNew: true,
 		Profile: streamRow{
-			Codec:      "mjpeg",
-			Usage:      "esp",
-			Encryption: "tls",
+			Codec: "mjpeg",
+			Usage: "esp",
 		},
 	})
 }
@@ -302,11 +304,14 @@ func parseStreamForm(r *http.Request, name string) (streams.Profile, string) {
 	if !validStreamUsage(usage) {
 		return streams.Profile{}, "Ungueltige Nutzung (esp / browser)."
 	}
+	// encryption is no longer an operator-facing knob (S15-29);
+	// the stream-edit form ships the current value as a hidden
+	// input so the value round-trips on save. Empty is allowed
+	// here so the stream-server's source-side default kicks in
+	// on a fresh profile create; non-empty must still hit the
+	// allow-list so a tampered form cannot smuggle garbage.
 	encryption := strings.TrimSpace(r.PostForm.Get("encryption"))
-	if encryption == "" {
-		encryption = "tls"
-	}
-	if !validStreamEncryption(encryption) {
+	if encryption != "" && !validStreamEncryption(encryption) {
 		return streams.Profile{}, "Ungueltiger Verschluesselungs-Modus (tls / srtp)."
 	}
 	width, ok := parseStreamInt(r.PostForm.Get("width"))
