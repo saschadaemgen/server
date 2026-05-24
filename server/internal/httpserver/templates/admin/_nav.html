@@ -93,11 +93,26 @@
   .dropdown-panel {
     /* das Panel wird beim Oeffnen
        via JS in document.body verschoben (Portal-Pattern) und
-       inline mit position:fixed + top/left/width gesetzt. Die
-       Defaults hier sind nur fuer den geschlossenen Zustand
-       relevant. Z-Index liegt UEBER dem Modal (--z-modal=300).
-       Die overflow:hidden des Modal-Glass kann das Panel nicht
-       mehr clippen, weil es im Body liegt.
+       inline mit position:fixed + top|bottom/left/width gesetzt.
+       Die Defaults hier sind nur fuer den geschlossenen Zustand
+       relevant (display:none). Z-Index liegt UEBER dem Modal
+       (--z-modal=300). Die overflow:hidden des Modal-Glass kann
+       das Panel nicht mehr clippen, weil es im Body liegt.
+
+       Saison 15-28: vorher stand hier
+         top: calc(100% + 4px);
+       als CSS-Default. Beim Open setzt positionPanel
+       position:fixed und JE NACH Flip-Richtung entweder top
+       oder bottom; den jeweils ungenutzten Anchor inline auf
+       '' zu setzen liess das CSS-Default einspringen. Bei
+       position:fixed wird das 100% in calc(100% + 4px) zu
+       viewport.height (Containing Block = Viewport), also
+       wanderte top auf vh+4 (offscreen). Zusammen mit dem
+       gesetzten bottom-Anchor klemmte der Browser die computed
+       height auf 0 und das Panel wurde unsichtbar. Lasst hier
+       jetzt keinen top-Default mehr stehen und setzt den
+       ungenutzten Anchor inline auf 'auto' (siehe positionPanel
+       unten).
 
        konkrete Farben statt
        var(--color-surface-1), weil das eine 4%-Alpha-translucente
@@ -107,7 +122,6 @@
        --color-bg-elev aus tokens.css) plus !important, damit
        spaetere Library-Updates nicht zurueckholen. */
     position: absolute;
-    top: calc(100% + 4px);
     left: 0;
     right: 0;
     max-height: 280px;
@@ -486,12 +500,20 @@
       panel.style.left = rect.left + 'px';
       panel.style.width = rect.width + 'px';
       panel.style.zIndex = '9999';
+      // Saison 15-28: 'auto' statt '' fuer den jeweils
+      // ungenutzten Anchor. Inline-empty wuerde das CSS-Default
+      // wieder einspringen lassen; bei position:fixed kollidiert
+      // das mit dem gesetzten Anchor und klemmt die computed
+      // height auf 0 (Panel unsichtbar). 'auto' ueberschreibt
+      // das Default explizit, damit der Browser nur den
+      // tatsaechlich gesetzten Anchor + die content-driven Hoehe
+      // nutzt.
       if (flipUp) {
-        panel.style.top = '';
+        panel.style.top = 'auto';
         panel.style.bottom = (vh - rect.top + PANEL_GAP) + 'px';
         panel.style.maxHeight = Math.max(120, Math.min(PANEL_MAX_HEIGHT, spaceAbove - 8)) + 'px';
       } else {
-        panel.style.bottom = '';
+        panel.style.bottom = 'auto';
         panel.style.top = (rect.bottom + PANEL_GAP) + 'px';
         panel.style.maxHeight = Math.max(120, Math.min(PANEL_MAX_HEIGHT, spaceBelow - 8)) + 'px';
       }
