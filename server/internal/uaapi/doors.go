@@ -37,7 +37,7 @@ type UnlockDoorRequest struct {
 // camera snapshot UA renders for the door. The path embeds the
 // intercom MAC that calls this door:
 //
-//	/preview/reader_28704e31e29c_321e5134-..._<ts>.jpg
+//	/preview/reader_28704e31e29c_00000000-..._<ts>.jpg
 //
 // IntercomMAC parses that out so carvilon can auto-resolve "which
 // door does THIS intercom open" without operator-curated mapping.

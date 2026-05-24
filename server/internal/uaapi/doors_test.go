@@ -196,12 +196,12 @@ func TestDoorIntercomMAC(t *testing.T) {
 	}{
 		{
 			name:      "live capture",
-			thumbnail: "/preview/reader_28704e31e29c_321e5134-b189-4de1-b973-8c4999e05790_1747.jpg",
+			thumbnail: "/preview/reader_28704e31e29c_00000000-0000-0000-0000-000000000000_1747.jpg",
 			want:      "28:70:4e:31:e2:9c",
 		},
 		{
 			name:      "uppercase hex normalised to lowercase",
-			thumbnail: "/preview/reader_28704E31E29C_321e5134-b189-4de1-b973-8c4999e05790_1747.jpg",
+			thumbnail: "/preview/reader_28704E31E29C_00000000-0000-0000-0000-000000000000_1747.jpg",
 			want:      "28:70:4e:31:e2:9c",
 		},
 		{
@@ -216,7 +216,7 @@ func TestDoorIntercomMAC(t *testing.T) {
 		},
 		{
 			name:      "thumbnail without reader prefix (key-only door)",
-			thumbnail: "/preview/snapshot_321e5134_1234.jpg",
+			thumbnail: "/preview/snapshot_00000000_1234.jpg",
 			want:      "",
 		},
 		{

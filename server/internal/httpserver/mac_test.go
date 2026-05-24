@@ -46,7 +46,7 @@ func TestMacAnyForm_Rejects(t *testing.T) {
 		"28704e31e29c00",         // 14 chars
 		"28-70-4e-31-e2-9c",      // dashes
 		"door-uuid-1",            // door uuid
-		"321e5134-b189-4de1-...", // uuid prefix
+		"00000000-b189-4de1-...", // uuid prefix
 	}
 	for _, in := range rejectCases {
 		if macAnyForm.MatchString(in) {
