@@ -129,6 +129,18 @@ type Options struct {
 	// streaming-server's HTTP listener — e.g. "http://127.0.0.1:8555".
 	// Used to build MJPEGURL / WebRTCSignalURL responses. Required.
 	BaseURL string
+
+	// Encryption is the GLOBAL camera-side wire-protection mode
+	// (S6-14). Mirrors stream.ServerOptions.Encryption and must be
+	// set to the same value — the Backend uses it when looking up
+	// per-camera hub subscriber counts (the source-registry Key
+	// includes Encryption since S6-12) and when surfacing the
+	// per-profile encryption field over the wire.
+	//
+	// Empty → treated as [profile.EncryptionTLS]. cmd/spike feeds
+	// this from the UNIFI_ENCRYPTION env var, same source as the
+	// stream.Server's value.
+	Encryption profile.Encryption
 }
 
 // Backend is the streaming-server's implementation of the carvilon
@@ -339,11 +351,11 @@ func (b *Backend) Configured() bool { return true }
 // known-limitation re. per-profile vs per-camera accounting.
 func (b *Backend) toWire(p profile.Profile) Profile {
 	consumers := 0
-	// S6-12: the source-registry key now includes Encryption so two
-	// modes on the same camera get distinct hubs. Mirror the
-	// canonicalisation server.canonicalEncryption uses ("" → "tls")
-	// so a profile with empty encryption finds its hub.
-	enc := string(p.Encryption)
+	// S6-14: Encryption in the Key now comes from the SERVER-GLOBAL
+	// setting (Options.Encryption), not from the per-profile
+	// field. Must match what stream.Server.sourceKeyFor uses so
+	// the consumer-count lookup hits the same hub.
+	enc := string(b.opts.Encryption)
 	if enc == "" {
 		enc = string(profile.EncryptionTLS)
 	}
@@ -363,7 +375,11 @@ func (b *Backend) toWire(p profile.Profile) Profile {
 		Height:        p.Height,
 		FPS:           p.FPS,
 		EncodeQuality: p.EncodeQuality,
-		Encryption:    string(p.Encryption),
+		// S6-14: surface the GLOBAL mode (what's running), not the
+		// per-profile stored value. Matches stream.Server's GET
+		// behaviour so the wire shape is consistent across both
+		// boundary paths (direct HTTP and carvilon-wrapper Go-level).
+		Encryption: enc,
 	}
 }
 

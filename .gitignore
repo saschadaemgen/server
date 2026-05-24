@@ -10,6 +10,8 @@ secrets.yml
 /spike.exe
 /bin/
 /dist/
+/carvilon-stream-rpi
+/carvilon-stream-rpi.exe
 
 # Go build / test artifacts
 *.test

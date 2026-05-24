@@ -2,14 +2,21 @@
 
 Status: **factual inventory** of what the server speaks today. Reflects the
 S6-09 snake_case unification (GET and PUT share the same field names; a
-profile object fetched via GET can be PUT back verbatim) and the S6-12
-encryption field.
+profile object fetched via GET can be PUT back verbatim), the S6-12
+encryption field, and the **S6-14 direction correction**: `encryption`
+is a SOURCE-side property (camera ↔ server hop), not a per-profile
+delivery property. The field stays in the wire schema for stability,
+but it is now **display-only** — the steering value comes from the
+server-global `UNIFI_ENCRYPTION` env. PUT still accepts the field
+(silently ignored for steering) so GET output round-trips cleanly.
 
-**Schema is final as of S6-12.** The full profile field set is now
+**Schema is final as of S6-12.** The full profile field set is still
 `{name, camera_id, quality, usage, description, codec, width, height,
 fps, encode_quality, encryption}`. No more fields planned. The
 master-chat can build the admin CRUD UI against this shape with
-confidence that it won't grow again before S7.
+confidence that it won't grow again before S7. (S6-14 changed the
+*semantics* of the existing `encryption` field; the *shape* is
+unchanged.)
 
 Server listens on `CARVILON_STREAM_LISTEN` (default `:8555`).
 
@@ -42,7 +49,7 @@ body shape; the live `handleProfiles` Fprintf format in `server.go`):
 | `height`         | number | output pixels (0 for `h264_passthrough`)               |
 | `fps`            | number | target frame rate (0 for `h264_passthrough`)           |
 | `encode_quality` | number | mjpeg q:v / h264 CRF (0 for `h264_passthrough`)        |
-| `encryption`     | string | wire-protection on camera-side hop: `tls` (default) or `srtp`. **GET always returns the effective value** (`""` in storage → `"tls"` on the wire) so admin UIs see a concrete mode. |
+| `encryption`     | string | wire-protection on camera-side hop: `tls` (default) or `srtp`. **S6-14: GET returns the SERVER-GLOBAL value** (from `UNIFI_ENCRYPTION` env), not the per-profile stored value. Always a concrete mode (`""` → `"tls"`). Display-only; the per-profile field does not steer the pull. |
 
 **Live sample** (the spike's S6-03 default-set on the intercom; reproduced
 byte-for-byte by `go run ./cmd/gen-docs` → `docs/api-sample-profiles-list.json`):
@@ -95,7 +102,7 @@ matches GET output 1:1 as of S6-09):
 | `height`         | number | iff codec≠passthrough | 1..8192                                |
 | `fps`            | number | iff codec≠passthrough | 1..60                                  |
 | `encode_quality` | number | iff codec≠passthrough | 1..51                                  |
-| `encryption`     | string | no                    | `tls` / `srtp` / `""` (empty = default tls). S6-12. |
+| `encryption`     | string | no                    | `tls` / `srtp` / `""`. **S6-14: accepted but NOT used for steering.** The pull mode is now server-global (`UNIFI_ENCRYPTION`). PUT validates the value (schema stability) and persists it, but a subsequent GET surfaces the global value, not the persisted one. |
 
 **Responses:**
 
@@ -217,7 +224,37 @@ tolerates a `name` key in the body (URL still wins). The carvilon-
 admin client can take a GET array entry and PUT it back verbatim.
 
 The S6-09 round-trip is locked down by
-`TestProfiles_GetPut_RoundTrip` in `server_tuning_test.go`.
+`TestProfiles_GetPut_RoundTrip` in `server_tuning_test.go`. S6-14
+updates the same test to assert that GET `encryption` reflects the
+SERVER-GLOBAL value and that the per-profile field is preserved
+in storage but not used for steering.
+
+### S6-14 — encryption is a SOURCE property
+
+Earlier (S6-12) the `encryption` field lived per profile and steered
+the pull. That had two problems:
+
+1. **Wrong layer.** SRTP/TLS describes the camera-side hop, not the
+   per-consumer delivery. Two profiles for the same camera with
+   different encryption made no physical sense (we can't pull the
+   same camera twice with two protocols simultaneously without
+   doubling source load).
+2. **Env override silently broken.** A canonicalization step
+   (`empty → "tls"`) inside the per-profile path always populated
+   the sourcereg key with `"tls"`, so the env-level fallback never
+   fired and `UNIFI_ENCRYPTION=srtp` was ignored.
+
+**Resolution:** the steering value is now the server-global setting
+fed in via `cmd/spike` (env `UNIFI_ENCRYPTION`). The per-profile
+field is kept in the schema (PUT still accepts and persists it) so
+the wire shape is stable and the GET-PUT round-trip works, but it
+is **display-only** — GET surfaces the global value, regardless of
+what was Put.
+
+Locked down by `TestSourceKeyFor_IgnoresProfileEncryption`,
+`TestSourceKeyFor_UsesServerGlobal`, and
+`TestSourceKeyFor_EmptyServerEncryptionDefaultsToTLS` in
+`server_tuning_test.go`, plus the streambackend round-trip tests.
 
 ### Other API limits (not bugs, just shape)
 

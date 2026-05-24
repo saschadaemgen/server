@@ -245,42 +245,70 @@ func TestProfileDelete_Unknown404(t *testing.T) {
 	}
 }
 
-// TestSourceKeyFor_EncryptionDistinct covers the S6-12 invariant that
-// two profiles on the SAME camera+quality but with different
-// encryption modes get DIFFERENT source-registry Keys — and therefore
-// different hubs, different ffmpeg pulls, different SRTP-vs-TLS
-// negotiation. If this ever returned equal keys, a freshly-tuned
-// SRTP profile would silently inherit a still-running TLS pull (or
-// vice versa) and every packet would fail.
-func TestSourceKeyFor_EncryptionDistinct(t *testing.T) {
-	p := profile.Profile{
-		Name:     "x", CameraID: "abc", Quality: profile.QualityHigh,
-		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
-	}
-	p.Encryption = profile.EncryptionTLS
-	tls := sourceKeyFor(p)
-	p.Encryption = profile.EncryptionSRTP
-	srtp := sourceKeyFor(p)
-	if tls == srtp {
-		t.Fatalf("tls (%v) and srtp (%v) profiles on the same camera got the same Key — they MUST split into different hubs", tls, srtp)
-	}
-}
+// TestSourceKeyFor_IgnoresProfileEncryption is the S6-14 inverse of
+// the (now-removed) S6-12 TestSourceKeyFor_EncryptionDistinct. The
+// camera-side encryption mode is now SERVER-GLOBAL — two profiles on
+// the same (camera, quality) MUST get the same Key regardless of
+// their stored per-profile encryption value, otherwise the fan-out
+// invariant degrades and legacy admin clients that PUT
+// encryption="srtp" by accident would silently spin up a second
+// (failing) ffmpeg pull.
+func TestSourceKeyFor_IgnoresProfileEncryption(t *testing.T) {
+	srv := freshServer(t, ServerOptions{Encryption: profile.EncryptionTLS})
 
-// TestSourceKeyFor_EmptyMeansTLS — canonicalisation: a profile with
-// encryption="" (the in-store default for old rows) must produce the
-// SAME Key as a profile with encryption="tls". Otherwise the hub
-// would split on a meaningless distinction and the fan-out would
-// degrade for legacy data.
-func TestSourceKeyFor_EmptyMeansTLS(t *testing.T) {
 	p := profile.Profile{
 		Name: "x", CameraID: "abc", Quality: profile.QualityHigh,
 		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
 	}
-	empty := sourceKeyFor(p) // Encryption=""
 	p.Encryption = profile.EncryptionTLS
-	tls := sourceKeyFor(p)
-	if empty != tls {
-		t.Errorf("empty Encryption (%v) should canonicalise to tls (%v) so old DB rows share the hub with explicit-tls profiles", empty, tls)
+	a := srv.sourceKeyFor(p)
+	p.Encryption = profile.EncryptionSRTP
+	b := srv.sourceKeyFor(p)
+	if a != b {
+		t.Errorf("S6-14 contract: per-profile Encryption must NOT affect Key. got tls→%v, srtp→%v", a, b)
+	}
+}
+
+// TestSourceKeyFor_UsesServerGlobal is the positive half — the
+// global mode (set via ServerOptions.Encryption) DOES make it into
+// the Key, so flipping it between two distinct server instances
+// produces distinct hubs.
+func TestSourceKeyFor_UsesServerGlobal(t *testing.T) {
+	p := profile.Profile{
+		Name: "x", CameraID: "abc", Quality: profile.QualityHigh,
+		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
+	}
+
+	tlsSrv := freshServer(t, ServerOptions{Encryption: profile.EncryptionTLS})
+	srtpSrv := freshServer(t, ServerOptions{Encryption: profile.EncryptionSRTP})
+
+	tlsKey := tlsSrv.sourceKeyFor(p)
+	srtpKey := srtpSrv.sourceKeyFor(p)
+
+	if tlsKey.Encryption != "tls" {
+		t.Errorf("tls-configured server: Key.Encryption=%q, want 'tls'", tlsKey.Encryption)
+	}
+	if srtpKey.Encryption != "srtp" {
+		t.Errorf("srtp-configured server: Key.Encryption=%q, want 'srtp'", srtpKey.Encryption)
+	}
+	if tlsKey == srtpKey {
+		t.Errorf("global mode must distinguish Keys: tls=%v srtp=%v", tlsKey, srtpKey)
+	}
+}
+
+// TestSourceKeyFor_EmptyServerEncryptionDefaultsToTLS — leaving the
+// ServerOptions.Encryption field unset (the default zero value)
+// must canonicalise to "tls" in the Key, so admin clients that
+// don't set the option still get a sensible default.
+func TestSourceKeyFor_EmptyServerEncryptionDefaultsToTLS(t *testing.T) {
+	srv := freshServer(t, ServerOptions{}) // Encryption left blank
+	p := profile.Profile{
+		Name: "x", CameraID: "abc", Quality: profile.QualityHigh,
+		Usage: profile.UsageBrowser, Codec: profile.CodecH264Passthrough,
+	}
+	k := srv.sourceKeyFor(p)
+	if k.Encryption != "tls" {
+		t.Errorf("default server Key.Encryption=%q, want 'tls'", k.Encryption)
 	}
 }
 
@@ -299,13 +327,20 @@ func TestProfileDelete_Disabled503(t *testing.T) {
 // fetched via GET /api/profiles can be POSTed back via
 // PUT /api/profiles/{name} verbatim, with no field rename and no
 // dropping of keys. That's the carvilon-admin's day-to-day workflow:
-// list → edit one field → save. Before S6-09 the GET output carried
-// `cameraID` / `encodeQuality` (camelCase) while PUT expected
-// `camera_id` / `encode_quality` (snake_case); the round-trip
-// failed at PUT with 400. Now both speak snake_case.
+// list → edit one field → save.
+//
+// S6-14 nuance: the GET output's `encryption` field is the SERVER-GLOBAL
+// mode, not the per-profile stored value. The round-trip is still
+// "GET → PUT" byte-exact on the wire, but the PERSISTED encryption
+// after the round-trip is the global value (it's what GET wrote back
+// into the PUT body). For non-encryption fields the round-trip
+// preserves the seed value as before.
 func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 	// Seed one realistic profile (MJPEG, all encode-params populated).
-	// S6-12: also set Encryption so the round-trip exercises that field.
+	// The per-profile Encryption is deliberately srtp here to exercise
+	// the S6-14 "global overrides profile" behaviour: GET will read
+	// "tls" (the freshServer default), and the round-trip will persist
+	// "tls" back.
 	seed := profile.Profile{
 		Name:          "mjpeg_bal",
 		CameraID:      "679573e101080b03e4000424",
@@ -350,8 +385,11 @@ func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 			t.Errorf("GET entry missing snake_case field %q; got: %v", want, entry)
 		}
 	}
-	if got := entry["encryption"]; got != "srtp" {
-		t.Errorf("GET encryption = %v, want %q (seeded value must survive)", got, "srtp")
+	// S6-14: GET reflects the SERVER-GLOBAL encryption, not the seeded
+	// profile.Encryption=srtp. freshServer leaves ServerOptions.Encryption
+	// empty → server canonicalises to "tls" → GET shows "tls".
+	if got := entry["encryption"]; got != "tls" {
+		t.Errorf("GET encryption = %v, want %q (S6-14: server-global wins over per-profile seed)", got, "tls")
 	}
 	for _, forbidden := range []string{"cameraID", "encodeQuality"} {
 		if _, ok := entry[forbidden]; ok {
@@ -374,14 +412,18 @@ func TestProfiles_GetPut_RoundTrip(t *testing.T) {
 		t.Fatalf("PUT status = %d, want 204; body=%s\nPUT-body=%s", rrPut.Code, rrPut.Body.String(), string(putBody))
 	}
 
-	// Step 4: the persisted profile must match the original
-	// (proves PUT decoded every field correctly through the
-	// snake_case profileJSON).
+	// Step 4: PUT persists the body's encryption value verbatim. Since
+	// GET wrote the server-global "tls" into the body, the persisted
+	// Encryption is "tls", NOT the seed's "srtp". This is the S6-14
+	// behaviour — the wire shape carries the live mode, and a naive
+	// GET→PUT loop snaps the stored value to that live mode.
 	if len(fw.puts) != 1 {
 		t.Fatalf("PutProfile called %d times, want 1", len(fw.puts))
 	}
 	got := fw.puts[0]
-	if got != seed {
-		t.Errorf("round-trip lost data:\ngot:  %+v\nwant: %+v", got, seed)
+	wantPersisted := seed
+	wantPersisted.Encryption = profile.EncryptionTLS // S6-14: round-trip snaps to global
+	if got != wantPersisted {
+		t.Errorf("round-trip data mismatch:\ngot:  %+v\nwant: %+v", got, wantPersisted)
 	}
 }

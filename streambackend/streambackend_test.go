@@ -65,6 +65,13 @@ func wireProfile(name string) Profile {
 		// S6-01: browser profiles default to h264_passthrough; no encode
 		// params required.
 		Codec: "h264_passthrough",
+		// S6-14: encryption is surfaced from the SERVER-GLOBAL setting.
+		// freshBackend leaves Options.Encryption empty → canonicalized
+		// to "tls" inside toWire. The wire round-trip therefore returns
+		// "tls" regardless of what was Put. Locking in "tls" here keeps
+		// the round-trip equality check honest and documents the
+		// "display-only" nature of the field at the wire boundary.
+		Encryption: "tls",
 	}
 }
 
@@ -82,6 +89,8 @@ func wireMJPEGProfile(name string) Profile {
 		Height:        1280,
 		FPS:           12,
 		EncodeQuality: 6,
+		// S6-14: see wireProfile.
+		Encryption: "tls",
 	}
 }
 

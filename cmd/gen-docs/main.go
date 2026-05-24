@@ -348,15 +348,19 @@ func writeProfilesListSample(path string) error {
 		// S6-09: snake_case to match server.go::handleProfiles AND
 		// PUT /api/profiles/{name}'s body shape. GET output and PUT
 		// input are now bit-compatible.
-		// S6-12: encryption surfaced as the EFFECTIVE value
-		// (empty → "tls") so the admin client sees the concrete mode.
+		// S6-14: encryption is now the SERVER-GLOBAL value, not the
+		// per-profile field. The doc sample reflects a server started
+		// without UNIFI_ENCRYPTION (default → "tls"). Live GET on a
+		// server started with UNIFI_ENCRYPTION=srtp would render
+		// "srtp" for every profile instead — uniform across the array
+		// by design (the camera-hop mode is the same for all clients).
 		fmt.Fprintf(&buf,
 			`{"name":%q,"camera_id":%q,"quality":%q,"usage":%q,"description":%q,`+
 				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d,`+
 				`"encryption":%q}`,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
 			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
-			string(p.EffectiveEncryption()),
+			string(profile.EncryptionTLS),
 		)
 	}
 	io.WriteString(&buf, "\n]\n")

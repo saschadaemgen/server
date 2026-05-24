@@ -171,29 +171,21 @@ func main() {
 
 	// --- Source factory + Protect-API client -------------------------------
 	//
-	// S6-12: the source factory now reads the encryption mode from the
-	// per-pull Key (which the server populated from the triggering
-	// profile's Encryption field). The UNIFI_ENCRYPTION env var stays
-	// as a fallback: when a profile doesn't carry an explicit mode
-	// (empty value, which server.canonicalEncryption maps to "tls"
-	// before building the Key), the env can still flip the global
-	// default. Profile value > env value > "tls".
+	// S6-14: the encryption mode is GLOBAL — populated into
+	// stream.ServerOptions.Encryption and streambackend.Options.Encryption
+	// from the UNIFI_ENCRYPTION env var (see below). The server then
+	// stamps that value into every sourcereg.Key it builds, so the
+	// factory just reads key.Encryption and trusts it. No env-fallback
+	// here, no per-profile reading: this is the simplification that
+	// fixed the S6-12 bug where env=srtp was silently ignored because
+	// the per-profile encryption value canonicalised to "tls" and won.
 	srcFactory := func(key sourcereg.Key) (source.VideoSource, error) {
-		modeForKey := key.Encryption
-		if modeForKey == "" {
-			// Belt-and-braces; in practice server.canonicalEncryption
-			// always sets a value before this point.
-			modeForKey = encryption
-		}
-		if modeForKey == "" {
-			modeForKey = string(unifi.EncryptionTLS)
-		}
 		return unifi.NewSource(unifi.Options{
 			NVRHost:    nvrHost,
 			APIKey:     apiKey,
 			CameraID:   key.CameraID,
 			Quality:    key.Quality,
-			Encryption: unifi.Encryption(modeForKey),
+			Encryption: unifi.Encryption(key.Encryption),
 			Logger:     logger,
 		})
 	}
@@ -213,11 +205,15 @@ func main() {
 	// New() hydrates the in-memory registry from the DB. The HTTP server
 	// (built below) shares the same registry, so it sees the same data.
 	backend, err := streambackend.New(streambackend.Options{
-		Store:    st,
-		Profiles: reg,
-		Sources:  srcReg,
-		Cameras:  cams,
-		BaseURL:  baseURL,
+		Store:      st,
+		Profiles:   reg,
+		Sources:    srcReg,
+		Cameras:    cams,
+		BaseURL:    baseURL,
+		// S6-14: global encryption mode. Must match the value passed
+		// to stream.NewServer below so both layers build the same
+		// sourcereg.Key for the same camera.
+		Encryption: profile.Encryption(encryption),
 	})
 	if err != nil {
 		logger.Fatalf("backend: %v", err)
@@ -266,6 +262,10 @@ func main() {
 		CPU:              cpuSampler,
 		StatsLogInterval: 30 * time.Second,
 		ProfileWriter:    backend, // S6-01 tuning: PUT/DELETE /api/profiles/{name}
+		// S6-14: global camera-side wire-protection mode. Must match
+		// the value passed to streambackend.New above so both layers
+		// see the same value in sourceKeyFor.
+		Encryption: profile.Encryption(encryption),
 	})
 	if err != nil {
 		logger.Fatalf("server: %v", err)

@@ -76,6 +76,12 @@ type Server struct {
 	// return 503; the read-only GET still works.
 	writer ProfileWriter
 
+	// S6-14: global camera-side wire-protection mode. Canonical
+	// ("tls" or "srtp", never empty) after NewServer. Used by
+	// sourceKeyFor to build the per-pull Key and by handleProfiles
+	// to surface the live mode in the GET output.
+	encryption string
+
 	api *webrtc.API
 	srv *http.Server
 }
@@ -141,6 +147,26 @@ type ServerOptions struct {
 	// viewers stay on the hub they joined. This is the spike-stage
 	// rule documented in streambackend.Backend.Put.
 	ProfileWriter ProfileWriter
+
+	// Encryption is the GLOBAL wire-protection mode for the camera-side
+	// (Protect → streaming-server) hop. Applied to every camera pull
+	// regardless of which profile triggered it.
+	//
+	// S6-14: this replaces the per-profile encryption steering that
+	// S6-12 introduced. Camera-side encryption is a property of the
+	// SOURCE, not of the delivery profile; mixing it per profile led
+	// to a bug where env=srtp was ignored because every DB profile
+	// canonicalised to "tls" and silently won the priority.
+	//
+	// The per-profile [profile.Profile.Encryption] field is kept in
+	// the schema (PUT body still accepts it; store still persists it;
+	// GET still exposes it) but is now display-only — it is OVERWRITTEN
+	// in the GET output by this server-global value, so the admin sees
+	// what's actually running, not what was stored.
+	//
+	// Empty value (default) is treated as [profile.EncryptionTLS].
+	// cmd/spike feeds this from the UNIFI_ENCRYPTION env var.
+	Encryption profile.Encryption
 }
 
 // ProfileWriter is the mutating half of the profile surface — the
@@ -177,16 +203,25 @@ func NewServer(opts ServerOptions) (*Server, error) {
 
 	srcReg := sourcereg.New(opts.SourceFactory, opts.Logger)
 
+	// S6-14: canonicalise the global encryption mode once at construction.
+	// Empty → "tls"; anything else is taken verbatim (Validate happens
+	// at the unifi.NewSource boundary in the source factory).
+	encryption := string(opts.Encryption)
+	if encryption == "" {
+		encryption = string(profile.EncryptionTLS)
+	}
+
 	s := &Server{
-		profiles: opts.Profiles,
-		sources:  srcReg,
-		addr:     opts.Addr,
-		logger:   opts.Logger,
-		api:      api,
-		stats:    opts.Stats,
-		cpu:      opts.CPU,
-		statsLog: opts.StatsLogInterval,
-		writer:   opts.ProfileWriter,
+		profiles:   opts.Profiles,
+		sources:    srcReg,
+		addr:       opts.Addr,
+		logger:     opts.Logger,
+		api:        api,
+		stats:      opts.Stats,
+		cpu:        opts.CPU,
+		statsLog:   opts.StatsLogInterval,
+		writer:     opts.ProfileWriter,
+		encryption: encryption,
 	}
 
 	if opts.EnableMJPEG {
@@ -270,17 +305,24 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return s, nil
 }
 
-// sourceKeyFor builds the per-pull key for a given profile, baking in
-// the S6-12 encryption split so mixed modes on the same camera get
-// distinct hubs (otherwise the first-arriving subscriber's mode
-// would win for everyone). Uses [profile.Profile.EffectiveEncryption]
-// to canonicalise empty → "tls" so legacy DB rows hash to the same
-// slot as explicit-tls profiles.
-func sourceKeyFor(p profile.Profile) sourcereg.Key {
+// sourceKeyFor builds the per-pull key for a given profile.
+//
+// S6-14: the Encryption component of the key now comes from the
+// SERVER-GLOBAL setting, NOT from the profile. This restores the
+// intended primacy of the UNIFI_ENCRYPTION env var that S6-12
+// accidentally broke (every DB row canonicalised to "tls" and won
+// the priority). All profiles for the same (camera, quality) share
+// a single hub again — the way Fan-Out was always supposed to work.
+//
+// Encryption stays in the Key because if a future change ever flips
+// the global mode mid-life, an existing hub with the old mode would
+// remain in the map distinct from the new one — clean separation,
+// no silent inheritance.
+func (s *Server) sourceKeyFor(p profile.Profile) sourcereg.Key {
 	return sourcereg.Key{
 		CameraID:   p.CameraID,
 		Quality:    string(p.Quality),
-		Encryption: string(p.EffectiveEncryption()),
+		Encryption: s.encryption,
 	}
 }
 
@@ -312,7 +354,7 @@ func (s *Server) mjpegEntryFor(name string) (mjpeg.Entry, error) {
 	if err != nil {
 		return mjpeg.Entry{}, err
 	}
-	srcHub := s.sources.HubFor(sourceKeyFor(p))
+	srcHub := s.sources.HubFor(s.sourceKeyFor(p))
 	return mjpeg.Entry{Spec: spec, Source: &hubAdapter{h: srcHub}}, nil
 }
 
@@ -334,7 +376,7 @@ func (s *Server) h264espEntryFor(name string) (h264esp.Entry, error) {
 	if err != nil {
 		return h264esp.Entry{}, err
 	}
-	srcHub := s.sources.HubFor(sourceKeyFor(p))
+	srcHub := s.sources.HubFor(s.sourceKeyFor(p))
 	return h264esp.Entry{Spec: spec, Source: &h264espHubAdapter{h: srcHub}}, nil
 }
 
@@ -438,7 +480,7 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srcHub := s.sources.HubFor(sourceKeyFor(p))
+	srcHub := s.sources.HubFor(s.sourceKeyFor(p))
 	sub, err := srcHub.Subscribe()
 	if err != nil {
 		http.Error(w, "subscribe: "+err.Error(), http.StatusServiceUnavailable)
@@ -755,16 +797,19 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			_, _ = io.WriteString(w, ",")
 		}
-		// S6-12: surface the EFFECTIVE encryption (empty → "tls") so
-		// admin clients see a concrete value. The PUT body still
-		// accepts empty as the "use default" sentinel.
+		// S6-14: the encryption field shows the SERVER-GLOBAL mode
+		// that's actually driving the camera pull, NOT the per-
+		// profile stored value. Camera-side encryption is a source
+		// property, not a delivery property — the admin sees what
+		// is really running. PUT still accepts the field (schema
+		// is stable) but it no longer steers anything.
 		fmt.Fprintf(w,
 			`{"name":%q,"camera_id":%q,"quality":%q,"usage":%q,"description":%q,`+
 				`"codec":%q,"width":%d,"height":%d,"fps":%d,"encode_quality":%d,`+
 				`"encryption":%q}`,
 			p.Name, p.CameraID, string(p.Quality), string(p.Usage), p.Description,
 			string(p.Codec), p.Width, p.Height, p.FPS, p.EncodeQuality,
-			string(p.EffectiveEncryption()),
+			s.encryption,
 		)
 	}
 	_, _ = io.WriteString(w, "]")
