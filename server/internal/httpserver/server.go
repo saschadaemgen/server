@@ -286,14 +286,20 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/web-viewers/{mac}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersSetLink)))
 	s.mux.Handle("DELETE /a/web-viewers/{mac}", s.requireAdminSession(http.HandlerFunc(s.handleAdminWebViewersDelete)))
 
-	// Stream-profile read-only list. The stream-server owns the
-	// profile registry; this page renders /api/profiles for
-	// operator visibility. The per-viewer profile pick happens in
-	// the web-/ESP-viewer edit modal (fed by /a/streams.json).
-	// Write surface (PUT/DELETE) will land once the stream-server
-	// unifies GET/PUT field-name casing.
+	// Stream-profile CRUD against the stream-server's
+	// /api/profiles registry. Read for the list view + the
+	// viewer-edit modal dropdown (fed by /a/streams.json);
+	// write side (S15-25) edits / creates / deletes profiles
+	// through Client.Put + Client.Delete. The literal /new
+	// route stays in front of the /{name} pattern; Go 1.22
+	// ServeMux gives literals precedence over wildcards.
 	s.mux.Handle("GET /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsList)))
 	s.mux.Handle("GET /a/streams.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsListJSON)))
+	s.mux.Handle("GET /a/streams/new", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamNew)))
+	s.mux.Handle("GET /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamEdit)))
+	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamCreate)))
+	s.mux.Handle("POST /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamSave)))
+	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamDelete)))
 
 	// Placeholder pages for upcoming features.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))

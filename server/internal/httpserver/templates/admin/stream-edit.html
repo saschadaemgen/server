@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - {{if .Page.IsNew}}Neues Stream-Profil{{else}}Stream-Profil bearbeiten{{end}}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">
+          {{if .Page.IsNew}}Neues Stream-Profil{{else}}{{.Page.Profile.Name}}{{end}}
+        </h1>
+        <p class="page-subtitle">
+          Die Felder gehen 1:1 als JSON-Body an
+          <code>{{if .Page.IsNew}}PUT /api/profiles/&lt;name&gt;{{else}}PUT /api/profiles/{{.Page.Profile.Name}}{{end}}</code>
+          am Stream-Server. Aenderungen greifen beim naechsten Client-Reconnect.
+        </p>
+      </div>
+      <div class="page-actions">
+        <a class="button button-ghost" href="/a/streams">Zurueck zur Liste</a>
+      </div>
+    </header>
+
+    {{if .Page.PostError}}
+      <div class="banner banner-red" role="alert" style="margin-bottom: var(--space-4);">
+        Speichern abgelehnt: {{.Page.PostError}}
+      </div>
+    {{end}}
+
+    <div class="app-card">
+      <form method="post"
+            action="{{if .Page.IsNew}}/a/streams{{else}}/a/streams/{{.Page.Profile.Name}}{{end}}"
+            class="app-card-body"
+            style="display: grid; gap: var(--space-4); padding: var(--space-5);">
+
+        <div class="form-row">
+          <label class="form-label" for="f-name">Profil-Name</label>
+          {{if .Page.IsNew}}
+            <input class="form-input" type="text" id="f-name" name="name"
+                   value="{{.Page.Profile.Name}}" required maxlength="64"
+                   pattern="[A-Za-z0-9_-]+"
+                   placeholder="z.B. intercom_esp">
+            <span class="field-hint">Buchstaben, Zahlen, Bindestrich, Unterstrich. Doppelt = ueberschreibt das vorhandene Profil.</span>
+          {{else}}
+            <input class="form-input" type="text" id="f-name"
+                   value="{{.Page.Profile.Name}}" readonly disabled>
+            <span class="field-hint">Name ist Schluessel und nicht aenderbar. Fuer Umbenennung neu anlegen und altes loeschen.</span>
+          {{end}}
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="f-camera-id">Kamera-ID</label>
+          <input class="form-input" type="text" id="f-camera-id" name="camera_id"
+                 value="{{.Page.Profile.CameraID}}" maxlength="64"
+                 placeholder="UniFi-Protect Kamera-UUID">
+          <span class="field-hint">Identifier der Quelle am Stream-Server.</span>
+        </div>
+
+        <div class="form-row form-row-2col">
+          <div>
+            <label class="form-label" for="f-quality">Qualitaets-Label</label>
+            <input class="form-input" type="text" id="f-quality" name="quality"
+                   value="{{.Page.Profile.Quality}}" maxlength="32"
+                   placeholder="low / medium / high">
+          </div>
+          <div>
+            <label class="form-label" for="f-usage">Nutzung</label>
+            <select class="form-input" id="f-usage" name="usage" required>
+              <option value="esp"     {{if eq .Page.Profile.Usage "esp"}}selected{{end}}>esp (MJPEG-Hardware)</option>
+              <option value="browser" {{if eq .Page.Profile.Usage "browser"}}selected{{end}}>browser (WebRTC)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="f-description">Beschreibung</label>
+          <input class="form-input" type="text" id="f-description" name="description"
+                 value="{{.Page.Profile.Description}}" maxlength="200"
+                 placeholder="Optional, fuer Operator-Auge">
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="f-codec">Codec</label>
+          <select class="form-input" id="f-codec" name="codec" required>
+            <option value="mjpeg"            {{if eq .Page.Profile.Codec "mjpeg"}}selected{{end}}>mjpeg</option>
+            <option value="h264_cbp"         {{if eq .Page.Profile.Codec "h264_cbp"}}selected{{end}}>h264_cbp</option>
+            <option value="h264_passthrough" {{if eq .Page.Profile.Codec "h264_passthrough"}}selected{{end}}>h264_passthrough</option>
+          </select>
+          <span class="field-hint">h264_passthrough = WebRTC (keine Re-Encodierung). mjpeg + h264_cbp = encode-Parameter unten beachten.</span>
+        </div>
+
+        <div class="form-row form-row-3col">
+          <div>
+            <label class="form-label" for="f-width">Width</label>
+            <input class="form-input" type="number" id="f-width" name="width"
+                   value="{{.Page.Profile.Width}}" min="0" max="7680">
+          </div>
+          <div>
+            <label class="form-label" for="f-height">Height</label>
+            <input class="form-input" type="number" id="f-height" name="height"
+                   value="{{.Page.Profile.Height}}" min="0" max="4320">
+          </div>
+          <div>
+            <label class="form-label" for="f-fps">FPS</label>
+            <input class="form-input" type="number" id="f-fps" name="fps"
+                   value="{{.Page.Profile.FPS}}" min="0" max="120">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="f-encode-quality">Encode-Quality</label>
+          <input class="form-input" type="number" id="f-encode-quality" name="encode_quality"
+                 value="{{.Page.Profile.EncodeQuality}}" min="0" max="63">
+          <span class="field-hint">MJPEG: ffmpeg <code>-q:v</code> (2..31, kleiner = besser). H.264_cbp: CRF (0..51).</span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="f-encryption">Medien-Verschluesselung</label>
+          <select class="form-input" id="f-encryption" name="encryption" required>
+            <option value="tls"  {{if eq .Page.Profile.Encryption "tls"}}selected{{end}}>TLS (Leitung verschluesselt)</option>
+            <option value="srtp" {{if eq .Page.Profile.Encryption "srtp"}}selected{{end}}>SRTP (Leitung + Medien verschluesselt)</option>
+          </select>
+          <span class="field-hint">
+            TLS: Transport ist verschluesselt, im LAN ausreichend.
+            SRTP: zusaetzlich werden die Medien-Pakete verschluesselt (fuer Internet- oder Cloud-Zugriff).
+            Aenderung greift beim naechsten Client-Reconnect.
+          </span>
+        </div>
+
+        <div class="form-row" style="display: flex; gap: var(--space-3); margin-top: var(--space-3);">
+          <button class="button button-primary" type="submit">
+            {{if .Page.IsNew}}Anlegen{{else}}Speichern{{end}}
+          </button>
+          <a class="button button-ghost" href="/a/streams">Abbrechen</a>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>
