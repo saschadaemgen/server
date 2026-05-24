@@ -48,15 +48,20 @@ func TestEncodeSpec_Validate_BadFields(t *testing.T) {
 func TestEncodeSpec_OutputArgs_Order(t *testing.T) {
 	// Lock down the exact ffmpeg argument layout. The order matters
 	// because some flags apply only to the option immediately following
-	// them (e.g. -vf, -r), and a regression here would silently corrupt
+	// them (e.g. -vf), and a regression here would silently corrupt
 	// encoded output without a unit test signal.
+	//
+	// S6-13: the filter chain is `fps=N,scale=W:H` (single -vf option,
+	// comma-separated filter list). `-r N` at output is intentionally
+	// gone — the fps filter is the authoritative sampler and `-r N`
+	// caused the stdin-pipe throttling that produced channel-overflow
+	// drops.
 	s := EncodeSpec{Width: 800, Height: 1280, FPS: 9, Quality: 6}
 	args := s.OutputArgs()
 
 	want := []string{
 		"-an",
-		"-vf", "scale=800:1280",
-		"-r", "9",
+		"-vf", "fps=9,scale=800:1280",
 		"-c:v", "mjpeg",
 		"-q:v", "6",
 		// S6-06: -flags +bitexact MUST follow the codec selection
@@ -72,6 +77,31 @@ func TestEncodeSpec_OutputArgs_Order(t *testing.T) {
 	for i := range want {
 		if args[i] != want[i] {
 			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+// TestEncodeSpec_OutputArgs_FpsFilterFirst is the S6-13 canary. The
+// filter chain MUST start with `fps=N` so the filter graph drops
+// frames BEFORE the (more expensive) scale runs. Two regressions
+// this catches:
+//   - someone re-ordering the chain to `scale,fps` (scale wastes
+//     CPU on frames that fps will drop)
+//   - someone restoring `-r N` at output (stdin throttling, channel
+//     overflow drops, motion-streak regression)
+func TestEncodeSpec_OutputArgs_FpsFilterFirst(t *testing.T) {
+	args := EncodeSpec{Width: 800, Height: 1280, FPS: 12, Quality: 6}.OutputArgs()
+	joined := strings.Join(args, " ")
+
+	// fps comes BEFORE scale in the filter chain.
+	want := "-vf fps=12,scale=800:1280"
+	if !strings.Contains(joined, want) {
+		t.Errorf("missing %q in args (filter order matters; fps must precede scale).\nargs=%v", want, args)
+	}
+	// And: no bare `-r` arg at output (S6-13: removed).
+	for i, a := range args {
+		if a == "-r" {
+			t.Errorf("found `-r` at args[%d] — S6-13 removed it; fps filter is now authoritative. args=%v", i, args)
 		}
 	}
 }

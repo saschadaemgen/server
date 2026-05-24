@@ -65,8 +65,11 @@ func TestOutputArgs_LocksBriefingFlags(t *testing.T) {
 		"-x264-params sliced-threads=0:slices=1",
 		"-bsf:v dump_extra=freq=keyframe", // SPS/PPS before every IDR
 		"-f h264",                          // Annex-B output
-		"-vf scale=800:1280",
-		"-r 15",
+		// S6-13: fps filter first, then scale (single -vf chain). -r
+		// at output is gone — see internal/mjpeg/encoding.go for the
+		// full rationale (was causing stdin-pipe throttling that
+		// surfaced as "encoder input channel full" drops).
+		"-vf fps=15,scale=800:1280",
 		"-crf 26",
 		"-an",
 	}
@@ -101,6 +104,26 @@ func TestOutputArgs_GoPMatchesFPS(t *testing.T) {
 		want = "-keyint_min " + itoa(fps)
 		if !strings.Contains(joined, want) {
 			t.Errorf("FPS=%d: args missing %q\nargs=%v", fps, want, args)
+		}
+	}
+}
+
+// TestOutputArgs_FpsFilterFirstAndNoBareR is the S6-13 canary for
+// h264esp — same shape as the mjpeg counterpart. The fps filter must
+// precede scale in the -vf chain, and the standalone `-r N` at output
+// must NOT be present (it caused stdin-pipe throttling that produced
+// motion-streak drops on the ESP).
+func TestOutputArgs_FpsFilterFirstAndNoBareR(t *testing.T) {
+	args := EncodeSpec{Width: 800, Height: 1280, FPS: 15, Quality: 26}.OutputArgs()
+	joined := strings.Join(args, " ")
+
+	want := "-vf fps=15,scale=800:1280"
+	if !strings.Contains(joined, want) {
+		t.Errorf("missing %q (fps filter must precede scale).\nargs=%v", want, args)
+	}
+	for i, a := range args {
+		if a == "-r" {
+			t.Errorf("found `-r` at args[%d] — S6-13 removed it from h264esp too. args=%v", i, args)
 		}
 	}
 }

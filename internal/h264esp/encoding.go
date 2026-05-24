@@ -110,7 +110,13 @@ func (s EncodeSpec) Validate() error {
 //     never see them. The =freq=keyframe knob is the one that gates
 //     on IDR (not every NAL).
 //   - `-an`: no audio.
-//   - `-vf scale=W:H`, `-r FPS`: spec-driven output shape.
+//   - `-vf fps=N,scale=W:H`: spec-driven sampling + scaling.
+//     S6-13 — see internal/mjpeg/encoding.go for the full rationale.
+//     Short version: the `fps` filter samples input frames evenly by
+//     PTS (NOT by channel-overflow), so 30 → target_fps becomes
+//     deterministic. `-r N` at output was removed because it caused
+//     stdin-pipe backpressure that bubbled all the way back to our
+//     forwarder as "encoder input channel full" drops.
 //   - `-crf <Q>`: rate control. CRF gives constant-quality output
 //     better suited to a single-camera experiment than CBR.
 //   - `-f h264`: write the raw Annex-B byte stream to pipe:1. NO
@@ -120,8 +126,9 @@ func (s EncodeSpec) OutputArgs() []string {
 	gop := strconv.Itoa(s.FPS) // GoP = 1 second
 	return []string{
 		"-an",
-		"-vf", fmt.Sprintf("scale=%d:%d", s.Width, s.Height),
-		"-r", strconv.Itoa(s.FPS),
+		// S6-13: fps first (drops evenly by PTS), then scale (now
+		// runs at target rate, ~60% CPU win on the scaler).
+		"-vf", fmt.Sprintf("fps=%d,scale=%d:%d", s.FPS, s.Width, s.Height),
 		"-c:v", "libx264",
 		"-profile:v", "baseline",
 		"-level", "3.0",

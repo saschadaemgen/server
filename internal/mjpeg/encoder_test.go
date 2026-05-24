@@ -37,10 +37,11 @@ func TestBuildFFmpegArgs_LayoutMatchesContract(t *testing.T) {
 		t.Errorf("last arg = %q, want pipe:1 (full: %v)", args[len(args)-1], args)
 	}
 
-	// Spec values present.
+	// Spec values present. S6-13: fps + scale live in a single -vf
+	// filter chain (`fps=N,scale=W:H`); no bare -r at output.
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"scale=800:1280", "-r 9", "-q:v 6", "-c:v mjpeg", "-f mjpeg",
+		"-vf fps=9,scale=800:1280", "-q:v 6", "-c:v mjpeg", "-f mjpeg",
 		"-hide_banner", "-loglevel error", "-nostats", "+nobuffer",
 	} {
 		if !strings.Contains(joined, want) {
@@ -53,11 +54,8 @@ func TestBuildFFmpegArgs_SpecValuesFlowThrough(t *testing.T) {
 	s := EncodeSpec{Width: 1280, Height: 720, FPS: 25, Quality: 3}
 	args := buildFFmpegArgs(s)
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "scale=1280:720") {
-		t.Errorf("expected scale=1280:720; got %v", args)
-	}
-	if !strings.Contains(joined, "-r 25") {
-		t.Errorf("expected -r 25; got %v", args)
+	if !strings.Contains(joined, "fps=25,scale=1280:720") {
+		t.Errorf("expected fps=25,scale=1280:720 in -vf chain; got %v", args)
 	}
 	if !strings.Contains(joined, "-q:v 3") {
 		t.Errorf("expected -q:v 3; got %v", args)

@@ -65,11 +65,42 @@ func (s EncodeSpec) Validate() error {
 // Lives in OutputArgs() so all three MJPEG profiles (mjpeg_hq,
 // mjpeg_bal, mjpeg_fast) inherit it through SpecFromProfile — one
 // fix, three profiles.
+//
+// S6-13 — `-vf fps=N,scale=…` (NOT `-r N` at output):
+//
+// The MJPEG path was dropping camera AUs chaotically at the encoder
+// input channel because the camera delivers ~30 fps on the RPi and
+// the profile wants 12. With the previous arg shape
+// (`-vf scale=… -r N` at output), ffmpeg's stdin-consumer was
+// throttled to roughly the output PTS rate — so our Go-side input
+// channel filled up at the (30-12) = 18 frames/s excess rate, then
+// the non-blocking forwarder dropped whichever frames happened to
+// arrive when the channel was full. Result: uneven sampling that
+// shows as motion-dependent pixel streaks on the ESP.
+//
+// Putting `fps=N` first in the FILTER GRAPH solves both halves:
+//
+//   - The fps filter explicitly samples input frames evenly based on
+//     PTS (which `-use_wallclock_as_timestamps 1` from S6-04
+//     anchors to real wall-clock). 30 → 12 fps becomes deterministic
+//     "pick the frame nearest each 1/12 s boundary" instead of
+//     "whichever frame happened to fit in the input channel".
+//   - ffmpeg consumes stdin at line speed (the filter graph runs as
+//     fast as input arrives); no more stdin-pipe backpressure, no
+//     more "encoder input channel full" drops.
+//   - As a bonus: the subsequent `scale=W:H` runs at the *target*
+//     rate (12 fps), not the source rate (30 fps). That's a free
+//     ~60% CPU saving on the scaler.
+//
+// `-r N` at output is intentionally REMOVED — it was redundant with
+// the fps filter and the cause of the input throttling. Container
+// rate is inferred from the filter graph output.
 func (s EncodeSpec) OutputArgs() []string {
 	return []string{
 		"-an", // no audio
-		"-vf", fmt.Sprintf("scale=%d:%d", s.Width, s.Height),
-		"-r", strconv.Itoa(s.FPS),
+		// S6-13: fps first (drops evenly), then scale (now runs at
+		// target rate). See doc comment above.
+		"-vf", fmt.Sprintf("fps=%d,scale=%d:%d", s.FPS, s.Width, s.Height),
 		"-c:v", "mjpeg",
 		"-q:v", strconv.Itoa(s.Quality),
 		// S6-06: suppress the libavcodec COM marker that the ESP-P4
