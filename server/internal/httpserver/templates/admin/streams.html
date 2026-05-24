@@ -19,7 +19,10 @@
       </div>
       {{if .Page.Configured}}
         <div class="page-actions">
-          <a class="button button-primary" href="/a/streams/new">Neues Profil</a>
+          <a class="btn btn-primary" href="/a/streams/new">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Neues Profil
+          </a>
         </div>
       {{end}}
     </header>
@@ -43,10 +46,11 @@
       </div>
     {{else}}
       <div class="app-card">
-        <div class="app-card-head">
-          <h2 class="app-card-title">Aktive Profile (<span>{{len .Page.Profiles}}</span>)</h2>
-          <span class="badge" title="Stream-Server REST-API"><code>{{.Page.BackendURL}}</code></span>
-        </div>
+        {{if .Page.BackendURL}}
+          <div style="padding: var(--space-3) var(--space-4); border-bottom: 0.5px solid rgba(255,255,255,0.08); color: var(--color-text-tertiary); font-size: var(--fs-sm);">
+            Stream-Server REST-API: <code>{{.Page.BackendURL}}</code>
+          </div>
+        {{end}}
         {{if .Page.Profiles}}
           <table class="app-table">
             <thead>
@@ -72,11 +76,11 @@
                   <td style="text-align:right;">{{if .FPS}}{{.FPS}}{{else}}&mdash;{{end}}</td>
                   <td>{{if eq .Encryption "srtp"}}SRTP{{else if eq .Encryption "tls"}}TLS{{else}}&mdash;{{end}}</td>
                   <td style="text-align:right; white-space:nowrap;">
-                    <a class="button button-ghost button-sm" href="/a/streams/{{.Name}}">Bearbeiten</a>
+                    <a class="btn btn-secondary btn-sm" href="/a/streams/{{.Name}}">Bearbeiten</a>
                     <form method="post" action="/a/streams/{{.Name}}/delete"
-                          style="display:inline;"
+                          style="display:inline; margin:0;"
                           onsubmit="return confirm('Profil {{.Name}} wirklich loeschen?');">
-                      <button type="submit" class="button button-danger button-sm">Loeschen</button>
+                      <button type="submit" class="btn btn-secondary btn-sm">Loeschen</button>
                     </form>
                   </td>
                 </tr>
