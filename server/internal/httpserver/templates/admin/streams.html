@@ -61,6 +61,7 @@
                 <th>Aufloesung</th>
                 <th style="text-align:right;">FPS</th>
                 <th>Medien</th>
+                <th style="text-align:right;">Konsumenten</th>
                 <th style="text-align:right;">Aktionen</th>
               </tr>
             </thead>
@@ -75,6 +76,7 @@
                   </td>
                   <td style="text-align:right;">{{if .FPS}}{{.FPS}}{{else}}&mdash;{{end}}</td>
                   <td>{{if eq .Encryption "srtp"}}SRTP{{else if eq .Encryption "tls"}}TLS{{else}}&mdash;{{end}}</td>
+                  <td style="text-align:right; font-variant-numeric: tabular-nums;">{{.Consumers}}</td>
                   <td style="text-align:right; white-space:nowrap;">
                     <a class="btn btn-secondary btn-sm" href="/a/streams/{{.Name}}">Bearbeiten</a>
                     <form method="post" action="/a/streams/{{.Name}}/delete"

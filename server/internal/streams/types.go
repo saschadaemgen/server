@@ -58,3 +58,22 @@ type Profile struct {
 	EncodeQuality int    `json:"encode_quality"`
 	Encryption    string `json:"encryption"`
 }
+
+// ProfileStats is one row from GET /stream/stats, keyed by
+// profile name. The stream-server emits more fields than this
+// struct decodes (global summary, transcoder CPU, ...); the JSON
+// decoder ignores anything that does not appear here, which is
+// the read-side intent (no DisallowUnknownFields on stats - the
+// stream-chat is free to add new fields without breaking us).
+//
+// Clients is the live count of consumers pulling the profile.
+// AvgFPS / SourceFPS / AvgBitrateKbps are decorative for now;
+// the admin UI may render them later without another schema
+// update.
+type ProfileStats struct {
+	Profile        string  `json:"profile"`
+	Clients        int     `json:"clients"`
+	AvgFPS         float64 `json:"avg_fps"`
+	SourceFPS      float64 `json:"source_fps"`
+	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+}

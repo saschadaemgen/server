@@ -41,8 +41,10 @@ type adminStreamsData struct {
 
 // streamRow is one row in the admin profile list. Fields mirror
 // the stream-server's /api/profiles entry shape (the 11-field
-// snake_case schema on streams.Profile) so the template can
-// render them without further mapping.
+// snake_case schema on streams.Profile) plus the live consumer
+// count from /stream/stats, joined by profile name. Consumers is
+// always written, even when the stats endpoint is unreachable -
+// the fall-back is an honest zero, not "n/a".
 type streamRow struct {
 	Name          string
 	Codec         string
@@ -55,6 +57,7 @@ type streamRow struct {
 	Description   string
 	Quality       string
 	Encryption    string
+	Consumers     int
 }
 
 // adminStreamEditData backs templates/admin/stream-edit.html.
@@ -116,14 +119,28 @@ func (s *Server) buildStreamsData(r *http.Request) adminStreamsData {
 		data.FlashType = "red"
 		return data
 	}
+	// Stats are a soft signal. If /stream/stats is unreachable
+	// (backend restart, network blip), the list still renders;
+	// the Consumers column just reads zero everywhere instead
+	// of crashing the page. Same fall-back applies on the edit
+	// path - the row mapper does not depend on stats either.
+	stats, statsErr := s.streams.Stats(r.Context())
+	if statsErr != nil {
+		s.log.Warn("admin streams stats", "err", statsErr)
+	}
 	for _, p := range profiles {
-		data.Profiles = append(data.Profiles, profileToRow(p))
+		row := profileToRow(p)
+		if st, ok := stats[p.Name]; ok {
+			row.Consumers = st.Clients
+		}
+		data.Profiles = append(data.Profiles, row)
 	}
 	return data
 }
 
 // profileToRow flattens a streams.Profile to the row the list +
-// edit templates render.
+// edit templates render. Consumers stays zero here; the list
+// builder joins the live count from /stream/stats per name.
 func profileToRow(p streams.Profile) streamRow {
 	return streamRow{
 		Name:          p.Name,

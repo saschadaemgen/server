@@ -83,6 +83,24 @@ func (w *CarvilonStreamBackend) ListCameras(ctx context.Context) ([]Camera, erro
 	return out, nil
 }
 
+func (w *CarvilonStreamBackend) Stats(ctx context.Context) (map[string]ProfileStats, error) {
+	rows, err := w.b.Stats(ctx)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make(map[string]ProfileStats, len(rows))
+	for name, s := range rows {
+		out[name] = ProfileStats{
+			Profile:        s.Profile,
+			Clients:        s.Clients,
+			AvgFPS:         s.AvgFPS,
+			SourceFPS:      s.SourceFPS,
+			AvgBitrateKbps: s.AvgBitrateKbps,
+		}
+	}
+	return out, nil
+}
+
 func (w *CarvilonStreamBackend) Configured() bool { return w.b.Configured() }
 
 func fromPrivateProfile(p private.Profile) Profile {

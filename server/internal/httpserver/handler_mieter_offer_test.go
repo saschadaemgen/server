@@ -53,6 +53,9 @@ func (f fakeBackend) Delete(context.Context, string) error { return streams.ErrN
 func (f fakeBackend) ListCameras(context.Context) ([]streams.Camera, error) {
 	return nil, nil
 }
+func (f fakeBackend) Stats(context.Context) (map[string]streams.ProfileStats, error) {
+	return nil, streams.ErrNotConfigured
+}
 
 func TestMieterOffer_RequiresSession(t *testing.T) {
 	env := newTestServer(t)

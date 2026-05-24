@@ -200,6 +200,31 @@ func (c *Client) ListCameras(_ context.Context) ([]Camera, error) {
 	return []Camera{}, nil
 }
 
+// Stats hits GET /stream/stats and returns the per-profile rows
+// keyed by profile name. The stream-server emits a richer
+// envelope (global summary + transcoder CPU + ...); we only
+// decode the per-profile slice we render. Unknown fields are
+// silently dropped by encoding/json - intentional for a read
+// surface, so the stream-chat can grow the response without
+// breaking us.
+//
+// Callers should treat a non-nil error as "stats unavailable" -
+// the admin list keeps rendering with consumer counts at zero.
+func (c *Client) Stats(ctx context.Context) (map[string]ProfileStats, error) {
+	body, err := c.do(ctx, http.MethodGet, "/stream/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	var envelope struct {
+		Profiles map[string]ProfileStats `json:"profiles"`
+	}
+	if err := json.NewDecoder(body).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("streams: decode stats: %w", err)
+	}
+	return envelope.Profiles, nil
+}
+
 // do issues a request to <baseURL><path> and returns the response
 // body on success. Caller MUST close. Translates non-2xx into
 // errors; 404 becomes ErrProfileNotFound.

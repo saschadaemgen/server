@@ -281,6 +281,62 @@ func TestDeleteRequestsBackend(t *testing.T) {
 	}
 }
 
+// Stats decodes the per-profile slice out of GET /stream/stats
+// and exposes it keyed by profile name. The stream-server emits
+// a richer envelope (global summary, transcoder CPU); we ignore
+// the extras so a future field addition does not break us.
+func TestStatsKeyedByProfile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/stream/stats" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"global": { "clients": 2, "transcoder_cpu_percent": 9.4 },
+			"profiles": {
+				"mjpeg_bal":    { "profile":"mjpeg_bal",    "clients":1, "avg_fps":12.0, "source_fps":15.0, "avg_bitrate_kbps":420.5 },
+				"intercom_web": { "profile":"intercom_web", "clients":3, "avg_fps":28.7, "source_fps":30.0 }
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL)
+	stats, err := c.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("want 2 profile stats, got %d", len(stats))
+	}
+	if stats["mjpeg_bal"].Clients != 1 {
+		t.Errorf("mjpeg_bal clients = %d, want 1", stats["mjpeg_bal"].Clients)
+	}
+	if stats["intercom_web"].Clients != 3 {
+		t.Errorf("intercom_web clients = %d, want 3", stats["intercom_web"].Clients)
+	}
+	if stats["mjpeg_bal"].AvgFPS != 12.0 {
+		t.Errorf("mjpeg_bal avg_fps = %v, want 12.0", stats["mjpeg_bal"].AvgFPS)
+	}
+	if stats["mjpeg_bal"].AvgBitrateKbps != 420.5 {
+		t.Errorf("mjpeg_bal bitrate = %v, want 420.5", stats["mjpeg_bal"].AvgBitrateKbps)
+	}
+}
+
+// Stats surfaces backend errors so the caller (admin handler)
+// can log + fall back to zero counts without crashing the page.
+func TestStatsPropagatesBackendError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "stats unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL)
+	if _, err := c.Stats(context.Background()); err == nil {
+		t.Fatal("Stats: want error on HTTP 503, got nil")
+	}
+}
+
 // The transitional client has no Protect connection of its own;
 // ListCameras returns an empty slice so the admin UI's
 // camera-dropdown can render an "Quelle waehlbar ab
@@ -325,5 +381,8 @@ func TestUnconfiguredBackend(t *testing.T) {
 	}
 	if len(cams) != 0 {
 		t.Errorf("ListCameras: want 0 entries, got %d", len(cams))
+	}
+	if _, err := b.Stats(context.Background()); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("Stats: want ErrNotConfigured, got %v", err)
 	}
 }

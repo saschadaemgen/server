@@ -78,6 +78,14 @@ type StreamBackend interface {
 	// returns an empty slice.
 	ListCameras(ctx context.Context) ([]Camera, error)
 
+	// Stats returns a snapshot of live consumer counts (and
+	// related telemetry) keyed by profile name. The admin list
+	// shows the Clients count alongside each row. An error here
+	// is NOT fatal for the caller: the admin handler renders
+	// the list anyway with consumer counts treated as zero, so
+	// a flaky stats endpoint never hides the profiles.
+	Stats(ctx context.Context) (map[string]ProfileStats, error)
+
 	// Configured reports whether a real backend is wired.
 	// Public-build default returns false; the go2rtc and future
 	// commercial backends return true. Handlers check this to
@@ -129,6 +137,10 @@ func (unconfiguredBackend) Delete(context.Context, string) error {
 
 func (unconfiguredBackend) ListCameras(context.Context) ([]Camera, error) {
 	return []Camera{}, nil
+}
+
+func (unconfiguredBackend) Stats(context.Context) (map[string]ProfileStats, error) {
+	return nil, ErrNotConfigured
 }
 
 func (unconfiguredBackend) Configured() bool { return false }
