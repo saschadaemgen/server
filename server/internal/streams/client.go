@@ -120,24 +120,31 @@ func (c *Client) List(ctx context.Context) ([]Profile, error) {
 	return out, nil
 }
 
-// Get returns one profile by name via GET /api/profiles/{name}.
-// Maps a 404 to ErrProfileNotFound so the admin UI can render
-// "schon weg" instead of a generic error.
+// Get returns one profile by name. The stream-server does NOT
+// expose a single-profile GET (only the list at /api/profiles
+// and the write surface PUT/DELETE /api/profiles/{name}), so the
+// implementation pulls the list and filters by name. ErrProfile-
+// NotFound surfaces when the name is unknown so the admin UI can
+// render "schon weg" instead of a generic error.
+//
+// Going through List is equivalent to a hypothetical single-GET
+// for an admin UI's purposes: the wire shape is the same Profile
+// envelope, and the list response is small enough (one entry per
+// configured profile) that the round-trip cost is negligible.
 func (c *Client) Get(ctx context.Context, name string) (Profile, error) {
 	if strings.TrimSpace(name) == "" {
 		return Profile{}, fmt.Errorf("streams: get: empty name")
 	}
-	body, err := c.do(ctx, http.MethodGet,
-		"/api/profiles/"+url.PathEscape(name), nil)
+	profiles, err := c.List(ctx)
 	if err != nil {
 		return Profile{}, err
 	}
-	defer body.Close()
-	var p Profile
-	if err := json.NewDecoder(body).Decode(&p); err != nil {
-		return Profile{}, fmt.Errorf("streams: decode get: %w", err)
+	for _, p := range profiles {
+		if p.Name == name {
+			return p, nil
+		}
 	}
-	return p, nil
+	return Profile{}, ErrProfileNotFound
 }
 
 // Put creates or replaces a profile via PUT /api/profiles/{name}.

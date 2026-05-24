@@ -220,16 +220,42 @@ func TestPutRejectsEmptyName(t *testing.T) {
 	}
 }
 
-func TestGetMapsNotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "missing", http.StatusNotFound)
+// Get walks the list response (the stream-server has no single-
+// profile GET endpoint) and returns ErrProfileNotFound when the
+// name is missing. The test asserts both the missing-case and a
+// success case so a future "I'll just route Get to a single-GET
+// again" temptation cannot slip past.
+func TestGetWalksListAndMapsNotFound(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/api/profiles" {
+			t.Errorf("unexpected single-profile path %q; Get must go through /api/profiles", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"name":"mjpeg_bal","camera_id":"cam-1","quality":"low","usage":"esp","description":"","codec":"mjpeg","width":800,"height":1280,"fps":9,"encode_quality":6,"encryption":"tls"}
+		]`))
 	}))
 	defer srv.Close()
 
 	c, _ := New(srv.URL)
-	_, err := c.Get(context.Background(), "ghost")
-	if !errors.Is(err, ErrProfileNotFound) {
-		t.Fatalf("want ErrProfileNotFound, got %v", err)
+
+	// Hit: returns the matching profile.
+	p, err := c.Get(context.Background(), "mjpeg_bal")
+	if err != nil {
+		t.Fatalf("Get(mjpeg_bal): %v", err)
+	}
+	if p.Name != "mjpeg_bal" || p.Encryption != "tls" {
+		t.Errorf("Get returned unexpected profile: %+v", p)
+	}
+
+	// Miss: ErrProfileNotFound.
+	if _, err := c.Get(context.Background(), "ghost"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("Get(ghost): want ErrProfileNotFound, got %v", err)
+	}
+	if hits != 2 {
+		t.Errorf("backend hits = %d, want 2 (one per Get)", hits)
 	}
 }
 
