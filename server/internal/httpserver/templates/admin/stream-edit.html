@@ -72,8 +72,10 @@
 
         <div class="field">
           <label class="field-label" for="f-usage">Nutzung</label>
-          <div class="dropdown" data-dropdown>
-            <select class="input" id="f-usage" name="usage" data-dropdown-target required>
+          <div class="dropdown" data-dropdown
+               data-dropdown-source="inline"
+               data-dropdown-value="{{.Page.Profile.Usage}}">
+            <select id="f-usage" name="usage" data-dropdown-target>
               <option value="esp"     {{if eq .Page.Profile.Usage "esp"}}selected{{end}}>esp (MJPEG-Hardware)</option>
               <option value="browser" {{if eq .Page.Profile.Usage "browser"}}selected{{end}}>browser (WebRTC)</option>
             </select>
@@ -90,8 +92,10 @@
 
         <div class="field">
           <label class="field-label" for="f-codec">Codec</label>
-          <div class="dropdown" data-dropdown>
-            <select class="input" id="f-codec" name="codec" data-dropdown-target required>
+          <div class="dropdown" data-dropdown
+               data-dropdown-source="inline"
+               data-dropdown-value="{{.Page.Profile.Codec}}">
+            <select id="f-codec" name="codec" data-dropdown-target>
               <option value="mjpeg"            {{if eq .Page.Profile.Codec "mjpeg"}}selected{{end}}>mjpeg</option>
               <option value="h264_cbp"         {{if eq .Page.Profile.Codec "h264_cbp"}}selected{{end}}>h264_cbp</option>
               <option value="h264_passthrough" {{if eq .Page.Profile.Codec "h264_passthrough"}}selected{{end}}>h264_passthrough</option>
@@ -127,8 +131,10 @@
 
         <div class="field">
           <label class="field-label" for="f-encryption">Medien-Verschluesselung</label>
-          <div class="dropdown" data-dropdown>
-            <select class="input" id="f-encryption" name="encryption" data-dropdown-target required>
+          <div class="dropdown" data-dropdown
+               data-dropdown-source="inline"
+               data-dropdown-value="{{.Page.Profile.Encryption}}">
+            <select id="f-encryption" name="encryption" data-dropdown-target>
               <option value="tls"  {{if eq .Page.Profile.Encryption "tls"}}selected{{end}}>TLS (Leitung verschluesselt)</option>
               <option value="srtp" {{if eq .Page.Profile.Encryption "srtp"}}selected{{end}}>SRTP (Leitung + Medien verschluesselt)</option>
             </select>
