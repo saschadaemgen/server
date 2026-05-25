@@ -528,8 +528,25 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 		Label:  fmt.Sprintf("stream: viewer %s/%d writesample", p.Name, sub.ID()),
 	}
 	go func() {
+		// S6-15: bring WebRTC viewers into /stream/stats. Codec uses
+		// the profile codec (h264_passthrough) — the same convention
+		// handleMJPEG / handleH264 follow. Stays consistent so the
+		// per-profile aggregation in stats.Snapshot doesn't split a
+		// profile across two codec names.
+		//
+		// Registration happens at goroutine start (signalling has
+		// produced a peer connection; the briefing's "successful
+		// peer-connection setup" trigger is the SDP-answer write
+		// already in flight at the call site). LIFO defers below
+		// guarantee pc.Close runs BEFORE Unregister, so when the
+		// snapshot disappears the wire is already gone.
+		var sc *stats.Client
+		if s.stats != nil {
+			sc = s.stats.Register(p.Name, string(p.Codec), r.RemoteAddr)
+			defer s.stats.Unregister(sc)
+		}
 		defer func() { _ = pc.Close() }()
-		s.feedTrack(sub, track, feedDrops)
+		s.feedTrack(sub, track, feedDrops, sc)
 	}()
 
 	offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: string(body)}
@@ -562,24 +579,81 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, pc.LocalDescription().SDP)
 }
 
+// webrtcIdleTimeout is the defensive watchdog window in [feedTrack]:
+// if no AU arrives from the camera hub for this long, the feed loop
+// exits even though [hub.Subscriber.Frames] has not been closed. The
+// deferred chain in handleOffer's goroutine then runs (Unregister
+// from stats, pc.Close), so a viewer can never linger as a "ghost"
+// in /stream/stats if pion's OnConnectionStateChange callback fails
+// to fire on disconnect (S6-15 briefing pflicht).
+//
+// 30 s is a wide margin: even the slowest configured profile delivers
+// at 10 fps (mjpeg_hq → 100 ms inter-frame), and the camera-side bus
+// pushes 30 fps to /offer subscribers (h264_passthrough — no
+// throttling). 30 s = 300 missing frames, well beyond any healthy
+// transient.
+//
+// It's a var (not const) so tests can shrink it to a millisecond
+// range. Not exported — pkg-internal only.
+var webrtcIdleTimeout = 30 * time.Second
+
 // feedTrack pumps access units from a subscriber into a pion sample
 // track. Per-viewer PTS tracking lives here — pion's WriteSample wants
 // a delta (Duration) per sample, not absolute timestamps.
-func (s *Server) feedTrack(sub *hub.Subscriber, track *webrtc.TrackLocalStaticSample, drops *droplog.Counter) {
+//
+// S6-15: sc is the per-viewer stats handle (nil-safe). On every
+// successful WriteSample we record the sample's wire size; on a
+// WriteSample error we record a drop so /stream/stats reflects the
+// teardown reason. The function also enforces an idle timeout against
+// [webrtcIdleTimeout]; on expiry the loop exits so the caller's
+// deferred Unregister + pc.Close run even if the upstream went silent
+// without pion noticing.
+func (s *Server) feedTrack(sub *hub.Subscriber, track *webrtc.TrackLocalStaticSample, drops *droplog.Counter, sc *stats.Client) {
 	var (
 		prevPTS    int64
 		prevPTSSet bool
 	)
-	for au := range sub.Frames() {
-		dur := frameDuration(au.PTS, prevPTS, prevPTSSet)
-		prevPTS = au.PTS
-		prevPTSSet = true
+	timer := time.NewTimer(webrtcIdleTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case au, ok := <-sub.Frames():
+			if !ok {
+				return
+			}
+			// Reset the idle timer for the next frame. Drain the
+			// channel first if Stop reports the timer already fired
+			// but its event is still queued — the standard
+			// time.Timer.Reset dance.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(webrtcIdleTimeout)
 
-		if err := track.WriteSample(media.Sample{
-			Data:     annexBMarshal(au.NALUs),
-			Duration: dur,
-		}); err != nil {
-			drops.Record(err)
+			dur := frameDuration(au.PTS, prevPTS, prevPTSSet)
+			prevPTS = au.PTS
+			prevPTSSet = true
+
+			payload := annexBMarshal(au.NALUs)
+			if err := track.WriteSample(media.Sample{
+				Data:     payload,
+				Duration: dur,
+			}); err != nil {
+				drops.Record(err)
+				sc.RecordDrop()
+				continue
+			}
+			sc.RecordFrame(len(payload))
+		case <-timer.C:
+			// No frame for webrtcIdleTimeout. Returning here lets
+			// the caller's deferred Unregister + pc.Close run — the
+			// stats entry will disappear from the next snapshot
+			// instead of lingering as a ghost.
+			drops.Record(fmt.Errorf("webrtc viewer idle for %s; tearing down", webrtcIdleTimeout))
+			return
 		}
 	}
 }
