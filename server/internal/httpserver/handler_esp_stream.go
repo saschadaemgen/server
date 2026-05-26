@@ -42,9 +42,9 @@ import (
 )
 
 func (s *Server) handleESPStream(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
-		// requireESPBearer normally short-circuits before us, so
+		// requireDeviceBearer normally short-circuits before us, so
 		// this branch only fires if a route was wired without the
 		// middleware. Keep the WARN for defence in depth.
 		s.log.Warn("stream proxy: unauthorized", "route", r.URL.Path, "reason", "no esp identity")

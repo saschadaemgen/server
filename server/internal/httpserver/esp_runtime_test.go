@@ -46,15 +46,15 @@ func adoptESPForTest(t *testing.T, env *testEnv, mac, name string) string {
 	return tok
 }
 
-// invokeBearer wraps the requireESPBearer middleware around a
+// invokeBearer wraps the requireDeviceBearer middleware around a
 // dummy 200-handler and runs it with the given Authorization
 // header value. Returns status code and the resolved MAC (empty
 // if 401).
 func invokeBearer(t *testing.T, env *testEnv, authHeader string) (int, string) {
 	t.Helper()
 	var seenMAC string
-	h := env.srv.requireESPBearer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenMAC = ESPMACFromContext(r.Context())
+	h := env.srv.requireDeviceBearer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMAC = DeviceMACFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/esp/probe", nil)
@@ -103,10 +103,10 @@ func TestESPAuth_AcceptsValidToken(t *testing.T) {
 		t.Errorf("MAC = %q, want %q", mac, espTestMAC)
 	}
 
-	// LookupESPMACByToken-Sanity.
-	got, err := env.viewerMgr.LookupESPMACByToken(context.Background(), tok)
+	// LookupDeviceMACByToken-Sanity.
+	got, err := env.viewerMgr.LookupDeviceMACByToken(context.Background(), tok)
 	if err != nil {
-		t.Fatalf("LookupESPMACByToken: %v", err)
+		t.Fatalf("LookupDeviceMACByToken: %v", err)
 	}
 	if got != espTestMAC {
 		t.Errorf("Lookup returned %s, want %s", got, espTestMAC)

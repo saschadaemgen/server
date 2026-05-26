@@ -6,7 +6,7 @@
 // present field is strictly checked against the allow-list in
 // viewermanager, applied = only the fields that actually changed.
 //
-// Auth: requireESPBearer. The MAC comes from the bearer context.
+// Auth: requireDeviceBearer. The MAC comes from the bearer context.
 //
 // Response: { ok: true, applied: { ...only changed fields } }
 //
@@ -53,7 +53,7 @@ var idleViewModeAllowed = []string{
 }
 
 func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return

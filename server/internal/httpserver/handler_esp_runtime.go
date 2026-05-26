@@ -3,7 +3,7 @@
 // Every handler in this file requires the caller to be an adopted
 // ESP-Viewer. The bearer-auth middleware (middleware_esp.go) puts
 // the matched viewer MAC on the request context; handlers read it
-// via ESPMACFromContext.
+// via DeviceMACFromContext.
 //
 // Endpoints in this file (registered in server.go):
 //
@@ -120,7 +120,7 @@ type espUISettings struct {
 // handleESPConfig renders the snapshot for the calling ESP-Viewer.
 // MAC comes from the bearer middleware's context value.
 func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -181,7 +181,7 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 // publisher side belongs to the doorbell-hub / admin-edit code
 // path.
 func (s *Server) handleESPEvents(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -259,7 +259,7 @@ type espAnswerRequest struct {
 // answer exchange between caller and answerer) lands together
 // with the /remote_view wire-up.
 func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -293,7 +293,7 @@ func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
 		// local branching.
 		s.publishToESP(mac, cancelEvent)
 	}
-	siblings, err := s.viewerMgr.SiblingESPMACs(r.Context(), mac)
+	siblings, err := s.viewerMgr.SiblingDeviceMACs(r.Context(), mac)
 	if err != nil {
 		s.log.Error("esp answer siblings", "err", err, "mac_prefix", mac[:8])
 	}
@@ -327,7 +327,7 @@ func (s *Server) handleESPAnswer(w http.ResponseWriter, r *http.Request) {
 // shorthand; new firmware should prefer /esp/reject because it
 // stops the intercom immediately.
 func (s *Server) handleESPReject(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -360,7 +360,7 @@ func (s *Server) handleESPReject(w http.ResponseWriter, r *http.Request) {
 			body.EventID, doorbellcalls.ReasonRejected),
 	}
 	s.publishToESP(mac, cancelEvent)
-	siblings, err := s.viewerMgr.SiblingESPMACs(r.Context(), mac)
+	siblings, err := s.viewerMgr.SiblingDeviceMACs(r.Context(), mac)
 	if err != nil {
 		s.log.Warn("esp reject siblings", "err", err, "mac_prefix", mac[:8])
 	}
@@ -417,7 +417,7 @@ type espUnlockRequest struct {
 //   - door_id empty + no paired_intercom -> 400 "no paired intercom configured"
 //   - door_id empty + intercom unbound   -> 400 "paired intercom not assigned..."
 func (s *Server) handleESPUnlock(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -521,7 +521,7 @@ type espStateRequest struct {
 // to a real table if persistence turns out to matter across
 // server restarts.
 func (s *Server) handleESPState(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
@@ -582,7 +582,7 @@ func (s *Server) ESPState(mac string) (ESPState, bool) {
 // intentionally tiny so a battery-friendly firmware can poll
 // often without burning bytes.
 func (s *Server) handleESPHeartbeat(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return

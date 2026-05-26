@@ -1207,13 +1207,13 @@ func (m *Manager) SetAutoScreensaverSeconds(ctx context.Context, mac string, sec
 	return nil
 }
 
-// SiblingESPMACs liefert alle ESP-Viewer-MACs die an demselben
+// SiblingDeviceMACs liefert alle ESP-Viewer-MACs die an demselben
 // UA-User haengen wie der uebergebene MAC, ausser dem MAC selbst.
 // Wird vom /esp/answer-Pfad genutzt um "answered elsewhere"-
 // Cancel-Events an die anderen Geraete des Mieters zu pushen.
 // Wenn der Viewer keine linked_ua_user_id hat, gibt es per
 // Definition keine Siblings (leere Liste, kein Fehler).
-func (m *Manager) SiblingESPMACs(ctx context.Context, mac string) ([]string, error) {
+func (m *Manager) SiblingDeviceMACs(ctx context.Context, mac string) ([]string, error) {
 	var linked sql.NullString
 	err := m.db.QueryRowContext(ctx,
 		`SELECT linked_ua_user_id FROM viewers WHERE mac = ?`, mac).Scan(&linked)
@@ -1283,7 +1283,7 @@ func (m *Manager) SetDeviceTokenHash(ctx context.Context, mac, hash string) erro
 	return nil
 }
 
-// LookupESPMACByToken compares the clear-text bearer token
+// LookupDeviceMACByToken compares the clear-text bearer token
 // presented by an ESP against every adopted ESP viewer and
 // returns the MAC of the matching device. Verify uses
 // crypto/subtle.ConstantTimeCompare. With <100 ESP viewers per
@@ -1291,13 +1291,14 @@ func (m *Manager) SetDeviceTokenHash(ctx context.Context, mac, hash string) erro
 // linear-scan strategy is cheap enough; this can switch to an
 // indexed hash lookup once a deployment grows into the
 // multi-tenant range.
-func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (string, error) {
+func (m *Manager) LookupDeviceMACByToken(ctx context.Context, presented string) (string, error) {
 	if presented == "" {
 		return "", ErrViewerNotFound
 	}
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, device_token_hash FROM viewers
-		  WHERE type = 'esp' AND device_token_hash IS NOT NULL`)
+		  WHERE type IN ('esp', 'android')
+		    AND device_token_hash IS NOT NULL`)
 	if err != nil {
 		return "", fmt.Errorf("viewermanager: lookup esp by token: %w", err)
 	}

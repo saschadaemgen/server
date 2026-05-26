@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Server) handleESPUnreadCount(w http.ResponseWriter, r *http.Request) {
-	mac := ESPMACFromContext(r.Context())
+	mac := DeviceMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return

@@ -319,29 +319,29 @@ func (s *Server) routes() {
 	// ESP runtime. Bearer-token-protected; the token is generated
 	// during the adoption flow and picked up by the ESP via
 	// /esp/discover/status.
-	s.mux.Handle("GET /esp/config", s.requireESPBearer(http.HandlerFunc(s.handleESPConfig)))
-	s.mux.Handle("GET /esp/events", s.requireESPBearer(http.HandlerFunc(s.handleESPEvents)))
-	s.mux.Handle("GET /esp/heartbeat", s.requireESPBearer(http.HandlerFunc(s.handleESPHeartbeat)))
-	s.mux.Handle("POST /esp/answer", s.requireESPBearer(http.HandlerFunc(s.handleESPAnswer)))
-	s.mux.Handle("POST /esp/reject", s.requireESPBearer(http.HandlerFunc(s.handleESPReject)))
-	s.mux.Handle("POST /esp/unlock", s.requireESPBearer(http.HandlerFunc(s.handleESPUnlock)))
-	s.mux.Handle("POST /esp/state", s.requireESPBearer(http.HandlerFunc(s.handleESPState)))
-	s.mux.Handle("GET /esp/stream.mjpeg", s.requireESPBearer(http.HandlerFunc(s.handleESPStream)))
+	s.mux.Handle("GET /esp/config", s.requireDeviceBearer(http.HandlerFunc(s.handleESPConfig)))
+	s.mux.Handle("GET /esp/events", s.requireDeviceBearer(http.HandlerFunc(s.handleESPEvents)))
+	s.mux.Handle("GET /esp/heartbeat", s.requireDeviceBearer(http.HandlerFunc(s.handleESPHeartbeat)))
+	s.mux.Handle("POST /esp/answer", s.requireDeviceBearer(http.HandlerFunc(s.handleESPAnswer)))
+	s.mux.Handle("POST /esp/reject", s.requireDeviceBearer(http.HandlerFunc(s.handleESPReject)))
+	s.mux.Handle("POST /esp/unlock", s.requireDeviceBearer(http.HandlerFunc(s.handleESPUnlock)))
+	s.mux.Handle("POST /esp/state", s.requireDeviceBearer(http.HandlerFunc(s.handleESPState)))
+	s.mux.Handle("GET /esp/stream.mjpeg", s.requireDeviceBearer(http.HandlerFunc(s.handleESPStream)))
 	// ESP settings + weather + unread.
 	// POST /esp/settings persists partial updates and broadcasts
 	// config.changed; /esp/weather and /esp/unread-count are
 	// bearer-gated reuses of the mieter endpoints (same
 	// response shape, different auth).
-	s.mux.Handle("POST /esp/settings", s.requireESPBearer(http.HandlerFunc(s.handleESPSettings)))
-	s.mux.Handle("GET /esp/weather", s.requireESPBearer(http.HandlerFunc(s.handleESPWeather)))
-	s.mux.Handle("GET /esp/unread-count", s.requireESPBearer(http.HandlerFunc(s.handleESPUnreadCount)))
+	s.mux.Handle("POST /esp/settings", s.requireDeviceBearer(http.HandlerFunc(s.handleESPSettings)))
+	s.mux.Handle("GET /esp/weather", s.requireDeviceBearer(http.HandlerFunc(s.handleESPWeather)))
+	s.mux.Handle("GET /esp/unread-count", s.requireDeviceBearer(http.HandlerFunc(s.handleESPUnreadCount)))
 
 	// ESP pendant to /webviewer/history*. Bearer-gated
 	// soft-delete + paged list. Internally delegate to the
 	// serveHistory* helpers in handler_mieter_history.go.
-	s.mux.Handle("GET /esp/history.json", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryList)))
-	s.mux.Handle("DELETE /esp/history/{event_id}", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteOne)))
-	s.mux.Handle("DELETE /esp/history", s.requireESPBearer(http.HandlerFunc(s.handleESPHistoryDeleteAll)))
+	s.mux.Handle("GET /esp/history.json", s.requireDeviceBearer(http.HandlerFunc(s.handleESPHistoryList)))
+	s.mux.Handle("DELETE /esp/history/{event_id}", s.requireDeviceBearer(http.HandlerFunc(s.handleESPHistoryDeleteOne)))
+	s.mux.Handle("DELETE /esp/history", s.requireDeviceBearer(http.HandlerFunc(s.handleESPHistoryDeleteAll)))
 
 	// ESP-viewer admin tab.
 	s.mux.Handle("GET /a/esp-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminESPViewersList)))

@@ -15,7 +15,7 @@ import (
 // weather handler. Identical response shape to
 // /webviewer/weather; only the auth mechanism differs.
 func (s *Server) handleESPWeather(w http.ResponseWriter, r *http.Request) {
-	if mac := ESPMACFromContext(r.Context()); mac == "" {
+	if mac := DeviceMACFromContext(r.Context()); mac == "" {
 		http.Error(w, "no esp identity", http.StatusUnauthorized)
 		return
 	}

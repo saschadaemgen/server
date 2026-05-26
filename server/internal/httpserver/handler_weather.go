@@ -50,7 +50,7 @@ func (s *Server) resolveTenantLanguage(ctx context.Context) string {
 	}
 	mac := ViewerMACFromContext(ctx)
 	if mac == "" {
-		mac = ESPMACFromContext(ctx)
+		mac = DeviceMACFromContext(ctx)
 	}
 	if mac == "" {
 		return viewermanager.DefaultLanguage

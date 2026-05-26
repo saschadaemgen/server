@@ -367,9 +367,9 @@ func TestAdminViewerRegenerateToken_ReturnsClearTextOnce(t *testing.T) {
 		t.Errorf("mac echo = %q", out.MAC)
 	}
 	// Token funktioniert als Bearer.
-	mac, err := env.viewerMgr.LookupESPMACByToken(context.Background(), out.NewToken)
+	mac, err := env.viewerMgr.LookupDeviceMACByToken(context.Background(), out.NewToken)
 	if err != nil {
-		t.Fatalf("LookupESPMACByToken: %v", err)
+		t.Fatalf("LookupDeviceMACByToken: %v", err)
 	}
 	if mac != espTestMAC {
 		t.Errorf("lookup -> %q, want %q", mac, espTestMAC)
@@ -536,7 +536,7 @@ func TestAdminViewerRegenerateToken_InvalidatesOldToken(t *testing.T) {
 		t.Fatalf("new token equals old token - regen broken")
 	}
 	// Alter Bearer-Token wird zurueckgewiesen.
-	_, err := env.viewerMgr.LookupESPMACByToken(context.Background(), oldToken)
+	_, err := env.viewerMgr.LookupDeviceMACByToken(context.Background(), oldToken)
 	if err == nil {
 		t.Errorf("old token still resolves to viewer; rotation failed")
 	}
