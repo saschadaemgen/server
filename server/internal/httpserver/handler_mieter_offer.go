@@ -10,7 +10,7 @@
 // hijack, no chunked-multipart fiddling. The body limit is small
 // (an SDP offer is a few kilobytes) so we just stream it through.
 //
-// Auth is the regular session cookie middleware (requireSession);
+// Auth is the regular session cookie middleware (requireViewerAuth);
 // the Authorization header is stripped before forwarding so the
 // backend never sees the tenant's bearer token / cookie.
 package httpserver
@@ -43,7 +43,7 @@ const mieterOfferMaxBytes = 64 * 1024
 // streaming backend's signalling endpoint and copies the answer
 // back to the browser.
 //
-// Route: POST /webviewer/offer  (requireSession)
+// Route: POST /webviewer/offer  (requireViewerAuth)
 func (s *Server) handleMieterOffer(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {

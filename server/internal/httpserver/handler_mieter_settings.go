@@ -19,7 +19,7 @@
 //	                             "auto_screensaver_seconds":...},
 //	                            otherwise 303 to /webviewer/
 //
-// Auth: requireSession (cookie-based). The viewer MAC comes from
+// Auth: requireViewerAuth (cookie-based). The viewer MAC comes from
 // the context value the middleware sets.
 package httpserver
 

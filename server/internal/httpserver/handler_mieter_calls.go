@@ -8,7 +8,7 @@
 //	POST /webviewer/end-call            close an answered call
 //
 // Each handler reads the viewer_mac from the request context
-// (set by requireSession) and the active call event_id from the
+// (set by requireViewerAuth) and the active call event_id from the
 // JSON body. The event_id is the cancel_token the mieter
 // browser received in the doorbell_start SSE frame.
 package httpserver

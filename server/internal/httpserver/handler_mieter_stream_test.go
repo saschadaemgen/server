@@ -82,7 +82,7 @@ func TestMieterStreamHandler_503WhenBackendUnconfigured(t *testing.T) {
 
 func TestMieterStreamHandler_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
-	// No login -> requireSession bounces to /login with 303.
+	// No login -> requireViewerAuth bounces to /login with 303.
 	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
 	if err != nil {
 		t.Fatalf("GET: %v", err)

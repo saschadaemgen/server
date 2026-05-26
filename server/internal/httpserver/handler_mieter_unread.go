@@ -1,6 +1,6 @@
 // Read-side endpoint for the screensaver unread-doorbell badge.
 //
-// Route: GET /webviewer/unread-count (requireSession)
+// Route: GET /webviewer/unread-count (requireViewerAuth)
 // Body:  {"count": N}
 //
 // The badge in intercom-idle.html calls this on page load to

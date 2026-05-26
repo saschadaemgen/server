@@ -9,7 +9,7 @@
 // MJPEG body from go2rtc with the same flush-per-chunk +
 // url.Parse core used by /esp/stream.mjpeg.
 //
-// Auth is the regular session cookie middleware (requireSession);
+// Auth is the regular session cookie middleware (requireViewerAuth);
 // no admin path, no API token. Browsers that drop credentials on
 // <img> requests would 401 here - we rely on same-origin cookies
 // which Chrome / Firefox / Safari all send on same-origin img.

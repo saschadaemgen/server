@@ -210,43 +210,43 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.handleLoginGet)
 	s.mux.HandleFunc("POST /login", s.handleViewerLoginPost)
 	s.mux.HandleFunc("POST /webviewer/logout", s.handleViewerLogout)
-	s.mux.Handle("GET /webviewer/events", s.requireSession(http.HandlerFunc(s.handleMieterEvents)))
+	s.mux.Handle("GET /webviewer/events", s.requireViewerAuth(http.HandlerFunc(s.handleMieterEvents)))
 	// Doorbell lifecycle.
-	s.mux.Handle("POST /webviewer/doors/{door_id}/unlock", s.requireSession(http.HandlerFunc(s.handleMieterUnlock)))
-	s.mux.Handle("POST /webviewer/answer", s.requireSession(http.HandlerFunc(s.handleMieterAnswer)))
-	s.mux.Handle("POST /webviewer/reject", s.requireSession(http.HandlerFunc(s.handleMieterReject)))
-	s.mux.Handle("POST /webviewer/end-call", s.requireSession(http.HandlerFunc(s.handleMieterEndCall)))
+	s.mux.Handle("POST /webviewer/doors/{door_id}/unlock", s.requireViewerAuth(http.HandlerFunc(s.handleMieterUnlock)))
+	s.mux.Handle("POST /webviewer/answer", s.requireViewerAuth(http.HandlerFunc(s.handleMieterAnswer)))
+	s.mux.Handle("POST /webviewer/reject", s.requireViewerAuth(http.HandlerFunc(s.handleMieterReject)))
+	s.mux.Handle("POST /webviewer/end-call", s.requireViewerAuth(http.HandlerFunc(s.handleMieterEndCall)))
 	// Live MJPEG passthrough for the ringing overlay (and
 	// optionally the idle stream slot).
-	s.mux.Handle("GET /webviewer/stream.mjpeg", s.requireSession(http.HandlerFunc(s.handleMieterStream)))
+	s.mux.Handle("GET /webviewer/stream.mjpeg", s.requireViewerAuth(http.HandlerFunc(s.handleMieterStream)))
 	// WebRTC signalling proxy. The browser POSTs an SDP offer; we
 	// forward to streams.StreamBackend.WebRTCSignalURL for the
 	// viewer's resolved profile and stream the SDP answer back.
 	// 503 when no backend is configured.
-	s.mux.Handle("POST /webviewer/offer", s.requireSession(http.HandlerFunc(s.handleMieterOffer)))
+	s.mux.Handle("POST /webviewer/offer", s.requireViewerAuth(http.HandlerFunc(s.handleMieterOffer)))
 	// Tenant settings (idle-view-mode) and weather pull for the
 	// screensaver.
-	s.mux.Handle("GET /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsGet)))
-	s.mux.Handle("POST /webviewer/settings", s.requireSession(http.HandlerFunc(s.handleMieterSettingsPost)))
-	s.mux.Handle("GET /webviewer/weather", s.requireSession(http.HandlerFunc(s.handleWeather)))
+	s.mux.Handle("GET /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsGet)))
+	s.mux.Handle("POST /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsPost)))
+	s.mux.Handle("GET /webviewer/weather", s.requireViewerAuth(http.HandlerFunc(s.handleWeather)))
 	// Inline-history mode JSON feed (read-marks rows
 	// asynchronously so the browser still sees "NEU" on first
 	// open).
-	s.mux.Handle("GET /webviewer/history.json", s.requireSession(http.HandlerFunc(s.handleMieterHistoryJSON)))
+	s.mux.Handle("GET /webviewer/history.json", s.requireViewerAuth(http.HandlerFunc(s.handleMieterHistoryJSON)))
 	// Mieter soft-delete (single + bulk).
 	// DELETE /webviewer/history/{event_id} hides one entry,
 	// DELETE /webviewer/history hides every currently-visible
 	// row. The admin still sees everything via
 	// /a/viewers/{mac}/history.
-	s.mux.Handle("DELETE /webviewer/history/{event_id}", s.requireSession(http.HandlerFunc(s.handleMieterHistoryHideOne)))
-	s.mux.Handle("DELETE /webviewer/history", s.requireSession(http.HandlerFunc(s.handleMieterHistoryHideAll)))
+	s.mux.Handle("DELETE /webviewer/history/{event_id}", s.requireViewerAuth(http.HandlerFunc(s.handleMieterHistoryHideOne)))
+	s.mux.Handle("DELETE /webviewer/history", s.requireViewerAuth(http.HandlerFunc(s.handleMieterHistoryHideAll)))
 	// Read-only unread-doorbell counter for the screensaver
 	// badge. Live updates ride the SSE channel; this endpoint
 	// hydrates the initial value and recovers from SSE
 	// reconnect.
-	s.mux.Handle("GET /webviewer/unread-count", s.requireSession(http.HandlerFunc(s.handleMieterUnreadCount)))
-	s.mux.Handle("GET /webviewer", s.requireSession(http.HandlerFunc(s.handleHome)))
-	s.mux.Handle("GET /webviewer/", s.requireSession(http.HandlerFunc(s.handleHome)))
+	s.mux.Handle("GET /webviewer/unread-count", s.requireViewerAuth(http.HandlerFunc(s.handleMieterUnreadCount)))
+	s.mux.Handle("GET /webviewer", s.requireViewerAuth(http.HandlerFunc(s.handleHome)))
+	s.mux.Handle("GET /webviewer/", s.requireViewerAuth(http.HandlerFunc(s.handleHome)))
 
 	// Legacy redirects. /m was the original mieter tree;
 	// /einloggen was its rename. Both stay as 301 permanent
@@ -440,7 +440,7 @@ func mapLegacyMieterPath(path, prefix string) string {
 		// The bare prefix used to render the login form; we route
 		// it to /login. The trailing slash variant historically
 		// rendered the home page when authenticated, so we keep
-		// the trailing slash on the new path so requireSession
+		// the trailing slash on the new path so requireViewerAuth
 		// can decide whether to send the user further.
 		if tail == "/" {
 			return "/webviewer/"

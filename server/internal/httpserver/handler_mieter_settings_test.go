@@ -512,7 +512,7 @@ func TestMieterSettingsPost_BroadcastsConfigChanged(t *testing.T) {
 }
 
 // TestMieterHistoryJSON_RequiresSession the JSON endpoint must be
-// behind requireSession; without a cookie it redirects to /login.
+// behind requireViewerAuth; without a cookie it redirects to /login.
 func TestMieterHistoryJSON_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
 	resp, err := env.client.Get(env.ts.URL + "/webviewer/history.json")

@@ -91,7 +91,7 @@ func TestMieterUnreadCount_Endpoint(t *testing.T) {
 }
 
 // TestMieterUnreadCount_RequiresSession the endpoint must be
-// behind requireSession; without a cookie it redirects to /login.
+// behind requireViewerAuth; without a cookie it redirects to /login.
 func TestMieterUnreadCount_RequiresSession(t *testing.T) {
 	env := newTestServer(t)
 	resp, err := env.client.Get(env.ts.URL + "/webviewer/unread-count")

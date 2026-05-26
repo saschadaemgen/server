@@ -13,7 +13,7 @@
 //     UI can show "Erfassung deaktiviert"-Hinweis instead of an
 //     empty list.
 //
-// Route: GET /webviewer/history.json (requireSession)
+// Route: GET /webviewer/history.json (requireViewerAuth)
 // Auth:  Mieter-Session-Cookie. MAC comes from the context.
 // Body:  see mieterHistoryResponse.
 //
