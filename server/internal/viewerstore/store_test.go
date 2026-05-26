@@ -36,7 +36,7 @@ func TestInsert_MinimalESP(t *testing.T) {
 		Name:              "ESP-A",
 		ServicePort:       8100,
 		Type:              "esp",
-		ESPTokenHash:      "deadbeef",
+		DeviceTokenHash:      "deadbeef",
 		PairedIntercomMAC: "28:70:4e:31:e2:9c",
 		LinkedUAUserID:    "ua-user-42",
 	}
@@ -59,7 +59,7 @@ func TestInsert_MinimalESP(t *testing.T) {
 		created    int64
 		updated    int64
 	)
-	err := d.QueryRow(`SELECT type, esp_token_hash, service_port,
+	err := d.QueryRow(`SELECT type, device_token_hash, service_port,
 	                          paired_intercom_mac, linked_ua_user_id,
 	                          esp_model, esp_fw_version, stream_profile,
 	                          idle_view_mode, auto_screensaver_seconds,
@@ -134,7 +134,7 @@ func TestInsert_FullManagerShape(t *testing.T) {
 		LinkedUAUserID:         "ua-user-7",
 		ESPModel:               "esp32-p4",
 		ESPFwVersion:           "v0.3.0",
-		ESPTokenHash:           "feedface",
+		DeviceTokenHash:           "feedface",
 		PairedIntercomMAC:      "  28:70:4E:31:E2:9C  ",
 		StreamProfile:          "  intercom_web  ",
 		IdleViewMode:           "  livestream  ",

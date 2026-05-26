@@ -56,7 +56,7 @@ type InsertSpec struct {
 	LinkedUAUserID         string
 	ESPModel               string
 	ESPFwVersion           string
-	ESPTokenHash           string
+	DeviceTokenHash           string
 	PairedIntercomMAC      string
 	StreamProfile          string
 	IdleViewMode           string
@@ -71,7 +71,7 @@ func Insert(ctx context.Context, db *sql.DB, spec InsertSpec, now int64) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO viewers
 		   (mac, name, service_port, type, linked_ua_user_id,
-		    esp_model, esp_fw_version, esp_token_hash,
+		    esp_model, esp_fw_version, device_token_hash,
 		    paired_intercom_mac, stream_profile, idle_view_mode,
 		    auto_screensaver_seconds,
 		    created_at, updated_at)
@@ -81,7 +81,7 @@ func Insert(ctx context.Context, db *sql.DB, spec InsertSpec, now int64) error {
 		nullableString(spec.LinkedUAUserID),
 		nullableString(spec.ESPModel),
 		nullableString(spec.ESPFwVersion),
-		nullableString(spec.ESPTokenHash),
+		nullableString(spec.DeviceTokenHash),
 		strings.ToLower(strings.TrimSpace(spec.PairedIntercomMAC)),
 		nullableString(strings.TrimSpace(spec.StreamProfile)),
 		nullableString(strings.TrimSpace(spec.IdleViewMode)),

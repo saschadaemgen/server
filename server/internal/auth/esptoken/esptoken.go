@@ -25,7 +25,7 @@ const TokenByteLen = 32
 //   - clear: base64url-encoded random bytes returned to the ESP
 //     in the adopt response. The server does NOT keep this.
 //   - hash:  SHA-256 as a hex string, stored in
-//     viewers.esp_token_hash.
+//     viewers.device_token_hash.
 func Generate() (clear string, hash string, err error) {
 	buf := make([]byte, TokenByteLen)
 	if _, err := rand.Read(buf); err != nil {

@@ -404,7 +404,7 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 		http.Error(w, "Token-Erzeugung fehlgeschlagen.", http.StatusInternalServerError)
 		return
 	}
-	if err := s.viewerMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
+	if err := s.viewerMgr.SetDeviceTokenHash(r.Context(), mac, hash); err != nil {
 		s.log.Error("admin token regen store", "err", err, "mac_prefix", safePrefix(mac))
 		http.Error(w, "Token-Speicherung fehlgeschlagen.", http.StatusInternalServerError)
 		return
@@ -468,7 +468,7 @@ func adminViewerJSON(info *viewermanager.ViewerInfo) map[string]any {
 		"history_capture_enabled":   info.ResolveHistoryCaptureEnabled(),
 		"clock_layout":              info.ResolveClockLayout(),
 		"has_password":              info.HasPassword,
-		"has_esp_token":             info.HasESPToken,
+		"has_esp_token":             info.HasDeviceToken,
 	}
 }
 

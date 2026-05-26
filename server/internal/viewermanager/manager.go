@@ -81,7 +81,7 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 // ViewerSpec describes one persisted viewer.
 //
 // There is no separate username column; the Wohnungs-Name is the
-// login itself. ESPModel / ESPFwVersion / ESPTokenHash are only
+// login itself. ESPModel / ESPFwVersion / DeviceTokenHash are only
 // honoured for Type='esp'; on TypeWeb they stay empty.
 type ViewerSpec struct {
 	MAC            string
@@ -91,7 +91,7 @@ type ViewerSpec struct {
 	LinkedUAUserID string // optional UA-Access-User link
 	ESPModel       string
 	ESPFwVersion   string
-	ESPTokenHash   string
+	DeviceTokenHash   string
 	// PairedIntercomMAC is the UA-API intercom this viewer is
 	// paired with for the standby "Tuer auf" button. Empty string
 	// = no pairing, standby button is inert. Stored colon-form
@@ -133,7 +133,7 @@ type ViewerInfo struct {
 	LinkedUAUserID         string
 	ESPModel               string
 	ESPFwVersion           string
-	HasESPToken            bool
+	HasDeviceToken            bool
 	Running                bool
 	PairedIntercomMAC      string // standby intercom pairing
 	StreamProfile          string // go2rtc profile override
@@ -652,7 +652,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 	}
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, device_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
@@ -723,7 +723,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			info.ESPFwVersion = espFW.String
 		}
 		if espHash.Valid && espHash.String != "" {
-			info.HasESPToken = true
+			info.HasDeviceToken = true
 		}
 		m.mu.Lock()
 		if _, ok := m.viewers[info.MAC]; ok {
@@ -794,7 +794,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 	)
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, device_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
@@ -829,7 +829,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		info.ESPFwVersion = espFW.String
 	}
 	if espHash.Valid && espHash.String != "" {
-		info.HasESPToken = true
+		info.HasDeviceToken = true
 	}
 	if autoSec.Valid {
 		v := int(autoSec.Int64)
@@ -856,7 +856,7 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 	rows, err := m.db.QueryContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
-		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, esp_token_hash,
+		        COALESCE(linked_ua_user_id, ''), esp_model, esp_fw_version, device_token_hash,
 		        COALESCE(paired_intercom_mac, ''), COALESCE(stream_profile, ''),
 		        COALESCE(idle_view_mode, ''),
 		        auto_screensaver_seconds,
@@ -923,7 +923,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			info.ESPFwVersion = espFW.String
 		}
 		if espHash.Valid && espHash.String != "" {
-			info.HasESPToken = true
+			info.HasDeviceToken = true
 		}
 		out = append(out, info)
 	}
@@ -979,7 +979,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		LinkedUAUserID:         spec.LinkedUAUserID,
 		ESPModel:               spec.ESPModel,
 		ESPFwVersion:           spec.ESPFwVersion,
-		ESPTokenHash:           spec.ESPTokenHash,
+		DeviceTokenHash:           spec.DeviceTokenHash,
 		PairedIntercomMAC:      spec.PairedIntercomMAC,
 		StreamProfile:          spec.StreamProfile,
 		IdleViewMode:           spec.IdleViewMode,
@@ -1264,13 +1264,13 @@ func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
 	return nil
 }
 
-// SetESPTokenHash stores a freshly generated token hash for an
+// SetDeviceTokenHash stores a freshly generated token hash for an
 // adopted ESP viewer. The previous token-hash row is overwritten
 // (token rotation).
-func (m *Manager) SetESPTokenHash(ctx context.Context, mac, hash string) error {
+func (m *Manager) SetDeviceTokenHash(ctx context.Context, mac, hash string) error {
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
-		`UPDATE viewers SET esp_token_hash = ?, updated_at = ?
+		`UPDATE viewers SET device_token_hash = ?, updated_at = ?
 		 WHERE mac = ? AND type = 'esp'`,
 		nullable(hash), now, mac)
 	if err != nil {
@@ -1296,8 +1296,8 @@ func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (st
 		return "", ErrViewerNotFound
 	}
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT mac, esp_token_hash FROM viewers
-		  WHERE type = 'esp' AND esp_token_hash IS NOT NULL`)
+		`SELECT mac, device_token_hash FROM viewers
+		  WHERE type = 'esp' AND device_token_hash IS NOT NULL`)
 	if err != nil {
 		return "", fmt.Errorf("viewermanager: lookup esp by token: %w", err)
 	}
@@ -1321,13 +1321,13 @@ func (m *Manager) LookupESPMACByToken(ctx context.Context, presented string) (st
 	return "", ErrViewerNotFound
 }
 
-// LookupESPTokenHash returns the token hash for an adopted ESP
+// LookupDeviceTokenHash returns the token hash for an adopted ESP
 // viewer. Used by the bearer-auth middleware on the /esp/ tree
 // and by the discovery status-poll logic.
-func (m *Manager) LookupESPTokenHash(ctx context.Context, mac string) (string, error) {
+func (m *Manager) LookupDeviceTokenHash(ctx context.Context, mac string) (string, error) {
 	var hash sql.NullString
 	err := m.db.QueryRowContext(ctx,
-		`SELECT esp_token_hash FROM viewers WHERE mac = ? AND type = 'esp'`,
+		`SELECT device_token_hash FROM viewers WHERE mac = ? AND type = 'esp'`,
 		mac).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrViewerNotFound

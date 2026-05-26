@@ -266,7 +266,7 @@ func (s *Server) buildESPViewersData(r *http.Request) (adminESPViewersData, erro
 			Name:          info.Name,
 			Model:         info.ESPModel,
 			FwVersion:     info.ESPFwVersion,
-			HasToken:      info.HasESPToken,
+			HasToken:      info.HasDeviceToken,
 			LinkedUserID:  info.LinkedUAUserID,
 			StreamProfile: info.StreamProfile,
 		}
@@ -409,7 +409,7 @@ func (s *Server) handleAdminESPViewersAdopt(w http.ResponseWriter, r *http.Reque
 		StreamProfile:     strings.TrimSpace(body.StreamProfile),
 		ESPModel:          model.String,
 		ESPFwVersion:      fwVersion.String,
-		ESPTokenHash:      hash,
+		DeviceTokenHash:      hash,
 	}
 	if err := s.viewerMgr.AddViewer(r.Context(), spec); err != nil {
 		switch {
@@ -532,7 +532,7 @@ func (s *Server) handleAdminESPViewersRegenerateToken(w http.ResponseWriter, r *
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if err := s.viewerMgr.SetESPTokenHash(r.Context(), mac, hash); err != nil {
+	if err := s.viewerMgr.SetDeviceTokenHash(r.Context(), mac, hash); err != nil {
 		if errors.Is(err, viewermanager.ErrViewerNotFound) {
 			http.Error(w, "ESP-Viewer nicht gefunden.", http.StatusNotFound)
 			return

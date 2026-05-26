@@ -58,7 +58,7 @@ func TestESPAdopt_PersistsRowAndPrintsToken(t *testing.T) {
 		port           int64
 	)
 	err := d.QueryRow(
-		`SELECT name, type, esp_token_hash,
+		`SELECT name, type, device_token_hash,
 		        COALESCE(paired_intercom_mac, ''),
 		        COALESCE(linked_ua_user_id, ''),
 		        service_port

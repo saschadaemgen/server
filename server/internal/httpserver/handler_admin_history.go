@@ -36,7 +36,7 @@ type adminViewerDetailData struct {
 	Type                  string // "web" | "esp"
 	Running               bool
 	HasPassword           bool
-	HasESPToken           bool
+	HasDeviceToken           bool
 	PairedIntercomMAC     string
 	StreamProfile         string
 	LinkedUAUserID        string
@@ -78,7 +78,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		Type:                   info.Type,
 		Running:                info.Running,
 		HasPassword:            info.HasPassword,
-		HasESPToken:            info.HasESPToken,
+		HasDeviceToken:            info.HasDeviceToken,
 		PairedIntercomMAC:      info.PairedIntercomMAC,
 		StreamProfile:          info.StreamProfile,
 		LinkedUAUserID:         info.LinkedUAUserID,

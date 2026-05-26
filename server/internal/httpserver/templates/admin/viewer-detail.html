@@ -605,7 +605,7 @@
           <dt>ESP-Modell</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
           <dt>Firmware</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
           <dt>Bearer-Token gesetzt</dt><dd>
-            {{if .Page.HasESPToken}}ja{{else}}nein{{end}}
+            {{if .Page.HasDeviceToken}}ja{{else}}nein{{end}}
             <button type="button" class="inline-action" data-action="regen-token">Token neu generieren</button>
           </dd>
         {{else}}

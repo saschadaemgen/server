@@ -106,7 +106,7 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 			}
 		case viewermanager.TypeESP:
 			data.ESPAdopted++
-			if info.HasESPToken {
+			if info.HasDeviceToken {
 				data.ESPWithToken++
 			}
 		}

@@ -436,7 +436,7 @@ func espSpec(mac string, port uint16) ViewerSpec {
 		Name:        "esp-" + mac,
 		ServicePort: port,
 		Type:        TypeESP,
-		ESPTokenHash: "deadbeefdeadbeefdeadbeefdeadbeef" +
+		DeviceTokenHash: "deadbeefdeadbeefdeadbeefdeadbeef" +
 			"deadbeefdeadbeefdeadbeefdeadbeef",
 	}
 }
@@ -484,7 +484,7 @@ func TestRemoveViewer_TypeESP_StopsGoroutine(t *testing.T) {
 	}
 }
 
-func TestSetESPTokenHash_KeepsGoroutineRunning(t *testing.T) {
+func TestSetDeviceTokenHash_KeepsGoroutineRunning(t *testing.T) {
 	mgr, factory := newTestManager(t)
 	spec := espSpec("0c:ea:14:aa:bb:cc", 8200)
 	if err := mgr.AddViewer(context.Background(), spec); err != nil {
@@ -501,8 +501,8 @@ func TestSetESPTokenHash_KeepsGoroutineRunning(t *testing.T) {
 	// must not cancel the live UDM-Mock.
 	const newHash = "0123456789abcdef0123456789abcdef" +
 		"0123456789abcdef0123456789abcdef"
-	if err := mgr.SetESPTokenHash(context.Background(), spec.MAC, newHash); err != nil {
-		t.Fatalf("SetESPTokenHash: %v", err)
+	if err := mgr.SetDeviceTokenHash(context.Background(), spec.MAC, newHash); err != nil {
+		t.Fatalf("SetDeviceTokenHash: %v", err)
 	}
 
 	// Goroutine still running.
@@ -516,9 +516,9 @@ func TestSetESPTokenHash_KeepsGoroutineRunning(t *testing.T) {
 	}
 
 	// And the new hash actually landed in the DB.
-	got, err := mgr.LookupESPTokenHash(context.Background(), spec.MAC)
+	got, err := mgr.LookupDeviceTokenHash(context.Background(), spec.MAC)
 	if err != nil {
-		t.Fatalf("LookupESPTokenHash: %v", err)
+		t.Fatalf("LookupDeviceTokenHash: %v", err)
 	}
 	if got != newHash {
 		t.Errorf("stored hash = %q, want %q", got, newHash)

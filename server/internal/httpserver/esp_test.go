@@ -225,8 +225,8 @@ func TestAdopt_MovesFromPendingToViewers(t *testing.T) {
 	if info.ESPModel != "UA-Display" {
 		t.Errorf("ESPModel = %q", info.ESPModel)
 	}
-	if !info.HasESPToken {
-		t.Error("HasESPToken = false, want true (adopt should set hash)")
+	if !info.HasDeviceToken {
+		t.Error("HasDeviceToken = false, want true (adopt should set hash)")
 	}
 }
 
@@ -280,12 +280,12 @@ func TestAdopt_StoresOnlyHashNotClearText(t *testing.T) {
 
 	var hash string
 	if err := env.d.QueryRow(
-		`SELECT esp_token_hash FROM viewers WHERE mac = ?`, espTestMAC,
+		`SELECT device_token_hash FROM viewers WHERE mac = ?`, espTestMAC,
 	).Scan(&hash); err != nil {
 		t.Fatalf("query hash: %v", err)
 	}
 	if hash == "" {
-		t.Error("esp_token_hash empty in DB")
+		t.Error("device_token_hash empty in DB")
 	}
 	if hash == token {
 		t.Error("DB stores plaintext token, not hash")
@@ -306,7 +306,7 @@ func TestRegenerateToken_InvalidatesOld(t *testing.T) {
 	resp.Body.Close()
 
 	var oldHash string
-	env.d.QueryRow(`SELECT esp_token_hash FROM viewers WHERE mac = ?`, espTestMAC).Scan(&oldHash)
+	env.d.QueryRow(`SELECT device_token_hash FROM viewers WHERE mac = ?`, espTestMAC).Scan(&oldHash)
 
 	regenReq, _ := http.NewRequest(http.MethodPost,
 		env.ts.URL+"/a/esp-viewers/"+espTestMAC+"/regenerate-token", nil)
@@ -317,7 +317,7 @@ func TestRegenerateToken_InvalidatesOld(t *testing.T) {
 	regenResp.Body.Close()
 
 	var newHash string
-	env.d.QueryRow(`SELECT esp_token_hash FROM viewers WHERE mac = ?`, espTestMAC).Scan(&newHash)
+	env.d.QueryRow(`SELECT device_token_hash FROM viewers WHERE mac = ?`, espTestMAC).Scan(&newHash)
 	if newHash == "" || newHash == oldHash {
 		t.Errorf("regenerate did not change hash: old=%s new=%s", oldHash, newHash)
 	}

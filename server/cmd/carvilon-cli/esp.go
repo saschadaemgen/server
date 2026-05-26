@@ -100,7 +100,7 @@ func runESPAdopt(args []string, out io.Writer) error {
 		Name:              nameTrimmed,
 		ServicePort:       port,
 		Type:              "esp",
-		ESPTokenHash:      hash,
+		DeviceTokenHash:      hash,
 		PairedIntercomMAC: intercomLower,
 		LinkedUAUserID:    mieterTrimmed,
 	}, time.Now().UnixMilli()); err != nil {
