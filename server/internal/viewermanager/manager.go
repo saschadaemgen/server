@@ -44,9 +44,18 @@ const (
 )
 
 // Viewer-Type-Konstanten (Spalte viewers.type).
+//
+// TypeWeb covers the browser tenant; TypeESP covers the ESP32-P4
+// hardware-display tenant; TypeAndroid covers the native Android
+// app (Saison 16 Etappe 1). Web and ESP each spawn an embedded
+// UDM-mock goroutine so the controller adopts them and delivers
+// doorbell RPCs; Android does NOT spawn a goroutine - in Etappe
+// 1 it only consumes WebRTC + admin endpoints, doorbell push
+// arrives via FCM in Etappe 2.
 const (
-	TypeWeb = "web"
-	TypeESP = "esp"
+	TypeWeb     = "web"
+	TypeESP     = "esp"
+	TypeAndroid = "android"
 )
 
 // Sentinel errors. Callers check via errors.Is.
@@ -299,18 +308,26 @@ func (v *ViewerInfo) ResolveClockLayout() string {
 // viewer. Order:
 //
 //  1. explicit StreamProfile if non-empty
-//  2. TypeESP -> "intercom_esp"  (MJPEG, served via /esp/stream.mjpeg)
-//  3. TypeWeb -> "intercom_web"  (H.264 passthrough for WebRTC, served via /offer)
-//  4. fallback "intercom_default" (defensive; should not happen
-//     because Type is constrained to web/esp by the schema check)
+//  2. TypeESP     -> "intercom_esp"     (MJPEG, /esp/stream.mjpeg)
+//  3. TypeWeb     -> "intercom_web"     (H.264 passthrough WebRTC, /offer)
+//  4. TypeAndroid -> "intercom_android" (H.264 passthrough WebRTC, /offer)
+//  5. fallback "intercom_default" (defensive; should not happen
+//     because Type is constrained by the schema check)
 //
 // Convention is in lock-step with the profiles the streaming
-// server ships. Two transports, two default profiles:
+// server ships:
 //   - Web viewers go via WebRTC; the /offer endpoint only accepts
 //     h264_passthrough sources, and the canonical such profile is
 //     intercom_web. mjpeg_bal would 400 here because it is MJPEG.
 //   - ESP devices keep the MJPEG passthrough; intercom_esp is the
 //     low-bandwidth MJPEG profile sized for the ESP32-P4 display.
+//   - Android (Saison 16 Etappe 1) shares the WebRTC stack with
+//     web but pulls a distinct profile so the operator can tune
+//     bitrate / resolution for mobile-data clients independently.
+//     The stream-server holds intercom_android as a persistent
+//     clone of intercom_web (codec h264_passthrough, same camera_id
+//     and width/height/fps=0 passthrough); confirmed live by the
+//     stream-chat before this commit landed.
 //
 // Renaming a profile on the backend without updating the matching
 // default here will leave new viewers pointed at a missing source
@@ -327,6 +344,8 @@ func (v *ViewerInfo) ResolveStreamProfile() string {
 		return "intercom_esp"
 	case TypeWeb:
 		return "intercom_web"
+	case TypeAndroid:
+		return "intercom_android"
 	}
 	return "intercom_default"
 }
@@ -415,8 +434,8 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 		`SELECT mac, name, service_port, type,
 		        COALESCE(linked_ua_user_id, '')
 		   FROM viewers
-		  WHERE type IN (?, ?)
-		  ORDER BY mac`, TypeWeb, TypeESP)
+		  WHERE type IN (?, ?, ?)
+		  ORDER BY mac`, TypeWeb, TypeESP, TypeAndroid)
 	if err != nil {
 		return fmt.Errorf("viewermanager: load: %w", err)
 	}
@@ -438,20 +457,29 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var web, esp int
+	var web, esp, android int
 	for _, spec := range specs {
+		// Android viewers do not spawn a UDM-mock goroutine -
+		// they consume /webviewer/* via Bearer (Saison 16
+		// Etappe 1). Skip the spawn but still count them so the
+		// boot log is honest about the row inventory.
+		if spec.Type == TypeAndroid {
+			android++
+			continue
+		}
 		if err := m.startViewerLocked(spec); err != nil {
 			m.log.Error("start viewer failed during load",
 				"mac", spec.MAC, "type", spec.Type, "err", err)
 			continue
 		}
-		if spec.Type == TypeESP {
+		switch spec.Type {
+		case TypeESP:
 			esp++
-		} else {
+		case TypeWeb:
 			web++
 		}
 	}
-	m.log.Info("loaded viewers", "web", web, "esp", esp)
+	m.log.Info("loaded viewers", "web", web, "esp", esp, "android", android)
 	return nil
 }
 
@@ -485,27 +513,44 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 			return ErrNameInUse
 		}
 	}
-	// In-memory holds both running web- and esp-type viewers,
-	// but rows persisted before LoadFromDB still need a direct
-	// DB check (the map is empty before the boot reload).
+	// In-memory holds running web- and esp-type viewers only.
+	// Android rows persist in the DB without a goroutine, so the
+	// in-memory MAC / port checks above miss them - the DB lookups
+	// below cover that gap. The boot-reload window (where the map
+	// is empty) is covered by the same checks for web + esp.
+	if exists, err := m.macExistsLocked(ctx, spec.MAC); err != nil {
+		return err
+	} else if exists {
+		return ErrMACInUse
+	}
 	if exists, err := m.nameExistsLocked(ctx, specKey, spec.MAC); err != nil {
 		return err
 	} else if exists {
 		return ErrNameInUse
+	}
+	if exists, err := m.servicePortExistsLocked(ctx, spec.ServicePort); err != nil {
+		return err
+	} else if exists {
+		return ErrPortInUse
 	}
 
 	if err := m.insertViewerLocked(ctx, spec); err != nil {
 		return err
 	}
 
-	// Spawn the mock goroutine for both web- and esp-type
-	// viewers. The type distinction matters for the
+	// Spawn the mock goroutine for web- and esp-type viewers
+	// only. The type distinction matters for the
 	// browser-vs-bearer auth surface (web has cookie sessions
 	// from /webviewer, esp has bearer tokens at /esp/), but on
 	// the UDM-facing side both run the same Stage 1+4+5+6 stack
 	// so that the ESP hardware can subscribe to /esp/events and
 	// receive doorbell.ring frames the same way the web tenant
 	// does on /webviewer/events.
+	//
+	// Android (Saison 16 Etappe 1) does NOT spawn a goroutine -
+	// no UDM adoption, no Stage 1+4+5+6 stack. The native app
+	// consumes WebRTC + admin endpoints; doorbell push arrives
+	// via FCM in Etappe 2 once that path is wired.
 	if spec.Type == TypeWeb || spec.Type == TypeESP {
 		if err := m.startViewerLocked(spec); err != nil {
 			// Best-effort rollback: drop the row so the next call
@@ -736,6 +781,43 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		return nil, "", fmt.Errorf("viewermanager: rows: %w", err)
 	}
 	return nil, "", ErrViewerNotFound
+}
+
+// macExistsLocked is the DB pendant of m.viewers[mac]-presence
+// for AddViewer. The in-memory map only holds running web/esp
+// viewers; persisted android rows live in the DB without a
+// goroutine, so a row-level check is the only honest gate
+// against a duplicate MAC for that type. For web/esp the check
+// is redundant with the map lookup but harmless.
+func (m *Manager) macExistsLocked(ctx context.Context, mac string) (bool, error) {
+	var got string
+	err := m.db.QueryRowContext(ctx,
+		`SELECT mac FROM viewers WHERE mac = ?`, mac).Scan(&got)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("viewermanager: mac check: %w", err)
+	}
+	return true, nil
+}
+
+// servicePortExistsLocked is the DB pendant of the in-memory
+// service-port loop, for the same reason as macExistsLocked:
+// android rows are not in m.viewers, so a row-level check is
+// the only honest collision gate for them.
+func (m *Manager) servicePortExistsLocked(ctx context.Context, port uint16) (bool, error) {
+	var got int64
+	err := m.db.QueryRowContext(ctx,
+		`SELECT service_port FROM viewers WHERE service_port = ?`,
+		int64(port)).Scan(&got)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("viewermanager: service-port check: %w", err)
+	}
+	return true, nil
 }
 
 // nameExistsLocked checks whether a row with the normalised name
@@ -1456,8 +1538,8 @@ func validateSpec(spec ViewerSpec) error {
 	if spec.ServicePort == 0 {
 		return errors.New("viewermanager: ServicePort must be > 0")
 	}
-	if spec.Type != "" && spec.Type != TypeWeb && spec.Type != TypeESP {
-		return fmt.Errorf("viewermanager: Type %q must be 'web' or 'esp'", spec.Type)
+	if spec.Type != "" && spec.Type != TypeWeb && spec.Type != TypeESP && spec.Type != TypeAndroid {
+		return fmt.Errorf("viewermanager: Type %q must be 'web', 'esp' or 'android'", spec.Type)
 	}
 	return nil
 }
