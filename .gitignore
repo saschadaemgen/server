@@ -21,3 +21,7 @@ Thumbs.db
 
 # Claude Code local config (deny-rules, permissions)
 .claude/
+
+# Lokale Grunddokumentation, NIE ins Repo (echte Anlagen-Daten)
+CLAUDE.md
+docs/wire-format.md
