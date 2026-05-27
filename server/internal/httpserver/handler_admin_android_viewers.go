@@ -12,8 +12,12 @@
 //
 // The viewers-row is the same shape ESP uses, plus the new
 // device_label column (Migration 018). Type is "android"; the
-// viewermanager refuses to spawn a goroutine for it (Etappe 1
-// does WebRTC + admin only, doorbell push is FCM in Etappe 2).
+// viewermanager spawns an embedded UDM-mock goroutine just like
+// it does for web and esp (S13-09 pattern), so the controller
+// adopts the row as a UA-Int-Viewer and delivers /remote_view
+// RPCs uniformly. The Etappe-2 FCM-push path attaches as an
+// ADDITIONAL push leg on top of that goroutine; it is not how
+// the server hears about the doorbell.
 //
 // One-shot reveal: the cleartext bearer token is returned in the
 // adopt / regenerate JSON response exactly once. The DB stores
@@ -266,8 +270,9 @@ func (s *Server) handleAdminAndroidViewersRegenerateToken(w http.ResponseWriter,
 
 // handleAdminAndroidViewersDelete removes an android viewer row.
 // FK cascades clear viewer_sessions / door_events /
-// viewer_hidden_events; the viewer never had a goroutine so
-// there is nothing to cancel in the manager beyond the row.
+// viewer_hidden_events; viewermanager.RemoveViewer cancels the
+// associated mock goroutine on the way out, same as for esp /
+// web rows.
 func (s *Server) handleAdminAndroidViewersDelete(w http.ResponseWriter, r *http.Request) {
 	mac := strings.ToLower(r.PathValue("mac"))
 	if !macFormat.MatchString(mac) {

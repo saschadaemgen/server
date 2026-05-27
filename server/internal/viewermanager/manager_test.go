@@ -441,6 +441,24 @@ func espSpec(mac string, port uint16) ViewerSpec {
 	}
 }
 
+// androidSpec helpers an Android-Spec with a token-hash placeholder
+// so the row passes the AddViewer pipeline shape. Android does
+// not go through any discovery flow - the admin creates the row
+// directly - but the manager-side handling (mock goroutine
+// spawn, doorbell routing) is identical to ESP / Web (S13-09
+// pattern).
+func androidSpec(mac string, port uint16) ViewerSpec {
+	return ViewerSpec{
+		MAC:         mac,
+		Name:        "android-" + mac,
+		ServicePort: port,
+		Type:        TypeAndroid,
+		DeviceTokenHash: "feedfacefeedfacefeedfacefeedface" +
+			"feedfacefeedfacefeedfacefeedface",
+		DeviceLabel: "Test Phone",
+	}
+}
+
 func TestAddViewer_TypeESP_SpawnsGoroutine(t *testing.T) {
 	mgr, factory := newTestManager(t)
 	spec := espSpec("0c:ea:14:aa:bb:cc", 8200)
@@ -459,6 +477,64 @@ func TestAddViewer_TypeESP_SpawnsGoroutine(t *testing.T) {
 	}
 	if v.runs.Load() != 1 {
 		t.Errorf("ESP viewer Run not invoked within 500ms")
+	}
+}
+
+// TestAddViewer_TypeAndroid_SpawnsGoroutine pins the S16-ANDROID-01-FIX
+// invariant: an android row goes through the same Stage 1+4+5+6
+// spawn as ESP / Web so the UDM adopts it as a UA-Int-Viewer and
+// delivers /remote_view RPCs. The Etappe-2 FCM push is an
+// additional leg on top, not a replacement.
+func TestAddViewer_TypeAndroid_SpawnsGoroutine(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	spec := androidSpec("0c:ea:14:dd:ee:ff", 8300)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if got := factory.starts.Load(); got != 1 {
+		t.Fatalf("factory.starts = %d, want 1 (android spawn)", got)
+	}
+	v := factory.viewer(spec.MAC)
+	if v == nil {
+		t.Fatal("factory did not record an android viewer")
+	}
+	for i := 0; i < 100 && v.runs.Load() != 1; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if v.runs.Load() != 1 {
+		t.Errorf("android viewer Run not invoked within 500ms")
+	}
+}
+
+// TestLoadFromDB_StartsAndroidViewers covers the boot-reload
+// path: an android row in viewers that already existed before
+// the server started must spawn its mock goroutine on
+// LoadFromDB, same as web / esp rows.
+func TestLoadFromDB_StartsAndroidViewers(t *testing.T) {
+	mgr, factory := newTestManager(t)
+	now := mgr.opts.Now().UnixMilli()
+	if _, err := mgr.db.Exec(
+		`INSERT INTO viewers (mac, name, service_port, type, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"0c:ea:14:dd:ee:ff", "android-test", 8300, TypeAndroid, now, now,
+	); err != nil {
+		t.Fatalf("seed android: %v", err)
+	}
+	if err := mgr.LoadFromDB(context.Background()); err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	if got := factory.starts.Load(); got != 1 {
+		t.Fatalf("factory.starts = %d, want 1 (android boot-spawn)", got)
+	}
+	infos, _ := mgr.ListViewers(context.Background())
+	if len(infos) != 1 {
+		t.Fatalf("ListViewers len = %d, want 1", len(infos))
+	}
+	if infos[0].Type != TypeAndroid {
+		t.Errorf("ListViewers[0].Type = %q, want %q", infos[0].Type, TypeAndroid)
+	}
+	if !infos[0].Running {
+		t.Errorf("android viewer Running=false after LoadFromDB, want true")
 	}
 }
 

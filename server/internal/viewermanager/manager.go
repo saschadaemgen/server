@@ -47,11 +47,17 @@ const (
 //
 // TypeWeb covers the browser tenant; TypeESP covers the ESP32-P4
 // hardware-display tenant; TypeAndroid covers the native Android
-// app (Saison 16 Etappe 1). Web and ESP each spawn an embedded
-// UDM-mock goroutine so the controller adopts them and delivers
-// doorbell RPCs; Android does NOT spawn a goroutine - in Etappe
-// 1 it only consumes WebRTC + admin endpoints, doorbell push
-// arrives via FCM in Etappe 2.
+// app (Saison 16 Etappe 1). Web, ESP and Android each spawn an
+// embedded UDM-mock goroutine; the UDM adopts every row as a
+// regular UA-Int-Viewer (S13-09 pattern). From the controller's
+// perspective the three types are indistinguishable - the type
+// column is a platform-side discriminator for the auth surface
+// (cookie session for web on /webviewer/, bearer token for esp
+// on /esp/, bearer token for android on /webviewer/) and the
+// admin UI tab the row lives under. Doorbell RPCs reach all
+// three the same way; the FCM-push pendant for Android in
+// Etappe 2 is an ADDITIONAL push leg on top of the mock
+// goroutine, not its replacement.
 const (
 	TypeWeb     = "web"
 	TypeESP     = "esp"
@@ -466,14 +472,10 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 	defer m.mu.Unlock()
 	var web, esp, android int
 	for _, spec := range specs {
-		// Android viewers do not spawn a UDM-mock goroutine -
-		// they consume /webviewer/* via Bearer (Saison 16
-		// Etappe 1). Skip the spawn but still count them so the
-		// boot log is honest about the row inventory.
-		if spec.Type == TypeAndroid {
-			android++
-			continue
-		}
+		// Every type (web, esp, android) gets a mock-goroutine
+		// so the UDM adopts the row as a UA-Int-Viewer (S13-09
+		// pattern). The auth-surface split happens at the HTTP
+		// layer, not here.
 		if err := m.startViewerLocked(spec); err != nil {
 			m.log.Error("start viewer failed during load",
 				"mac", spec.MAC, "type", spec.Type, "err", err)
@@ -484,6 +486,8 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 			esp++
 		case TypeWeb:
 			web++
+		case TypeAndroid:
+			android++
 		}
 	}
 	m.log.Info("loaded viewers", "web", web, "esp", esp, "android", android)
@@ -520,45 +524,30 @@ func (m *Manager) AddViewer(ctx context.Context, spec ViewerSpec) error {
 			return ErrNameInUse
 		}
 	}
-	// In-memory holds running web- and esp-type viewers only.
-	// Android rows persist in the DB without a goroutine, so the
-	// in-memory MAC / port checks above miss them - the DB lookups
-	// below cover that gap. The boot-reload window (where the map
-	// is empty) is covered by the same checks for web + esp.
-	if exists, err := m.macExistsLocked(ctx, spec.MAC); err != nil {
-		return err
-	} else if exists {
-		return ErrMACInUse
-	}
+	// In-memory holds every running viewer (web/esp/android, all
+	// of which spawn a goroutine). The DB name lookup covers the
+	// boot-reload window where m.viewers is still empty.
 	if exists, err := m.nameExistsLocked(ctx, specKey, spec.MAC); err != nil {
 		return err
 	} else if exists {
 		return ErrNameInUse
-	}
-	if exists, err := m.servicePortExistsLocked(ctx, spec.ServicePort); err != nil {
-		return err
-	} else if exists {
-		return ErrPortInUse
 	}
 
 	if err := m.insertViewerLocked(ctx, spec); err != nil {
 		return err
 	}
 
-	// Spawn the mock goroutine for web- and esp-type viewers
-	// only. The type distinction matters for the
-	// browser-vs-bearer auth surface (web has cookie sessions
-	// from /webviewer, esp has bearer tokens at /esp/), but on
-	// the UDM-facing side both run the same Stage 1+4+5+6 stack
-	// so that the ESP hardware can subscribe to /esp/events and
-	// receive doorbell.ring frames the same way the web tenant
-	// does on /webviewer/events.
-	//
-	// Android (Saison 16 Etappe 1) does NOT spawn a goroutine -
-	// no UDM adoption, no Stage 1+4+5+6 stack. The native app
-	// consumes WebRTC + admin endpoints; doorbell push arrives
-	// via FCM in Etappe 2 once that path is wired.
-	if spec.Type == TypeWeb || spec.Type == TypeESP {
+	// Spawn the mock goroutine for every viewer type (web, esp,
+	// android). The type distinction matters for the auth surface
+	// (web has cookie sessions on /webviewer/, esp has bearer
+	// tokens on /esp/, android has bearer tokens on /webviewer/),
+	// but on the UDM-facing side all three run the same Stage
+	// 1+4+5+6 stack so the controller adopts them as regular
+	// UA-Int-Viewers and delivers /remote_view RPCs uniformly
+	// (S13-09 pattern). The Etappe-2 FCM-push path for Android
+	// will attach as an ADDITIONAL push leg on top of this
+	// goroutine, not as a replacement.
+	if spec.Type == TypeWeb || spec.Type == TypeESP || spec.Type == TypeAndroid {
 		if err := m.startViewerLocked(spec); err != nil {
 			// Best-effort rollback: drop the row so the next call
 			// is not blocked by a phantom entry.
@@ -788,43 +777,6 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		return nil, "", fmt.Errorf("viewermanager: rows: %w", err)
 	}
 	return nil, "", ErrViewerNotFound
-}
-
-// macExistsLocked is the DB pendant of m.viewers[mac]-presence
-// for AddViewer. The in-memory map only holds running web/esp
-// viewers; persisted android rows live in the DB without a
-// goroutine, so a row-level check is the only honest gate
-// against a duplicate MAC for that type. For web/esp the check
-// is redundant with the map lookup but harmless.
-func (m *Manager) macExistsLocked(ctx context.Context, mac string) (bool, error) {
-	var got string
-	err := m.db.QueryRowContext(ctx,
-		`SELECT mac FROM viewers WHERE mac = ?`, mac).Scan(&got)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("viewermanager: mac check: %w", err)
-	}
-	return true, nil
-}
-
-// servicePortExistsLocked is the DB pendant of the in-memory
-// service-port loop, for the same reason as macExistsLocked:
-// android rows are not in m.viewers, so a row-level check is
-// the only honest collision gate for them.
-func (m *Manager) servicePortExistsLocked(ctx context.Context, port uint16) (bool, error) {
-	var got int64
-	err := m.db.QueryRowContext(ctx,
-		`SELECT service_port FROM viewers WHERE service_port = ?`,
-		int64(port)).Scan(&got)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("viewermanager: service-port check: %w", err)
-	}
-	return true, nil
 }
 
 // nameExistsLocked checks whether a row with the normalised name
