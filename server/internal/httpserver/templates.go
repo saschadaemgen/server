@@ -63,6 +63,7 @@ var adminLibraryFor = map[string][]string{
 	"esp-pager":   {},
 	"streams":       {},
 	"stream-edit":  {},
+	"android-viewers": {},
 	"viewer-detail": {},
 }
 

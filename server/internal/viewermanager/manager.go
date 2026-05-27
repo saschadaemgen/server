@@ -128,6 +128,13 @@ type ViewerSpec struct {
 	// there is nothing to fall back to. Stored as INTEGER NULL
 	// in the DB.
 	AutoScreensaverSeconds *int
+	// DeviceLabel is the operator-facing device name shown in
+	// the admin list, used to tell multiple devices of the same
+	// flat apart ("Papas Handy", "Mamas Handy"). Saison 16
+	// Etappe 1 introduces this for the Android viewer where
+	// many devices can share the same UA-user / paired-intercom
+	// binding. Empty string = no label.
+	DeviceLabel string
 }
 
 // ViewerInfo is the public view of one running viewer for the
@@ -1066,6 +1073,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		StreamProfile:          spec.StreamProfile,
 		IdleViewMode:           spec.IdleViewMode,
 		AutoScreensaverSeconds: spec.AutoScreensaverSeconds,
+		DeviceLabel:            spec.DeviceLabel,
 	}, m.opts.Now().UnixMilli())
 }
 

@@ -177,6 +177,8 @@ func navSlotFor(name string) string {
 		return "users"
 	case "esp-pager":
 		return "esp-pager"
+	case "android-viewers":
+		return "android-viewers"
 	case "streams":
 		return "streams"
 	case "settings":
@@ -210,7 +212,11 @@ func extractUser(data any) adminUser {
 		return v.User
 	case adminESPViewersData:
 		return v.User
+	case adminAndroidViewersData:
+		return v.User
 	case adminStreamsData:
+		return v.User
+	case adminStreamEditData:
 		return v.User
 	case adminViewerDetailData:
 		return v.User

@@ -301,6 +301,15 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamSave)))
 	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamDelete)))
 
+	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
+	// auth happens at the /webviewer/* tree; here we just CRUD
+	// the viewers-row + the one-shot token reveal.
+	s.mux.Handle("GET /a/android-viewers", s.requireAdminSession(http.HandlerFunc(s.handleAdminAndroidViewersList)))
+	s.mux.Handle("GET /a/android-viewers.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminAndroidViewersListJSON)))
+	s.mux.Handle("POST /a/android-viewers/adopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminAndroidViewersAdopt)))
+	s.mux.Handle("POST /a/android-viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminAndroidViewersRegenerateToken)))
+	s.mux.Handle("POST /a/android-viewers/{mac}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminAndroidViewersDelete)))
+
 	// Placeholder pages for upcoming features.
 	s.mux.Handle("GET /a/esp-pager", s.requireAdminSession(http.HandlerFunc(s.handleAdminEspPager)))
 

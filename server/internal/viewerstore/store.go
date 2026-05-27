@@ -61,6 +61,7 @@ type InsertSpec struct {
 	StreamProfile          string
 	IdleViewMode           string
 	AutoScreensaverSeconds *int
+	DeviceLabel            string // android viewer-Geraetename
 }
 
 // Insert writes a new viewers row. The created_at and updated_at
@@ -73,9 +74,9 @@ func Insert(ctx context.Context, db *sql.DB, spec InsertSpec, now int64) error {
 		   (mac, name, service_port, type, linked_ua_user_id,
 		    esp_model, esp_fw_version, device_token_hash,
 		    paired_intercom_mac, stream_profile, idle_view_mode,
-		    auto_screensaver_seconds,
+		    auto_screensaver_seconds, device_label,
 		    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		spec.MAC, spec.Name, int64(spec.ServicePort),
 		spec.Type,
 		nullableString(spec.LinkedUAUserID),
@@ -86,6 +87,7 @@ func Insert(ctx context.Context, db *sql.DB, spec InsertSpec, now int64) error {
 		nullableString(strings.TrimSpace(spec.StreamProfile)),
 		nullableString(strings.TrimSpace(spec.IdleViewMode)),
 		nullableInt(spec.AutoScreensaverSeconds),
+		nullableString(strings.TrimSpace(spec.DeviceLabel)),
 		now, now,
 	)
 	if err != nil {
