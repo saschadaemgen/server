@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -36,6 +37,13 @@ type ServerOptions struct {
 	// Listener, when non-nil, is served instead of binding ListenAddr.
 	// Tests pass a 127.0.0.1:0 listener; production leaves it nil.
 	Listener net.Listener
+
+	// OnStartPublish / OnStopPublish are optional hooks fired when the
+	// edge reports it began / stopped pushing a stream. The server
+	// already tracks the active-stream set internally; these let the
+	// wiring log or a test observe. nil in the simplest setup.
+	OnStartPublish func(streamID, publishToken string)
+	OnStopPublish  func(streamID, reason string)
 }
 
 // Server is the cloud-side side-channel listener. mTLS
@@ -47,6 +55,28 @@ type Server struct {
 	tlsConfig *tls.Config
 	log       *slog.Logger
 	connCount atomic.Int64
+
+	mu            sync.Mutex
+	conns         map[*serverConn]struct{}
+	activeStreams map[string]struct{}
+}
+
+// serverConn is one accepted edge connection plus a write mutex.
+// coder/websocket forbids concurrent writers, so RequestPublish (from
+// the interim-hook goroutine) and the pong writes (from the read loop)
+// must serialise through writeMu.
+type serverConn struct {
+	conn    *websocket.Conn
+	peer    string
+	writeMu sync.Mutex
+}
+
+func (sc *serverConn) write(ctx context.Context, env Envelope) error {
+	sc.writeMu.Lock()
+	defer sc.writeMu.Unlock()
+	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return wsjson.Write(wctx, sc.conn, env)
 }
 
 // NewServer validates options and loads the TLS material.
@@ -61,7 +91,13 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{opts: opts, tlsConfig: tlsCfg, log: opts.Log}, nil
+	return &Server{
+		opts:          opts,
+		tlsConfig:     tlsCfg,
+		log:           opts.Log,
+		conns:         make(map[*serverConn]struct{}),
+		activeStreams: make(map[string]struct{}),
+	}, nil
 }
 
 // Run serves until ctx is cancelled (then it shuts down gracefully
@@ -124,30 +160,109 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 
-	peer := peerCN(r)
+	sc := &serverConn{conn: conn, peer: peerCN(r)}
 	n := s.connCount.Add(1)
-	s.log.Info("sidechannel client connected", "peer", peer, "remote", r.RemoteAddr, "conn", n)
+	s.addConn(sc)
+	defer s.removeConn(sc)
+	s.log.Info("sidechannel client connected", "peer", sc.peer, "remote", r.RemoteAddr, "conn", n)
 
 	ctx := r.Context()
 	for {
 		var env Envelope
 		if err := wsjson.Read(ctx, conn, &env); err != nil {
-			s.log.Info("sidechannel client gone", "peer", peer, "err", err)
+			s.log.Info("sidechannel client gone", "peer", sc.peer, "err", err)
 			return
 		}
 		switch env.Type {
 		case TypePing:
-			s.log.Info("sidechannel ping received, sending pong", "peer", peer)
-			if err := wsjson.Write(ctx, conn, Envelope{Type: TypePong}); err != nil {
-				s.log.Warn("sidechannel pong write failed", "peer", peer, "err", err)
+			s.log.Info("sidechannel ping received, sending pong", "peer", sc.peer)
+			if err := sc.write(ctx, Envelope{Type: TypePong}); err != nil {
+				s.log.Warn("sidechannel pong write failed", "peer", sc.peer, "err", err)
 				return
+			}
+		case TypeStartPublish:
+			s.markActive(env.StreamID)
+			s.log.Info("sidechannel start_publish",
+				"peer", sc.peer, "stream_id", env.StreamID, "has_token", env.PublishToken != "")
+			if s.opts.OnStartPublish != nil {
+				s.opts.OnStartPublish(env.StreamID, env.PublishToken)
+			}
+		case TypeStopPublish:
+			s.markInactive(env.StreamID)
+			s.log.Info("sidechannel stop_publish",
+				"peer", sc.peer, "stream_id", env.StreamID, "reason", env.Reason)
+			if s.opts.OnStopPublish != nil {
+				s.opts.OnStopPublish(env.StreamID, env.Reason)
 			}
 		default:
 			// Forward-compatible: a newer edge may send cargo types
 			// this cloud build predates. Log and ignore, never crash.
-			s.log.Warn("sidechannel unknown message type", "type", env.Type, "peer", peer)
+			s.log.Warn("sidechannel unknown message type", "type", env.Type, "peer", sc.peer)
 		}
 	}
+}
+
+// RequestPublish sends a request_publish frame to every connected edge
+// and returns how many it reached. One edge today; routing a stream_id
+// to a specific edge is future work, so this broadcasts.
+func (s *Server) RequestPublish(ctx context.Context, streamID string) int {
+	s.mu.Lock()
+	targets := make([]*serverConn, 0, len(s.conns))
+	for sc := range s.conns {
+		targets = append(targets, sc)
+	}
+	s.mu.Unlock()
+
+	sent := 0
+	for _, sc := range targets {
+		if err := sc.write(ctx, Envelope{Type: TypeRequestPublish, StreamID: streamID}); err != nil {
+			s.log.Warn("sidechannel request_publish write failed",
+				"peer", sc.peer, "stream_id", streamID, "err", err)
+			continue
+		}
+		sent++
+	}
+	s.log.Info("sidechannel request_publish sent", "stream_id", streamID, "edges", sent)
+	return sent
+}
+
+// ActiveStreams returns a snapshot of the stream_ids the edge currently
+// reports as publishing. In-memory only, no persistence.
+func (s *Server) ActiveStreams() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.activeStreams))
+	for id := range s.activeStreams {
+		out = append(out, id)
+	}
+	return out
+}
+
+func (s *Server) addConn(sc *serverConn) {
+	s.mu.Lock()
+	s.conns[sc] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *Server) removeConn(sc *serverConn) {
+	s.mu.Lock()
+	delete(s.conns, sc)
+	s.mu.Unlock()
+}
+
+func (s *Server) markActive(streamID string) {
+	if streamID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.activeStreams[streamID] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *Server) markInactive(streamID string) {
+	s.mu.Lock()
+	delete(s.activeStreams, streamID)
+	s.mu.Unlock()
 }
 
 // peerCN returns the verified client certificate's CommonName, or ""

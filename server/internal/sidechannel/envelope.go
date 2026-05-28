@@ -12,20 +12,51 @@
 // cloud outage only triggers reconnect attempts.
 package sidechannel
 
-// Envelope is the JSON wire frame exchanged in both directions. It is
-// deliberately minimal: a single "type" discriminator. Future cargo
-// messages add fields here and further "type" values; both sides
-// already dispatch on a type switch so adding a branch is the only
-// change a new message type needs.
+// Envelope is the JSON wire frame exchanged in both directions. Both
+// sides dispatch on the "type" discriminator; adding a new message
+// type is one more switch branch. Cargo fields are optional and only
+// meaningful for the matching type (omitempty keeps ping/pong tiny).
 type Envelope struct {
 	Type string `json:"type"`
+
+	// StreamID correlates a publish request/start/stop. It is the
+	// viewer/mock MAC - the stable per-viewer identity the doorbellhub
+	// already routes by and the edge can authorise against. Empty for
+	// ping/pong.
+	StreamID string `json:"stream_id,omitempty"`
+
+	// PublishToken is issued by carvilon (edge) and carried on
+	// start_publish; the stream-edge presents it on the WHIP push.
+	PublishToken string `json:"publish_token,omitempty"`
+
+	// Reason explains a stop_publish (see Reason* constants).
+	Reason string `json:"reason,omitempty"`
 }
 
-// Message types. Only ping/pong exist in this iteration.
+// Message types.
 const (
 	// TypePing is sent by the edge as proof of life; the cloud
 	// answers with TypePong.
 	TypePing = "ping"
 	// TypePong is the cloud's reply to a ping.
 	TypePong = "pong"
+
+	// TypeRequestPublish (cloud -> edge): a remote WHEP subscriber is
+	// waiting; the cloud asks the edge to start pushing StreamID. The
+	// anchor (a remote viewer) appears on the cloud side, so the cloud
+	// triggers and the edge answers - the edge stays lazy.
+	TypeRequestPublish = "request_publish"
+	// TypeStartPublish (edge -> cloud): the edge accepted the push,
+	// carries the carvilon-issued PublishToken for StreamID.
+	TypeStartPublish = "start_publish"
+	// TypeStopPublish (edge -> cloud): the edge stopped pushing
+	// StreamID (Reason says why).
+	TypeStopPublish = "stop_publish"
+)
+
+// stop_publish reasons.
+const (
+	ReasonNoSubscribers = "no_subscribers"
+	ReasonError         = "error"
+	ReasonCancelled     = "cancelled"
 )

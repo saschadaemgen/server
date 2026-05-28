@@ -19,6 +19,7 @@ const (
 	defaultPingInterval   = 15 * time.Second
 	dialTimeout           = 10 * time.Second
 	writeTimeout          = 10 * time.Second
+	sendQueueSize         = 16
 )
 
 // ClientOptions configures the edge-side dialer.
@@ -49,6 +50,13 @@ type ClientOptions struct {
 	// OnPong is a test hook fired when a pong is received. nil in
 	// production.
 	OnPong func()
+
+	// OnRequestPublish, when set, is invoked (in its own goroutine)
+	// when the cloud sends a request_publish frame. The edge wiring
+	// implements it: authorise the stream, issue a publish token,
+	// Send a start_publish, and kick the StreamPublisher. nil ignores
+	// the frame.
+	OnRequestPublish func(streamID string)
 }
 
 // Client is the edge-side dialer. It keeps a single mTLS WebSocket to
@@ -64,6 +72,10 @@ type Client struct {
 	log        *slog.Logger
 	pingEvery  time.Duration
 	initialBO  time.Duration
+	// send carries outgoing frames (start_publish/stop_publish) to the
+	// single writer in connectAndServe. Buffered + non-blocking so a
+	// caller never stalls on a down link.
+	send chan Envelope
 }
 
 // NewClient validates options and loads the TLS material.
@@ -94,7 +106,21 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		log:       opts.Log,
 		pingEvery: pingEvery,
 		initialBO: initialBO,
+		send:      make(chan Envelope, sendQueueSize),
 	}, nil
+}
+
+// Send enqueues a frame for the current connection. Non-blocking: if
+// the queue is full or the link is down the frame is dropped with a
+// warn. The cloud link is additive, so a dropped control frame must
+// never stall the edge.
+func (c *Client) Send(env Envelope) {
+	select {
+	case c.send <- env:
+	default:
+		c.log.Warn("sidechannel send queue full, dropping frame",
+			"type", env.Type, "stream_id", env.StreamID)
+	}
 }
 
 // Run loops until ctx is cancelled, reconnecting with exponential
@@ -155,6 +181,15 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 				if c.opts.OnPong != nil {
 					c.opts.OnPong()
 				}
+			case TypeRequestPublish:
+				c.log.Info("sidechannel request_publish received", "stream_id", env.StreamID)
+				if c.opts.OnRequestPublish != nil {
+					sid := env.StreamID
+					// Own goroutine: the edge business logic (authz,
+					// token, StreamPublisher) must never block the
+					// read loop.
+					go c.opts.OnRequestPublish(sid)
+				}
 			default:
 				c.log.Warn("sidechannel unknown message type", "type", env.Type)
 			}
@@ -166,7 +201,7 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 
 	// Initial ping immediately, so the proof of life appears without
 	// waiting a full interval.
-	if err := c.writePing(ctx, conn); err != nil {
+	if err := c.writeEnvelope(ctx, conn, Envelope{Type: TypePing}); err != nil {
 		return err
 	}
 	for {
@@ -176,21 +211,29 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 			return ctx.Err()
 		case err := <-readErr:
 			return fmt.Errorf("read: %w", err)
+		case env := <-c.send:
+			// Outgoing start_publish/stop_publish from the edge
+			// business logic. Single writer (this loop), so writes
+			// stay serialised as coder/websocket requires.
+			if err := c.writeEnvelope(ctx, conn, env); err != nil {
+				return err
+			}
 		case <-ticker.C:
-			if err := c.writePing(ctx, conn); err != nil {
+			if err := c.writeEnvelope(ctx, conn, Envelope{Type: TypePing}); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (c *Client) writePing(ctx context.Context, conn *websocket.Conn) error {
+// writeEnvelope is the single serialised writer for the connection.
+func (c *Client) writeEnvelope(ctx context.Context, conn *websocket.Conn, env Envelope) error {
 	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
-	if err := wsjson.Write(writeCtx, conn, Envelope{Type: TypePing}); err != nil {
-		return fmt.Errorf("write ping: %w", err)
+	if err := wsjson.Write(writeCtx, conn, env); err != nil {
+		return fmt.Errorf("write %s: %w", env.Type, err)
 	}
-	c.log.Info("sidechannel ping sent")
+	c.log.Info("sidechannel frame sent", "type", env.Type, "stream_id", env.StreamID)
 	return nil
 }
 

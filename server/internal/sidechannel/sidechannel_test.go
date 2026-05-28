@@ -319,6 +319,91 @@ func TestSidechannel_ReconnectsAfterServerDrop(t *testing.T) {
 	waitFor(t, func() bool { return srv2.ConnCount() >= 1 }, 8*time.Second)
 }
 
+func TestSidechannel_PublishControlRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const streamID = "0c:ea:14:00:00:01"
+	started := make(chan [2]string, 4)
+	stopped := make(chan [2]string, 4)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv, err := NewServer(ServerOptions{
+		Listener:       ln,
+		CACertPath:     p.caCrt,
+		ServerCert:     p.serverCrt,
+		ServerKey:      p.serverKey,
+		Log:            quietLogger(),
+		OnStartPublish: func(id, tok string) { started <- [2]string{id, tok} },
+		OnStopPublish:  func(id, reason string) { stopped <- [2]string{id, reason} },
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() { _ = srv.Run(ctx) }()
+
+	url := "wss://" + ln.Addr().String() + "/sidechannel"
+	var cli *Client
+	cli, err = NewClient(ClientOptions{
+		URL:            url,
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		// Minimal edge stand-in: reply to request_publish with a
+		// start_publish carrying a token. (The real authz+token logic
+		// is the EdgePublisher, tested separately.)
+		OnRequestPublish: func(id string) {
+			cli.Send(Envelope{Type: TypeStartPublish, StreamID: id, PublishToken: "tok-" + id})
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	waitFor(t, func() bool { return srv.ConnCount() >= 1 }, 5*time.Second)
+
+	if sent := srv.RequestPublish(ctx, streamID); sent < 1 {
+		t.Fatalf("RequestPublish reached %d edges, want >= 1", sent)
+	}
+
+	select {
+	case got := <-started:
+		if got[0] != streamID || got[1] != "tok-"+streamID {
+			t.Errorf("start_publish = %v, want [%s tok-%s]", got, streamID, streamID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no start_publish within 5s")
+	}
+	waitFor(t, func() bool {
+		for _, id := range srv.ActiveStreams() {
+			if id == streamID {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second)
+
+	cli.Send(Envelope{Type: TypeStopPublish, StreamID: streamID, Reason: ReasonNoSubscribers})
+	select {
+	case got := <-stopped:
+		if got[0] != streamID || got[1] != ReasonNoSubscribers {
+			t.Errorf("stop_publish = %v, want [%s %s]", got, streamID, ReasonNoSubscribers)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no stop_publish within 5s")
+	}
+	waitFor(t, func() bool { return len(srv.ActiveStreams()) == 0 }, 3*time.Second)
+}
+
 // rawDial attempts a WebSocket dial with an explicit TLS config and
 // returns the dial error (nil on success). Used to assert mTLS
 // rejections from a client that does not go through sidechannel.Client.
