@@ -1,19 +1,23 @@
 # carvilon Architecture
 
-**Status:** Saison 15 in Arbeit (Stand 21. Mai 2026, S15-01).
-S15-01 hat die Stream-Schicht hinter ein
-`streams.StreamBackend`-Interface gezogen (Open-Core-Naht),
-einen 503-Default fuer das oeffentliche Repo eingebaut, den
-go2rtc-Client als transitional implementation gelassen und
-den Webviewer-Browser-Pfad auf WebRTC umgestellt (MJPEG bleibt
-als Fallback). Profile-CRUD-Vollausbau plus
-camera-dropdown-Form folgt nach Naht-Befuellung durch den
-privaten `carvilon-streaming-server`. Details: Sektion 16.
+**Status:** Saison 16 (laufend; Android-Viewer + FCM-Token-
+Registrierung). Saison 15 war eine Aufraeum-Saison: Open-Core-
+Naht via `streams.StreamBackend`-Interface (503-Default fuer das
+oeffentliche Repo, go2rtc-Client als transitional implementation,
+Details in Sektion 16), mock->viewer-Rename, gesamter Go-Code auf
+Englisch, Dead-Code-Bereinigung, Dependency-Migration
+nhooyr->coder/websocket. Saison 16 brachte die ARCH-Trilogie
+(`internal/normalize`, `internal/viewerstore`, viewermanager-
+Setter-Dedup), den eigenen Stream-Server auf :8555 (loest go2rtc
+ab), das web/esp/android-Viewer-Modell mit gemeinsamer Bearer-Naht
+und die FCM-Token-Registrierung. Die S15/S16-Details stehen
+gebuendelt in Sektion 18.9; der Saison-10-14-Bestand darunter
+bleibt als historische Quelle erhalten.
 
-Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU). Saison 14
-hat die Plattform vom "Klingel-Streamer mit Web-UI" zur
-"Klingel-Anlage mit Mieter-, Admin- und ESP-Erlebnis" weiter
-entwickelt. Sub-Briefings:
+Vorheriger Meilenstein - Saison 14 (abgeschlossen 19. Mai 2026,
+S14-DOKU) hat die Plattform vom "Klingel-Streamer mit Web-UI"
+zur "Klingel-Anlage mit Mieter-, Admin- und ESP-Erlebnis"
+weiter entwickelt. Sub-Briefings:
 
 - S14-01 / S14-01b / FIX01-FIX04: Stream-Backend go2rtc
   produktiv, Idle-View-Modus mit Bildschirmschoner und open-
@@ -53,20 +57,23 @@ UniFi-Welt (UDM + Hub Door + echte Intercom) <- bleibt unveraendert
    v
 carvilon-Host (RPi pro Standort)
    - mock-Viewer-Goroutines (im carvilon-server-Prozess,
-     simulieren UA Intercom Viewer fuer das UDM)
+     simulieren UA Intercom Viewer fuer das UDM; Typen
+     web/esp/android, alle als UA-Int-Viewer adoptiert)
    - carvilon-server (HTTPS, Admin- und Mieter-UI, SSE-Hub,
      Auth, Persistenz, UA-API-Client)
-   - go2rtc (Stream-Bridge fuer RTSP-zu-Klient, Saison 13+)
+   - eigener Stream-Server auf :8555 (S16; loeste go2rtc ab,
+     MJPEG-Passthrough + WebRTC-/offer)
    |
-   | HTTP/HTTPS, Magic-Link, SSE
+   | HTTP/HTTPS (Cookie- ODER Bearer-Auth), SSE
    v
-Endgeraete (Browser, Tablet, ESP32, Smart-TV, ...)
+Endgeraete (Browser, Tablet, ESP32, Android-App, Smart-TV, ...)
 ```
 
 ## 2. Module im Monorepo
 
 ```
-server/         Haupt-Produkt, Pool-Manager + REST + UI + DB
+server/         Haupt-Produkt: Viewer-Goroutines (viewermanager,
+                vormals "Pool-Manager"/"mockmanager") + REST + UI + DB
 mock/           UA Intercom Viewer-Simulator
 license-server/ Cloud-Komponente, Lizenz-Validation + Updates
 shared/         types, proto (Wire-Format), logging
@@ -1242,17 +1249,46 @@ carvilon-cli           Headless-Tool fuer CLI-First-Adoption.
 ### 15.5 Stream-Backend-Reverse-Proxy
 
 `/esp/stream.mjpeg` ist ein Profile-bewusster MJPEG-Proxy auf
-`UNIFIX_STREAM_BACKEND_URL`. Der Authorization-Header wird vor
-dem Forward gestrippt (das Backend ist typisch ein lokaler
-go2rtc-Daemon ohne Auth; ESP-Token darf nie ueber den carvilon-
-Prozess hinaus). Wenn die Env-Variable nicht gesetzt ist:
-HTTP 503 "stream backend not configured". Volle Spezifikation
-in Sektion 16 weiter unten (Saison 14-01: go2rtc-Profile +
-S14-01-FIX01-URL-Hardening).
+`CARVILON_STREAM_BACKEND_URL` (Legacy-Alias
+`UNIFIX_STREAM_BACKEND_URL`). Der Authorization-Header wird vor
+dem Forward gestrippt (das Backend ist der lokale Stream-Server
+auf :8555 - S14/S15 war es go2rtc:1984 - ohne Forward-Auth; der
+Device-Bearer darf nie ueber den carvilon-Prozess hinaus). Wenn
+die Env-Variable nicht gesetzt ist: HTTP 503 "stream backend not
+configured". Volle Spezifikation in Sektion 16 weiter unten
+(historischer go2rtc-Stand mit S16-Korrektur-Banner oben).
 
 ---
 
-## 16. Stream-Backend (Saison 14-01 / Saison 15-01)
+## 16. Stream-Backend (Saison 14-01 / Saison 15-01 / Saison 16)
+
+> **S16-Korrektur (Stand 2026-05-27):** go2rtc ist in Saison 16
+> KOMPLETT ENTFERNT. Das aktive Stream-Backend ist der eigene
+> Stream-Server auf `:8555` (gleiches `streams.StreamBackend`-
+> Interface, gleiche Proxy-Mechanik wie unten). Konkret fuer die
+> folgenden Abschnitte:
+>
+> - Daten-Pfad (16.1): statt `go2rtc-Daemon (localhost:1984)` jetzt
+>   `Stream-Server (localhost:8555)`; die Quelle kommt ueber das
+>   Profil (`camera_id`) statt ueber `go2rtc.yaml`.
+> - Profile (16.2): Convention-Defaults heissen jetzt
+>   `intercom_web` (Browser), `intercom_esp`, `intercom_android`.
+>   `go2rtc.yaml.example` ist obsolet; Profile leben am Stream-
+>   Server und werden ueber dessen REST-API gepflegt.
+> - Admin-CRUD (16.3): `/a/streams` liest `GET /api/profiles`
+>   (Array), schreibt `PUT`/`DELETE`, zeigt die Konsumenten-Spalte
+>   aus `GET /stream/stats` und das `encryption`-Feld read-only.
+> - WebRTC (16.6-16.8): `/offer` wird jetzt vom eigenen Server
+>   wirklich serviert; der Webviewer nutzt WebRTC primaer
+>   (`intercom_web`), die Android-App denselben Pfad
+>   (`intercom_android`). MJPEG bleibt ESP-only und als Browser-
+>   Fallback. Die PeerConnection bleibt ueber Idle-Mode-Wechsel
+>   offen (Teardown nur bei pagehide/beforeunload).
+> - Env-Var: `CARVILON_STREAM_BACKEND_URL=http://127.0.0.1:8555`.
+>
+> Die Abschnitte unten beschreiben den S14/S15-Stand und bleiben
+> als historische Quelle erhalten. Die konsolidierte S16-Sicht
+> steht in Sektion 18.9.
 
 ### 16.0 Open-Core-Naht (Saison 15-01)
 
@@ -1796,7 +1832,7 @@ durch. Siehe docs/security.md Sektion 10.3 fuer den
 Sicherheits-Aspekt und CLAUDE.md Lessons-Sektion fuer die
 generelle Regel.
 
-### 18.6 Migrations-Liste bis 017
+### 18.6 Migrations-Liste bis 018
 
 | Nr | Datei | Inhalt |
 | -- | ----- | ------ |
@@ -1811,14 +1847,15 @@ generelle Regel.
 | 009 | esp_pending_devices | Adoptions-Handoff |
 | 010 | doorbell_calls | Lifecycle-Tabelle fuer aktive Anrufe |
 | 011 | viewers_paired_intercom | Standby-Pairing |
-| 012 | stream_profile | go2rtc-Profil pro Viewer |
+| 012 | stream_profile | Stream-Profil-Name pro Viewer (S14 go2rtc, S16 Stream-Server) |
 | 013 | idle_view_mode | screensaver/livestream + station_lat/lon |
 | 014 | auto_screensaver | viewers.auto_screensaver_seconds |
 | 015 | esp_settings | brightness_idle, screen_off_after_sec, language |
 | 016 | history_soft_delete | viewer_hidden_events + history_capture_enabled |
 | 017 | clock_layout | viewers.clock_layout |
+| 018 | android_viewer | type-CHECK + 'android'; esp_token_hash -> device_token_hash; fcm_token + device_label; Tabellen-Rebuild mit FK-off im Runner |
 
-Aktuelle `schema_version = 17`.
+Aktuelle `schema_version = 18`.
 
 ### 18.7 SSE-Event-Inventar
 
@@ -1848,7 +1885,109 @@ Cloud-Tier oder einen non-UA-Adapter (z.B. eigene
 ESP32-Intercom-Hardware) bekommt, muss das Adapter-Pattern auf
 diese drei Layer erweitert werden. Heute kein Druck.
 
+### 18.9 Saison-15/16: Open-Core-Naht + go2rtc-Abloesung
+
+```
+OPEN-CORE (S15): Kern (carvilon-server) AGPL geplant, Streaming-/
+Lizenz-Server kommerziell via Build-Tag carvilon_stream. Public
+Build importiert die privaten Module NIE.
+   server/internal/streams/   StreamBackend-Interface + Impls:
+      backend.go               unconfigured (503)
+      client.go                Stream-Server-Client (List/Get/Put/
+                               Delete/Stats gegen /api/profiles + /stream/stats)
+      backend_carvilon_stream.go  //go:build carvilon_stream (Wrapper)
+   cmd/carvilon-server/backend_default.go        ungetaggter Slot
+   cmd/carvilon-server/main_carvilon_stream.go   //go:build carvilon_stream
+
+RENAME (S15): internal/mockmanager -> internal/viewermanager;
+   MockMAC -> ViewerMAC. json-Tag mock_mac BLEIBT (Wire). mock-Paket
+   selbst bleibt "mock".
+
+GO2RTC-ABLOESUNG (S16): go2rtc komplett vom RPi entfernt. Stream-
+   Backend ist der eigene Stream-Server auf :8555. WebViewer ueber
+   WebRTC (POST /webviewer/offer -> Stream-Server /offer?src=
+   intercom_web). PeerConnection bleibt ueber Idle-Mode-Wechsel
+   offen (idle.js setMode disconnect-Branch raus, isActive()-Guard;
+   webrtc-stream.js Self-Reset auf NoOp). Teardown nur bei pagehide/
+   beforeunload.
+
+ADMIN-STREAMS (S16): /a/streams listet GET /api/profiles (Array),
+   volle CRUD-Schreibseite (PUT/DELETE), Konsumenten-Spalte aus
+   GET /stream/stats, encryption read-only Anzeige. Custom-Dropdowns
+   ueber _nav.html (inline-Pattern). Dropdown-Panel-Positionierung
+   gefixt (CSS-top-Default raus, positionPanel setzt Anchor auf
+   'auto' statt '' - betraf alle nach-oben-aufklappenden Panels).
+
+ARCH-TRILOGIE (S16): drei "zweite-Wahrheits-Stelle"-Duplikate
+   zusammengelegt:
+   - ARCH-1: viewermanager Setter-Duplikate ueber setColumnExec +
+     updateCachedSpec-Helfer dedupliziert; toter Lock in
+     SetBrightnessIdle entfernt.
+   - ARCH-2: internal/normalize - EINE Viewer-Namens-
+     Normalisierung (ViewerName), vorher doppelt in httpserver
+     + viewermanager. Charakterisierungs-Test friert das
+     bit-identische Verhalten vor der Extraktion ein.
+   - ARCH-3: internal/viewerstore - EIN SQL-Insert fuer eine
+     viewers-Reihe (Insert) + EIN Port-Allocator
+     (NextFreeServicePort), geteilt von viewermanager (in-process)
+     UND carvilon-cli (separater Prozess am selben SQLite-File).
+
+VIEWER-TYPEN-MODELL (S16): viewers.type IN ('web','esp','android').
+   Alle drei spawnen eine Mock-Viewer-Goroutine und werden vom UDM
+   als regulaerer UA-Int-Viewer adoptiert (S13-09-Muster) -
+   AddViewer UND LoadFromDB spawnen alle drei. Der Typ ist ein
+   reines Plattform-Konzept: er entscheidet die Auth-Naht (Cookie
+   fuer web auf /webviewer/, Bearer fuer esp auf /esp/, Bearer fuer
+   android auf /webviewer/) und den Admin-UI-Tab, NICHT das
+   UDM-Verhalten. ResolveStreamProfile: web->intercom_web,
+   esp->intercom_esp, android->intercom_android.
+
+AUTH-NAHT requireViewerAuth (S16): die /webviewer/*-Routen
+   akzeptieren Cookie ODER Bearer. Bearer zuerst (Android +
+   API-Clients), bei Bearer-Fehlschlag Fallback auf Cookie
+   (Browser mit stale Authorization-Header), sonst 401 fuer
+   Bearer-Clients bzw. 303 zu /login fuer Browser. Beide Pfade
+   setzen dieselbe viewer_mac in den Context; alle nachgelagerten
+   Handler lesen ViewerMACFromContext, agnostisch zur Auth-Art.
+   requireSession (cookie-only) ist entfernt. Die /esp/*-Routen
+   nutzen requireDeviceBearer (vormals requireESPBearer), dessen
+   Token-Lookup nun type IN ('esp','android') matcht.
+
+DEVICE-TOKEN (S16): viewers.esp_token_hash -> device_token_hash
+   (Migration 018), geteilt von esp + android. Generierung via
+   esptoken (sha256(random), constant-time-compare),
+   One-Shot-Klartext-Reveal beim Anlegen / Regenerieren, Hash in
+   der DB. Das esptoken-Paket behaelt seinen Namen (Algorithmus
+   ist generisch, Rename ohne Gewinn).
+
+ANDROID ETAPPE 1 (S16): native App = Web-Viewer im nativen
+   Gehaeuse. Migration 018 (type 'android', fcm_token,
+   device_label). Admin-Tab /a/android-viewers (Create / List /
+   Regenerate-Token / Delete; direkt angelegt, KEIN ESP-Discovery-
+   Flow). Stream ueber denselben /webviewer/offer-WebRTC-Pfad wie
+   der Browser, Profil intercom_android (Klon von intercom_web,
+   codec h264_passthrough, am Stream-Server persistent angelegt).
+
+FCM-TOKEN-REGISTRIERUNG (S16): POST/DELETE /webviewer/fcm-token
+   (requireViewerAuth). POST speichert/aktualisiert das Firebase-
+   Token an der viewers-Reihe (idempotent, deckt auch Token-
+   Refresh ab), DELETE nullt es beim App-Logout (eigener Endpunkt,
+   weil der Cookie-Logout fuer Bearer-Clients nicht greift). Nur
+   die REGISTRIERUNG ist gebaut - WO der FCM-Versand spaeter
+   passiert (RPi-direkt vs. Cloud-Server) ist bewusst noch offen.
+
+CLOUD-AUSBLICK (S17, noch nicht gebaut): edge/cloud-Split. LAN-
+   lokaler Betrieb funktioniert ohne Internet; die Cloud-Schicht
+   ist rein additiv. Geplante Bausteine: mTLS-WebSocket-Side-
+   Channel RPi<->VPS (eigene Mini-CA), Stream-Cloud ueber
+   WHIP/WHEP + TURN lazy/on-demand (nur bei Aussen-Zugriff,
+   nicht im LAN), FCM-Versand-Entscheidung. Sicherheits-Details
+   in security.md.
+```
+
 ---
 
-Zuletzt aktualisiert: 2026-05-21 (Saison-15-01: StreamBackend-
-Naht + WebRTC-Webviewer).
+Zuletzt aktualisiert: 2026-05-27 (Saison 16: ARCH-Trilogie,
+Stream-Server :8555, web/esp/android-Viewer-Modell,
+requireViewerAuth, Android Etappe 1, FCM-Token-Registrierung,
+Cloud-Ausblick).
