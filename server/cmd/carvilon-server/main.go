@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"log/slog"
 	"net"
 	"net/http"
@@ -31,15 +32,45 @@ import (
 	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
+	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/weather"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	role := flag.String("role", "edge",
+		"process role: 'edge' (RPi: full local stack plus the side-channel "+
+			"client) or 'cloud' (VPS: side-channel server only)")
+	flag.Parse()
 
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg := config.FromEnv()
+
+	// One context for graceful shutdown, shared by whichever role
+	// runs. SIGINT/SIGTERM cancels it; every subsystem goroutine and
+	// the side-channel watch it.
+	ctx, cancel := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	switch *role {
+	case "edge":
+		runEdge(ctx, log, cfg)
+	case "cloud":
+		runCloud(ctx, log, cfg)
+	default:
+		log.Error("invalid -role (want 'edge' or 'cloud')", "role", *role)
+		os.Exit(1)
+	}
+}
+
+// runEdge boots the full local stack (the RPi role): config, db,
+// auth, mock viewers, doorbell hub, HTTP/stream server, plus the
+// ADDITIVE side-channel client. This is the historical main() body;
+// nothing about the local behaviour changed, the side-channel client
+// is layered on at the end and never gates startup.
+func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	if err := cfg.Validate(); err != nil {
 		log.Error("config invalid", "err", err)
 		os.Exit(1)
@@ -87,10 +118,6 @@ func main() {
 		StateDirBase: cfg.MockStateDir,
 		ServerIPv4:   cfg.ServerIPv4,
 	})
-
-	ctx, cancel := signal.NotifyContext(context.Background(),
-		os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	if err := viewerMgr.LoadFromDB(ctx); err != nil {
 		log.Error("mock manager load failed", "err", err)
@@ -229,6 +256,12 @@ func main() {
 		"mdns_active", mdnsSvc != nil,
 	)
 
+	// Saison 17: additive side-channel client to the cloud. Started
+	// only when fully configured; runs in its own goroutine and its
+	// failures only trigger reconnects - it never blocks or delays
+	// the edge (Grundregel: LAN works without the cloud).
+	startSidechannelClient(ctx, log, cfg)
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.ListenAndServe()
@@ -243,6 +276,68 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// runCloud boots the minimal cloud role (the VPS): only the
+// side-channel server. No db, no mock viewers, no doorbell hub, no
+// edge HTTP routes - the VPS has no UDM and no mocks. It validates
+// only the cloud-relevant config (ValidateCloud) and blocks on the
+// side-channel server until ctx is cancelled.
+func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
+	if err := cfg.ValidateCloud(); err != nil {
+		log.Error("config invalid for cloud role", "err", err)
+		os.Exit(1)
+	}
+	srv, err := sidechannel.NewServer(sidechannel.ServerOptions{
+		ListenAddr: cfg.SidechannelListenAddr,
+		CACertPath: cfg.SidechannelCACert,
+		ServerCert: cfg.SidechannelServerCert,
+		ServerKey:  cfg.SidechannelServerKey,
+		Log:        log.With("component", "sidechannel-server"),
+	})
+	if err != nil {
+		log.Error("sidechannel server init failed", "err", err)
+		os.Exit(1)
+	}
+	log.Info("carvilon-server starting",
+		"role", "cloud",
+		"sidechannel_addr", cfg.SidechannelListenAddr,
+	)
+	if err := srv.Run(ctx); err != nil {
+		log.Error("sidechannel server stopped", "err", err)
+		os.Exit(1)
+	}
+	log.Info("cloud role shut down")
+}
+
+// startSidechannelClient launches the edge-side cloud link IF it is
+// fully configured. The link is ADDITIVE: an unconfigured or
+// misconfigured side-channel never blocks or fails the edge - it is
+// logged and skipped, and runtime failures only trigger reconnects
+// inside the client goroutine.
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config) {
+	if !cfg.SidechannelClientConfigured() {
+		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
+		return
+	}
+	client, err := sidechannel.NewClient(sidechannel.ClientOptions{
+		URL:        cfg.SidechannelDialURL,
+		CACertPath: cfg.SidechannelCACert,
+		ClientCert: cfg.SidechannelClientCert,
+		ClientKey:  cfg.SidechannelClientKey,
+		Log:        log.With("component", "sidechannel-client"),
+	})
+	if err != nil {
+		// A misconfigured side-channel must NOT take down the edge.
+		log.Error("sidechannel client init failed; continuing without cloud link", "err", err)
+		return
+	}
+	go func() {
+		if err := client.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("sidechannel client stopped", "err", err)
+		}
+	}()
+	log.Info("sidechannel client started", "url", cfg.SidechannelDialURL)
 }
 
 // platformPepperBridge adaptiert *platformconfig.Service an das

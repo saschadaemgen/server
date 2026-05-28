@@ -59,6 +59,32 @@ type Config struct {
 	// integration is still being plumbed.
 	// Example: "http://127.0.0.1:8555/api/stream.mjpeg?src=front-door"
 	StreamBackendURL string
+
+	// --- Side-channel (Saison 17, cloud tier) ---
+	//
+	// All edge-side fields are optional: the cloud link is ADDITIVE,
+	// so an edge with no side-channel config simply does not dial out
+	// and runs fully locally. The cloud role, by contrast, needs the
+	// listener plus its server mTLS material (see ValidateCloud).
+	// These are CARVILON_-only (born in Saison 17); no UNIFIX_ alias.
+
+	// SidechannelListenAddr is the cloud-role bind address.
+	// Default ":8443".
+	SidechannelListenAddr string
+	// SidechannelDialURL is the edge-role cloud endpoint, e.g.
+	// "wss://<vps-ip>:8443/sidechannel". The host must match the
+	// server cert's IP SAN.
+	SidechannelDialURL string
+	// SidechannelCACert is the CA cert path (both roles).
+	SidechannelCACert string
+	// SidechannelServerCert / SidechannelServerKey are the cloud
+	// server's own cert+key.
+	SidechannelServerCert string
+	SidechannelServerKey  string
+	// SidechannelClientCert / SidechannelClientKey are the edge's own
+	// cert+key, presented for mTLS.
+	SidechannelClientCert string
+	SidechannelClientKey  string
 }
 
 const (
@@ -81,6 +107,15 @@ const (
 	envMockStateDir     = "CARVILON_MOCK_STATE_DIR"
 	envSecretsKey       = "CARVILON_SECRETS_KEY"
 	envStreamBackendURL = "CARVILON_STREAM_BACKEND_URL"
+	// Side-channel (Saison 17). CARVILON_-only, no legacy alias.
+	envSidechannelListenAddr = "CARVILON_SIDECHANNEL_LISTEN_ADDR"
+	envSidechannelDialURL    = "CARVILON_SIDECHANNEL_DIAL_URL"
+	envSidechannelCACert     = "CARVILON_SIDECHANNEL_CA_CERT"
+	envSidechannelServerCert = "CARVILON_SIDECHANNEL_SERVER_CERT"
+	envSidechannelServerKey  = "CARVILON_SIDECHANNEL_SERVER_KEY"
+	envSidechannelClientCert = "CARVILON_SIDECHANNEL_CLIENT_CERT"
+	envSidechannelClientKey  = "CARVILON_SIDECHANNEL_CLIENT_KEY"
+	defaultSidechannelListen = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
 	legacyCertFile         = "UNIFIX_CERT_FILE"
@@ -121,6 +156,17 @@ func FromEnv() Config {
 		MockStateDir:     lookupEnv(envMockStateDir, legacyMockStateDir),
 		SecretsKeySet:    lookupEnv(envSecretsKey, legacySecretsKey) != "",
 		StreamBackendURL: lookupEnv(envStreamBackendURL, legacyStreamBackendURL),
+
+		SidechannelListenAddr: lookupEnv(envSidechannelListenAddr),
+		SidechannelDialURL:    lookupEnv(envSidechannelDialURL),
+		SidechannelCACert:     lookupEnv(envSidechannelCACert),
+		SidechannelServerCert: lookupEnv(envSidechannelServerCert),
+		SidechannelServerKey:  lookupEnv(envSidechannelServerKey),
+		SidechannelClientCert: lookupEnv(envSidechannelClientCert),
+		SidechannelClientKey:  lookupEnv(envSidechannelClientKey),
+	}
+	if cfg.SidechannelListenAddr == "" {
+		cfg.SidechannelListenAddr = defaultSidechannelListen
 	}
 	if cfg.ListenAddr == "" {
 		if cfg.DevMode {
@@ -160,6 +206,37 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateCloud checks the fields the cloud role needs: the
+// side-channel listener plus its mTLS material. The cloud role runs
+// none of the edge subsystems (no DB, no HTTP TLS cert, no mocks), so
+// the edge-only fields are intentionally not validated here.
+func (c Config) ValidateCloud() error {
+	if c.SidechannelListenAddr == "" {
+		return fmt.Errorf("config: %s must not be empty for the cloud role", envSidechannelListenAddr)
+	}
+	if c.SidechannelCACert == "" {
+		return fmt.Errorf("config: %s is required for the cloud role", envSidechannelCACert)
+	}
+	if c.SidechannelServerCert == "" {
+		return fmt.Errorf("config: %s is required for the cloud role", envSidechannelServerCert)
+	}
+	if c.SidechannelServerKey == "" {
+		return fmt.Errorf("config: %s is required for the cloud role", envSidechannelServerKey)
+	}
+	return nil
+}
+
+// SidechannelClientConfigured reports whether the edge has enough
+// config to dial the cloud. The link is additive: an edge missing any
+// of these simply skips the client and runs fully locally, so this is
+// a soft check (a skip-or-start decision), never a Validate() failure.
+func (c Config) SidechannelClientConfigured() bool {
+	return c.SidechannelDialURL != "" &&
+		c.SidechannelCACert != "" &&
+		c.SidechannelClientCert != "" &&
+		c.SidechannelClientKey != ""
 }
 
 func parseBool(s string) bool {

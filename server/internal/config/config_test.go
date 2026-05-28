@@ -162,3 +162,85 @@ func TestValidate_EmptyDBPath_Rejected(t *testing.T) {
 		t.Fatal("Validate with empty DBPath returned nil")
 	}
 }
+
+func TestFromEnv_SidechannelListenDefault(t *testing.T) {
+	t.Setenv(envSidechannelListenAddr, "")
+	cfg := FromEnv()
+	if cfg.SidechannelListenAddr != defaultSidechannelListen {
+		t.Errorf("SidechannelListenAddr = %q, want %q", cfg.SidechannelListenAddr, defaultSidechannelListen)
+	}
+}
+
+func TestValidateCloud_RequiresServerMaterial(t *testing.T) {
+	full := Config{
+		SidechannelListenAddr: ":8443",
+		SidechannelCACert:     "ca.crt",
+		SidechannelServerCert: "server.crt",
+		SidechannelServerKey:  "server.key",
+	}
+	if err := full.ValidateCloud(); err != nil {
+		t.Errorf("ValidateCloud(full) = %v, want nil", err)
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"no listen", func(c *Config) { c.SidechannelListenAddr = "" }},
+		{"no ca", func(c *Config) { c.SidechannelCACert = "" }},
+		{"no server cert", func(c *Config) { c.SidechannelServerCert = "" }},
+		{"no server key", func(c *Config) { c.SidechannelServerKey = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := full
+			tc.mut(&c)
+			if err := c.ValidateCloud(); err == nil {
+				t.Errorf("ValidateCloud(%s) = nil, want error", tc.name)
+			}
+		})
+	}
+}
+
+// TestValidateCloud_IgnoresEdgeMaterial documents that the cloud role
+// does not require the edge HTTP cert/key or DBPath: a config that
+// carries only the side-channel server material is valid for cloud.
+func TestValidateCloud_IgnoresEdgeMaterial(t *testing.T) {
+	c := Config{
+		SidechannelListenAddr: ":8443",
+		SidechannelCACert:     "ca.crt",
+		SidechannelServerCert: "server.crt",
+		SidechannelServerKey:  "server.key",
+		// deliberately no CertFile / KeyFile / DBPath
+	}
+	if err := c.ValidateCloud(); err != nil {
+		t.Errorf("ValidateCloud without edge HTTP certs/DB = %v, want nil", err)
+	}
+}
+
+func TestSidechannelClientConfigured(t *testing.T) {
+	full := Config{
+		SidechannelDialURL:    "wss://example:8443/sidechannel",
+		SidechannelCACert:     "ca.crt",
+		SidechannelClientCert: "client.crt",
+		SidechannelClientKey:  "client.key",
+	}
+	if !full.SidechannelClientConfigured() {
+		t.Error("full config: SidechannelClientConfigured() = false, want true")
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"no url", func(c *Config) { c.SidechannelDialURL = "" }},
+		{"no ca", func(c *Config) { c.SidechannelCACert = "" }},
+		{"no client cert", func(c *Config) { c.SidechannelClientCert = "" }},
+		{"no client key", func(c *Config) { c.SidechannelClientKey = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := full
+			tc.mut(&c)
+			if c.SidechannelClientConfigured() {
+				t.Errorf("%s: SidechannelClientConfigured() = true, want false", tc.name)
+			}
+		})
+	}
+}
