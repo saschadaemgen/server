@@ -167,3 +167,27 @@ func TestGenerateKeyHex_Format(t *testing.T) {
 		t.Error("two GenerateKeyHex calls produced identical output")
 	}
 }
+
+func TestDeriveSubkey_DeterministicAndNamespaced(t *testing.T) {
+	s, err := NewWithKey(testKey(t))
+	if err != nil {
+		t.Fatalf("NewWithKey: %v", err)
+	}
+	a := s.DeriveSubkey("publish-token")
+	if len(a) != 32 {
+		t.Fatalf("subkey length = %d, want 32", len(a))
+	}
+	// Deterministic: same label yields the same subkey (so issued
+	// tokens survive a restart).
+	if hex.EncodeToString(a) != hex.EncodeToString(s.DeriveSubkey("publish-token")) {
+		t.Error("DeriveSubkey not deterministic for the same label")
+	}
+	// Namespaced: a different label yields a different subkey.
+	if hex.EncodeToString(a) == hex.EncodeToString(s.DeriveSubkey("other-purpose")) {
+		t.Error("DeriveSubkey returned identical keys for different labels")
+	}
+	// Never the master key verbatim.
+	if hex.EncodeToString(a) == hex.EncodeToString(testKey(t)) {
+		t.Error("DeriveSubkey returned the master key verbatim")
+	}
+}

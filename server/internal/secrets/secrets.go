@@ -13,6 +13,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -116,6 +117,20 @@ func (s *Service) Decrypt(encrypted string) (string, error) {
 		return "", ErrDecryptFailed
 	}
 	return string(pt), nil
+}
+
+// DeriveSubkey derives a deterministic 32-byte subkey from the master
+// key for a labelled purpose, as SHA-256(masterKey || label). It lets
+// a subsystem (e.g. the Saison-17 publish-token signer) hold an
+// independent key without ever seeing the master key, and the label
+// namespaces purposes so two subsystems never share key material. The
+// same master key + label always yields the same subkey, so a process
+// restart keeps issued tokens verifiable.
+func (s *Service) DeriveSubkey(label string) []byte {
+	h := sha256.New()
+	h.Write(s.key)
+	h.Write([]byte(label))
+	return h.Sum(nil)
 }
 
 // GenerateKeyHex produces a fresh 64-hex-char key from
