@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -31,8 +32,10 @@ import (
 	"carvilon.local/server/internal/mdns"
 	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/sidechannel"
+	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/weather"
@@ -260,7 +263,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	startSidechannelClient(ctx, log, cfg)
+	startSidechannelClient(ctx, log, cfg, viewerMgr, secretsSvc)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -299,6 +302,13 @@ func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("sidechannel server init failed", "err", err)
 		os.Exit(1)
 	}
+	// Interim trigger: a localhost HTTP hook the future stream-cloud
+	// layer (or a manual curl on the VPS) uses to ask the edge to
+	// publish, until the real WHEP-subscriber trigger replaces it. Runs
+	// in its own goroutine; srv.Run blocks below. Disabled unless the
+	// addr is configured.
+	startInterimRequestPublishHook(ctx, log, cfg, srv)
+
 	log.Info("carvilon-server starting",
 		"role", "cloud",
 		"sidechannel_addr", cfg.SidechannelListenAddr,
@@ -310,34 +320,104 @@ func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	log.Info("cloud role shut down")
 }
 
+// startInterimRequestPublishHook starts a localhost-only, no-auth HTTP
+// endpoint that triggers a request_publish to the connected edge(s).
+//
+// TODO S17-stream-integration: this is the interim test naht. The real
+// trigger is a WHEP subscriber arriving at the stream-cloud layer on
+// the VPS; that layer will call Server.RequestPublish in-process (or
+// hit this same endpoint) once it docks. Until then this lets a curl on
+// the VPS drive a cloud -> edge request_publish over the live link.
+func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg config.Config, srv *sidechannel.Server) {
+	if cfg.SidechannelInternalAddr == "" {
+		log.Info("sidechannel interim request-publish hook disabled (set CARVILON_SIDECHANNEL_INTERNAL_ADDR to enable)")
+		return
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/request-publish", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			StreamID string `json:"stream_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.StreamID == "" {
+			http.Error(w, "stream_id required", http.StatusBadRequest)
+			return
+		}
+		n := srv.RequestPublish(r.Context(), body.StreamID)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"requested": body.StreamID, "edges": n})
+	})
+	hookSrv := &http.Server{
+		Addr:              cfg.SidechannelInternalAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	go func() {
+		log.Warn("sidechannel interim request-publish hook listening (localhost, NO AUTH, interim)",
+			"addr", cfg.SidechannelInternalAddr)
+		if err := hookSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("interim request-publish hook stopped", "err", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		sh, c := context.WithTimeout(context.Background(), 2*time.Second)
+		defer c()
+		_ = hookSrv.Shutdown(sh)
+	}()
+}
+
 // startSidechannelClient launches the edge-side cloud link IF it is
 // fully configured. The link is ADDITIVE: an unconfigured or
 // misconfigured side-channel never blocks or fails the edge - it is
 // logged and skipped, and runtime failures only trigger reconnects
 // inside the client goroutine.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config) {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, secretsSvc *secrets.Service) {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return
 	}
+
+	// Edge publish controller: on request_publish from the cloud it
+	// authorises the stream against the viewer manager, issues a
+	// publish token, and kicks the StreamPublisher (no-op until the
+	// stream layer docks). All of this is decoupled from the local LAN
+	// flow - a cloud outage cannot stall the edge.
+	edgePub := &sidechannel.EdgePublisher{
+		Authorize: func(streamID string) bool {
+			_, err := viewerMgr.GetViewerInfo(ctx, streamID)
+			return err == nil
+		},
+		Issuer:       publishtoken.NewIssuer(secretsSvc.DeriveSubkey("sidechannel-publish-token"), 5*time.Minute),
+		Publisher:    streampublish.NewNoop(log),
+		CloudWhipURL: cfg.SidechannelCloudWhipURL,
+		Log:          log.With("component", "sidechannel-publish"),
+	}
+
 	client, err := sidechannel.NewClient(sidechannel.ClientOptions{
-		URL:        cfg.SidechannelDialURL,
-		CACertPath: cfg.SidechannelCACert,
-		ClientCert: cfg.SidechannelClientCert,
-		ClientKey:  cfg.SidechannelClientKey,
-		Log:        log.With("component", "sidechannel-client"),
+		URL:              cfg.SidechannelDialURL,
+		CACertPath:       cfg.SidechannelCACert,
+		ClientCert:       cfg.SidechannelClientCert,
+		ClientKey:        cfg.SidechannelClientKey,
+		Log:              log.With("component", "sidechannel-client"),
+		OnRequestPublish: edgePub.HandleRequestPublish,
 	})
 	if err != nil {
 		// A misconfigured side-channel must NOT take down the edge.
 		log.Error("sidechannel client init failed; continuing without cloud link", "err", err)
 		return
 	}
+	edgePub.Send = client.Send
+
 	go func() {
 		if err := client.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("sidechannel client stopped", "err", err)
 		}
 	}()
-	log.Info("sidechannel client started", "url", cfg.SidechannelDialURL)
+	log.Info("sidechannel client started",
+		"url", cfg.SidechannelDialURL,
+		"cloud_whip_url", cfg.SidechannelCloudWhipURL,
+	)
 }
 
 // platformPepperBridge adaptiert *platformconfig.Service an das

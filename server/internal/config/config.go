@@ -85,6 +85,16 @@ type Config struct {
 	// cert+key, presented for mTLS.
 	SidechannelClientCert string
 	SidechannelClientKey  string
+
+	// SidechannelCloudWhipURL (edge) is the static cloud WHIP ingress
+	// the stream-edge pushes to. Passed to the StreamPublisher, NOT
+	// carried per frame. Optional (empty until the stream layer docks).
+	SidechannelCloudWhipURL string
+	// SidechannelInternalAddr (cloud) enables the interim localhost
+	// request-publish HTTP hook when set (e.g. "127.0.0.1:8444").
+	// Empty disables it. Interim until the stream-cloud layer triggers
+	// publishes directly.
+	SidechannelInternalAddr string
 }
 
 const (
@@ -113,9 +123,11 @@ const (
 	envSidechannelCACert     = "CARVILON_SIDECHANNEL_CA_CERT"
 	envSidechannelServerCert = "CARVILON_SIDECHANNEL_SERVER_CERT"
 	envSidechannelServerKey  = "CARVILON_SIDECHANNEL_SERVER_KEY"
-	envSidechannelClientCert = "CARVILON_SIDECHANNEL_CLIENT_CERT"
-	envSidechannelClientKey  = "CARVILON_SIDECHANNEL_CLIENT_KEY"
-	defaultSidechannelListen = ":8443"
+	envSidechannelClientCert   = "CARVILON_SIDECHANNEL_CLIENT_CERT"
+	envSidechannelClientKey    = "CARVILON_SIDECHANNEL_CLIENT_KEY"
+	envSidechannelCloudWhipURL = "CARVILON_SIDECHANNEL_CLOUD_WHIP_URL"
+	envSidechannelInternalAddr = "CARVILON_SIDECHANNEL_INTERNAL_ADDR"
+	defaultSidechannelListen   = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
 	legacyCertFile         = "UNIFIX_CERT_FILE"
@@ -164,6 +176,9 @@ func FromEnv() Config {
 		SidechannelServerKey:  lookupEnv(envSidechannelServerKey),
 		SidechannelClientCert: lookupEnv(envSidechannelClientCert),
 		SidechannelClientKey:  lookupEnv(envSidechannelClientKey),
+
+		SidechannelCloudWhipURL: lookupEnv(envSidechannelCloudWhipURL),
+		SidechannelInternalAddr: lookupEnv(envSidechannelInternalAddr),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
