@@ -1208,6 +1208,21 @@ func (m *Manager) SetLanguage(ctx context.Context, mac, value string) error {
 	return m.setColumnExec(ctx, "set language", mac, "language", nullable(trimmed))
 }
 
+// SetFCMToken persists the device's Firebase Cloud Messaging
+// token on its viewers row (Saison 16 FCM Etappe). An empty
+// token clears the column (NULL) - used on logout so a signed-
+// out device no longer receives push. Pure DB setter, no cache
+// update: fcm_token is not mirrored in ViewerSpec, and the
+// (yet-undecided) push-send path will read it fresh from the DB
+// when a doorbell fires.
+//
+// This step only stores the token. WHERE the FCM send later
+// happens (RPi-direct vs. the planned cloud server) is
+// deliberately not decided here.
+func (m *Manager) SetFCMToken(ctx context.Context, mac, token string) error {
+	return m.setColumnExec(ctx, "set fcm token", mac, "fcm_token", nullable(strings.TrimSpace(token)))
+}
+
 // AutoScreensaverSecondsAllowed is the closed set of values the
 // inline-settings form may persist. 0 means "off" and is stored
 // as SQL NULL; the others are seconds.

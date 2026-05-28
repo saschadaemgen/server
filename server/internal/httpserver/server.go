@@ -245,6 +245,14 @@ func (s *Server) routes() {
 	// hydrates the initial value and recovers from SSE
 	// reconnect.
 	s.mux.Handle("GET /webviewer/unread-count", s.requireViewerAuth(http.HandlerFunc(s.handleMieterUnreadCount)))
+
+	// FCM push-token registration for the native apps (Saison 16
+	// FCM Etappe). POST registers / refreshes, DELETE clears on
+	// app logout. Bearer-gated like the rest of /webviewer/*;
+	// the viewer MAC comes from the token context.
+	s.mux.Handle("POST /webviewer/fcm-token", s.requireViewerAuth(http.HandlerFunc(s.handleMieterFCMToken)))
+	s.mux.Handle("DELETE /webviewer/fcm-token", s.requireViewerAuth(http.HandlerFunc(s.handleMieterFCMTokenDelete)))
+
 	s.mux.Handle("GET /webviewer", s.requireViewerAuth(http.HandlerFunc(s.handleHome)))
 	s.mux.Handle("GET /webviewer/", s.requireViewerAuth(http.HandlerFunc(s.handleHome)))
 
