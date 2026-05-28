@@ -1,0 +1,334 @@
+package sidechannel
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"io"
+	"log/slog"
+	"math/big"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+// --- test helpers ---------------------------------------------------
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+type certPaths struct {
+	caCrt, serverCrt, serverKey, clientCrt, clientKey string
+}
+
+func serial(t *testing.T) *big.Int {
+	t.Helper()
+	n, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatalf("serial: %v", err)
+	}
+	return n
+}
+
+func writeCertPEM(t *testing.T, path string, der []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatalf("write cert %s: %v", path, err)
+	}
+}
+
+func writeKeyPEM(t *testing.T, path string, key *ecdsa.PrivateKey) {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write key %s: %v", path, err)
+	}
+}
+
+// newCA returns a fresh self-signed CA (key + parsed cert + DER).
+func newCA(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ca key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          serial(t),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("ca cert: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse ca: %v", err)
+	}
+	return key, cert, der
+}
+
+// leaf signs a leaf cert (server or client) with the given CA.
+func leaf(t *testing.T, caKey *ecdsa.PrivateKey, caCert *x509.Certificate, cn string, eku x509.ExtKeyUsage, ips []net.IP) (*ecdsa.PrivateKey, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("leaf key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial(t),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{eku},
+		IPAddresses:  ips,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("leaf cert: %v", err)
+	}
+	return key, der
+}
+
+// genCerts writes a CA + server(IP SAN 127.0.0.1) + client into dir.
+func genCerts(t *testing.T, dir string) certPaths {
+	t.Helper()
+	caKey, caCert, caDER := newCA(t)
+	loop := []net.IP{net.ParseIP("127.0.0.1"), net.IPv6loopback}
+	srvKey, srvDER := leaf(t, caKey, caCert, "test-server", x509.ExtKeyUsageServerAuth, loop)
+	cliKey, cliDER := leaf(t, caKey, caCert, "test-client", x509.ExtKeyUsageClientAuth, nil)
+
+	p := certPaths{
+		caCrt:     filepath.Join(dir, "ca.crt"),
+		serverCrt: filepath.Join(dir, "server.crt"),
+		serverKey: filepath.Join(dir, "server.key"),
+		clientCrt: filepath.Join(dir, "client.crt"),
+		clientKey: filepath.Join(dir, "client.key"),
+	}
+	writeCertPEM(t, p.caCrt, caDER)
+	writeCertPEM(t, p.serverCrt, srvDER)
+	writeKeyPEM(t, p.serverKey, srvKey)
+	writeCertPEM(t, p.clientCrt, cliDER)
+	writeKeyPEM(t, p.clientKey, cliKey)
+	return p
+}
+
+// startServer binds a 127.0.0.1:0 listener and runs a sidechannel
+// server on it, returning the server, its dial URL, and a stop func.
+func startServer(t *testing.T, ctx context.Context, p certPaths) (*Server, string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv, err := NewServer(ServerOptions{
+		Listener:   ln,
+		CACertPath: p.caCrt,
+		ServerCert: p.serverCrt,
+		ServerKey:  p.serverKey,
+		Log:        quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() { _ = srv.Run(ctx) }()
+	return srv, "wss://" + ln.Addr().String() + "/sidechannel"
+}
+
+func waitFor(t *testing.T, cond func() bool, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("condition not met within %s", d)
+}
+
+// --- tests ----------------------------------------------------------
+
+func TestSidechannel_PingPongRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv, url := startServer(t, ctx, p)
+
+	pong := make(chan struct{}, 16)
+	cli, err := NewClient(ClientOptions{
+		URL:            url,
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		OnPong:         func() { select { case pong <- struct{}{}: default: } },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	select {
+	case <-pong:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no pong received within 5s")
+	}
+	if got := srv.ConnCount(); got != 1 {
+		t.Errorf("server ConnCount = %d, want 1", got)
+	}
+}
+
+func TestSidechannel_RejectsClientWithoutCert(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, url := startServer(t, ctx, p)
+
+	// Trusts the server CA but presents NO client cert.
+	pool := x509.NewCertPool()
+	caPEM, _ := os.ReadFile(p.caCrt)
+	pool.AppendCertsFromPEM(caPEM)
+	err := rawDial(url, &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+	if err == nil {
+		t.Fatal("dial without client cert succeeded, want mTLS rejection")
+	}
+}
+
+func TestSidechannel_RejectsForeignClientCert(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, url := startServer(t, ctx, p)
+
+	// A client cert signed by a DIFFERENT CA than the server trusts.
+	otherCAKey, otherCACert, _ := newCA(t)
+	fKey, fDER := leaf(t, otherCAKey, otherCACert, "intruder", x509.ExtKeyUsageClientAuth, nil)
+	fKeyDER, _ := x509.MarshalPKCS8PrivateKey(fKey)
+	foreignCert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: fDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: fKeyDER}),
+	)
+	if err != nil {
+		t.Fatalf("foreign keypair: %v", err)
+	}
+	pool := x509.NewCertPool()
+	caPEM, _ := os.ReadFile(p.caCrt)
+	pool.AppendCertsFromPEM(caPEM)
+
+	err = rawDial(url, &tls.Config{
+		Certificates: []tls.Certificate{foreignCert},
+		RootCAs:      pool,
+		MinVersion:   tls.VersionTLS12,
+	})
+	if err == nil {
+		t.Fatal("dial with foreign-signed client cert succeeded, want mTLS rejection")
+	}
+}
+
+func TestSidechannel_ReconnectsAfterServerDrop(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Server 1 on an ephemeral port we will reuse.
+	ln1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln1.Addr().String()
+	srv1, err := NewServer(ServerOptions{Listener: ln1, CACertPath: p.caCrt, ServerCert: p.serverCrt, ServerKey: p.serverKey, Log: quietLogger()})
+	if err != nil {
+		t.Fatalf("NewServer 1: %v", err)
+	}
+	ctx1, cancel1 := context.WithCancel(ctx)
+	go func() { _ = srv1.Run(ctx1) }()
+
+	pong := make(chan struct{}, 64)
+	cli, err := NewClient(ClientOptions{
+		URL:            "wss://" + addr + "/sidechannel",
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		OnPong:         func() { select { case pong <- struct{}{}: default: } },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	// First connection works.
+	select {
+	case <-pong:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no pong from server 1 within 5s")
+	}
+	waitFor(t, func() bool { return srv1.ConnCount() >= 1 }, 5*time.Second)
+
+	// Drop server 1; its listener closes and the client connection
+	// breaks, forcing the reconnect loop.
+	cancel1()
+
+	// Rebind the same port for server 2 (retry while the old listener
+	// finishes closing).
+	var ln2 net.Listener
+	waitFor(t, func() bool {
+		l, e := net.Listen("tcp", addr)
+		if e != nil {
+			return false
+		}
+		ln2 = l
+		return true
+	}, 5*time.Second)
+	srv2, err := NewServer(ServerOptions{Listener: ln2, CACertPath: p.caCrt, ServerCert: p.serverCrt, ServerKey: p.serverKey, Log: quietLogger()})
+	if err != nil {
+		t.Fatalf("NewServer 2: %v", err)
+	}
+	go func() { _ = srv2.Run(ctx) }()
+
+	// The client must redial and land on server 2.
+	waitFor(t, func() bool { return srv2.ConnCount() >= 1 }, 8*time.Second)
+}
+
+// rawDial attempts a WebSocket dial with an explicit TLS config and
+// returns the dial error (nil on success). Used to assert mTLS
+// rejections from a client that does not go through sidechannel.Client.
+func rawDial(url string, tlsCfg *tls.Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	hc := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}}
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: hc})
+	if err == nil {
+		conn.CloseNow()
+	}
+	return err
+}

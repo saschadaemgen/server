@@ -8,6 +8,7 @@ replace carvilon.local/mock => ../mock
 
 require (
 	carvilon.local/mock v0.0.0-00010101000000-000000000000
+	github.com/coder/websocket v1.8.14
 	github.com/hashicorp/mdns v1.0.6
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.51.0
@@ -16,7 +17,6 @@ require (
 
 require (
 	carvilon.local/shared v0.0.0 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
