@@ -1,9 +1,16 @@
 # carvilon Security Plan
 
-**Status:** Saison 14 abgeschlossen 19. Mai 2026 (S14-DOKU).
+**Status:** Saison 16 (laufend; Android-Viewer + FCM-Token-
+Registrierung). Saison 15 hat aufgeraeumt (Open-Core-Naht,
+mock->viewer-Rename, Code auf Englisch) und dabei den Magic-Link
+ENTFERNT - der Mieter-Login laeuft seit S15 ueber Wohnungs-Name +
+Passwort (Argon2id mit Pepper aus platform_config). Die
+S15/S16-Sicherheits-Aspekte stehen gebuendelt in Sektion 12 am
+Ende; der Saison-12-14-Bestand darunter bleibt erhalten.
 Lebendes Dokument, wird pro Saison ergaenzt.
 **Stand:** Strategische Eckpunkte gesetzt. Saison 12 hat den
-Auth-Backbone (Magic-Link plus Mieter- und Admin-Session), die
+Auth-Backbone (damals Magic-Link, in S15 durch Wohnungs-Name +
+Argon2id-Passwort ersetzt; plus Mieter- und Admin-Session), die
 TLS-Schicht im Server-Prozess, das AES-256-GCM-Verschluesseln
 von UA-API-Tokens (platform_config) und den FK-CASCADE-Datenpfad
 fuer Mock-zu-Sessions/Tokens umgesetzt. Saison 13 hat den
@@ -20,8 +27,9 @@ Server-TLS bleiben Saison 15+.
 ## 1. Sicherheits-Philosophie
 
 carvilon ist eine Convenience-Plattform, kein Sicherheits-Produkt.
-Mieter-Authentifizierung lauft auf Convenience-Niveau (Magic-Link),
-nicht Bank-Sicherheit. Hochsensitive Bereiche brauchen die nativen
+Mieter-Authentifizierung laeuft auf Convenience-Niveau (Wohnungs-
+Name + Argon2id-Passwort; bis S15 Magic-Link), nicht Bank-
+Sicherheit. Hochsensitive Bereiche brauchen die nativen
 UniFi-Reader und Hub-Door-Mechanismen.
 
 Trotzdem werden alle Komponenten mit Branchen-Standards gehaertet:
@@ -89,13 +97,21 @@ Doorbell-Trigger usw. Es muss daher:
   gesetzt werden, nicht generierbar vom carvilon-server selbst
 
 Der Browser/Endgeraet-Klient redet ausschliesslich mit dem
-carvilon-server (eigener Magic-Link), nicht direkt mit der UDM-API.
+carvilon-server (eigene Session-Cookie- bzw. Bearer-Auth; bis S15
+war es ein eigener Magic-Link), nicht direkt mit der UDM-API.
 
-#### 2.2.5 Magic-Link und Session Klartext-Storage (Saison 12)
+#### 2.2.5 Session-Klartext-Storage (Saison 12; Magic-Link S15 entfernt)
 
-Magic-Link-Tokens und Session-IDs werden in Saison 12 weiterhin
-PLAIN in der SQLite-DB gespeichert. Beide sind 32 Bytes
-crypto/rand, base64url-encoded (43 Zeichen ASCII).
+> **S15-Korrektur:** Der Magic-Link ist in Saison 15 entfernt - die
+> `magic_link_tokens`-Tabelle und das Feature sind weg. Der Mieter-
+> Login laeuft jetzt ueber Wohnungs-Name + Argon2id-Passwort. Der
+> folgende Saison-12-Absatz beschreibt den damaligen Magic-Link-
+> plus-Session-Storage; fuer die Session-IDs gilt der Klartext-
+> Trade-off unveraendert weiter.
+
+Magic-Link-Tokens (bis S15) und Session-IDs werden PLAIN in der
+SQLite-DB gespeichert. Beide sind 32 Bytes crypto/rand,
+base64url-encoded (43 Zeichen ASCII).
 
 Bewusster Trade-off, Sascha-Beschluss 12. Mai 2026:
 
@@ -303,7 +319,7 @@ Produkt produktiv und stabil ist.
 | Bedrohung                        | Schutz                  | Saison |
 |----------------------------------|-------------------------|--------|
 | Anderer Mieter sniffed im WLAN   | LAN-only-Traffic, TLS   | 12+    |
-| WLAN-Passwort kompromittiert     | Magic-Link + TLS-Cert   | 12+    |
+| WLAN-Passwort kompromittiert     | Passwort + TLS-Cert     | 12+    |
 | SD-Karte geklaut, RPi geklont    | Hardware-Bindung A      | 14     |
 | SD-Karte geklaut, CA extrahiert  | Key-Sealing B           | 15+    |
 | Source-Code geleakt              | Build-Strip + Obfuskat  | 10/14  |
@@ -444,13 +460,23 @@ Klartext-Logs:  Master-Key NIEMALS loggen, auch nicht im
                 Regel wie fuer alle Tokens.
 ```
 
-### 7.5 ESP-Bearer-Token (Saison 13-08)
+### 7.5 Device-Bearer-Token (Saison 13-08; S16: esp + android)
 
-Im Gegensatz zur Mieter-Auth (Magic-Link + Cookie-Session) und
-zur Admin-Auth (Username + bcrypt + Cookie-Session) laueft die
-ESP-Endgeraete-Authentifikation ueber einen geraete-skopten
-Bearer-Token, der pro adoptiertem ESP einmalig generiert und im
-NVS des Geraets persistiert wird.
+> **S16-Korrektur:** Die Spalte heisst seit Migration 018
+> `viewers.device_token_hash` (vormals `esp_token_hash`) und wird
+> jetzt von ZWEI Geraete-Typen genutzt: `esp` und `android`. Die
+> Middleware heisst `requireDeviceBearer` (vormals
+> `requireESPBearer`) und matcht `type IN ('esp','android')`. Der
+> Storage-Hash bleibt SHA-256 (siehe unten) - NICHT Argon2id;
+> Argon2id ist ausschliesslich fuer das Mieter-Passwort. Die
+> Mechanik unten gilt unveraendert fuer beide Typen.
+
+Im Gegensatz zur Mieter-Auth (Wohnungs-Name + Argon2id, Cookie-
+oder Bearer-Session; bis S15 Magic-Link) und zur Admin-Auth
+(Username + bcrypt + Cookie-Session) laeuft die Geraete-
+Authentifikation ueber einen geraete-skopten Bearer-Token, der pro
+adoptiertem Geraet einmalig generiert und (beim ESP im NVS)
+persistiert wird.
 
 ```
 Generierung:    32 Bytes von crypto/rand. base64url-encoded
@@ -882,4 +908,145 @@ sich aendert.
 
 ---
 
-Zuletzt aktualisiert: 2026-05-19 (Saison-14-Abschluss-Doku).
+## 12. Saison-15/16-Updates am Bedrohungsmodell
+
+| Bedrohung | Schutz | Saison |
+| --- | --- | --- |
+| Public Build leakt kommerziellen Code | Build-Tag `carvilon_stream`; ungetaggter Slot = unconfigured. Public-Build importiert das private Modul NIE | 15 |
+| Gestohlener Device-Token offline brute-forcebar | nicht moeglich: 32 crypto/rand-Bytes, kein User-Material; SHA-256-Hash genuegt | 13/16 |
+| Bearer-Client bekommt Redirect statt Fehler | `requireViewerAuth` antwortet einem Bearer-Client mit 401 (nicht 303); nur Browser ohne Bearer werden zu /login geleitet | 16 |
+| Abgemeldetes Geraet bekommt weiter Push | `DELETE /webviewer/fcm-token` nullt das Token bei App-Logout | 16 |
+| Interne Topologie in oeffentlicher Git-History | History bereinigt, Repo privat, interne Doku gitignored, Pre-Push-Grep (siehe unten) | 16 |
+| Stream-Cloud leakt Kamera-IDs nach aussen (S17) | opake `stream_id` statt roher `camera_id`; JWT asymmetrisch | 17 |
+
+### 12.1 Open-Core-Build-Trennung (S15)
+
+Der Kern (carvilon-server) ist AGPL geplant; Streaming- und
+Lizenz-Server bleiben kommerziell geschlossen. Die Trennung ist
+ein Go-Build-Tag: `carvilon_stream` zieht
+`backend_carvilon_stream.go` + `main_carvilon_stream.go` und den
+privaten `carvilon.local/stream`-Wrapper ins Linker-Frontend. Der
+ungetaggte (oeffentliche) Build kompiliert den
+`commercialBackend`-Slot als unconfigured und importiert das
+private Modul NIE. Konsequenz fuer Source-Schutz: der kommerzielle
+Code kann nicht versehentlich in einem oeffentlichen Build landen,
+weil der Import-Pfad ohne Tag schlicht nicht existiert.
+
+### 12.2 Device-Bearer fuer esp + android (S16)
+
+```
+device_token_hash (Migration 018, vormals esp_token_hash):
+   - geteilt von type='esp' UND type='android'
+   - Generierung: 32 Bytes crypto/rand, base64url (43 ASCII)
+   - Storage:     SHA-256-Hex in viewers.device_token_hash;
+                  Verify ueber crypto/subtle.ConstantTimeCompare
+                  ACHTUNG: SHA-256, NICHT Argon2id. Argon2id ist
+                  ausschliesslich das Mieter-Passwort (mit Pepper
+                  aus platform_config). Bei einem M2M-Token ohne
+                  User-Material gibt es nichts offline zu
+                  brute-forcen, ein langsamer KDF braechte keinen
+                  Gewinn.
+   - Klartext:    One-Shot-Reveal beim Anlegen / Regenerieren,
+                  danach nur der Hash. Regenerate ueberschreibt
+                  den Hash und macht den alten Token sofort
+                  ungueltig.
+   - Middleware:  requireDeviceBearer (vormals requireESPBearer),
+                  Token-Lookup matcht type IN ('esp','android').
+```
+
+### 12.3 requireViewerAuth - Bearer ODER Cookie (S16)
+
+Die `/webviewer/*`-Routen akzeptieren seit S16 beides: einen
+Bearer-Token (Android + API-Clients) ODER ein Session-Cookie
+(Browser). Bearer wird zuerst versucht; schlaegt er fehl, faellt
+die Middleware bewusst auf das Cookie zurueck (ein Browser kann
+einen veralteten Authorization-Header tragen und trotzdem ein
+gueltiges Cookie haben). Sicherheits-relevant ist der
+Schluss-Zweig:
+
+```
+Bearer ok                                   -> 200
+Bearer fail | Cookie ok                     -> 200
+Bearer fail | Cookie fail | Bearer present  -> 401 (kein Redirect)
+sonst (kein Bearer, kein/ungueltiges Cookie)-> 303 /login
+```
+
+Ein API-/Bearer-Client bekommt also einen sauberen 401 statt
+einer 303-Umleitung auf eine HTML-Login-Seite. Die fruehere
+cookie-only `requireSession` ist entfernt. Beide Pfade setzen
+dieselbe `viewer_mac` in den Request-Context; nachgelagerte
+Handler lesen `ViewerMACFromContext` und sind blind fuer die
+Auth-Art - der Pfad-Parameter ist nie die Identitaetsquelle.
+
+### 12.4 FCM-Token-Lebenszyklus (S16)
+
+Das Firebase-Token der Android-App liegt in `viewers.fcm_token`
+(eine Zeile pro Geraet). `POST /webviewer/fcm-token` schreibt /
+aktualisiert es (idempotent, deckt auch Googles Token-Rotation
+ab), `DELETE /webviewer/fcm-token` nullt es beim App-Logout, damit
+ein abgemeldetes Geraet keine Push-Nachrichten mehr bekommt. Beide
+Routen sitzen hinter `requireViewerAuth`; die viewer_mac kommt aus
+dem Bearer-Context. Bewusst NICHT gebaut ist der Versand-Pfad - WO
+der FCM-Push spaeter ausgeloest wird (RPi-direkt vs. Cloud-Server)
+ist eine offene S17-Entscheidung.
+
+### 12.5 UA-API-Token-Verschluesselung (S16-Verifikation)
+
+Geprueft und unveraendert gueltig: der UA-API-Token wird mit
+AES-256-GCM in `platform_config.value_encrypted` abgelegt
+(`internal/secrets`, 32-Byte-Master-Key aus
+`CARVILON_SECRETS_KEY`, Legacy-Alias `UNIFIX_SECRETS_KEY`). Frische
+12-Byte-Nonce pro Wert, als Praefix vor den Ciphertext serialisiert;
+GCM haengt einen 16-Byte-Auth-Tag an. Der Master-Key wird NIE
+geloggt.
+
+### 12.6 REPO-VORFALL (S16) - interne Doku in oeffentlicher History
+
+Vorfall: das Repo war ueber Monate ungewollt oeffentlich, mit
+interner Doku in der Git-History - insbesondere `CLAUDE.md`
+(enthaelt UDM-Zugangsdaten, das UA-JWT-Secret, reale MAC-/IP-/
+Standort-Werte) und `wire-format.md` (echte Netz-Topologie und
+Live-Capture-Werte).
+
+Gegenmassnahmen (umgesetzt) und Pflicht-Prozess vor jedem
+Oeffentlich-Schalten:
+
+```
+- Git-History bereinigt (git filter-repo) und Repo wieder privat
+  geschaltet.
+- CLAUDE.md und wire-format.md sind gitignored (chore-Commit) -
+  sie bleiben lokale Arbeitsdoku, fliessen aber nicht mehr ins Repo.
+- Echte Werte in Tests durch Platzhalter ersetzt (Test-MACs,
+  -UUIDs, -IPs statt Saschas Heimnetz-Realwerte).
+- PFLICHT-Pre-Push-Check vor Oeffentlich-Schalten: git grep nach
+  IP-/MAC-/UUID-Mustern und nach den bekannten Geheimnis-Strings
+  (UDM-Passwort, UA-JWT-Secret). Kein Push, solange ein Treffer
+  ungeklaert ist.
+- Lehre: das UA-JWT-Secret und alle realen Zugangsdaten gelten als
+  kompromittiert und werden beim Produktiv-Uebergang rotiert
+  (Test-Netz-Annahme aus CLAUDE.md, deshalb kein Live-Schaden -
+  aber die Disziplin gilt ab jetzt hart).
+```
+
+### 12.7 Cloud-Sicherheit (S17-Ausblick, noch nicht gebaut)
+
+Der geplante edge/cloud-Split ist rein additiv - LAN-lokaler
+Betrieb funktioniert ohne Internet. Sicherheits-Eckpfeiler der
+Cloud-Schicht, sobald sie gebaut wird:
+
+```
+- mTLS fuer den RPi<->VPS-Side-Channel: eigene Mini-CA, Server-
+  Cert am VPS, Client-Cert am RPi. Beide Seiten verifizieren
+  gegenseitig; keine offene Cloud-API.
+- Stream-Tokens als JWT, asymmetrisch: der VPS verifiziert mit
+  dem Public-Key, signiert selbst NIE (Signatur-Schluessel liegt
+  nicht auf dem Internet-exponierten Host).
+- Nach aussen nur opake stream_id, nie die rohe camera_id - die
+  interne Geraete-Topologie bleibt im LAN.
+```
+
+---
+
+Zuletzt aktualisiert: 2026-05-27 (Saison 16: Device-Bearer +
+requireViewerAuth + FCM-Lebenszyklus + Repo-Vorfall +
+Open-Core-Build-Trennung + Cloud-Sicherheits-Ausblick).
