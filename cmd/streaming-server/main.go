@@ -81,6 +81,7 @@ import (
 	"carvilon.local/stream/internal/sourcereg"
 	"carvilon.local/stream/internal/stats"
 	"carvilon.local/stream/internal/store"
+	"carvilon.local/stream/internal/streamhub"
 	"carvilon.local/stream/internal/unifiapi"
 	"carvilon.local/stream/internal/whip"
 	"carvilon.local/stream/streambackend"
@@ -173,11 +174,14 @@ func runCloud() {
 		logger.Fatalf("%s: must be 32 bytes hex-encoded (got %d bytes)", envPublishTokenHMACKey, len(hmacKey))
 	}
 
+	hub := streamhub.NewHub()
+
 	srv, err := whip.New(whip.Config{
 		Addr:     addr,
 		CertFile: certFile,
 		KeyFile:  keyFile,
 		HMACKey:  hmacKey,
+		Hub:      hub,
 		Logger:   logger,
 	})
 	if err != nil {
@@ -185,8 +189,7 @@ func runCloud() {
 	}
 
 	logger.Printf("WHIP-Ingress auf %s (cert=%s)", addr, certFile)
-	logger.Printf("TODO S2-04: WHEN token verified, accept WebRTC SDP and pump to TrackLocalStaticRTP")
-	logger.Printf("TODO S2-05: WHEP-Egress")
+	logger.Printf("TODO S2-05: WHEP-Egress zum Hub")
 	logger.Printf("TODO S2-06: RequestPublish-Call zu carvilon-cloud sidechannel.Server")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

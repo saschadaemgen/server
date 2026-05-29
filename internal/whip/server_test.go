@@ -25,7 +25,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/webrtc/v4"
+
 	"carvilon.local/stream/internal/publishtoken"
+	"carvilon.local/stream/internal/streamhub"
 )
 
 // --- test plumbing ----------------------------------------------------------
@@ -112,6 +115,7 @@ func newTestServer(t *testing.T) (baseURL string, key []byte) {
 		CertFile: certFile,
 		KeyFile:  keyFile,
 		HMACKey:  key,
+		Hub:      streamhub.NewHub(),
 		Logger:   log.New(io.Discard, "", 0),
 	})
 	if err != nil {
@@ -149,14 +153,48 @@ func validToken(t *testing.T, sid string, key []byte) string {
 
 // --- tests ------------------------------------------------------------------
 
-func TestWHIP_ValidTokenReturns501(t *testing.T) {
+// clientOffer builds a synthetic pion publisher: a PeerConnection with
+// one H.264 send track, and returns its gathered SDP offer. Models the
+// edge WHIP client (whose Go implementation lands in a later commit).
+func clientOffer(t *testing.T) string {
+	t.Helper()
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("client pc: %v", err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+		"video", "pion",
+	)
+	if err != nil {
+		t.Fatalf("client track: %v", err)
+	}
+	if _, err := pc.AddTrack(track); err != nil {
+		t.Fatalf("add track: %v", err)
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	gather := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		t.Fatalf("set local: %v", err)
+	}
+	<-gather
+	return pc.LocalDescription().SDP
+}
+
+// TestWHIPHandshake drives a real WHIP handshake with a synthetic pion
+// publisher: valid token + real SDP offer -> 201 Created, SDP answer,
+// Location header.
+func TestWHIPHandshake(t *testing.T) {
 	base, key := newTestServer(t)
 	const sid = "test-mac"
 
-	req, err := http.NewRequest(http.MethodPost, base+"/whip/"+sid, strings.NewReader("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n"))
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
+	req, _ := http.NewRequest(http.MethodPost, base+"/whip/"+sid, strings.NewReader(clientOffer(t)))
 	req.Header.Set("Authorization", "Bearer "+validToken(t, sid, key))
 	req.Header.Set("Content-Type", "application/sdp")
 
@@ -166,12 +204,73 @@ func TestWHIP_ValidTokenReturns501(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("status = %d, want 501", resp.StatusCode)
-	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "pending S2-04") {
-		t.Errorf("body = %q, want it to mention pending S2-04", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/sdp" {
+		t.Errorf("Content-Type = %q, want application/sdp", ct)
+	}
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/whip/"+sid+"/session/") {
+		t.Errorf("Location = %q, want prefix /whip/%s/session/", loc, sid)
+	}
+	if !strings.Contains(string(body), "v=0") {
+		t.Errorf("answer body is not SDP: %q", body)
+	}
+}
+
+// TestWHIPConflict asserts the single-publisher invariant: a second
+// publish for an already-active streamID is rejected with 409.
+func TestWHIPConflict(t *testing.T) {
+	base, key := newTestServer(t)
+	const sid = "test-mac"
+	tok := validToken(t, sid, key)
+
+	publish := func() *http.Response {
+		req, _ := http.NewRequest(http.MethodPost, base+"/whip/"+sid, strings.NewReader(clientOffer(t)))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/sdp")
+		resp, err := insecureClient().Do(req)
+		if err != nil {
+			t.Fatalf("do: %v", err)
+		}
+		return resp
+	}
+
+	r1 := publish()
+	defer func() { _ = r1.Body.Close() }()
+	if r1.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(r1.Body)
+		t.Fatalf("first publish status = %d, want 201; body=%s", r1.StatusCode, body)
+	}
+
+	r2 := publish()
+	defer func() { _ = r2.Body.Close() }()
+	if r2.StatusCode != http.StatusConflict {
+		t.Errorf("second publish status = %d, want 409", r2.StatusCode)
+	}
+}
+
+// TestWHIP_ValidTokenMalformedSDPReturns500 covers the path where auth
+// succeeds but the SDP offer is unparseable: AcceptPublisher fails and
+// the handler returns 500 (not a leak of the auth-vs-setup distinction
+// — both are server-side concerns past the 401 gate).
+func TestWHIP_ValidTokenMalformedSDPReturns500(t *testing.T) {
+	base, key := newTestServer(t)
+	const sid = "test-mac"
+
+	req, _ := http.NewRequest(http.MethodPost, base+"/whip/"+sid, strings.NewReader("this is not a valid sdp offer"))
+	req.Header.Set("Authorization", "Bearer "+validToken(t, sid, key))
+	req.Header.Set("Content-Type", "application/sdp")
+
+	resp, err := insecureClient().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (malformed offer)", resp.StatusCode)
 	}
 }
 
@@ -278,13 +377,15 @@ func TestWHIP_MissingStreamIDReturns404(t *testing.T) {
 // TestWHIP_NewRejectsIncompleteConfig guards the constructor's
 // validation: missing cert/key or empty HMAC key must error.
 func TestWHIP_NewRejectsIncompleteConfig(t *testing.T) {
+	hub := streamhub.NewHub()
 	cases := []struct {
 		name string
 		cfg  Config
 	}{
-		{"no cert", Config{KeyFile: "k.pem", HMACKey: []byte("x")}},
-		{"no key", Config{CertFile: "c.pem", HMACKey: []byte("x")}},
-		{"no hmac", Config{CertFile: "c.pem", KeyFile: "k.pem"}},
+		{"no cert", Config{KeyFile: "k.pem", HMACKey: []byte("x"), Hub: hub}},
+		{"no key", Config{CertFile: "c.pem", HMACKey: []byte("x"), Hub: hub}},
+		{"no hmac", Config{CertFile: "c.pem", KeyFile: "k.pem", Hub: hub}},
+		{"no hub", Config{CertFile: "c.pem", KeyFile: "k.pem", HMACKey: []byte("x")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

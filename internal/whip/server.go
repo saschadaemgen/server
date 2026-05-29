@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"carvilon.local/stream/internal/publishtoken"
+	"carvilon.local/stream/internal/streamhub"
 )
 
 // maxSDPBytes caps the request body. A WHIP SDP offer is a few KB; 64
@@ -35,10 +36,11 @@ const shutdownTimeout = 5 * time.Second
 
 // Config configures a [Server].
 type Config struct {
-	Addr     string // listen address, e.g. ":8444" (default if empty)
-	CertFile string // absolute path to the server certificate (PEM)
-	KeyFile  string // absolute path to the server private key (PEM)
-	HMACKey  []byte // publish-token HMAC key, already hex-decoded
+	Addr     string            // listen address, e.g. ":8444" (default if empty)
+	CertFile string            // absolute path to the server certificate (PEM)
+	KeyFile  string            // absolute path to the server private key (PEM)
+	HMACKey  []byte            // publish-token HMAC key, already hex-decoded
+	Hub      *streamhub.Hub    // active-publisher registry (S2-04)
 	Logger   *log.Logger
 }
 
@@ -51,6 +53,7 @@ type Server struct {
 	certFile string
 	keyFile  string
 	hmacKey  []byte
+	hub      *streamhub.Hub
 	logger   *log.Logger
 	srv      *http.Server
 }
@@ -65,6 +68,9 @@ func New(cfg Config) (*Server, error) {
 	if len(cfg.HMACKey) == 0 {
 		return nil, errors.New("whip: HMACKey must not be empty")
 	}
+	if cfg.Hub == nil {
+		return nil, errors.New("whip: Hub is required")
+	}
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
@@ -78,6 +84,7 @@ func New(cfg Config) (*Server, error) {
 		certFile: cfg.CertFile,
 		keyFile:  cfg.KeyFile,
 		hmacKey:  cfg.HMACKey,
+		hub:      cfg.Hub,
 		logger:   logger,
 	}
 
@@ -175,14 +182,28 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Success path — track acceptance is S2-04. Token is verified,
-	// SDP is in hand; we simply don't have the PeerConnection plumbing
-	// yet. 501 is the honest status.
-	s.logger.Printf("whip ingress: token verified for sid=%s, sdp bytes=%d, 501 (track acceptance pending)",
-		streamID, len(body))
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusNotImplemented)
-	_, _ = io.WriteString(w, "WHIP track acceptance pending S2-04")
+	// 5. Token verified, SDP in hand: build the PeerConnection, accept
+	// the publisher's RTP into the hub, and answer per WHIP (RFC 9725):
+	// 201 Created, SDP answer in the body, Location header pointing at
+	// the (future) session resource.
+	sdpAnswer, sessionID, err := AcceptPublisher(r.Context(), s.hub, s.logger, streamID, string(body))
+	if err != nil {
+		if errors.Is(err, streamhub.ErrConflict) {
+			s.logger.Printf("whip ingress: conflict for sid=%s (already publishing)", streamID)
+			http.Error(w, "stream already publishing", http.StatusConflict)
+			return
+		}
+		s.logger.Printf("whip ingress: accept publisher failed for sid=%s: %v", streamID, err)
+		http.Error(w, "publisher setup failed", http.StatusInternalServerError)
+		return
+	}
+
+	location := fmt.Sprintf("/whip/%s/session/%s", streamID, sessionID)
+	w.Header().Set("Content-Type", "application/sdp")
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusCreated)
+	_, _ = io.WriteString(w, sdpAnswer)
+	s.logger.Printf("whip ingress: accepted sid=%s session=%s, sdp bytes=%d", streamID, sessionID, len(body))
 }
 
 // isSDP reports whether the Content-Type names application/sdp,
