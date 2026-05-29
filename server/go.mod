@@ -6,8 +6,11 @@ replace carvilon.local/shared => ../shared
 
 replace carvilon.local/mock => ../mock
 
+replace carvilon.local/stream => ../../streaming-server
+
 require (
 	carvilon.local/mock v0.0.0-00010101000000-000000000000
+	carvilon.local/stream v0.0.0-00010101000000-000000000000
 	github.com/coder/websocket v1.8.14
 	github.com/hashicorp/mdns v1.0.6
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
