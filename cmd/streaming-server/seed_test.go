@@ -10,7 +10,7 @@ import (
 // fallback: with neither CARVILON_PROFILES_JSON nor UNIFI_CAMERA_ID
 // set, loadSeedProfiles returns the five-profile measurement set
 // pointing at the built-in intercom CameraID. The briefing's success
-// criterion ("go run .\cmd\spike on an empty DB seeds from the
+// criterion ("go run .\cmd\streaming-server on an empty DB seeds from the
 // built-in default set").
 func TestLoadSeedProfiles_BuiltInDefaultSet(t *testing.T) {
 	t.Setenv("CARVILON_PROFILES_JSON", "")

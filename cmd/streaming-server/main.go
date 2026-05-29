@@ -60,6 +60,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -81,6 +82,7 @@ import (
 	"carvilon.local/stream/internal/stats"
 	"carvilon.local/stream/internal/store"
 	"carvilon.local/stream/internal/unifiapi"
+	"carvilon.local/stream/internal/whip"
 	"carvilon.local/stream/streambackend"
 )
 
@@ -101,7 +103,7 @@ const (
 
 	// defaultIntercomCameraID is the Intercom-on-the-test-UDM Protect
 	// identifier. Used by the built-in S6 measurement default-set so
-	// `go run .\cmd\spike` with neither CARVILON_PROFILES_JSON nor
+	// `go run .\cmd\streaming-server` with neither CARVILON_PROFILES_JSON nor
 	// UNIFI_CAMERA_ID still produces a working set of profiles
 	// pointing at the obvious camera. NOT a secret — the ID is a
 	// device-local handle, the API key (which is the secret) is still
@@ -109,6 +111,19 @@ const (
 	// spike convenience; the carvilon-side production deployment
 	// configures cameras via the admin UI, not through this fallback.
 	defaultIntercomCameraID = "679573e101080b03e4000424"
+
+	// --- cloud role (S2-03) ------------------------------------------------
+	//
+	// WHIP ingress listener. Cert/Key paths are installation-specific
+	// (Sascha-convention: VPS user-homedir, not standardisable), so
+	// they have NO default — runCloud Fatalf's when unset. On the VPS,
+	// systemd's EnvironmentFile supplies the absolute paths.
+	envWHIPListen          = "CARVILON_WHIP_LISTEN"            // optional, defaults to ":8444"
+	envWHIPCertFile        = "CARVILON_WHIP_CERT_FILE"         // required in cloud mode
+	envWHIPKeyFile         = "CARVILON_WHIP_KEY_FILE"          // required in cloud mode
+	envPublishTokenHMACKey = "CARVILON_PUBLISH_TOKEN_HMAC_KEY" // required in cloud mode, 32-byte hex
+
+	defaultWHIPListen = ":8444"
 )
 
 func main() {
@@ -129,18 +144,57 @@ func main() {
 	}
 }
 
-// runCloud is the Season-2 cloud-role entry point. Stub for now: log
-// the planned build-out and park, so a manual `-role=cloud` start
-// stays alive (a stub that returned immediately would look like a
-// crash — no process, no output). Real ingress/fan-out/egress land in
-// S2-03..S2-06.
+// runCloud is the Season-2 cloud-role entry point. As of S2-03 it
+// starts a real WHIP-ingress TLS listener with Bearer-token
+// verification; on a verified token the endpoint still answers 501
+// (track acceptance is S2-04). Required env: cert + key file paths and
+// the 32-byte hex publish-token HMAC key. Missing config is fatal.
 func runCloud() {
-	log.Println("[cloud] streaming-server cloud role - not yet implemented")
-	log.Println("[cloud] TODO S2-03: WHIP-Ingress auf :8444/whip/{streamID}")
-	log.Println("[cloud] TODO S2-04: Fan-Out (pion TrackLocalStaticRTP)")
-	log.Println("[cloud] TODO S2-05: WHEP-Egress")
-	log.Println("[cloud] TODO S2-06: RequestPublish-Call zu carvilon-cloud sidechannel.Server")
-	select {} // park, damit der Prozess nicht sofort terminiert
+	logger := log.New(os.Stdout, "[cloud] ", log.LstdFlags|log.Lmicroseconds)
+
+	addr := os.Getenv(envWHIPListen)
+	if addr == "" {
+		addr = defaultWHIPListen
+	}
+	certFile := os.Getenv(envWHIPCertFile)
+	keyFile := os.Getenv(envWHIPKeyFile)
+	hmacHex := os.Getenv(envPublishTokenHMACKey)
+
+	if certFile == "" || keyFile == "" || hmacHex == "" {
+		logger.Fatalf("missing one of %s, %s, %s — required in cloud mode",
+			envWHIPCertFile, envWHIPKeyFile, envPublishTokenHMACKey)
+	}
+
+	hmacKey, err := hex.DecodeString(hmacHex)
+	if err != nil {
+		logger.Fatalf("%s: not valid hex: %v", envPublishTokenHMACKey, err)
+	}
+	if len(hmacKey) != 32 {
+		logger.Fatalf("%s: must be 32 bytes hex-encoded (got %d bytes)", envPublishTokenHMACKey, len(hmacKey))
+	}
+
+	srv, err := whip.New(whip.Config{
+		Addr:     addr,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		HMACKey:  hmacKey,
+		Logger:   logger,
+	})
+	if err != nil {
+		logger.Fatalf("whip server init: %v", err)
+	}
+
+	logger.Printf("WHIP-Ingress auf %s (cert=%s)", addr, certFile)
+	logger.Printf("TODO S2-04: WHEN token verified, accept WebRTC SDP and pump to TrackLocalStaticRTP")
+	logger.Printf("TODO S2-05: WHEP-Egress")
+	logger.Printf("TODO S2-06: RequestPublish-Call zu carvilon-cloud sidechannel.Server")
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	if err := srv.ListenAndServe(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatalf("whip server: %v", err)
+	}
 }
 
 // runEdge is the Season-1 edge-role entry point — the original main()
