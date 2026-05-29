@@ -1,0 +1,283 @@
+// Package whipclient implements a WHIP (RFC 9725) publisher client.
+//
+// It is designed to be embedded in carvilon-edge as the concrete
+// StreamPublisher implementation: StartPublish/StopPublish are
+// non-blocking, the actual WebRTC negotiation and publish run in
+// per-stream worker goroutines. The caller is the carvilon side-channel
+// read-loop, which must never block — hence the worker pattern.
+//
+// The client does not own the media source. The caller provides a
+// [TrackSourceFunc] in the [Config]; the client invokes it lazily when
+// StartPublish fires for a given streamID. On StopPublish or ICE
+// failure the client closes the PeerConnection, which detaches the
+// track and (cloud-side) triggers the ICE-state cleanup in the WHIP
+// server — there is deliberately no HTTP DELETE.
+package whipclient
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/pion/webrtc/v4"
+)
+
+// gatherTimeout bounds the wait for ICE candidate gathering before the
+// offer is POSTed. Push-side gathers host candidates near-instantly;
+// the timeout only guards a stuck stack.
+const gatherTimeout = 5 * time.Second
+
+// defaultHTTPTimeout is the WHIP POST timeout when the caller does not
+// supply its own HTTPClient.
+const defaultHTTPTimeout = 15 * time.Second
+
+// TrackSourceFunc returns the RTP track to publish for the given
+// streamID. It is invoked once per StartPublish in the worker
+// goroutine. The caller is responsible for cleaning up the underlying
+// source when the track is no longer referenced (the client closes the
+// PeerConnection on StopPublish or ICE failure, which detaches the
+// track).
+type TrackSourceFunc func(streamID string) (*webrtc.TrackLocalStaticRTP, error)
+
+// Config configures a [Client].
+type Config struct {
+	// TrackSource is required. nil -> New returns an error.
+	TrackSource TrackSourceFunc
+
+	// TLSConfig is used for the HTTPS connection to the WHIP server. If
+	// nil, the system root CA pool is used. For the CARVILON cloud
+	// (Mini-CA), the caller MUST provide a TLSConfig with RootCAs set to
+	// a CertPool containing ca.crt. Ignored if HTTPClient is set.
+	TLSConfig *tls.Config
+
+	// HTTPClient is used for the WHIP POST. If nil, a default client
+	// (Timeout: 15s, using TLSConfig) is constructed.
+	HTTPClient *http.Client
+
+	// Logger is required (no nil default; the caller chooses the sink).
+	Logger *log.Logger
+}
+
+// Client is a non-blocking WHIP publisher. Construct with [New].
+type Client struct {
+	cfg        Config
+	httpClient *http.Client
+
+	mu       sync.Mutex
+	sessions map[string]*session // streamID -> live session
+}
+
+type session struct {
+	pc       *webrtc.PeerConnection
+	location string             // Location header from 201 (for a future DELETE)
+	cancel   context.CancelFunc // signals the worker to stop
+	done     chan struct{}      // closed when the worker goroutine exits
+}
+
+// New validates the config and returns a ready Client.
+func New(cfg Config) (*Client, error) {
+	if cfg.TrackSource == nil {
+		return nil, errors.New("whipclient: TrackSource is required")
+	}
+	if cfg.Logger == nil {
+		return nil, errors.New("whipclient: Logger is required")
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		transport := &http.Transport{}
+		if cfg.TLSConfig != nil {
+			transport.TLSClientConfig = cfg.TLSConfig
+		}
+		httpClient = &http.Client{Timeout: defaultHTTPTimeout, Transport: transport}
+	}
+	return &Client{
+		cfg:        cfg,
+		httpClient: httpClient,
+		sessions:   make(map[string]*session),
+	}, nil
+}
+
+// StartPublish initiates a WHIP push for streamID. Returns immediately;
+// the actual publish runs in a worker goroutine. If a session for
+// streamID already exists, the call is logged and ignored (no
+// double-publish).
+func (c *Client) StartPublish(streamID, publishToken, cloudWhipURL string) {
+	c.mu.Lock()
+	if _, exists := c.sessions[streamID]; exists {
+		c.mu.Unlock()
+		c.cfg.Logger.Printf("whipclient: publish already active for streamID=%s (ignored)", streamID)
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	sess := &session{cancel: cancel, done: make(chan struct{})}
+	c.sessions[streamID] = sess
+	c.mu.Unlock()
+
+	go c.runPublish(ctx, streamID, publishToken, cloudWhipURL, sess)
+}
+
+// StopPublish terminates the worker for streamID. Returns immediately;
+// teardown runs in the worker goroutine. No-op if no session exists.
+func (c *Client) StopPublish(streamID string) {
+	c.mu.Lock()
+	sess, ok := c.sessions[streamID]
+	c.mu.Unlock()
+	if !ok {
+		c.cfg.Logger.Printf("whipclient: stop for unknown streamID=%s (no-op)", streamID)
+		return
+	}
+	sess.cancel() // worker observes ctx.Done(), tears down, removes itself
+}
+
+// Close terminates all active sessions and blocks until each worker
+// exits. Used at shutdown.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	live := make([]*session, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		live = append(live, s)
+	}
+	c.mu.Unlock()
+
+	for _, s := range live {
+		s.cancel()
+	}
+	for _, s := range live {
+		<-s.done
+	}
+	return nil
+}
+
+// runPublish is the per-stream worker. It performs the full WHIP
+// handshake and then parks on ctx.Done() until StopPublish/Close or an
+// ICE failure cancels it. On any exit path it closes the PeerConnection
+// (which cloud-side triggers ICE-based session cleanup), removes itself
+// from the session map, and signals done.
+func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWhipURL string, sess *session) {
+	defer close(sess.done)
+	defer c.removeSession(streamID)
+	defer sess.cancel() // release the context on every exit path
+
+	track, err := c.cfg.TrackSource(streamID)
+	if err != nil {
+		c.cfg.Logger.Printf("whipclient: track source failed for streamID=%s: %v", streamID, err)
+		return
+	}
+
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		c.cfg.Logger.Printf("whipclient: new peer connection for streamID=%s: %v", streamID, err)
+		return
+	}
+	defer func() { _ = pc.Close() }()
+	c.mu.Lock()
+	sess.pc = pc
+	c.mu.Unlock()
+
+	if _, err := pc.AddTrack(track); err != nil {
+		c.cfg.Logger.Printf("whipclient: add track for streamID=%s: %v", streamID, err)
+		return
+	}
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		c.cfg.Logger.Printf("whipclient: streamID=%s ICE state=%s", streamID, state)
+		switch state {
+		case webrtc.ICEConnectionStateFailed,
+			webrtc.ICEConnectionStateDisconnected,
+			webrtc.ICEConnectionStateClosed:
+			sess.cancel()
+		}
+	})
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		c.cfg.Logger.Printf("whipclient: create offer for streamID=%s: %v", streamID, err)
+		return
+	}
+	gather := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		c.cfg.Logger.Printf("whipclient: set local description for streamID=%s: %v", streamID, err)
+		return
+	}
+	select {
+	case <-gather:
+	case <-ctx.Done():
+		return
+	case <-time.After(gatherTimeout):
+		c.cfg.Logger.Printf("whipclient: ICE gathering timed out for streamID=%s", streamID)
+		return
+	}
+
+	answer, location, err := c.postOffer(ctx, streamID, publishToken, cloudWhipURL, pc.LocalDescription().SDP)
+	if err != nil {
+		c.cfg.Logger.Printf("whipclient: publish failed for streamID=%s: %v", streamID, err)
+		return
+	}
+	c.mu.Lock()
+	sess.location = location
+	c.mu.Unlock()
+
+	if err := pc.SetRemoteDescription(webrtc.SessionDescription{
+		Type: webrtc.SDPTypeAnswer,
+		SDP:  answer,
+	}); err != nil {
+		c.cfg.Logger.Printf("whipclient: set remote description for streamID=%s: %v", streamID, err)
+		return
+	}
+
+	c.cfg.Logger.Printf("whipclient: publish started: streamID=%s session=%s", streamID, sessionIDFromLocation(location))
+
+	// Park until cancelled (StopPublish / Close / ICE failure).
+	<-ctx.Done()
+}
+
+// postOffer performs the WHIP POST and returns the SDP answer + Location
+// header on a 201. The bearer token is set on the request but NEVER
+// logged (master memory rule).
+func (c *Client) postOffer(ctx context.Context, streamID, publishToken, cloudWhipURL, offerSDP string) (answer, location string, err error) {
+	reqURL := strings.TrimRight(cloudWhipURL, "/") + "/" + streamID
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, strings.NewReader(offerSDP))
+	if err != nil {
+		return "", "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+publishToken)
+	req.Header.Set("Content-Type", "application/sdp")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("post: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return "", "", fmt.Errorf("read answer: %w", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return "", "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return string(body), resp.Header.Get("Location"), nil
+}
+
+// removeSession drops streamID from the session map. Idempotent.
+func (c *Client) removeSession(streamID string) {
+	c.mu.Lock()
+	delete(c.sessions, streamID)
+	c.mu.Unlock()
+}
+
+// sessionIDFromLocation pulls the trailing path segment out of a WHIP
+// Location header (".../session/<id>"). Returns "" if there's no slash.
+func sessionIDFromLocation(location string) string {
+	if i := strings.LastIndex(location, "/"); i >= 0 {
+		return location[i+1:]
+	}
+	return ""
+}
