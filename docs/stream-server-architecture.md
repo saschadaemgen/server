@@ -48,7 +48,7 @@ internal/store      SQLite profile persistence (modernc.org/sqlite, no cgo)
 internal/stats      client tracking + /stream/stats (/proc CPU)
 internal/unifiapi   ListCameras via Protect integration API
 streambackend/      mirror of the carvilon seam (StreamBackend interface)
-cmd/spike           dev server entry (S2: -> Cobra root edge/cloud)
+cmd/streaming-server  dev server entry; -role=edge|cloud (S2-02, stdlib flag)
 ```
 
 Layer rule: the encoders know nothing about auth; the source layer knows

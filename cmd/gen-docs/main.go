@@ -285,8 +285,8 @@ func buildWireFormatDoc(wire, jpeg1, jpeg2 []byte) string {
 // Used by S6-08 documentation. The carvilon-admin parser compares
 // against THIS sample to build a compatible decoder.
 func writeProfilesListSample(path string) error {
-	// Mirrors cmd/spike/main.go::defaultMeasurementProfileSet — repeated
-	// here so this tool doesn't depend on the cmd/spike main package
+	// Mirrors cmd/streaming-server/main.go::defaultMeasurementProfileSet — repeated
+	// here so this tool doesn't depend on the cmd/streaming-server main package
 	// (which can't be imported). If the spike's defaults drift, regen.
 	const cam = "679573e101080b03e4000424"
 	defaults := []profile.Profile{

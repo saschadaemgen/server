@@ -53,7 +53,7 @@ const (
 // HTTP API rather than via a single global env var.
 //
 // Values match the unifi.Encryption type byte-for-byte; the source
-// factory in cmd/spike casts profile.Encryption → unifi.Encryption.
+// factory in cmd/streaming-server casts profile.Encryption → unifi.Encryption.
 //
 //   - "tls"  — TLS tunnel only, plain RTP inside (default; the
 //              go2rtc rtspx://-equivalent path that's been in use

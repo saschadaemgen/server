@@ -6,8 +6,8 @@ secrets.yaml
 secrets.yml
 
 # Built binaries
-/spike
-/spike.exe
+/streaming-server
+/streaming-server.exe
 /bin/
 /dist/
 /carvilon-stream-rpi

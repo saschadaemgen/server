@@ -124,8 +124,8 @@ type Options struct {
 	//
 	// THIS is the single control point for the wire-protection mode —
 	// the admin-side switch the master-chat will eventually build sets
-	// this field. Today: cmd/spike populates it from the
-	// UNIFI_ENCRYPTION env var; the source factory in cmd/spike/main.go
+	// this field. Today: cmd/streaming-server populates it from the
+	// UNIFI_ENCRYPTION env var; the source factory in cmd/streaming-server/main.go
 	// is the one place that reads the env. To move the switch to a
 	// per-profile setting later, expand profile.Profile to carry an
 	// Encryption field and have the factory read it from there. No

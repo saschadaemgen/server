@@ -90,8 +90,9 @@ RASPBERRY PI:
 ```
 streaming-server/
    cmd/
-      spike/            main entry (dev server). S2: to become Cobra
-                        root with edge/cloud subcommands.
+      streaming-server/ main entry (dev server). -role=edge|cloud
+                        (S2-02, stdlib flag): edge = Season-1 logic
+                        (runEdge), cloud = Season-2 scaffold (runCloud).
       genkey/           (if present) secrets key generator
    internal/
       h264/             own RFC-6184 depacketizer (UniFi sends mode-2
@@ -150,7 +151,7 @@ internal/mjpeg:   ffmpeg subprocess, byte-exact multipart/x-mixed-replace.
      -vf fps=N,scale=W:H              (even input sampling, S6-13 - fps BEFORE
                                        scale; never -r N at output)
 internal/h264esp: H.264-CBP transcode (/stream/h264), same fps-filter rule.
-internal/webrtc (in cmd/spike server): pion h264 passthrough, NO ffmpeg.
+internal/webrtc (in cmd/streaming-server): pion h264 passthrough, NO ffmpeg.
 ```
 
 ### 5.4 Profiles + stats
@@ -189,7 +190,7 @@ In a pure LAN, tls is sufficient; srtp matters for external/cloud access.
 BUILD (Windows desktop):
    cd C:\Projects\UniFi\streaming-server
    $env:GOOS="linux"; $env:GOARCH="arm64"
-   go build -o carvilon-stream-rpi ./cmd/spike
+   go build -o carvilon-stream-rpi ./cmd/streaming-server
    $env:GOOS=""; $env:GOARCH=""        (reset afterwards)
 
 DEPLOY (RPi):

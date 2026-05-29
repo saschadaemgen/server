@@ -165,7 +165,7 @@ type ServerOptions struct {
 	// what's actually running, not what was stored.
 	//
 	// Empty value (default) is treated as [profile.EncryptionTLS].
-	// cmd/spike feeds this from the UNIFI_ENCRYPTION env var.
+	// cmd/streaming-server feeds this from the UNIFI_ENCRYPTION env var.
 	Encryption profile.Encryption
 }
 

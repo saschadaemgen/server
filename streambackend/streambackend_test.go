@@ -476,8 +476,8 @@ func TestProfile_WireTags(t *testing.T) {
 
 // TestNaht_EmptyStartHasZeroProfiles is the explicit S6-03 guard: the
 // streambackend.Backend MUST NOT fabricate any "default" profiles on
-// its own. The default-set introduced in cmd/spike for the
-// measurement workflow lives exclusively in cmd/spike; the carvilon-
+// its own. The default-set introduced in cmd/streaming-server for the
+// measurement workflow lives exclusively in cmd/streaming-server; the carvilon-
 // side production deployment that links through streambackend starts
 // with an empty registry and lets the admin populate it via CRUD.
 //

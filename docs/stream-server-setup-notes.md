@@ -20,11 +20,11 @@ server-side setup-notes.md (master chat) and esp-setup-notes.md (ESP chat).
 ```powershell
 cd C:\Projects\UniFi\streaming-server
 $env:GOOS="linux"; $env:GOARCH="arm64"
-go build -o carvilon-stream-rpi ./cmd/spike
+go build -o carvilon-stream-rpi ./cmd/streaming-server
 $env:GOOS=""; $env:GOARCH=""        # IMPORTANT: reset afterwards
 ```
 
-Local test build (Windows, no cross-compile): `go build ./cmd/spike` and run
+Local test build (Windows, no cross-compile): `go build ./cmd/streaming-server` and run
 locally - note the camera is on the LAN, so the desktop must reach the UDM.
 
 ---

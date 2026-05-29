@@ -73,7 +73,7 @@ cp .env.example .env
 3. Keins von beidem → S6-Mess-Set auf der eingebauten Intercom-Default-CameraID (**S6-03**, nur im Spike).
 
 Hat die DB schon Profile, gewinnt sie unabhängig vom Env immer (S5-Regel).
-Das eingebaute Default-Set existiert **nur in `cmd/spike`** — die `streambackend`-Naht
+Das eingebaute Default-Set existiert **nur in `cmd/streaming-server`** — die `streambackend`-Naht
 (Produktiv-Pfad ueber carvilon-server) startet leer; der carvilon-Admin füllt sie via CRUD.
 
 Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
@@ -83,7 +83,7 @@ Ports `9080` (carvilon-server) und `1984` (go2rtc) werden bewusst gemieden.
 ```powershell
 $env:UNIFI_NVR_HOST = '192.168.1.1'
 $env:UNIFI_API_KEY  = '<protect-integration-key>'
-go run .\cmd\spike
+go run .\cmd\streaming-server
 ```
 
 ## Starten (Linux / macOS)
@@ -91,13 +91,13 @@ go run .\cmd\spike
 ```sh
 export UNIFI_NVR_HOST='192.168.1.1'
 export UNIFI_API_KEY='<protect-integration-key>'
-go run ./cmd/spike
+go run ./cmd/streaming-server
 ```
 
 Zero-Config-Start (S6-03): ohne `UNIFI_CAMERA_ID` und ohne
 `CARVILON_PROFILES_JSON` seedet der Spike automatisch das eingebaute
 S6-Mess-Default-Set (5 Profile auf der hard-coded Intercom-CameraID).
-Genau dafür gedacht: `git pull && go run .\cmd\spike` und sofort
+Genau dafür gedacht: `git pull && go run .\cmd\streaming-server` und sofort
 durchmessen. Die DB wird zur Wahrheit, ab dem zweiten Start ist das
 Default-Set egal — Tuning ueber `PUT /api/profiles/{name}`.
 
@@ -212,7 +212,7 @@ Telemetrie:
 ## Cross-Compile für Raspberry Pi (arm64)
 
 ```sh
-GOOS=linux GOARCH=arm64 go build -o bin/spike ./cmd/spike
+GOOS=linux GOARCH=arm64 go build -o bin/streaming-server ./cmd/streaming-server
 ```
 
 ## Architektur
@@ -278,7 +278,7 @@ Backpressure endet beim einzelnen Subscriber-Buffer (Default 30 AUs,
 
 ```
 streaming-server/
-├── cmd/spike/         (Binary; baut Profile + Source-Factory + Stats)
+├── cmd/streaming-server/ (Binary; -role=edge|cloud; baut Profile + Source-Factory + Stats)
 ├── server.go          (HTTP /offer + /api/stream.mjpeg + /api/profiles + /stream/stats)
 ├── streambackend/     (carvilon-Naht: Backend, Profile/Camera-Wireshape, INTEGRATION.md)
 ├── web/index.html     (Testseite mit Profil-Dropdown)

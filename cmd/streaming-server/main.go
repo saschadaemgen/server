@@ -1,10 +1,16 @@
-// Command spike is the streaming-server feasibility binary.
+// Command streaming-server is the CARVILON video stream server.
 //
-// It hosts a small WebRTC signaling endpoint and a go2rtc-compatible
-// MJPEG endpoint, both /offer and /api/stream.mjpeg keyed by ?src=
-// profile name. Profiles bind a camera, a Protect quality tier, and a
-// usage (browser / esp). Cameras are pulled only when watched
-// (S4: 0 viewers = 0 RTSP pull, 0 ffmpeg, 0 decode).
+// It runs in one of two roles selected by the -role flag (stdlib
+// flag, no Cobra — see runEdge / runCloud):
+//
+//   - edge (default): the Season-1 logic. Hosts a small WebRTC
+//     signaling endpoint and a go2rtc-compatible MJPEG endpoint, both
+//     /offer and /api/stream.mjpeg keyed by ?src= profile name.
+//     Profiles bind a camera, a Protect quality tier, and a usage
+//     (browser / esp). Cameras are pulled only when watched (S4: 0
+//     viewers = 0 RTSP pull, 0 ffmpeg, 0 decode).
+//   - cloud: the Season-2 cloud-layer scaffold (WHIP ingress, fan-out,
+//     WHEP egress). Stub today; real logic lands in S2-03 ff.
 //
 // As of S5, profiles persist in a SQLite database. As of S6-03, the
 // spike comes with a built-in measurement-set default so the
@@ -28,7 +34,7 @@
 //
 //	$env:UNIFI_NVR_HOST = '192.168.1.1'
 //	$env:UNIFI_API_KEY  = '<protect-integration-key>'
-//	go run .\cmd\spike
+//	go run .\cmd\streaming-server
 //
 // — seeds five profiles on the intercom: intercom_web (browser/WebRTC),
 // mjpeg_hq, mjpeg_bal, mjpeg_fast, h264_cbp.
@@ -36,7 +42,7 @@
 // Single-camera quick-start (same set on a different camera):
 //
 //	$env:UNIFI_CAMERA_ID = '<other-camera-id>'
-//	go run .\cmd\spike
+//	go run .\cmd\streaming-server
 //
 // Multi-camera quick-start (CARVILON_PROFILES_JSON overrides everything):
 //
@@ -45,9 +51,9 @@
 //	  {"name":"intercom_mjpeg",  "camera_id":"abc","quality":"high","usage":"esp","codec":"mjpeg","width":800,"height":1280,"fps":12,"encode_quality":6},
 //	  {"name":"ai360_browser",   "camera_id":"def","quality":"high","usage":"browser","codec":"h264_passthrough","description":"AI 360"}
 //	]'
-//	go run .\cmd\spike
+//	go run .\cmd\streaming-server
 //
-// The built-in default-set lives in cmd/spike only — the carvilon-side
+// The built-in default-set lives in cmd/streaming-server only — the carvilon-side
 // production deployment (which links through streambackend.Backend)
 // starts with an empty registry and lets the admin fill it via CRUD.
 package main
@@ -56,6 +62,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -105,6 +112,42 @@ const (
 )
 
 func main() {
+	// S2-02: one binary, two roles via stdlib flag (no Cobra —
+	// dependency doctrine + consistency with carvilon's S17-01 -role
+	// choice). Default edge = the unchanged Season-1 path.
+	var role string
+	flag.StringVar(&role, "role", "edge", "Server-Rolle: edge|cloud")
+	flag.Parse()
+
+	switch role {
+	case "edge":
+		runEdge()
+	case "cloud":
+		runCloud()
+	default:
+		log.Fatalf("ungueltige -role: %q (erwarte edge|cloud)", role)
+	}
+}
+
+// runCloud is the Season-2 cloud-role entry point. Stub for now: log
+// the planned build-out and park, so a manual `-role=cloud` start
+// stays alive (a stub that returned immediately would look like a
+// crash — no process, no output). Real ingress/fan-out/egress land in
+// S2-03..S2-06.
+func runCloud() {
+	log.Println("[cloud] streaming-server cloud role - not yet implemented")
+	log.Println("[cloud] TODO S2-03: WHIP-Ingress auf :8444/whip/{streamID}")
+	log.Println("[cloud] TODO S2-04: Fan-Out (pion TrackLocalStaticRTP)")
+	log.Println("[cloud] TODO S2-05: WHEP-Egress")
+	log.Println("[cloud] TODO S2-06: RequestPublish-Call zu carvilon-cloud sidechannel.Server")
+	select {} // park, damit der Prozess nicht sofort terminiert
+}
+
+// runEdge is the Season-1 edge-role entry point — the original main()
+// body, verbatim. It is the default when -role is omitted; behaviour
+// is identical to the pre-S2 binary (open DB, seed, build registry +
+// sources, serve HTTP on :8555).
+func runEdge() {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 
 	nvrHost := os.Getenv(envNVRHost)
@@ -304,7 +347,7 @@ func seedSource() string {
 //     was getting in the way. NOT used by the carvilon-side production
 //     deployment: the streambackend Naht stays empty-start (the
 //     carvilon admin fills the DB via CRUD); the default-set lives
-//     exclusively in cmd/spike.
+//     exclusively in cmd/streaming-server.
 //
 // The streambackend never imports this file or the function — the
 // boundary is enforced by package structure, not by a flag.

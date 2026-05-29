@@ -137,7 +137,7 @@ type Options struct {
 	// includes Encryption since S6-12) and when surfacing the
 	// per-profile encryption field over the wire.
 	//
-	// Empty → treated as [profile.EncryptionTLS]. cmd/spike feeds
+	// Empty → treated as [profile.EncryptionTLS]. cmd/streaming-server feeds
 	// this from the UNIFI_ENCRYPTION env var, same source as the
 	// stream.Server's value.
 	Encryption profile.Encryption
