@@ -1,0 +1,17 @@
+[Unit]
+Description=carvilon edge (RPi viewer stack + side-channel client)
+Documentation=https://github.com/saschadaemgen/carvilon
+
+[Service]
+Type=simple
+# %h is the running user's home (e.g. /home/sash710). Using the
+# specifier avoids hardcoding the username in a versioned template.
+WorkingDirectory=%h/carvilon-server
+EnvironmentFile=%h/.config/systemd/user/carvilon-edge.env
+ExecStart=%h/carvilon-server/bin/carvilon-server-linux-arm64 -role=edge
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

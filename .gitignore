@@ -25,3 +25,7 @@ Thumbs.db
 # Lokale Grunddokumentation, NIE ins Repo (echte Anlagen-Daten)
 CLAUDE.md
 docs/wire-format.md
+
+# systemd EnvironmentFiles with real secrets (the *.env.example
+# templates are committed; the filled-in *.env are not).
+deploy/systemd/*.env

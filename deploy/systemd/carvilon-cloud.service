@@ -1,0 +1,19 @@
+[Unit]
+Description=carvilon cloud (VPS side-channel server)
+Documentation=https://github.com/saschadaemgen/carvilon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/carvilon
+EnvironmentFile=/etc/systemd/system/carvilon-cloud.env
+ExecStart=/root/carvilon/carvilon-server -role=cloud
+Restart=on-failure
+RestartSec=5s
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
