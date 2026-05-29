@@ -244,3 +244,52 @@ func TestSidechannelClientConfigured(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_PublishTokenKey_RequiredWithSidechannel(t *testing.T) {
+	validKey := strings.Repeat("ab", 32) // 64 hex chars = 32 bytes
+	base := func() Config {
+		return Config{ListenAddr: ":8080", DBPath: defaultDBPath, DevMode: true}
+	}
+
+	// No side-channel dial URL: the key is optional (pure-LAN edge).
+	if err := base().Validate(); err != nil {
+		t.Errorf("Validate (no dial url, no key) = %v, want nil", err)
+	}
+
+	// Dial URL set but no key: error.
+	c := base()
+	c.SidechannelDialURL = "wss://x:8443/sidechannel"
+	if err := c.Validate(); err == nil {
+		t.Error("Validate (dial url, no key) = nil, want error")
+	}
+
+	// Dial URL set, non-hex key: error.
+	c.PublishTokenHMACKey = "nothex!!"
+	if err := c.Validate(); err == nil {
+		t.Error("Validate (dial url, non-hex key) = nil, want error")
+	}
+
+	// Dial URL set, wrong length (16 bytes): error.
+	c.PublishTokenHMACKey = strings.Repeat("ab", 16)
+	if err := c.Validate(); err == nil {
+		t.Error("Validate (dial url, 16-byte key) = nil, want error")
+	}
+
+	// Dial URL set, valid 32-byte hex: ok.
+	c.PublishTokenHMACKey = validKey
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate (dial url, valid key) = %v, want nil", err)
+	}
+}
+
+func TestDecodePublishTokenHMACKey(t *testing.T) {
+	if _, err := (Config{PublishTokenHMACKey: strings.Repeat("ab", 32)}).DecodePublishTokenHMACKey(); err != nil {
+		t.Errorf("valid 32-byte hex rejected: %v", err)
+	}
+	if _, err := (Config{PublishTokenHMACKey: "zz"}).DecodePublishTokenHMACKey(); err == nil {
+		t.Error("non-hex key accepted")
+	}
+	if _, err := (Config{PublishTokenHMACKey: strings.Repeat("ab", 16)}).DecodePublishTokenHMACKey(); err == nil {
+		t.Error("16-byte key accepted")
+	}
+}

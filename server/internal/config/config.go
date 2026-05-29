@@ -6,6 +6,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -95,6 +96,14 @@ type Config struct {
 	// Empty disables it. Interim until the stream-cloud layer triggers
 	// publishes directly.
 	SidechannelInternalAddr string
+
+	// PublishTokenHMACKey (hex, 32 bytes / 64 chars) is the symmetric
+	// key carvilon signs publish tokens with. It is its OWN env var,
+	// not derived from the master key, because the stream-cloud layer
+	// must hold the same key to verify - and the master key stays
+	// isolated on the RPi. Required on the edge once
+	// CARVILON_SIDECHANNEL_DIAL_URL is set (see Validate).
+	PublishTokenHMACKey string
 }
 
 const (
@@ -127,6 +136,7 @@ const (
 	envSidechannelClientKey    = "CARVILON_SIDECHANNEL_CLIENT_KEY"
 	envSidechannelCloudWhipURL = "CARVILON_SIDECHANNEL_CLOUD_WHIP_URL"
 	envSidechannelInternalAddr = "CARVILON_SIDECHANNEL_INTERNAL_ADDR"
+	envPublishTokenHMACKey     = "CARVILON_PUBLISH_TOKEN_HMAC_KEY"
 	defaultSidechannelListen   = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
@@ -179,6 +189,8 @@ func FromEnv() Config {
 
 		SidechannelCloudWhipURL: lookupEnv(envSidechannelCloudWhipURL),
 		SidechannelInternalAddr: lookupEnv(envSidechannelInternalAddr),
+
+		PublishTokenHMACKey: lookupEnv(envPublishTokenHMACKey),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -220,7 +232,34 @@ func (c Config) Validate() error {
 			return fmt.Errorf("config: KeyFile is required in TLS mode (set %s for plain HTTP)", envDevMode)
 		}
 	}
+	// Edge publish-token signing key: required once the side-channel is
+	// being dialed (DIAL_URL set), because the EdgePublisher then issues
+	// publish tokens. Optional otherwise (a pure-LAN edge needs none).
+	if c.SidechannelDialURL != "" {
+		if c.PublishTokenHMACKey == "" {
+			return fmt.Errorf("config: %s is required when %s is set (edge publish-token signing key)",
+				envPublishTokenHMACKey, envSidechannelDialURL)
+		}
+		if _, err := c.DecodePublishTokenHMACKey(); err != nil {
+			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
+		}
+	}
 	return nil
+}
+
+// DecodePublishTokenHMACKey hex-decodes the publish-token HMAC key and
+// checks it is exactly 32 bytes (64 hex chars). Its own env var (not a
+// master-key subkey) so the stream-cloud verifier can hold the same key
+// while the master key stays isolated on the RPi.
+func (c Config) DecodePublishTokenHMACKey() ([]byte, error) {
+	b, err := hex.DecodeString(c.PublishTokenHMACKey)
+	if err != nil {
+		return nil, fmt.Errorf("must be hex: %w", err)
+	}
+	if len(b) != 32 {
+		return nil, fmt.Errorf("must be 32 bytes (64 hex chars), got %d", len(b))
+	}
+	return b, nil
 }
 
 // ValidateCloud checks the fields the cloud role needs: the
