@@ -400,7 +400,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 			return err == nil
 		},
 		Issuer:       publishtoken.NewIssuer(hmacKey, 5*time.Minute),
-		Publisher:    streampublish.NewNoop(log),
+		Publisher:    streamPublisher(log),
 		CloudWhipURL: cfg.SidechannelCloudWhipURL,
 		Log:          log.With("component", "sidechannel-publish"),
 	}
@@ -429,6 +429,27 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		"url", cfg.SidechannelDialURL,
 		"cloud_whip_url", cfg.SidechannelCloudWhipURL,
 	)
+}
+
+// streamPublisher selects the edge-side video publisher handed to the
+// EdgePublisher. Today it is ALWAYS the no-op (logs, pushes nothing),
+// so runtime behaviour is unchanged. The signatures of the real client
+// already match streampublish.StreamPublisher, so the swap is contained
+// to this one function.
+//
+// TODO S17-05 / Stream-S2-04b: return the real WHIP client once the
+// carvilon.local/stream/whipclient package exists, e.g.
+//
+//	c, err := whipclient.New(whipclient.Config{ /* ... */ })
+//	if err != nil { log.Error(...); return streampublish.NewNoop(log) }
+//	return c
+//
+// The replace + require for carvilon.local/stream are already in
+// server/go.mod; only the import + this body change (and the real
+// import will require bumping the go directives to 1.26.1, since the
+// stream module is on go 1.26.1).
+func streamPublisher(log *slog.Logger) streampublish.StreamPublisher {
+	return streampublish.NewNoop(log)
 }
 
 // platformPepperBridge adaptiert *platformconfig.Service an das
