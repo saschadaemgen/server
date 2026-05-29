@@ -263,7 +263,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	startSidechannelClient(ctx, log, cfg, viewerMgr, secretsSvc)
+	startSidechannelClient(ctx, log, cfg, viewerMgr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -372,9 +372,20 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // misconfigured side-channel never blocks or fails the edge - it is
 // logged and skipped, and runtime failures only trigger reconnects
 // inside the client goroutine.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, secretsSvc *secrets.Service) {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager) {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
+		return
+	}
+
+	// Publish-token signing key from CARVILON_PUBLISH_TOKEN_HMAC_KEY
+	// (its own env, NOT a master-key subkey, so the stream-cloud layer
+	// can verify with the same key). Validate() already enforces this
+	// once DIAL_URL is set; stay defensive and skip the cloud link
+	// rather than crash if it is somehow invalid (additive rule).
+	hmacKey, err := cfg.DecodePublishTokenHMACKey()
+	if err != nil {
+		log.Error("publish-token hmac key invalid; cloud link disabled", "err", err)
 		return
 	}
 
@@ -388,7 +399,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 			_, err := viewerMgr.GetViewerInfo(ctx, streamID)
 			return err == nil
 		},
-		Issuer:       publishtoken.NewIssuer(secretsSvc.DeriveSubkey("sidechannel-publish-token"), 5*time.Minute),
+		Issuer:       publishtoken.NewIssuer(hmacKey, 5*time.Minute),
 		Publisher:    streampublish.NewNoop(log),
 		CloudWhipURL: cfg.SidechannelCloudWhipURL,
 		Log:          log.With("component", "sidechannel-publish"),

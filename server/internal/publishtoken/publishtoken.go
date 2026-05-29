@@ -39,9 +39,11 @@ type Issuer struct {
 	now func() time.Time // injectable clock; tests override
 }
 
-// NewIssuer builds an Issuer. key should be a dedicated subkey (for
-// example secrets.DeriveSubkey("sidechannel-publish-token")); ttl is
-// the token lifetime.
+// NewIssuer builds an Issuer. key is the 32-byte HMAC key; on the edge
+// it is the decoded CARVILON_PUBLISH_TOKEN_HMAC_KEY - the same key the
+// stream-cloud layer verifies with, kept separate from the master key
+// so the master key stays isolated on the RPi. ttl is the token
+// lifetime.
 func NewIssuer(key []byte, ttl time.Duration) *Issuer {
 	return &Issuer{key: key, ttl: ttl, now: time.Now}
 }
