@@ -96,6 +96,14 @@ stream chat. Remove that line to keep the hook silent.
   `carvilon-edge.env.example`). Setting exactly one is a config error;
   both empty leaves FCM disabled and the edge starts normally. The
   service-account JSON is a secret - keep it `0600` and out of the repo.
+- In-process stream server (commercial `carvilon_stream` build, edge
+  only): set `CARVILON_STREAM_NVR_HOST` / `CARVILON_STREAM_API_KEY` /
+  `CARVILON_STREAM_DB_PATH` / `CARVILON_STREAM_ADDR` (commented
+  placeholders in `carvilon-edge.env.example`); the base URL is reused
+  from `UNIFIX_STREAM_BACKEND_URL`. Incomplete config skips the
+  in-process server and the edge keeps running. `CARVILON_STREAM_API_KEY`
+  (the Protect X-API-KEY) is a secret - this is why the edge `.env` is
+  `0600`. The public build ignores all `CARVILON_STREAM_*`.
 - Both units restart on failure (`Restart=on-failure`, `RestartSec=5s`).
 - Hardening directives (ProtectSystem, NoNewPrivileges, ...) are
   intentionally left out for now to avoid disturbing the existing
