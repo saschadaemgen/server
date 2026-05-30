@@ -83,19 +83,24 @@ func (w *CarvilonStreamBackend) ListCameras(ctx context.Context) ([]Camera, erro
 	return out, nil
 }
 
+// Stats synthesises the public ProfileStats map from the private
+// backend's List result. S2-06 removed the separate Backend.Stats
+// method and moved the live consumer count into Profile.Consumers
+// (filled by List/Get from the hub state), so the only telemetry the
+// in-process backend exposes is Clients == Consumers. The richer
+// fields (AvgFPS / SourceFPS / AvgBitrateKbps) the HTTP /stream/stats
+// client reports are not available here and stay zero; the admin list
+// only renders the Clients/Consumers column.
 func (w *CarvilonStreamBackend) Stats(ctx context.Context) (map[string]ProfileStats, error) {
-	rows, err := w.b.Stats(ctx)
+	rows, err := w.b.List(ctx)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	out := make(map[string]ProfileStats, len(rows))
-	for name, s := range rows {
-		out[name] = ProfileStats{
-			Profile:        s.Profile,
-			Clients:        s.Clients,
-			AvgFPS:         s.AvgFPS,
-			SourceFPS:      s.SourceFPS,
-			AvgBitrateKbps: s.AvgBitrateKbps,
+	for _, p := range rows {
+		out[p.Name] = ProfileStats{
+			Profile: p.Name,
+			Clients: p.Consumers,
 		}
 	}
 	return out, nil
