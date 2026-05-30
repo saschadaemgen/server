@@ -119,6 +119,38 @@ type Config struct {
 	// FCMProjectID is the Firebase project id used in the FCM v1 send
 	// URL (projects/<id>/messages:send).
 	FCMProjectID string
+
+	// --- In-process stream server (Saison 17-08, carvilon_stream build) ---
+	//
+	// These feed stream.SetupEdgeInProcess in the carvilon_stream-tagged
+	// wiring. They are READ in every build (plain env), but only CONSUMED
+	// under the build tag; the public build ignores them. The typed
+	// Encryption conversion happens in the tagged wiring (the profile type
+	// is an internal stream package that the public build must not
+	// import), so it stays a plain string here.
+	//
+	// BaseURL is intentionally NOT a separate value: the in-process server
+	// reuses StreamBackendURL (CARVILON_STREAM_BACKEND_URL) as its MJPEG/
+	// Offer base, because that env already means "the stream-server base
+	// URL" and is already in the RPi env. StreamAddr is the listen address
+	// of that same server.
+
+	// StreamNVRHost is the UDM/Protect host (e.g. "192.168.1.1").
+	StreamNVRHost string
+	// StreamAPIKey is the Protect integration X-API-KEY. SECRET.
+	StreamAPIKey string
+	// StreamDBPath is the SQLite path for stream-profile persistence.
+	StreamDBPath string
+	// StreamEncryption is the camera-side wire mode ("tls"/"srtp"/"").
+	// Empty -> tls (SetupEdgeInProcess maps it).
+	StreamEncryption string
+	// StreamAddr is the local stream-server HTTP listen address
+	// (e.g. ":8555"). StreamBackendURL is the matching base URL.
+	StreamAddr string
+	// StreamFFmpegPath overrides the ffmpeg binary ("" -> "ffmpeg").
+	StreamFFmpegPath string
+	// StreamEnableMJPEG turns on the MJPEG / h264_cbp ffmpeg paths.
+	StreamEnableMJPEG bool
 }
 
 const (
@@ -154,6 +186,13 @@ const (
 	envPublishTokenHMACKey     = "CARVILON_PUBLISH_TOKEN_HMAC_KEY"
 	envFCMServiceAccountJSON   = "CARVILON_FCM_SERVICE_ACCOUNT_JSON"
 	envFCMProjectID            = "CARVILON_FCM_PROJECT_ID"
+	envStreamNVRHost           = "CARVILON_STREAM_NVR_HOST"
+	envStreamAPIKey            = "CARVILON_STREAM_API_KEY"
+	envStreamDBPath            = "CARVILON_STREAM_DB_PATH"
+	envStreamEncryption        = "CARVILON_STREAM_ENCRYPTION"
+	envStreamAddr              = "CARVILON_STREAM_ADDR"
+	envStreamFFmpegPath        = "CARVILON_STREAM_FFMPEG_PATH"
+	envStreamEnableMJPEG       = "CARVILON_STREAM_ENABLE_MJPEG"
 	defaultSidechannelListen   = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
@@ -211,6 +250,14 @@ func FromEnv() Config {
 
 		FCMServiceAccountJSON: lookupEnv(envFCMServiceAccountJSON),
 		FCMProjectID:          lookupEnv(envFCMProjectID),
+
+		StreamNVRHost:     lookupEnv(envStreamNVRHost),
+		StreamAPIKey:      lookupEnv(envStreamAPIKey),
+		StreamDBPath:      lookupEnv(envStreamDBPath),
+		StreamEncryption:  lookupEnv(envStreamEncryption),
+		StreamAddr:        lookupEnv(envStreamAddr),
+		StreamFFmpegPath:  lookupEnv(envStreamFFmpegPath),
+		StreamEnableMJPEG: parseBool(lookupEnv(envStreamEnableMJPEG)),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -279,6 +326,17 @@ func (c Config) Validate() error {
 // edge runs normally and the doorbell push leg skips.
 func (c Config) FCMEnabled() bool {
 	return c.FCMServiceAccountJSON != "" && c.FCMProjectID != ""
+}
+
+// StreamInProcessConfigured reports whether all required fields for the
+// in-process stream server are present (the BaseURL is reused from
+// StreamBackendURL). Only meaningful in the carvilon_stream build; the
+// public build never consumes it. The tagged wiring uses this to decide
+// whether to call stream.SetupEdgeInProcess: incomplete config logs and
+// skips (the edge keeps running, Grundregel), full config sets it up.
+func (c Config) StreamInProcessConfigured() bool {
+	return c.StreamNVRHost != "" && c.StreamAPIKey != "" &&
+		c.StreamDBPath != "" && c.StreamAddr != "" && c.StreamBackendURL != ""
 }
 
 // DecodePublishTokenHMACKey hex-decodes the publish-token HMAC key and

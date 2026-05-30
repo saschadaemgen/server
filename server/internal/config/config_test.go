@@ -322,6 +322,54 @@ func TestValidate_FCM_BothOrNeither(t *testing.T) {
 	}
 }
 
+func TestStreamInProcessConfigured(t *testing.T) {
+	full := Config{
+		StreamNVRHost:    "192.168.1.1",
+		StreamAPIKey:     "secret-key",
+		StreamDBPath:     "state/stream.db",
+		StreamAddr:       ":8555",
+		StreamBackendURL: "http://127.0.0.1:8555",
+	}
+	if !full.StreamInProcessConfigured() {
+		t.Error("full config: StreamInProcessConfigured() = false, want true")
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"no nvr host", func(c *Config) { c.StreamNVRHost = "" }},
+		{"no api key", func(c *Config) { c.StreamAPIKey = "" }},
+		{"no db path", func(c *Config) { c.StreamDBPath = "" }},
+		{"no addr", func(c *Config) { c.StreamAddr = "" }},
+		{"no base url", func(c *Config) { c.StreamBackendURL = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := full
+			tc.mut(&c)
+			if c.StreamInProcessConfigured() {
+				t.Errorf("%s: StreamInProcessConfigured() = true, want false", tc.name)
+			}
+		})
+	}
+}
+
+func TestFromEnv_StreamInProcessFields(t *testing.T) {
+	t.Setenv(envStreamNVRHost, "192.168.1.1")
+	t.Setenv(envStreamAPIKey, "sekret")
+	t.Setenv(envStreamDBPath, "/var/lib/stream.db")
+	t.Setenv(envStreamEncryption, "srtp")
+	t.Setenv(envStreamAddr, ":8555")
+	t.Setenv(envStreamFFmpegPath, "/usr/bin/ffmpeg")
+	t.Setenv(envStreamEnableMJPEG, "1")
+	cfg := FromEnv()
+	if cfg.StreamNVRHost != "192.168.1.1" || cfg.StreamAPIKey != "sekret" ||
+		cfg.StreamDBPath != "/var/lib/stream.db" || cfg.StreamEncryption != "srtp" ||
+		cfg.StreamAddr != ":8555" || cfg.StreamFFmpegPath != "/usr/bin/ffmpeg" ||
+		!cfg.StreamEnableMJPEG {
+		t.Errorf("stream in-process fields not read correctly: %+v", cfg)
+	}
+}
+
 func TestDecodePublishTokenHMACKey(t *testing.T) {
 	if _, err := (Config{PublishTokenHMACKey: strings.Repeat("ab", 32)}).DecodePublishTokenHMACKey(); err != nil {
 		t.Errorf("valid 32-byte hex rejected: %v", err)
