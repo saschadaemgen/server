@@ -908,3 +908,46 @@ func TestShutdown_StopsAllViewers(t *testing.T) {
 		}
 	}
 }
+
+func TestGetFCMToken(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	ctx := context.Background()
+	const mac = "0c:ea:14:dd:ee:ff"
+	if err := mgr.AddViewer(ctx, androidSpec(mac, 8300)); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+
+	// Fresh row: column is NULL -> empty string, no error.
+	got, err := mgr.GetFCMToken(ctx, mac)
+	if err != nil {
+		t.Fatalf("GetFCMToken (unset): %v", err)
+	}
+	if got != "" {
+		t.Errorf("GetFCMToken (unset) = %q, want empty", got)
+	}
+
+	// After SetFCMToken the same value comes back.
+	if err := mgr.SetFCMToken(ctx, mac, "fcm-token-xyz"); err != nil {
+		t.Fatalf("SetFCMToken: %v", err)
+	}
+	got, err = mgr.GetFCMToken(ctx, mac)
+	if err != nil {
+		t.Fatalf("GetFCMToken (set): %v", err)
+	}
+	if got != "fcm-token-xyz" {
+		t.Errorf("GetFCMToken (set) = %q, want fcm-token-xyz", got)
+	}
+
+	// Clearing returns empty again.
+	if err := mgr.SetFCMToken(ctx, mac, ""); err != nil {
+		t.Fatalf("SetFCMToken clear: %v", err)
+	}
+	if got, _ := mgr.GetFCMToken(ctx, mac); got != "" {
+		t.Errorf("GetFCMToken (cleared) = %q, want empty", got)
+	}
+
+	// Unknown MAC -> ErrViewerNotFound.
+	if _, err := mgr.GetFCMToken(ctx, "00:00:00:00:00:00"); !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("GetFCMToken (unknown mac) err = %v, want ErrViewerNotFound", err)
+	}
+}

@@ -1223,6 +1223,27 @@ func (m *Manager) SetFCMToken(ctx context.Context, mac, token string) error {
 	return m.setColumnExec(ctx, "set fcm token", mac, "fcm_token", nullable(strings.TrimSpace(token)))
 }
 
+// GetFCMToken reads the device's FCM token from its viewers row. A
+// NULL or empty column returns "" with no error - the caller treats
+// empty as "no phone registered for this viewer, skip the push". A
+// missing row returns ErrViewerNotFound. Read fresh from the DB on
+// every call; fcm_token is deliberately not mirrored in ViewerSpec
+// (see SetFCMToken), so the doorbell send path always sees the
+// current value.
+func (m *Manager) GetFCMToken(ctx context.Context, mac string) (string, error) {
+	var token string
+	err := m.db.QueryRowContext(ctx,
+		`SELECT COALESCE(fcm_token, '') FROM viewers WHERE mac = ?`, mac).
+		Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrViewerNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("viewermanager: get fcm token: %w", err)
+	}
+	return token, nil
+}
+
 // AutoScreensaverSecondsAllowed is the closed set of values the
 // inline-settings form may persist. 0 means "off" and is stored
 // as SQL NULL; the others are seconds.
