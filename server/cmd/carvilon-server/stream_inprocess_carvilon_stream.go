@@ -12,10 +12,18 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	stdlog "log"
 	"log/slog"
+	"os"
+
+	"github.com/pion/webrtc/v4"
 
 	"carvilon.local/stream"
+	"carvilon.local/stream/whipclient"
 
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/streampublish"
@@ -74,9 +82,71 @@ func init() {
 
 		wrapped := streams.NewCarvilonStreamBackend(backend)
 
-		// S17-08 D returns the WHIP cloud-push publisher here (built from
-		// srv.TrackForStream + viewerMgr). For now nil keeps the Noop
-		// publisher; the local MJPEG/Offer path is already live above.
-		return wrapped, nil, func() { _ = shutdown() }, nil
+		// WHIP cloud-push publisher. Best-effort: if the Mini-CA is
+		// missing/unreadable the publisher degrades to nil (Noop) and the
+		// local MJPEG/Offer path is unaffected. The combined shutdown
+		// closes the WHIP client first (terminating live pushes), then
+		// the stream stack.
+		cleanup := func() { _ = shutdown() }
+		var publisher streampublish.StreamPublisher
+		if client, perr := buildWHIPClient(ctx, log, cfg, srv, viewerMgr); perr != nil {
+			log.Error("whip publisher init failed; cloud push disabled (local stream unaffected)", "err", perr)
+		} else {
+			publisher = client
+			cleanup = func() { _ = client.Close(); _ = shutdown() }
+		}
+
+		return wrapped, publisher, cleanup, nil
 	}
+}
+
+// buildWHIPClient constructs the WHIP cloud-push client. The TrackSource
+// resolves a streamID (viewer MAC) to its stream profile and opens an
+// in-process TrackForStream track - the same shared camera pull the
+// local viewers use. The TLS config pins the cloud WHIP server against
+// the Mini-CA (the same ca.crt the side-channel client trusts).
+func buildWHIPClient(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg config.Config,
+	srv *stream.Server,
+	viewerMgr *viewermanager.Manager,
+) (*whipclient.Client, error) {
+	tlsCfg, err := whipTLSConfig(cfg.SidechannelCACert)
+	if err != nil {
+		return nil, err
+	}
+	trackSource := func(streamID string) (webrtc.TrackLocal, func(), error) {
+		info, err := viewerMgr.GetViewerInfo(ctx, streamID)
+		if err != nil {
+			return nil, nil, err
+		}
+		// TrackForStream rejects non-h264_passthrough profiles (e.g. an
+		// ESP MJPEG viewer) with an error; the whipclient worker logs it
+		// and tears down - no panic, the local flow is untouched.
+		return srv.TrackForStream(info.ResolveStreamProfile())
+	}
+	return whipclient.New(whipclient.Config{
+		TrackSource: trackSource,
+		TLSConfig:   tlsCfg,
+		Logger:      stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
+	})
+}
+
+// whipTLSConfig builds a tls.Config that trusts only the Mini-CA in
+// caPath (RootCAs). The cloud WHIP server presents the whip-server cert
+// signed by that CA; standard verification applies (no skip-verify).
+func whipTLSConfig(caPath string) (*tls.Config, error) {
+	if caPath == "" {
+		return nil, errors.New("whip: CARVILON_SIDECHANNEL_CA_CERT is required for the WHIP TLS connection")
+	}
+	pemBytes, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("whip: read ca cert: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("whip: ca cert %s has no usable certificates", caPath)
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
