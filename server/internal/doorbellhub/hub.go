@@ -31,6 +31,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/fcm"
 )
 
 // Source is the subset of viewermanager.Manager that the hub
@@ -47,6 +49,19 @@ import (
 type Source interface {
 	Events() <-chan mock.DoorbellEvent
 	Cancels() <-chan mock.DoorbellCancelEvent
+}
+
+// FCMTokenReader reads a device's FCM token by viewer MAC.
+// viewermanager.Manager satisfies it (GetFCMToken). Kept as an
+// interface so tests inject a fake without the full manager.
+type FCMTokenReader interface {
+	GetFCMToken(ctx context.Context, mac string) (string, error)
+}
+
+// FCMPushSender sends a doorbell push to one device token.
+// *fcm.Sender satisfies it.
+type FCMPushSender interface {
+	Send(ctx context.Context, token string, push fcm.DoorbellPush) error
 }
 
 // Subscriber buffers events destined for one HTTP/SSE
@@ -117,6 +132,9 @@ type Hub struct {
 	bus     *eventbus.Bus
 	calls   *doorbellcalls.Service
 
+	fcmTokens FCMTokenReader
+	fcmSender FCMPushSender
+
 	mu          sync.RWMutex
 	subscribers map[string]map[*Subscriber]struct{}
 
@@ -131,6 +149,12 @@ type Hub struct {
 type Options struct {
 	Bus   *eventbus.Bus
 	Calls *doorbellcalls.Service
+	// FCMTokens + FCMSender enable the additive doorbell push leg
+	// (Saison 17). Both nil keeps the prior behaviour; the leg is a
+	// no-op unless both are set. FCM is best-effort and decoupled - a
+	// failure never affects the local doorbell flow.
+	FCMTokens FCMTokenReader
+	FCMSender FCMPushSender
 }
 
 // New constructs a Hub with no optional extras. Pass
@@ -154,6 +178,8 @@ func NewWithOptions(src Source, history doorhistory.Store, log *slog.Logger, opt
 		history:     history,
 		bus:         opts.Bus,
 		calls:       opts.Calls,
+		fcmTokens:   opts.FCMTokens,
+		fcmSender:   opts.FCMSender,
 		subscribers: make(map[string]map[*Subscriber]struct{}),
 	}
 }
@@ -227,6 +253,10 @@ func (h *Hub) dispatchDoorbell(ctx context.Context, ev mock.DoorbellEvent) {
 	}
 	h.broadcast(ev.ViewerMAC, hubEvent)
 	h.publishToBus(ev.ViewerMAC, "doorbell.ring", hubEvent)
+	// Additive cloud push leg (Saison 17): notify the viewer's phone
+	// via FCM if one is registered. Best-effort and decoupled; never
+	// blocks or fails the local flow above.
+	h.publishFCM(ctx, ev, id)
 	// Every new doorbell row also raises the unread count.
 	// Broadcast a separate SSE frame so the screensaver badge
 	// updates without the browser doing a
@@ -310,6 +340,51 @@ func (h *Hub) publishToBus(mockMAC, eventType string, hubEvent Event) {
 		return
 	}
 	h.bus.Publish(mockMAC, eventbus.Event{Type: eventType, JSON: string(js)})
+}
+
+// publishFCM is the additive cloud push leg (Saison 17). It looks up
+// the viewer's FCM token and, if present, fires a doorbell push in a
+// detached goroutine so a slow FCM call never blocks dispatchDoorbell.
+// No-op unless both the token reader and the sender are wired. Every
+// failure is logged and swallowed - the local doorbell flow is
+// unaffected (Grundregel: the cloud is additive).
+func (h *Hub) publishFCM(ctx context.Context, ev mock.DoorbellEvent, eventID int64) {
+	if h.fcmSender == nil || h.fcmTokens == nil {
+		return
+	}
+	// Token read is a fast local PK lookup; keep it synchronous.
+	token, err := h.fcmTokens.GetFCMToken(ctx, ev.ViewerMAC)
+	if err != nil {
+		h.log.Warn("fcm: token lookup failed", "mac", ev.ViewerMAC, "err", err)
+		return
+	}
+	if token == "" {
+		// No phone registered for this viewer (web/esp without app).
+		h.log.Debug("fcm: no token for viewer, skipping push", "mac", ev.ViewerMAC)
+		return
+	}
+	ts := ev.CreateTimeUnix
+	if ts == 0 {
+		ts = ev.ReceivedAt.Unix()
+	}
+	push := fcm.DoorbellPush{
+		StreamID:    ev.ViewerMAC,
+		DeviceName:  ev.DeviceName,
+		RoomID:      ev.RoomID,
+		EventID:     strconv.FormatInt(eventID, 10),
+		CancelToken: ev.CancelToken,
+		TS:          strconv.FormatInt(ts, 10),
+	}
+	sender := h.fcmSender
+	go func() {
+		// Detached, bounded context: the network call must not outlive
+		// a reasonable window nor block the dispatch path.
+		sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := sender.Send(sendCtx, token, push); err != nil {
+			h.log.Warn("fcm: doorbell push failed", "mac", ev.ViewerMAC, "err", err)
+		}
+	}()
 }
 
 // persistStart writes the doorbell_start row and returns the new

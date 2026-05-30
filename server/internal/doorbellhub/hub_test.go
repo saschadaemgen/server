@@ -17,6 +17,7 @@ import (
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/fcm"
 )
 
 var errBoom = errors.New("history boom")
@@ -690,5 +691,126 @@ func TestHub_StartsAndEndsCallLifecycle(t *testing.T) {
 	}
 	if c.EndedAt == nil {
 		t.Error("EndedAt is nil after cancel")
+	}
+}
+
+// ---------- FCM doorbell push leg (Saison 17) ----------
+
+type fakeFCMTokens struct {
+	token string
+	err   error
+}
+
+func (f fakeFCMTokens) GetFCMToken(_ context.Context, _ string) (string, error) {
+	return f.token, f.err
+}
+
+type recordingFCMSender struct {
+	mu     sync.Mutex
+	calls  int
+	token  string
+	push   fcm.DoorbellPush
+	retErr error
+}
+
+func (r *recordingFCMSender) Send(_ context.Context, token string, push fcm.DoorbellPush) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.token = token
+	r.push = push
+	return r.retErr
+}
+
+func (r *recordingFCMSender) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func (r *recordingFCMSender) snapshot() (string, fcm.DoorbellPush) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.token, r.push
+}
+
+func TestDispatchDoorbell_FCMLeg_TokenPresentSends(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: "phone-token-1"},
+		FCMSender: sender,
+	})
+
+	h.dispatchDoorbell(context.Background(), mock.DoorbellEvent{
+		ViewerMAC:      "0c:ea:14:00:00:01",
+		DeviceName:     "Hauseingang",
+		RoomID:         "WR-room-9",
+		CancelToken:    "cancel-9",
+		CreateTimeUnix: 1747000000,
+		ReceivedAt:     time.Unix(1747000005, 0),
+	})
+
+	// Send runs in a detached goroutine; wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sender.callCount() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sender.callCount() != 1 {
+		t.Fatalf("FCM Send call count = %d, want 1", sender.callCount())
+	}
+	token, push := sender.snapshot()
+	if token != "phone-token-1" {
+		t.Errorf("Send token = %q, want phone-token-1", token)
+	}
+	if push.StreamID != "0c:ea:14:00:00:01" || push.DeviceName != "Hauseingang" ||
+		push.RoomID != "WR-room-9" || push.CancelToken != "cancel-9" || push.TS != "1747000000" {
+		t.Errorf("push payload = %+v", push)
+	}
+}
+
+func TestDispatchDoorbell_FCMLeg_NoTokenSkips(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: ""}, // no phone registered
+		FCMSender: sender,
+	})
+	h.dispatchDoorbell(context.Background(), mock.DoorbellEvent{ViewerMAC: "0c:ea:14:00:00:02"})
+
+	time.Sleep(100 * time.Millisecond)
+	if got := sender.callCount(); got != 0 {
+		t.Errorf("FCM Send call count = %d, want 0 (empty token)", got)
+	}
+}
+
+// TestDispatchDoorbell_FCMLeg_SendErrorDoesNotBreakDispatch proves the
+// Grundregel: even when the FCM token reader errors AND the sender
+// would error, dispatchDoorbell still drives the local legs (SSE
+// broadcast to the subscriber) to completion.
+func TestDispatchDoorbell_FCMLeg_SendErrorDoesNotBreakDispatch(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{retErr: errors.New("fcm down")}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: "phone-token-2"},
+		FCMSender: sender,
+	})
+	sub, cleanup := h.Subscribe("0c:ea:14:00:00:03")
+	defer cleanup()
+
+	h.dispatchDoorbell(context.Background(), mock.DoorbellEvent{
+		ViewerMAC:   "0c:ea:14:00:00:03",
+		CancelToken: "c3",
+		ReceivedAt:  time.Unix(1747000010, 0),
+	})
+
+	// The local SSE leg must have fired regardless of FCM.
+	select {
+	case ev := <-sub.Events:
+		if ev.Type != TypeDoorbellStart {
+			t.Errorf("first event type = %q, want %q", ev.Type, TypeDoorbellStart)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("local SSE broadcast did not fire (FCM error broke dispatch?)")
 	}
 }

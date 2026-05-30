@@ -28,6 +28,7 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/fcm"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
 	"carvilon.local/server/internal/viewermanager"
@@ -139,9 +140,19 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// fuer Multi-Viewer-Annehmen.
 	eventBus := eventbus.New()
 	callsSvc := doorbellcalls.New(database.DB)
+
+	// Saison 17: additive FCM doorbell-push leg (edge role). The RPi
+	// calls Google directly; this is NOT routed through the cloud /
+	// side-channel. Built only when configured; a build failure
+	// disables the leg without failing the edge (Grundregel: the
+	// cloud is additive, the local doorbell flow is unaffected).
+	fcmSender := buildFCMSender(ctx, log, cfg)
+
 	hub := doorbellhub.NewWithOptions(viewerMgr, historyStore, log, doorbellhub.Options{
-		Bus:   eventBus,
-		Calls: callsSvc,
+		Bus:       eventBus,
+		Calls:     callsSvc,
+		FCMSender: fcmSender,
+		FCMTokens: viewerMgr,
 	})
 	go func() {
 		if err := hub.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -450,6 +461,31 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 // stream module is on go 1.26.1).
 func streamPublisher(log *slog.Logger) streampublish.StreamPublisher {
 	return streampublish.NewNoop(log)
+}
+
+// buildFCMSender constructs the edge FCM doorbell-push sender, or
+// returns nil (disabled) when FCM is not configured. A build error is
+// logged and also yields nil: FCM stays off but the edge runs normally
+// (Grundregel: the cloud is additive). The return type is the hub's
+// interface so a nil result is a true nil interface the hub nil-checks
+// - never a typed-nil.
+func buildFCMSender(ctx context.Context, log *slog.Logger, cfg config.Config) doorbellhub.FCMPushSender {
+	if !cfg.FCMEnabled() {
+		log.Info("fcm doorbell push disabled (set CARVILON_FCM_SERVICE_ACCOUNT_JSON + CARVILON_FCM_PROJECT_ID to enable)")
+		return nil
+	}
+	sender, err := fcm.NewSender(ctx, cfg.FCMServiceAccountJSON, cfg.FCMProjectID)
+	if err != nil {
+		log.Error("fcm sender init failed; doorbell push disabled", "err", err)
+		return nil
+	}
+	if sender == nil {
+		// Defensive: FCMEnabled() guarantees a non-empty path, so
+		// NewSender does not return the disabled (nil,nil) case here.
+		return nil
+	}
+	log.Info("fcm doorbell push configured", "project_id", cfg.FCMProjectID)
+	return sender
 }
 
 // platformPepperBridge adaptiert *platformconfig.Service an das
