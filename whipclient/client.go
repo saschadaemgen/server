@@ -38,13 +38,20 @@ const gatherTimeout = 5 * time.Second
 // supply its own HTTPClient.
 const defaultHTTPTimeout = 15 * time.Second
 
-// TrackSourceFunc returns the RTP track to publish for the given
-// streamID. It is invoked once per StartPublish in the worker
-// goroutine. The caller is responsible for cleaning up the underlying
-// source when the track is no longer referenced (the client closes the
-// PeerConnection on StopPublish or ICE failure, which detaches the
-// track).
-type TrackSourceFunc func(streamID string) (*webrtc.TrackLocalStaticRTP, error)
+// TrackSourceFunc returns the track to publish for the given streamID,
+// plus a stop function that releases the underlying source. It is
+// invoked once per StartPublish in the worker goroutine.
+//
+// S2-06: the track is returned as the [webrtc.TrackLocal] interface
+// (not a concrete *TrackLocalStaticRTP), so an in-process source such
+// as [stream.Server.TrackForStream] — which yields a
+// TrackLocalStaticSample — can satisfy it directly. The stop function
+// is called by the worker on teardown (StopPublish / ICE failure /
+// Close); for the TrackForStream source that unsubscribes from the hub
+// and releases the shared upstream camera pull. It is the
+// bandwidth-critical hook: without it the pull would outlive the
+// publish. stop may be nil (the worker guards it).
+type TrackSourceFunc func(streamID string) (track webrtc.TrackLocal, stop func(), err error)
 
 // Config configures a [Client].
 type Config struct {
@@ -165,10 +172,17 @@ func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWh
 	defer c.removeSession(streamID)
 	defer sess.cancel() // release the context on every exit path
 
-	track, err := c.cfg.TrackSource(streamID)
+	track, stopTrack, err := c.cfg.TrackSource(streamID)
 	if err != nil {
 		c.cfg.Logger.Printf("whipclient: track source failed for streamID=%s: %v", streamID, err)
 		return
+	}
+	// S2-06: release the source on every exit path. Registered before
+	// the PeerConnection defer so (LIFO) pc.Close runs first (detaching
+	// the track), then stopTrack tears the source down — releasing the
+	// shared upstream pull. nil-safe per the TrackSourceFunc contract.
+	if stopTrack != nil {
+		defer stopTrack()
 	}
 
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})

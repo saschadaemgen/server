@@ -95,8 +95,22 @@ type ServerOptions struct {
 	// SourceFactory builds a fresh, un-Started [source.VideoSource] for
 	// a given (CameraID, Quality) on demand. Invoked lazily by the
 	// source registry: nothing happens until a viewer arrives for that
-	// key.
+	// key. Required UNLESS Sources is supplied (the registry already
+	// embeds a factory in that case).
 	SourceFactory sourcereg.Factory
+
+	// Sources (optional, S2-06) is a pre-built shared source registry.
+	// When non-nil it is used verbatim and SourceFactory is ignored;
+	// when nil, NewServer builds its own registry from SourceFactory
+	// (the standalone cmd/streaming-server path, unchanged).
+	//
+	// Passing a shared registry is what lets a *Server (TrackForStream /
+	// the local WebRTC+MJPEG path) and a [streambackend.Backend] feed
+	// off ONE camera pull instead of two — see [SetupEdgeInProcess].
+	// The owner of the shared registry is responsible for closing it;
+	// [sourcereg.Registry.Close] is idempotent, so the server's own
+	// shutdown path closing it again is harmless.
+	Sources *sourcereg.Registry
 
 	// Addr is the HTTP listen address, e.g. ":8555". Avoid 9080
 	// (carvilon-server) and 1984 (go2rtc).
@@ -185,8 +199,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Profiles == nil {
 		return nil, errors.New("stream: Profiles registry is required")
 	}
-	if opts.SourceFactory == nil {
-		return nil, errors.New("stream: SourceFactory is required")
+	// S2-06: either a ready Sources registry or a factory to build one.
+	if opts.Sources == nil && opts.SourceFactory == nil {
+		return nil, errors.New("stream: SourceFactory or Sources is required")
 	}
 	if opts.Addr == "" {
 		return nil, errors.New("stream: Addr is required")
@@ -201,7 +216,12 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
-	srcReg := sourcereg.New(opts.SourceFactory, opts.Logger)
+	// S2-06: reuse a shared registry if given (so Server + Backend share
+	// one camera pull), else build our own from the factory.
+	srcReg := opts.Sources
+	if srcReg == nil {
+		srcReg = sourcereg.New(opts.SourceFactory, opts.Logger)
+	}
 
 	// S6-14: canonicalise the global encryption mode once at construction.
 	// Empty → "tls"; anything else is taken verbatim (Validate happens

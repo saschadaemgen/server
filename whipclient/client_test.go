@@ -50,7 +50,7 @@ func newTestServer(t *testing.T) *testServer {
 }
 
 // url is the base WHIP URL; the client appends "/" + streamID.
-func (ts *testServer) url() string         { return ts.srv.URL + "/whip" }
+func (ts *testServer) url() string          { return ts.srv.URL + "/whip" }
 func (ts *testServer) client() *http.Client { return ts.srv.Client() }
 
 func (ts *testServer) handle(w http.ResponseWriter, r *http.Request) {
@@ -118,11 +118,12 @@ func (s *safeBuf) String() string {
 	return s.b.String()
 }
 
-func dummyTrackSource(streamID string) (*webrtc.TrackLocalStaticRTP, error) {
-	return webrtc.NewTrackLocalStaticRTP(
+func dummyTrackSource(streamID string) (webrtc.TrackLocal, func(), error) {
+	tr, err := webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
 		"video", streamID,
 	)
+	return tr, func() {}, err
 }
 
 // signToken mirrors the carvilon-edge token issuer (HMAC-SHA256 over the
@@ -239,8 +240,8 @@ func TestStartPublish_DoublePublish(t *testing.T) {
 
 func TestStartPublish_TrackSourceFails(t *testing.T) {
 	ts := newTestServer(t)
-	failSrc := func(string) (*webrtc.TrackLocalStaticRTP, error) {
-		return nil, errors.New("source boom")
+	failSrc := func(string) (webrtc.TrackLocal, func(), error) {
+		return nil, nil, errors.New("source boom")
 	}
 	c := newClient(t, ts, failSrc, nil)
 	const sid = "test-mac"
@@ -269,6 +270,27 @@ func TestStopPublish_Unknown(t *testing.T) {
 	c := newClient(t, ts, dummyTrackSource, nil)
 	// Must not panic; pure no-op.
 	c.StopPublish("never-started")
+}
+
+// TestStopPublish_CallsTrackStop is the S2-06 behaviour guarantee: the
+// worker invokes the TrackSource's stop function on teardown, so the
+// underlying source (and its shared upstream pull) is released.
+func TestStopPublish_CallsTrackStop(t *testing.T) {
+	ts := newTestServer(t)
+	var stopped atomic.Bool
+	src := func(streamID string) (webrtc.TrackLocal, func(), error) {
+		tr, err := webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", streamID)
+		return tr, func() { stopped.Store(true) }, err
+	}
+	c := newClient(t, ts, src, nil)
+	const sid = "test-mac"
+
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url())
+	eventually(t, 2*time.Second, func() bool { return sessionPresent(c, sid) }, "session not created")
+
+	c.StopPublish(sid)
+	eventually(t, 3*time.Second, stopped.Load, "track stop function was not called on teardown")
 }
 
 func TestClose_TerminatesAllSessions(t *testing.T) {
