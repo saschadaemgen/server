@@ -104,6 +104,21 @@ type Config struct {
 	// isolated on the RPi. Required on the edge once
 	// CARVILON_SIDECHANNEL_DIAL_URL is set (see Validate).
 	PublishTokenHMACKey string
+
+	// --- FCM doorbell push (Saison 17, edge role) ---
+	//
+	// Both optional and a pair: set together to enable FCM, leave both
+	// empty to disable it (the edge starts normally and the push leg
+	// skips). Setting exactly one is a config error (see Validate).
+	// FCM runs on the edge (the RPi calls Google directly), not via the
+	// cloud / side-channel.
+
+	// FCMServiceAccountJSON is the path to the Firebase service-account
+	// JSON used to mint the FCM access token.
+	FCMServiceAccountJSON string
+	// FCMProjectID is the Firebase project id used in the FCM v1 send
+	// URL (projects/<id>/messages:send).
+	FCMProjectID string
 }
 
 const (
@@ -137,6 +152,8 @@ const (
 	envSidechannelCloudWhipURL = "CARVILON_SIDECHANNEL_CLOUD_WHIP_URL"
 	envSidechannelInternalAddr = "CARVILON_SIDECHANNEL_INTERNAL_ADDR"
 	envPublishTokenHMACKey     = "CARVILON_PUBLISH_TOKEN_HMAC_KEY"
+	envFCMServiceAccountJSON   = "CARVILON_FCM_SERVICE_ACCOUNT_JSON"
+	envFCMProjectID            = "CARVILON_FCM_PROJECT_ID"
 	defaultSidechannelListen   = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
@@ -191,6 +208,9 @@ func FromEnv() Config {
 		SidechannelInternalAddr: lookupEnv(envSidechannelInternalAddr),
 
 		PublishTokenHMACKey: lookupEnv(envPublishTokenHMACKey),
+
+		FCMServiceAccountJSON: lookupEnv(envFCMServiceAccountJSON),
+		FCMProjectID:          lookupEnv(envFCMProjectID),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -244,7 +264,21 @@ func (c Config) Validate() error {
 			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
 		}
 	}
+	// FCM is both-or-neither: either both the service-account path and
+	// the project id are set (FCM enabled) or both empty (FCM disabled).
+	// Exactly one set is a half-configuration, i.e. a config error.
+	if (c.FCMServiceAccountJSON == "") != (c.FCMProjectID == "") {
+		return fmt.Errorf("config: %s and %s must be set together (or both empty to disable FCM)",
+			envFCMServiceAccountJSON, envFCMProjectID)
+	}
 	return nil
+}
+
+// FCMEnabled reports whether FCM doorbell push is configured (both the
+// service-account path and the project id are present). When false the
+// edge runs normally and the doorbell push leg skips.
+func (c Config) FCMEnabled() bool {
+	return c.FCMServiceAccountJSON != "" && c.FCMProjectID != ""
 }
 
 // DecodePublishTokenHMACKey hex-decodes the publish-token HMAC key and

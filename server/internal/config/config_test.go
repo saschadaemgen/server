@@ -282,6 +282,46 @@ func TestValidate_PublishTokenKey_RequiredWithSidechannel(t *testing.T) {
 	}
 }
 
+func TestValidate_FCM_BothOrNeither(t *testing.T) {
+	base := func() Config {
+		return Config{ListenAddr: ":8080", DBPath: defaultDBPath, DevMode: true}
+	}
+
+	// Neither set: ok (FCM disabled).
+	c := base()
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate (no FCM) = %v, want nil", err)
+	}
+	if c.FCMEnabled() {
+		t.Error("FCMEnabled() = true with neither value set")
+	}
+
+	// Only the path set: error.
+	c = base()
+	c.FCMServiceAccountJSON = "/etc/carvilon/sa.json"
+	if err := c.Validate(); err == nil {
+		t.Error("Validate (only path) = nil, want error")
+	}
+
+	// Only the project id set: error.
+	c = base()
+	c.FCMProjectID = "my-project"
+	if err := c.Validate(); err == nil {
+		t.Error("Validate (only project id) = nil, want error")
+	}
+
+	// Both set: ok, enabled.
+	c = base()
+	c.FCMServiceAccountJSON = "/etc/carvilon/sa.json"
+	c.FCMProjectID = "my-project"
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate (both FCM) = %v, want nil", err)
+	}
+	if !c.FCMEnabled() {
+		t.Error("FCMEnabled() = false with both values set")
+	}
+}
+
 func TestDecodePublishTokenHMACKey(t *testing.T) {
 	if _, err := (Config{PublishTokenHMACKey: strings.Repeat("ab", 32)}).DecodePublishTokenHMACKey(); err != nil {
 		t.Errorf("valid 32-byte hex rejected: %v", err)
