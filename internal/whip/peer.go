@@ -58,23 +58,20 @@ func AcceptPublisher(
 		return "", "", fmt.Errorf("whip: session id: %w", err)
 	}
 
-	sess := &streamhub.Session{
-		StreamID: streamID,
-		PC:       pc,
-		OnClose:  func() { _ = pc.Close() },
-	}
+	sess := streamhub.NewSession(streamID, pc, func() { _ = pc.Close() })
 
 	// OnTrack: wrap the incoming remote RTP in a local fan-out track,
-	// store it on the session, and pump packets across until the remote
-	// ends. The session pointer is captured directly (it is the same
-	// object the hub stores after Add below).
+	// publish it on the session (SetTrack closes the ready-channel so
+	// WHEP subscribers stop waiting), and pump packets across until the
+	// remote ends. The session pointer is captured directly (it is the
+	// same object the hub stores after Add below).
 	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		local, terr := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, "video", streamID)
 		if terr != nil {
 			logger.Printf("whip: sid=%s new local track: %v", streamID, terr)
 			return
 		}
-		sess.Track = local
+		sess.SetTrack(local)
 		logger.Printf("whip: sid=%s track started codec=%s", streamID, remote.Codec().MimeType)
 		go pumpRTP(remote, local, logger, streamID)
 	})
@@ -152,46 +149,6 @@ func pumpRTP(remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP, logg
 			return
 		}
 	}
-}
-
-// newH264MediaEngine registers an H.264-only video MediaEngine. The two
-// registered profiles (42001f and 42e01f, packetization-mode=1) mirror
-// pion's own defaults, so a standard pion publisher negotiates a codec
-// without us pulling in VP8/VP9/Opus we don't need yet.
-func newH264MediaEngine() (*webrtc.MediaEngine, error) {
-	me := &webrtc.MediaEngine{}
-	videoRTCPFeedback := []webrtc.RTCPFeedback{
-		{Type: "goog-remb"},
-		{Type: "ccm", Parameter: "fir"},
-		{Type: "nack"},
-		{Type: "nack", Parameter: "pli"},
-	}
-	codecs := []webrtc.RTPCodecParameters{
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:     webrtc.MimeTypeH264,
-				ClockRate:    90000,
-				SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
-				RTCPFeedback: videoRTCPFeedback,
-			},
-			PayloadType: 102,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:     webrtc.MimeTypeH264,
-				ClockRate:    90000,
-				SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
-				RTCPFeedback: videoRTCPFeedback,
-			},
-			PayloadType: 106,
-		},
-	}
-	for _, c := range codecs {
-		if err := me.RegisterCodec(c, webrtc.RTPCodecTypeVideo); err != nil {
-			return nil, err
-		}
-	}
-	return me, nil
 }
 
 // randomSessionID returns 16 hex characters (8 random bytes) for the

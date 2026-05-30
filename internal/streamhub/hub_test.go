@@ -1,6 +1,24 @@
 package streamhub
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/pion/webrtc/v4"
+)
+
+// newTestTrack builds a standalone fan-out track (no PeerConnection
+// needed) for the SetTrack/WaitTrack tests.
+func newTestTrack(t *testing.T, id string) *webrtc.TrackLocalStaticRTP {
+	t.Helper()
+	tr, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", id)
+	if err != nil {
+		t.Fatalf("new track: %v", err)
+	}
+	return tr
+}
 
 func TestHub_AddThenGet(t *testing.T) {
 	h := NewHub()
@@ -69,4 +87,77 @@ func TestHub_RemoveNilOnCloseIsSafe(t *testing.T) {
 	h := NewHub()
 	_ = h.Add(&Session{StreamID: "cam-1"}) // OnClose nil
 	h.Remove("cam-1")                      // must not panic on nil OnClose
+}
+
+// --- S2-05: ready/SetTrack/WaitTrack race resolution ------------------------
+
+func TestSession_SetTrackThenWaitReturnsImmediately(t *testing.T) {
+	sess := NewSession("cam-1", nil, nil)
+	track := newTestTrack(t, "cam-1")
+	sess.SetTrack(track)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := sess.WaitTrack(ctx)
+	if err != nil {
+		t.Fatalf("WaitTrack after SetTrack: %v", err)
+	}
+	if got != track {
+		t.Errorf("WaitTrack returned a different track pointer")
+	}
+}
+
+func TestSession_WaitTrackExpiredCtx(t *testing.T) {
+	sess := NewSession("cam-1", nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already done
+
+	got, err := sess.WaitTrack(ctx)
+	if err == nil {
+		t.Fatal("WaitTrack with expired ctx returned nil error")
+	}
+	if got != nil {
+		t.Errorf("WaitTrack returned non-nil track on ctx error")
+	}
+}
+
+func TestSession_WaitTrackBlocksUntilSetTrack(t *testing.T) {
+	sess := NewSession("cam-1", nil, nil)
+	track := newTestTrack(t, "cam-1")
+
+	// SetTrack fires from another goroutine after a short delay; WaitTrack
+	// must block until then, not return nil early.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		sess.SetTrack(track)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got, err := sess.WaitTrack(ctx)
+	if err != nil {
+		t.Fatalf("WaitTrack blocked past the parallel SetTrack: %v", err)
+	}
+	if got != track {
+		t.Errorf("WaitTrack returned a different track pointer")
+	}
+}
+
+func TestSession_SetTrackOnlyFirstWins(t *testing.T) {
+	sess := NewSession("cam-1", nil, nil)
+	first := newTestTrack(t, "first")
+	second := newTestTrack(t, "second")
+
+	sess.SetTrack(first)
+	sess.SetTrack(second) // must be a no-op (trackOnce)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := sess.WaitTrack(ctx)
+	if err != nil {
+		t.Fatalf("WaitTrack: %v", err)
+	}
+	if got != first {
+		t.Errorf("WaitTrack returned the second track; first must win (trackOnce)")
+	}
 }

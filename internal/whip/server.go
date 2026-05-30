@@ -93,6 +93,9 @@ func New(cfg Config) (*Server, error) {
 	// PATCH on the same path yield 405 automatically. A request to
 	// "/whip/" (empty {streamID}) does not match and yields 404.
 	mux.HandleFunc("POST /whip/{streamID}", s.handlePublish)
+	// WHEP egress (S2-05): subscribers POST an SDP offer, receive the
+	// fan-out track. Same path-pattern semantics as the ingress.
+	mux.HandleFunc("POST /whep/{streamID}", s.handleWHEP)
 
 	s.srv = &http.Server{
 		Addr:              cfg.Addr,
@@ -204,6 +207,62 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_, _ = io.WriteString(w, sdpAnswer)
 	s.logger.Printf("whip ingress: accepted sid=%s session=%s, sdp bytes=%d", streamID, sessionID, len(body))
+}
+
+// handleWHEP implements POST /whep/{streamID} — the egress side. A
+// subscriber POSTs an SDP offer and receives the publisher's fan-out
+// track. Unlike the ingress, S2-05 does NOT verify a bearer token here:
+// the egress-auth scheme is deferred (Master Option 3), and
+// AcceptSubscriber carries the marked pass-through hook. Once that hook
+// gates, this handler grows a 401 branch.
+func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
+	streamID := r.PathValue("streamID")
+	if streamID == "" {
+		http.Error(w, "missing streamID", http.StatusBadRequest)
+		return
+	}
+
+	// TODO egress-auth: no token check in S2-05 (Master Option 3). When
+	// the egress-token spec lands, validate here BEFORE reading the body
+	// and surface a bare 401 on failure, mirroring the ingress.
+
+	if !isSDP(r.Header.Get("Content-Type")) {
+		s.logger.Printf("whep egress: sid=%s rejected: content-type %q (want application/sdp)",
+			streamID, r.Header.Get("Content-Type"))
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxSDPBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Printf("whep egress: sid=%s read body: %v", streamID, err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNoPublisher):
+			s.logger.Printf("whep egress: sid=%s no active publisher", streamID)
+			http.Error(w, "no active publisher for stream", http.StatusNotFound)
+		case errors.Is(err, ErrTrackNotReady):
+			s.logger.Printf("whep egress: sid=%s track not ready", streamID)
+			http.Error(w, "stream starting, retry", http.StatusServiceUnavailable)
+		default:
+			s.logger.Printf("whep egress: sid=%s subscriber setup failed: %v", streamID, err)
+			http.Error(w, "subscriber setup failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	location := fmt.Sprintf("/whep/%s/session/%s", streamID, sessionID)
+	w.Header().Set("Content-Type", "application/sdp")
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusCreated)
+	_, _ = io.WriteString(w, sdpAnswer)
+	s.logger.Printf("whep egress: accepted sid=%s session=%s, offer bytes=%d", streamID, sessionID, len(body))
 }
 
 // isSDP reports whether the Content-Type names application/sdp,

@@ -11,6 +11,7 @@
 package streamhub
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -22,16 +23,65 @@ import (
 var ErrConflict = errors.New("streamhub: streamID already has an active publisher")
 
 // Session represents one active WHIP publisher.
+//
+// Construct with [NewSession] — the zero value's ready channel is nil,
+// which would make [Session.WaitTrack] block forever.
 type Session struct {
 	StreamID string
 	PC       *webrtc.PeerConnection
 	// Track is the fan-out source WHEP subscribers read from. It is set
-	// once the publisher's first RTP track arrives (OnTrack); it may be
-	// nil briefly between Add and the first OnTrack callback.
+	// exactly once, via [Session.SetTrack], when the publisher's first
+	// RTP track arrives (OnTrack). Do NOT write it directly — readers
+	// rely on the ready-channel happens-before to observe it safely.
+	// Read it through [Session.WaitTrack], not the field, unless you
+	// already know ready is closed.
 	Track *webrtc.TrackLocalStaticRTP
 	// OnClose runs exactly once, on the first [Hub.Remove] for this
 	// session. Used to tear down the PeerConnection.
 	OnClose func()
+
+	// ready is closed by SetTrack once Track is set. WHEP subscribers
+	// block on it (via WaitTrack) so they never attach a nil track in
+	// the window between Add and the first OnTrack callback (S2-05
+	// race fix).
+	ready chan struct{}
+	// trackOnce guarantees Track-set + ready-close happen exactly once,
+	// even if OnTrack fires for multiple m-lines.
+	trackOnce sync.Once
+}
+
+// NewSession creates a Session with an initialised ready channel. PC and
+// onClose may be supplied now; Track arrives later via [Session.SetTrack].
+func NewSession(streamID string, pc *webrtc.PeerConnection, onClose func()) *Session {
+	return &Session{
+		StreamID: streamID,
+		PC:       pc,
+		OnClose:  onClose,
+		ready:    make(chan struct{}),
+	}
+}
+
+// SetTrack stores the fan-out track and signals readiness. Effective
+// exactly once; later calls are no-ops (the first track wins). Called
+// from the WHIP OnTrack callback.
+func (s *Session) SetTrack(t *webrtc.TrackLocalStaticRTP) {
+	s.trackOnce.Do(func() {
+		s.Track = t
+		close(s.ready)
+	})
+}
+
+// WaitTrack blocks until the track is ready or ctx is done. It returns
+// the fan-out track, or ctx.Err() if the deadline/cancellation fires
+// first. The channel-close happens-before guarantees the returned Track
+// pointer is fully published to the caller.
+func (s *Session) WaitTrack(ctx context.Context) (*webrtc.TrackLocalStaticRTP, error) {
+	select {
+	case <-s.ready:
+		return s.Track, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Hub is the thread-safe registry of active publishers, keyed by

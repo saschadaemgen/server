@@ -188,8 +188,7 @@ func runCloud() {
 		logger.Fatalf("whip server init: %v", err)
 	}
 
-	logger.Printf("WHIP-Ingress auf %s (cert=%s)", addr, certFile)
-	logger.Printf("TODO S2-05: WHEP-Egress zum Hub")
+	logger.Printf("WHIP-Ingress (/whip) + WHEP-Egress (/whep) auf %s (cert=%s)", addr, certFile)
 	logger.Printf("TODO S2-06: RequestPublish-Call zu carvilon-cloud sidechannel.Server")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
