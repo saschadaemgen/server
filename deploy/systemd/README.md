@@ -90,6 +90,12 @@ stream chat. Remove that line to keep the hook silent.
 
 - No install automation (no Ansible, no script). Run these once by hand.
 - Both `.env` files must be `0600`; they hold the master/HMAC keys.
+- FCM doorbell push (edge only, optional): set
+  `CARVILON_FCM_SERVICE_ACCOUNT_JSON` + `CARVILON_FCM_PROJECT_ID`
+  together in the edge `.env` to enable it (commented placeholders in
+  `carvilon-edge.env.example`). Setting exactly one is a config error;
+  both empty leaves FCM disabled and the edge starts normally. The
+  service-account JSON is a secret - keep it `0600` and out of the repo.
 - Both units restart on failure (`Restart=on-failure`, `RestartSec=5s`).
 - Hardening directives (ProtectSystem, NoNewPrivileges, ...) are
   intentionally left out for now to avoid disturbing the existing
