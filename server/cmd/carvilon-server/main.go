@@ -181,6 +181,30 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// Liste.
 	userStore := ua.New(uaClient)
 
+	// Saison 17-08: in-process stream server (carvilon_stream build
+	// only). startInProcessStream is nil in the public build, so this
+	// whole block is skipped there. When the hook runs and succeeds it
+	// boots the in-process stream.Server (serving the local MJPEG/Offer
+	// HTTP path on :8555) and hands back its StreamBackend for the
+	// commercialBackend slot plus a (later) WHIP publisher. Setup
+	// failure only logs and disables the stream subsystem; the edge core
+	// (mocks, WS, MQTT, side-channel, FCM) keeps running (Grundregel).
+	var inProcStreamPublisher streampublish.StreamPublisher
+	if startInProcessStream != nil {
+		backend, publisher, shutdown, err := startInProcessStream(ctx, log, cfg, viewerMgr)
+		switch {
+		case err != nil:
+			log.Error("in-process stream setup failed; stream subsystem disabled", "err", err)
+		case backend != nil:
+			commercialBackend = backend
+			inProcStreamPublisher = publisher
+			if shutdown != nil {
+				defer shutdown()
+			}
+			log.Info("in-process stream server enabled")
+		}
+	}
+
 	// Stream-Backend zeigt auf die StreamBackend-Naht
 	// (Saison 15-01). Praezedenz seit Saison 15-07:
 	//
@@ -274,7 +298,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	startSidechannelClient(ctx, log, cfg, viewerMgr)
+	startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -383,10 +407,18 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // misconfigured side-channel never blocks or fails the edge - it is
 // logged and skipped, and runtime failures only trigger reconnects
 // inside the client goroutine.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager) {
+// publisher is the edge-side video push surface (the WHIP client in the
+// carvilon_stream build, supplied by the in-process stream setup). When
+// nil - the public build, or an unconfigured/failed in-process stream -
+// it falls back to the no-op publisher, so a request_publish issues a
+// token but pushes nothing.
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher) {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return
+	}
+	if publisher == nil {
+		publisher = streamPublisher(log)
 	}
 
 	// Publish-token signing key from CARVILON_PUBLISH_TOKEN_HMAC_KEY
@@ -411,7 +443,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 			return err == nil
 		},
 		Issuer:       publishtoken.NewIssuer(hmacKey, 5*time.Minute),
-		Publisher:    streamPublisher(log),
+		Publisher:    publisher,
 		CloudWhipURL: cfg.SidechannelCloudWhipURL,
 		Log:          log.With("component", "sidechannel-publish"),
 	}

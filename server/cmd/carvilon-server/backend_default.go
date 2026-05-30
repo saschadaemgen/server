@@ -1,20 +1,42 @@
-// Saison 15-07 + Nachtrag: shared commercialBackend slot. The
-// public build leaves the variable nil (Zero-Value). The commercial
-// build (-tags carvilon_stream) assigns it in
-// main_carvilon_stream.go to bind the private streaming-server.
-//
-// This file is intentionally NOT build-tagged: the declaration must
-// be visible in BOTH builds, otherwise the commercial init() would
-// hit an undefined-variable error (it only assigns, it does not
-// re-declare).
+// Saison 15-07 + Saison 17-08: public-side slots for the commercial
+// stream integration. Both are declared here (NOT build-tagged) so the
+// declarations are visible in BOTH builds; the carvilon_stream build
+// assigns them at runtime (see stream_inprocess_carvilon_stream.go).
+// The public build leaves them at their zero values, so it never
+// imports carvilon.local/stream.
 
 package main
 
-import "carvilon.local/server/internal/streams"
+import (
+	"context"
+	"log/slog"
 
-// commercialBackend is nil in the public build. The commercial
-// build (-tags carvilon_stream) assigns it in
-// main_carvilon_stream.go to bind the private streaming-server.
-// main() reads this slot first and falls back to the transitional
-// go2rtc client / streams.Unconfigured() when it stays nil.
+	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/viewermanager"
+)
+
+// commercialBackend is nil in the public build. The carvilon_stream
+// build assigns it (via startInProcessStream below) to the in-process
+// streaming-server's StreamBackend. main() reads this slot first and
+// falls back to the transitional go2rtc client / streams.Unconfigured()
+// when it stays nil.
 var commercialBackend streams.StreamBackend
+
+// startInProcessStream is nil in the public build. The carvilon_stream
+// build assigns it (init() in stream_inprocess_carvilon_stream.go) to a
+// function that boots the in-process stream server and returns:
+//   - its StreamBackend (for the commercialBackend slot / MJPEG+Offer),
+//   - a StreamPublisher (the WHIP cloud-push client; nil until S17-08 D),
+//   - a shutdown func, and an error.
+//
+// runEdge calls it only when non-nil, so the public build never reaches
+// any carvilon.local/stream code. The signature references only public
+// carvilon types, so this declaration compiles in both builds.
+var startInProcessStream func(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg config.Config,
+	viewerMgr *viewermanager.Manager,
+) (streams.StreamBackend, streampublish.StreamPublisher, func(), error)
