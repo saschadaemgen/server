@@ -5,4 +5,5 @@ use (
 	./mock
 	./server
 	./shared
+	../streaming-server
 )
