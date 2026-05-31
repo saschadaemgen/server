@@ -106,7 +106,10 @@
 .sd-egress .ev .u{color:var(--sd-faint);font-size:10px}
 .sd-minispark{width:74px;height:16px;display:block}
 
-.sd-health{justify-self:end}
+/* Table health cell only. Scoped so the summary "Verlorene Frames"
+   card (which also carries .sd-health for its value color) is NOT
+   right-aligned inside its grid cell. */
+.sd-rmain .sd-health{justify-self:end}
 .sd-hpill{display:inline-flex;align-items:center;gap:5px;font-family:var(--sd-mono);font-size:10.5px;padding:3px 8px;border-radius:999px}
 .sd-h-ok{color:var(--sd-live);background:rgba(55,224,160,.09)}
 .sd-h-warn{color:var(--sd-amber);background:rgba(245,177,61,.1)}
