@@ -5,11 +5,20 @@
    mockup.html; the live data comes from GET /a/streams/stats.json. */
 
 .sd-root{
-  --sd-bg:#08090b; --sd-s1:#0e1014; --sd-s2:#13161b; --sd-s3:#191d24; --sd-s4:#20252e;
-  --sd-line:rgba(255,255,255,.07); --sd-line2:rgba(255,255,255,.12);
-  --sd-hi:#f3f5f8; --sd-tx:#c5ccd6; --sd-dim:#888f9b; --sd-faint:#565d68;
-  --sd-live:#37e0a0; --sd-blue:#5e9dff; --sd-amber:#f5b13d; --sd-red:#ff6b6b; --sd-violet:#9b8cff;
-  --sd-glow:0 0 0 1px rgba(55,224,160,.25), 0 0 22px -6px rgba(55,224,160,.5);
+  /* S17-16: surfaces/text/borders point at the design-library theme
+     tokens (tokens.css) so .sd-root follows the admin light/dark switch
+     instead of staying hard dark. Accents map to the library accent
+     tokens for readable contrast in both themes; only --sd-violet (no
+     library equivalent) keeps a hand-picked both-theme value. The
+     translucent accent tints further down read fine on either theme. */
+  --sd-bg:var(--color-bg); --sd-s1:var(--color-bg-elev); --sd-s2:var(--color-bg-elev-2);
+  --sd-s3:var(--color-surface-2); --sd-s4:var(--color-surface-3);
+  --sd-line:var(--color-hairline); --sd-line2:var(--color-hairline-strong);
+  --sd-hi:var(--color-text); --sd-tx:var(--color-text-secondary);
+  --sd-dim:var(--color-text-tertiary); --sd-faint:var(--color-text-quaternary);
+  --sd-live:var(--color-ok); --sd-blue:var(--color-accent); --sd-amber:var(--color-warn);
+  --sd-red:var(--color-danger); --sd-violet:#7c5cff;
+  --sd-glow:0 0 0 1px rgba(44,198,106,.25), 0 0 22px -6px rgba(44,198,106,.5);
   --sd-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
   position:relative; border-radius:16px; padding:22px 20px 26px; margin-top:var(--space-4,16px);
   background:var(--sd-bg); color:var(--sd-tx); border:1px solid var(--sd-line); overflow:hidden;
@@ -47,7 +56,7 @@
 .sd-spark{height:28px;width:100%;margin-top:8px;display:block;overflow:visible}
 
 /* panel + table */
-.sd-panel{background:linear-gradient(180deg,var(--sd-s1),#0b0d10);border:1px solid var(--sd-line);border-radius:14px;overflow:hidden}
+.sd-panel{background:linear-gradient(180deg,var(--sd-s1),var(--sd-bg));border:1px solid var(--sd-line);border-radius:14px;overflow:hidden}
 .sd-panel-h{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--sd-line)}
 .sd-panel-h h3{font-size:13px;color:var(--sd-hi);font-weight:700;margin:0}
 .sd-panel-h .sd-count{font-family:var(--sd-mono);font-size:11px;color:var(--sd-faint);background:var(--sd-s3);padding:2px 8px;border-radius:6px}
@@ -61,22 +70,22 @@
 .sd-trow{border-bottom:1px solid var(--sd-line);opacity:0;transform:translateY(6px);animation:sd-rise .45s ease forwards}
 .sd-trow:last-child{border-bottom:0}
 .sd-rmain{padding:12px 16px;cursor:pointer;transition:background .18s}
-.sd-rmain:hover{background:rgba(255,255,255,.018)}
+.sd-rmain:hover{background:var(--color-surface-1)}
 .sd-trow.open .sd-rmain{background:rgba(94,157,255,.04)}
 
 .sd-pname{display:flex;align-items:center;gap:10px;min-width:0}
 .sd-pname .nm{font-weight:600;color:var(--sd-hi);font-size:13px}
 .sd-pname .meta{font-family:var(--sd-mono);font-size:10px;color:var(--sd-faint);margin-top:1px}
 .sd-cbadge{font-family:var(--sd-mono);font-size:10px;font-weight:600;padding:3px 7px;border-radius:6px;white-space:nowrap;border:1px solid transparent}
-.sd-cb-h264{color:#9cc2ff;background:rgba(94,157,255,.12);border-color:rgba(94,157,255,.22)}
-.sd-cb-mjpeg{color:#ffd089;background:rgba(245,177,61,.12);border-color:rgba(245,177,61,.22)}
-.sd-cb-cbp{color:#c9b8ff;background:rgba(155,140,255,.12);border-color:rgba(155,140,255,.22)}
+.sd-cb-h264{color:var(--sd-blue);background:rgba(94,157,255,.12);border-color:rgba(94,157,255,.22)}
+.sd-cb-mjpeg{color:var(--sd-amber);background:rgba(245,177,61,.12);border-color:rgba(245,177,61,.22)}
+.sd-cb-cbp{color:var(--sd-violet);background:rgba(155,140,255,.12);border-color:rgba(155,140,255,.22)}
 
 .sd-status{display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--sd-mono)}
 .sd-status .sd-sd{width:8px;height:8px;border-radius:50%}
 .sd-status.live .sd-sd{background:var(--sd-live);box-shadow:var(--sd-glow);animation:sd-pulse 2.4s infinite}
 .sd-status.live{color:var(--sd-live)}
-.sd-status.idle .sd-sd{background:#3a4049}
+.sd-status.idle .sd-sd{background:var(--sd-faint)}
 .sd-status.idle{color:var(--sd-faint)}
 
 .sd-consumers{font-family:var(--sd-mono);font-size:15px;color:var(--sd-hi);font-weight:600}
