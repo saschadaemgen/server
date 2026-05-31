@@ -23,15 +23,19 @@ Open-core, in the spirit of Matrix/Element:
   the server registers with the UDM)
 - `shared/proto` - UniFi wire-format helpers (discovery, MQTT,
   RPC, TLV, WebSocket)
-- `cmd/license-server` - commercial license validation (closed)
+- `cmd/cloudca` - mTLS mini-CA generator for the edge/cloud
+  side-channel (stdlib only)
 
 ## Tech
 
 - Go (stdlib-first; `net/http` + Go 1.22 ServeMux, no router lib)
 - `modernc.org/sqlite` (pure Go, no CGO)
-- Admin UI: Go templates + Tailwind (CDN) + htmx + Lucide, via
-  `go:embed`
-- Cross-compiled `linux/arm64`, runs on a Raspberry Pi per site
+- Admin UI: Go templates + inline Lucide icons, via `go:embed`
+- One binary, two roles chosen at runtime by a `-role` flag:
+  cross-compiled `linux/arm64` for the per-site Raspberry Pi (edge)
+  and `linux/amd64` for the cloud VPS
+- `systemd` deployment (a user service on the edge, a system
+  service on the cloud)
 
 ## Build
 
@@ -48,10 +52,19 @@ build\deploy-rpi.ps1
 ## Status
 
 Active development. The streaming layer runs on the platform's own
-server (go2rtc has been removed). Web viewer, ESP monitor and the
-Android app authenticate against the same `/webviewer` surface
-(session cookie for the browser, bearer token for devices). A
-cloud tier (edge/cloud split, remote access, push) is planned.
+server (go2rtc has been removed) and, in the commercial build, is
+linked in-process via the `carvilon_stream` build tag. Web viewer,
+ESP monitor and the Android app authenticate against the same
+`/webviewer` surface (session cookie for the browser, bearer token
+for devices).
+
+The cloud tier is no longer just planned - its foundation is built:
+an edge/cloud split (one binary, a `-role` flag), an outbound mTLS
+side-channel from the edge to the cloud, FCM push sent from the
+edge, and in-process stream integration (commercial, the
+`carvilon_stream` tag). The remote media path (ICE/STUN/TURN) is the
+next step. The core stays local-first: doorbell and video work on
+the LAN without any internet, and the cloud is strictly additive.
 
 ## Confidentiality
 
