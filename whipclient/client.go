@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
+
+	"carvilon.local/stream/internal/icedebug"
 )
 
 // gatherTimeout bounds the wait for ICE candidate gathering before the
@@ -200,8 +202,14 @@ func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWh
 		return
 	}
 
+	// S3 ICE befund: opt-in masked candidate + state logging
+	// (CARVILON_ICE_DEBUG). Purely additive; no-op when the flag is off.
+	icedebug.AttachCandidateLogging(pc, c.cfg.Logger, "whipclient streamID="+streamID)
+	iceTracker := icedebug.NewStateTracker(c.cfg.Logger, "whipclient streamID="+streamID)
+
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		c.cfg.Logger.Printf("whipclient: streamID=%s ICE state=%s", streamID, state)
+		iceTracker.Log(state)
 		switch state {
 		case webrtc.ICEConnectionStateFailed,
 			webrtc.ICEConnectionStateDisconnected,

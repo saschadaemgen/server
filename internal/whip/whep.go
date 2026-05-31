@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 
+	"carvilon.local/stream/internal/icedebug"
 	"carvilon.local/stream/internal/streamhub"
 )
 
@@ -99,11 +100,17 @@ func AcceptSubscriber(
 	// buffer would back up. Exits when the PC closes.
 	go drainRTCP(rtpSender)
 
+	// S3 ICE befund: opt-in masked candidate + state logging
+	// (CARVILON_ICE_DEBUG). Purely additive; no-op when the flag is off.
+	icedebug.AttachCandidateLogging(pc, logger, "whep sid="+streamID)
+	iceTracker := icedebug.NewStateTracker(logger, "whep sid="+streamID)
+
 	// Subscriber-only teardown: close THIS PeerConnection, never the
 	// hub's publisher entry. The publisher and other subscribers are
 	// unaffected.
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		logger.Printf("whep: sid=%s session=%s ICE state=%s", streamID, sessionID, state)
+		iceTracker.Log(state)
 		switch state {
 		case webrtc.ICEConnectionStateFailed,
 			webrtc.ICEConnectionStateDisconnected,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 
+	"carvilon.local/stream/internal/icedebug"
 	"carvilon.local/stream/internal/streamhub"
 )
 
@@ -76,10 +77,16 @@ func AcceptPublisher(
 		go pumpRTP(remote, local, logger, streamID)
 	})
 
+	// S3 ICE befund: opt-in masked candidate + state logging
+	// (CARVILON_ICE_DEBUG). Purely additive; no-op when the flag is off.
+	icedebug.AttachCandidateLogging(pc, logger, "whip sid="+streamID)
+	iceTracker := icedebug.NewStateTracker(logger, "whip sid="+streamID)
+
 	// Auto-cleanup on connection death — the hub removes itself, no
 	// session leak. OnClose (pc.Close) runs exactly once via Remove.
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		logger.Printf("whip: sid=%s ICE state=%s", streamID, state)
+		iceTracker.Log(state)
 		switch state {
 		case webrtc.ICEConnectionStateFailed,
 			webrtc.ICEConnectionStateDisconnected,
