@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>carvilon - Stream-Profile</title>
+  <title>carvilon - Stream-Dashboard</title>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="/static/streams-dashboard.css">
 </head>
 <body class="admin-shell">
 
@@ -14,8 +15,8 @@
   <main class="page" role="main">
     <header class="page-header">
       <div class="page-title-stack">
-        <h1 class="page-title">Stream-Profile</h1>
-        <p class="page-subtitle">Profile vom Stream-Server. Bearbeiten / Anlegen / Loeschen wirkt direkt auf <code>/api/profiles</code>.</p>
+        <h1 class="page-title">Stream-Dashboard</h1>
+        <p class="page-subtitle">Live-Uebersicht der Stream-Profile vom Stream-Server. Zeile anklicken fuer Konsumenten-Detail; Anlegen / Bearbeiten / Loeschen wirkt auf <code>/api/profiles</code>.</p>
       </div>
       {{if .Page.Configured}}
         <div class="page-actions">
@@ -27,10 +28,6 @@
       {{end}}
     </header>
 
-    {{if .Page.Flash}}
-      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
-    {{end}}
-
     {{if not .Page.Configured}}
       <div class="app-card">
         <div class="app-card-body" style="padding: var(--space-5); text-align: center;">
@@ -39,63 +36,44 @@
             Setze die Umgebungsvariable <code>CARVILON_STREAM_BACKEND_URL</code> auf die Basis-URL des Stream-Servers
             (typischerweise <code>http://127.0.0.1:8555</code>) und starte den Server neu.
           </p>
-          <p style="color: var(--color-text-tertiary); margin-top: var(--space-2);">
-            Bis dahin liefern <code>/esp/stream.mjpeg</code> und <code>/webviewer/stream.mjpeg</code> einen 503.
-          </p>
         </div>
       </div>
     {{else}}
-      <div class="app-card">
-        {{if .Page.BackendURL}}
-          <div style="padding: var(--space-3) var(--space-4); border-bottom: 0.5px solid rgba(255,255,255,0.08); color: var(--color-text-tertiary); font-size: var(--fs-sm);">
-            Stream-Server REST-API: <code>{{.Page.BackendURL}}</code>
+      <div id="sd-root" class="sd-root" data-poll="/a/streams/stats.json">
+        {{if .Page.Error}}<div class="sd-banner">Stream-Server nicht erreichbar: {{.Page.Error}}</div>{{end}}
+
+        <div class="sd-bar">
+          <span class="sd-title">Profile</span>
+          {{if .Page.BackendURL}}<span style="font-family:var(--sd-mono);font-size:11px;color:var(--sd-faint)">{{.Page.BackendURL}}</span>{{end}}
+          <span class="sd-spacer"></span>
+          <div class="sd-seg">
+            <button class="on" data-iv="2">2s</button>
+            <button data-iv="5">5s</button>
+            <button data-iv="10">10s</button>
           </div>
-        {{end}}
-        {{if .Page.Profiles}}
-          <table class="app-table">
-            <thead>
-              <tr>
-                <th>Profil-Name</th>
-                <th>Codec</th>
-                <th>Nutzung</th>
-                <th>Aufloesung</th>
-                <th style="text-align:right;">FPS</th>
-                <th>Medien</th>
-                <th style="text-align:right;">Konsumenten</th>
-                <th style="text-align:right;">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .Page.Profiles}}
-                <tr>
-                  <td><strong>{{.Name}}</strong></td>
-                  <td><code style="font-size: var(--fs-sm);">{{.Codec}}</code></td>
-                  <td>{{.Usage}}</td>
-                  <td style="white-space:nowrap;">
-                    {{if and .Width .Height}}{{.Width}} &times; {{.Height}}{{else}}&mdash;{{end}}
-                  </td>
-                  <td style="text-align:right;">{{if .FPS}}{{.FPS}}{{else}}&mdash;{{end}}</td>
-                  <td>{{if eq .Encryption "srtp"}}SRTP{{else if eq .Encryption "tls"}}TLS{{else}}&mdash;{{end}}</td>
-                  <td style="text-align:right; font-variant-numeric: tabular-nums;">{{.Consumers}}</td>
-                  <td style="text-align:right; white-space:nowrap;">
-                    <a class="btn btn-secondary btn-sm" href="/a/streams/{{.Name}}">Bearbeiten</a>
-                    <form method="post" action="/a/streams/{{.Name}}/delete"
-                          style="display:inline; margin:0;"
-                          onsubmit="return confirm('Profil {{.Name}} wirklich loeschen?');">
-                      <button type="submit" class="btn btn-secondary btn-sm">Loeschen</button>
-                    </form>
-                  </td>
-                </tr>
-              {{end}}
-            </tbody>
-          </table>
-        {{else}}
-          <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
-            <p>Noch kein Profil konfiguriert.</p>
-            <p style="font-size: var(--fs-sm);">"Neues Profil" oben rechts legt das erste an.</p>
+          <div class="sd-livepill"><span class="sd-ldot"></span><span id="sd-livetxt">live</span></div>
+        </div>
+
+        <!-- Ebene 1: Gesamt -->
+        <div class="sd-summary"></div>
+
+        <!-- Ebene 2 + 3: Tabelle -->
+        <div class="sd-panel">
+          <div class="sd-panel-h">
+            <h3>Profile</h3>
+            <span class="sd-count">0</span>
+            <span class="sd-hint">Zeile anklicken fuer Details</span>
           </div>
-        {{end}}
+          <div class="sd-thead">
+            <span>Profil</span><span>Status</span><span class="r">Konsumenten</span><span class="r">Quelle</span>
+            <span class="r">Ausgang</span><span class="r">Egress</span><span class="r">Health</span><span></span>
+          </div>
+          <div class="sd-rows"></div>
+        </div>
       </div>
+
+      <script id="sd-data" type="application/json">{{.Page.DataJSON}}</script>
+      <script src="/static/streams-dashboard.js"></script>
     {{end}}
   </main>
 

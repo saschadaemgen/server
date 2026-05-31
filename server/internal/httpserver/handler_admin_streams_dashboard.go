@@ -13,12 +13,26 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"html/template"
 	"net"
 	"net/http"
 	"strings"
 
 	"carvilon.local/server/internal/streams"
 )
+
+// streamsPageData is the render payload for templates/admin/streams.html.
+// The dashboard is built client-side from DataJSON (the full dashboard
+// snapshot embedded in a <script id="sd-data">), so the page paints
+// instantly without a round-trip; the JS then live-polls
+// /a/streams/stats.json. User powers the admin nav.
+type streamsPageData struct {
+	User       adminUser
+	Configured bool
+	BackendURL string
+	Error      string
+	DataJSON   template.JS
+}
 
 // streamDashboard is the full payload for the streams dashboard, shared
 // by the HTML render and the JSON poll. JSON tags are the contract the

@@ -216,6 +216,8 @@ func extractUser(data any) adminUser {
 		return v.User
 	case adminStreamsData:
 		return v.User
+	case streamsPageData:
+		return v.User
 	case adminStreamEditData:
 		return v.User
 	case adminViewerDetailData:

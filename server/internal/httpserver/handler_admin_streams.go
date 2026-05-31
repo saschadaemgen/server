@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -83,8 +84,20 @@ type adminStreamEditData struct {
 type baseURLer interface{ BaseURL() string }
 
 func (s *Server) handleAdminStreamsList(w http.ResponseWriter, r *http.Request) {
-	data := s.buildStreamsData(r)
-	s.renderAdminPage(w, "streams", data)
+	username := AdminUserFromContext(r.Context())
+	d := s.buildStreamsDashboard(r.Context())
+	raw, err := json.Marshal(d)
+	if err != nil {
+		s.log.Warn("admin streams dashboard marshal", "err", err)
+		raw = []byte(`{"configured":false}`)
+	}
+	s.renderAdminPage(w, "streams", streamsPageData{
+		User:       adminUser{Name: username, Initials: initialsOf(username)},
+		Configured: d.Configured,
+		BackendURL: d.BackendURL,
+		Error:      d.Error,
+		DataJSON:   template.JS(raw),
+	})
 }
 
 // handleAdminStreamsListJSON feeds the viewer-edit modal dropdown.
