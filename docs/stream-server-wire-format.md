@@ -128,5 +128,6 @@ wire-format.md when the seam changes.
 
 ---
 
-*Living document. Last: 2026-05-25 (end of Stream season 1). Reconcile with
-carvilon wire-format.md and esp-wire-format.md on changes.*
+*Living document. Last: 2026-05-31 (end of Stream season 2). Reconcile with
+carvilon wire-format.md and esp-wire-format.md on changes. Sibling:
+stream-server-decisions.md.*

@@ -1,8 +1,11 @@
 # Stream-Server Architecture (CARVILON video media layer)
 
-**Status:** Updated end of Stream season 1 (25 May 2026). Living document,
+**Status:** Updated end of Stream season 2 (31 May 2026). Living document,
 extend per season. Counterpart to the carvilon-server architecture.md (master
 chat) and esp-architecture.md (ESP chat), but for the video media layer.
+Sibling docs in this track: stream-server-setup-notes.md,
+stream-server-wire-format.md, and stream-server-decisions.md (the WHY /
+learnings log).
 **Scope:** internal architecture of the standalone stream server. MIT-licensed
 (commercial component; the ESP firmware is a separate AGPL component).
 **Repo:** `C:\Projects\UniFi\streaming-server`, branch `main`.
@@ -101,8 +104,13 @@ encryption field is display-only since S6-14.
    (= streaks on the ESP). (S6-13)
 2. -flags +bitexact to kill the ffmpeg COM marker (the P4 HW decoder fails on
    it). Note: -flags (codec) != -fflags (format). (S6-06)
-3. -fflags +nobuffer -flags +low_delay + small channels (cap=2) for latency.
-   Do NOT enlarge buffers to fix drops - that regresses latency. (S6-07)
+3. -fflags +nobuffer + small channels (cap=2) for latency. Do NOT enlarge
+   buffers to fix drops - that regresses latency. (S6-07)
+   NOTE (S2-16): -flags +low_delay was REMOVED - it disables the decoder's
+   multi-core threading and starves the 1200x1600 decode (single-core stall ->
+   encoder-input backup -> P-frame loss -> stutter at GOP 105). See
+   stream-server-decisions.md D-0002. Do NOT reintroduce it; the
+   NoCodecLowDelay test canary guards this.
 4. -use_wallclock_as_timestamps 1 at the input (honest PTS; the fps filter
    needs it). (S6-04)
 5. Encoder spec is frozen at ffmpeg spawn. A profile change needs a fresh
@@ -146,4 +154,5 @@ transcoder_cpu_percent (/proc).
 
 ---
 
-*Living document. Last: 2026-05-25 (end of Stream season 1, go2rtc replaced).*
+*Living document. Last: 2026-05-31 (end of Stream season 2). See
+stream-server-decisions.md for the low_delay throughput finding (D-0002).*

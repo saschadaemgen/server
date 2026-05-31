@@ -147,7 +147,10 @@ internal/mjpeg:   ffmpeg subprocess, byte-exact multipart/x-mixed-replace.
    ffmpeg args (hard-won):
      -use_wallclock_as_timestamps 1   (input timing, S6-04)
      -flags +bitexact                 (kill COM marker, ESP HW decoder, S6-06)
-     -fflags +nobuffer -flags +low_delay  (latency, S6-07)
+     -fflags +nobuffer                (format-level low-delay, S6-04)
+     (NO -flags +low_delay: REMOVED S2-16/D-0002 - the codec-level flag
+      disabled multi-core decode threading and starved the 1200x1600
+      decode; HW v4l2m2m decode was measured even slower)
      -vf fps=N,scale=W:H              (even input sampling, S6-13 - fps BEFORE
                                        scale; never -r N at output)
 internal/h264esp: H.264-CBP transcode (/stream/h264), same fps-filter rule.
@@ -252,12 +255,18 @@ Coordination docs: BRIEFING-STREAM-SXX-NN (to Claude Code),
 mjpeg_bal (800x1280 @ 12 fps q:v6), one ESP viewer:
    avg_fps      ~12 (even, frames_dropped=0)
    bitrate      ~4.6-5.3 Mbit/s
-   encode CPU   ~4% (after S6-13 fps-filter; was ~24% before)
+   encode CPU   ~4% (S1 fps-filter encode-side, S6-13; was ~24% before)
+   DECODE CPU   (S2-16/D-0002) source is now 1200x1600 High Profile, GOP
+                ~105. With -flags +low_delay the H.264 DECODE ran single-
+                threaded, fell behind, ffmpeg pegged 100-184%, stutter.
+                low_delay removed -> multi-core decode: 18+ min live,
+                frames_dropped 0, avg_fps 11.9, ffmpeg ~7.5%.
 
 intercom_web (h264 passthrough WebRTC), one browser viewer:
    ~20 fps, ~6 Mbit/s, frames_dropped=0
 
-Latency: on go2rtc level (low_delay + small buffers, S6-07).
+Latency: small buffers (S6-07); low_delay REMOVED (S2-16/D-0002) - costs
+   ~1-3 frames decode latency, traded for multi-core decode throughput.
 Source fps varies (UniFi dynamic): seen 15-30 fps depending on scene.
 ```
 

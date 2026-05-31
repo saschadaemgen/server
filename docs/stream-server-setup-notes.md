@@ -85,6 +85,10 @@ curl -s http://localhost:8555/api/profiles      # array of profiles (snake_case)
 After the S6-13 fps fix: `encoder input channel full` must be GONE,
 frames_dropped=0, even avg_fps. After S6-15: WebRTC viewers appear in stats
 and disappear on tab close (within 30s worst case via the idle watchdog).
+After S2-16 (low_delay removed): on a heavy 1200x1600 source, ffmpeg CPU drops
+to single digits and `encoder input` drops vanish over many minutes of motion.
+If `encoder input` drops reappear, do NOT re-add low_delay - check
+stream-server-decisions.md D-0002 first.
 
 ---
 
@@ -130,5 +134,5 @@ security, profile-api) current?
 
 ---
 
-*Living document. Last: 2026-05-25 (end of Stream season 1, RPi deploy +
-env vars + srtp mode).*
+*Living document. Last: 2026-05-31 (end of Stream season 2). Sibling:
+stream-server-decisions.md (the WHY / learnings log).*
