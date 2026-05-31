@@ -26,6 +26,28 @@
     radial-gradient(700px 380px at 80% -10%, rgba(55,224,160,.06), transparent 60%),
     radial-gradient(560px 340px at 12% 4%, rgba(94,157,255,.05), transparent 55%);
 }
+/* S17-17 light-mode contrast. Dark mode is untouched. In light mode the
+   muted-text tokens (quaternary 0.22 / tertiary 0.42 black) are too faint
+   on white for the dashboard's small text, so bump them one step; and the
+   hard low-opacity accent tints (.09-.12) on the pills/badges are nearly
+   invisible on white, so point them at the library -soft tokens (.15) -
+   the same treatment the shared .badge-* components use. */
+:root[data-theme="light"] .sd-root{
+  --sd-dim:var(--color-text-secondary);
+  --sd-faint:var(--color-text-tertiary);
+}
+:root[data-theme="light"] .sd-root .sd-badge-ok,
+:root[data-theme="light"] .sd-root .sd-h-ok{background:var(--color-ok-soft)}
+:root[data-theme="light"] .sd-root .sd-h-warn{background:var(--color-warn-soft)}
+:root[data-theme="light"] .sd-root .sd-cb-h264,
+:root[data-theme="light"] .sd-root .sd-tag-web,
+:root[data-theme="light"] .sd-root .sd-ci-web{background:var(--color-accent-soft)}
+:root[data-theme="light"] .sd-root .sd-cb-mjpeg,
+:root[data-theme="light"] .sd-root .sd-tag-esp,
+:root[data-theme="light"] .sd-root .sd-ci-esp{background:var(--color-warn-soft)}
+:root[data-theme="light"] .sd-root .sd-cb-cbp,
+:root[data-theme="light"] .sd-root .sd-tag-loop,
+:root[data-theme="light"] .sd-root .sd-ci-loop{background:rgba(124,92,255,.16)}
 .sd-root *{box-sizing:border-box}
 
 /* topbar */
