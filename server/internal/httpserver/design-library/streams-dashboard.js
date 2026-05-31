@@ -163,7 +163,7 @@
   }
   function detailHTML(p) {
     if (!p.active) return '<div class="sd-empty-note">' + I.zzz + '<span>Kein Konsument verbunden. Dieses Profil zieht lazy – die Quelle startet erst beim ersten Subscriber.</span></div>' + manageHTML(p);
-    var cc = codecColor(p.codec);
+    var cc = codecColor(p.codec), h = ensureHist(p);
     var left = '<div class="sd-dblock"><h5>' + I.gauge + ' Profil-Metriken</h5><div class="sd-mgrid">' +
       mcell("Ausgang fps", p.avg_fps.toFixed(2) + '<span class="u">/ ' + gaugeTarget(p) + '</span>') +
       mcell("Quell-fps", p.source_fps.toFixed(2)) +
@@ -174,7 +174,14 @@
       '</div><div class="sd-chartcard"><div class="ch-h"><span class="t">Verlauf · fps &amp; Egress</span>' +
       '<span class="leg"><span style="color:var(--sd-live)"><i style="background:var(--sd-live)"></i>fps</span>' +
       '<span style="color:' + cc + '"><i style="background:' + cc + '"></i>Mbit/s</span></span></div>' +
-      '<svg class="sd-bigchart" viewBox="0 0 320 90" preserveAspectRatio="none"></svg></div></div>';
+      // S17-17: draw the accumulated history (fps + egress) into the
+      // detail chart. /stream/stats has no history, so each line is the
+      // client-side ring buffer (h.fps / h.eg), normalized independently
+      // to its own range. Recomputed on every poll re-render -> grows live.
+      '<svg class="sd-bigchart" viewBox="0 0 320 90" preserveAspectRatio="none">' +
+      '<path d="' + sparkPath(h.fps, 320, 90, 4) + '" fill="none" stroke="var(--sd-live)" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<path d="' + sparkPath(h.eg, 320, 90, 4) + '" fill="none" stroke="' + cc + '" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '</svg></div></div>';
     var clients = (DASH.clients || []).filter(function (c) { return c.profile === p.name; });
     var right = '<div class="sd-dblock"><h5>' + I.list + ' Verbundene Konsumenten · ' + p.clients + '</h5><div class="sd-clients">' +
       clients.map(clientHTML).join("") + '</div></div>';
@@ -197,7 +204,7 @@
     Array.prototype.forEach.call(rows, function (row) {
       var p = byName[row.dataset.name]; if (!p) return;
       ensureHist(p);
-      if (p.active) pushHist(HIST[p.name].eg, p.avg_bitrate_kbps);
+      if (p.active) { pushHist(HIST[p.name].eg, p.avg_bitrate_kbps); pushHist(HIST[p.name].fps, p.avg_fps); }
       var wasOpen = row.classList.contains("open");
       // Preserve expand state across polls; the .sd-rmain click listener
       // lives on the element and survives innerHTML updates.
