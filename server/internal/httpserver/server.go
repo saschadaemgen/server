@@ -128,6 +128,16 @@ type Server struct {
 	eventBus        *eventbus.Bus
 	calls           *doorbellcalls.Service
 	streams         streams.StreamBackend
+	// streamStats is a dedicated HTTP client to the stream-server's
+	// GET /stream/stats (the per-profile + per-client live data the
+	// admin dashboard polls). It targets cfg.StreamBackendURL, which
+	// serves /stream/stats in BOTH modes: the external go2rtc/stream
+	// server (HTTP mode) and the embedded in-process server on :8555
+	// (carvilon_stream mode). nil when no backend URL is configured.
+	// Kept separate from `streams` because the in-process build's
+	// StreamBackend is a wrapper whose List/Consumers count is the
+	// coarse per-camera-hub number, not the per-profile stats.
+	streamStats     *streams.Client
 	weather         *weather.Client
 	log             *slog.Logger
 	mux             *http.ServeMux
@@ -164,6 +174,13 @@ func New(deps Deps) (*Server, error) {
 	if deps.Streams == nil {
 		deps.Streams = streams.Unconfigured()
 	}
+	// Dedicated /stream/stats client for the admin dashboard. Built
+	// only when a backend URL is set; New returns ErrNotConfigured on
+	// an empty URL, which we treat as "no live stats" (nil).
+	var streamStats *streams.Client
+	if c, err := streams.New(deps.Config.StreamBackendURL); err == nil {
+		streamStats = c
+	}
 	srv := &Server{
 		cfg:             deps.Config,
 		sessions:        deps.Sessions,
@@ -182,6 +199,7 @@ func New(deps Deps) (*Server, error) {
 		eventBus:        deps.EventBus,
 		calls:           deps.DoorbellCalls,
 		streams:         deps.Streams,
+		streamStats:     streamStats,
 		weather:         deps.Weather,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),

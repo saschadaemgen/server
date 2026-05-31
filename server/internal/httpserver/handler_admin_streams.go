@@ -20,6 +20,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -119,23 +120,38 @@ func (s *Server) buildStreamsData(r *http.Request) adminStreamsData {
 		data.FlashType = "red"
 		return data
 	}
-	// Stats are a soft signal. If /stream/stats is unreachable
-	// (backend restart, network blip), the list still renders;
-	// the Consumers column just reads zero everywhere instead
-	// of crashing the page. Same fall-back applies on the edit
-	// path - the row mapper does not depend on stats either.
-	stats, statsErr := s.streams.Stats(r.Context())
-	if statsErr != nil {
-		s.log.Warn("admin streams stats", "err", statsErr)
-	}
+	// Per-profile consumer counts come from the live /stream/stats
+	// document (s.streamStats), NOT from the StreamBackend's
+	// List/Consumers - the in-process wrapper's Consumers is the coarse
+	// per-camera-hub count, which is the same for profiles sharing a
+	// camera (the S17-13 "2 everywhere" bug). /stream/stats reports the
+	// true per-profile number. Soft signal: if it is unreachable the
+	// list still renders with consumers at zero (no crash).
+	stats := s.fetchStreamStats(r.Context())
 	for _, p := range profiles {
 		row := profileToRow(p)
-		if st, ok := stats[p.Name]; ok {
+		if st, ok := stats.Profiles[p.Name]; ok {
 			row.Consumers = st.Clients
 		}
 		data.Profiles = append(data.Profiles, row)
 	}
 	return data
+}
+
+// fetchStreamStats returns the live GET /stream/stats snapshot, or a
+// zero snapshot (logged) when the stats source is unconfigured or
+// unreachable. The admin streams views degrade gracefully - zero
+// consumers, no crash - rather than failing the page.
+func (s *Server) fetchStreamStats(ctx context.Context) streams.StreamStats {
+	if s.streamStats == nil {
+		return streams.StreamStats{}
+	}
+	snap, err := s.streamStats.FullStats(ctx)
+	if err != nil {
+		s.log.Warn("admin streams stats", "err", err)
+		return streams.StreamStats{}
+	}
+	return snap
 }
 
 // profileToRow flattens a streams.Profile to the row the list +
