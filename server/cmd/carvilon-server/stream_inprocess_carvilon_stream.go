@@ -53,6 +53,13 @@ func init() {
 			BaseURL:     cfg.StreamBackendURL,
 			FFmpegPath:  cfg.StreamFFmpegPath,
 			EnableMJPEG: cfg.StreamEnableMJPEG,
+			// EnableStats flips on the stream-server's per-client
+			// throughput tracker so /stream/stats reports real numbers
+			// (ESP-diagnostics). Stats is left nil on purpose: with
+			// EnableStats true + Stats nil, SetupEdgeInProcess builds the
+			// registry internally - carvilon cannot import the internal
+			// stats package, so it must not set Stats itself.
+			EnableStats: true,
 		}
 		// Typed Encryption without importing the internal profile
 		// package: an untyped string constant is assignable to the named
