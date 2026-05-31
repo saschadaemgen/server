@@ -211,18 +211,33 @@ func (c *Client) ListCameras(_ context.Context) ([]Camera, error) {
 // Callers should treat a non-nil error as "stats unavailable" -
 // the admin list keeps rendering with consumer counts at zero.
 func (c *Client) Stats(ctx context.Context) (map[string]ProfileStats, error) {
-	body, err := c.do(ctx, http.MethodGet, "/stream/stats", nil)
+	snap, err := c.FullStats(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return snap.Profiles, nil
+}
+
+// FullStats fetches the COMPLETE GET /stream/stats document: the
+// global aggregate, the per-profile map, and the flat per-client list
+// (streams.StreamStats, mirroring the stream-server's stats.Snapshot).
+// It is the single data source for the admin streams dashboard - global
+// band, per-profile rows, and per-client detail all read from one
+// fetch. Unknown fields the stream-server adds are ignored (read
+// surface; no DisallowUnknownFields). A non-nil error means stats are
+// unavailable; the dashboard then renders profiles at zero consumers
+// rather than failing.
+func (c *Client) FullStats(ctx context.Context) (StreamStats, error) {
+	body, err := c.do(ctx, http.MethodGet, "/stream/stats", nil)
+	if err != nil {
+		return StreamStats{}, err
+	}
 	defer body.Close()
-	var envelope struct {
-		Profiles map[string]ProfileStats `json:"profiles"`
+	var snap StreamStats
+	if err := json.NewDecoder(body).Decode(&snap); err != nil {
+		return StreamStats{}, fmt.Errorf("streams: decode stats: %w", err)
 	}
-	if err := json.NewDecoder(body).Decode(&envelope); err != nil {
-		return nil, fmt.Errorf("streams: decode stats: %w", err)
-	}
-	return envelope.Profiles, nil
+	return snap, nil
 }
 
 // do issues a request to <baseURL><path> and returns the response

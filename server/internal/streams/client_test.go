@@ -337,6 +337,53 @@ func TestStatsPropagatesBackendError(t *testing.T) {
 	}
 }
 
+// FullStats decodes the whole /stream/stats document: the global
+// aggregate, the per-profile map AND the flat per-client list - the
+// data the dashboard needs across all three tiers.
+func TestFullStatsDecodesGlobalProfilesClients(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"generated_at": "2026-05-31T10:00:00Z",
+			"global": { "clients": 3, "frames_sent_total": 10675, "bytes_sent_total": 463182971 },
+			"profiles": {
+				"intercom_web": { "profile":"intercom_web", "codec":"h264_passthrough", "clients":1, "frames_sent":5438, "frames_dropped":0, "bytes_sent":135867555, "avg_fps":30.04, "source_fps":30.03, "avg_bitrate_kbps":6004 },
+				"mjpeg_bal":    { "profile":"mjpeg_bal", "codec":"mjpeg", "clients":2, "frames_sent":5237, "frames_dropped":0, "bytes_sent":327315416, "avg_fps":11.76, "source_fps":30.03, "avg_bitrate_kbps":5878 }
+			},
+			"clients": [
+				{ "id":1, "profile":"intercom_web", "codec":"h264_passthrough", "remote_addr":"127.0.0.1:55658", "uptime_sec":181, "frames_sent":5438, "bytes_sent":135867555, "avg_fps":30.04, "avg_bitrate_kbps":6004 },
+				{ "id":2, "profile":"mjpeg_bal", "codec":"mjpeg", "remote_addr":"192.168.1.28:58949", "uptime_sec":253, "frames_sent":2900, "bytes_sent":183616873, "avg_fps":11.58, "avg_bitrate_kbps":5793 }
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New(srv.URL)
+	snap, err := c.FullStats(context.Background())
+	if err != nil {
+		t.Fatalf("FullStats: %v", err)
+	}
+	if snap.Global.Clients != 3 || snap.Global.FramesSentTotal != 10675 || snap.Global.BytesSentTotal != 463182971 {
+		t.Errorf("global = %+v", snap.Global)
+	}
+	if len(snap.Profiles) != 2 {
+		t.Fatalf("want 2 profiles, got %d", len(snap.Profiles))
+	}
+	mb := snap.Profiles["mjpeg_bal"]
+	if mb.Clients != 2 || mb.Codec != "mjpeg" || mb.BytesSent != 327315416 {
+		t.Errorf("mjpeg_bal = %+v", mb)
+	}
+	if snap.Profiles["intercom_web"].Clients != 1 {
+		t.Errorf("intercom_web clients = %d, want 1", snap.Profiles["intercom_web"].Clients)
+	}
+	if len(snap.Clients) != 2 {
+		t.Fatalf("want 2 clients, got %d", len(snap.Clients))
+	}
+	if snap.Clients[1].RemoteAddr != "192.168.1.28:58949" || snap.Clients[1].Profile != "mjpeg_bal" {
+		t.Errorf("client[1] = %+v", snap.Clients[1])
+	}
+}
+
 // The transitional client has no Protect connection of its own;
 // ListCameras returns an empty slice so the admin UI's
 // camera-dropdown can render an "Quelle waehlbar ab

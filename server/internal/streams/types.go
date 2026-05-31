@@ -59,21 +59,66 @@ type Profile struct {
 	Encryption    string `json:"encryption"`
 }
 
-// ProfileStats is one row from GET /stream/stats, keyed by
-// profile name. The stream-server emits more fields than this
-// struct decodes (global summary, transcoder CPU, ...); the JSON
-// decoder ignores anything that does not appear here, which is
-// the read-side intent (no DisallowUnknownFields on stats - the
-// stream-chat is free to add new fields without breaking us).
+// ProfileStats is one per-profile row from GET /stream/stats, keyed by
+// profile name. It mirrors the stream-server's stats.ProfileSnapshot
+// field-for-field (JSON tags identical). Clients is the live consumer
+// count pulling THIS profile (the per-profile number the admin column
+// shows). SourceFrames / SourceFPS are how many upstream access units
+// reached the encoder and at what rate - the gap to AvgFPS localises
+// frame loss (camera vs encoder vs wire).
 //
-// Clients is the live count of consumers pulling the profile.
-// AvgFPS / SourceFPS / AvgBitrateKbps are decorative for now;
-// the admin UI may render them later without another schema
-// update.
+// The JSON decoder ignores any field the stream-server adds beyond
+// this struct (no DisallowUnknownFields on the read side).
 type ProfileStats struct {
 	Profile        string  `json:"profile"`
+	Codec          string  `json:"codec"`
 	Clients        int     `json:"clients"`
+	FramesSent     int64   `json:"frames_sent"`
+	FramesDropped  int64   `json:"frames_dropped"`
+	BytesSent      int64   `json:"bytes_sent"`
 	AvgFPS         float64 `json:"avg_fps"`
-	SourceFPS      float64 `json:"source_fps"`
 	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+	SourceFrames   int64   `json:"source_frames"`
+	SourceFPS      float64 `json:"source_fps"`
+}
+
+// GlobalStats is the server-wide aggregate from GET /stream/stats
+// (stats.GlobalSnapshot). TranscoderCPUPercent is present only when the
+// stream-server has a CPU sampler wired.
+type GlobalStats struct {
+	Clients              int     `json:"clients"`
+	FramesSentTotal      int64   `json:"frames_sent_total"`
+	BytesSentTotal       int64   `json:"bytes_sent_total"`
+	TranscoderCPUPercent float64 `json:"transcoder_cpu_percent"`
+}
+
+// ClientStats is one connected consumer from GET /stream/stats
+// (stats.ClientSnapshot). Times are RFC3339 strings. RemoteAddr drives
+// the admin device-type heuristic (ESP / Browser / Loopback).
+type ClientStats struct {
+	ID             uint64  `json:"id"`
+	Profile        string  `json:"profile"`
+	Codec          string  `json:"codec"`
+	RemoteAddr     string  `json:"remote_addr"`
+	ConnectedAt    string  `json:"connected_at"`
+	UptimeSec      float64 `json:"uptime_sec"`
+	FramesSent     int64   `json:"frames_sent"`
+	FramesDropped  int64   `json:"frames_dropped"`
+	BytesSent      int64   `json:"bytes_sent"`
+	AvgFPS         float64 `json:"avg_fps"`
+	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
+	LastFrameAt    string  `json:"last_frame_at"`
+}
+
+// StreamStats is the full GET /stream/stats document
+// (stats.Snapshot): the global aggregate, the per-profile map (active
+// profiles only), and the flat per-client list. It is the data source
+// for the admin streams dashboard (global band, per-profile rows,
+// per-client detail). A profile absent from Profiles has zero
+// consumers and is idle.
+type StreamStats struct {
+	GeneratedAt string                  `json:"generated_at"`
+	Global      GlobalStats             `json:"global"`
+	Profiles    map[string]ProfileStats `json:"profiles"`
+	Clients     []ClientStats           `json:"clients"`
 }
