@@ -143,11 +143,37 @@ func TestBuildFFmpegArgs_NoCodecLowDelay(t *testing.T) {
 	if strings.Contains(joined, "+low_delay") {
 		t.Errorf("`-flags +low_delay` must NOT be present: S2-16 measured it disables multi-core decode threading and breaks realtime decode of the 1200x1600 source. args=%v", args)
 	}
-	// PTS = arrival wallclock (S6-04) still applied before the input.
-	iWall := strings.Index(joined, "-use_wallclock_as_timestamps 1")
+}
+
+// TestBuildFFmpegArgs_NoWallclockEvenRate is the S3-01 canary (it inverts
+// the S6-04 wallclock expectation, analogous to NoCodecLowDelay above).
+//
+// S6-04 used `-use_wallclock_as_timestamps 1` assuming the camera ran
+// ~15-17 fps. S3-01 measured a constant 30 fps and found wallclock turned
+// the bursty pipe-arrival times into clumpy PTS, so the fps filter emitted
+// clumps that overran the encoder input queue at 15-25 fps (12 was the
+// prior ceiling). `-r 30` before `-i` gives an even 1/30 PTS base instead;
+// `-threads 4` lets the 1200x1600 decode use all cores. Fails LOUDLY if
+// wallclock returns or the rate/threads args go missing. See D-0003.
+func TestBuildFFmpegArgs_NoWallclockEvenRate(t *testing.T) {
+	args := buildFFmpegArgs(EncodeSpec{Width: 800, Height: 1280, FPS: 20, Quality: 6})
+	joined := strings.Join(args, " ")
 	iInput := strings.Index(joined, "-i pipe:0")
-	if iWall < 0 || iInput < 0 || iWall > iInput {
-		t.Errorf("-use_wallclock_as_timestamps 1 must precede -i pipe:0; args=%v", args)
+	if iInput < 0 {
+		t.Fatalf("no -i pipe:0 in args=%v", args)
+	}
+
+	// Removed in S3-01: arrival-wallclock PTS caused bursty sampling.
+	if strings.Contains(joined, "-use_wallclock_as_timestamps") {
+		t.Errorf("`-use_wallclock_as_timestamps` must NOT be present: S3-01 replaced it with -r 30 (even sampling). args=%v", args)
+	}
+	// -r 30 present and BEFORE -i (applies to the raw H.264 demuxer).
+	if iRate := strings.Index(joined, "-r 30"); iRate < 0 || iRate > iInput {
+		t.Errorf("`-r 30` must be present and precede -i pipe:0; args=%v", args)
+	}
+	// -threads 4 present and BEFORE -i (decode-side threading).
+	if iThreads := strings.Index(joined, "-threads 4"); iThreads < 0 || iThreads > iInput {
+		t.Errorf("`-threads 4` must be present and precede -i pipe:0; args=%v", args)
 	}
 }
 

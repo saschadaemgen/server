@@ -61,7 +61,8 @@ func TestEncodeSpec_OutputArgs_Order(t *testing.T) {
 
 	want := []string{
 		"-an",
-		"-vf", "fps=9,scale=800:1280",
+		// S3-01: fast_bilinear scaler appended to the scale filter.
+		"-vf", "fps=9,scale=800:1280:flags=fast_bilinear",
 		"-c:v", "mjpeg",
 		"-q:v", "6",
 		// S6-06: -flags +bitexact MUST follow the codec selection
@@ -97,6 +98,10 @@ func TestEncodeSpec_OutputArgs_FpsFilterFirst(t *testing.T) {
 	want := "-vf fps=12,scale=800:1280"
 	if !strings.Contains(joined, want) {
 		t.Errorf("missing %q in args (filter order matters; fps must precede scale).\nargs=%v", want, args)
+	}
+	// S3-01: the scale filter uses the cheap fast_bilinear scaler.
+	if !strings.Contains(joined, "scale=800:1280:flags=fast_bilinear") {
+		t.Errorf("missing fast_bilinear scaler flag (S3-01); args=%v", args)
 	}
 	// And: no bare `-r` arg at output (S6-13: removed).
 	for i, a := range args {

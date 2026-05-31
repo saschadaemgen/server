@@ -180,20 +180,23 @@ func (e *Encoder) Start() error {
 // buildFFmpegArgs constructs the full ffmpeg command line: static input
 // args (raw H.264 from stdin) + spec-driven output args + pipe:1 sink.
 //
-// S6-04 fix — `-use_wallclock_as_timestamps 1`:
+// S6-04 / S3-01 - input rate: `-r 30` (NOT -use_wallclock_as_timestamps):
 //
 // The `-f h264` demuxer has NO timestamps in the bitstream (raw
-// Annex-B), so without help ffmpeg synthesises PTS at a default
-// 25 fps. If the actual camera delivers fewer frames per wallclock-
-// second (UniFi Protect High often runs at ~15-17 fps), output -r N
-// at the encoder ends up as "N frames per PTS-second" — but PTS-
-// seconds tick faster than wallclock when input is below 25 fps,
-// so the wallclock output rate drops below N. Live-measured
-// regression: mjpeg_bal configured 12 fps came out at ~8 fps.
+// Annex-B). S6-04 used `-use_wallclock_as_timestamps 1` to stamp each
+// frame with its pipe arrival time, on the (wrong) assumption that the
+// camera ran ~15-17 fps. S3-01 measured the truth: the camera delivers
+// a constant 30 fps (UniFi UI + ffprobe on a live dump, 1200x1600 high
+// tier). Wallclock was the wrong medicine - the H.264 arrives bursty
+// (large keyframes, GOP ~105), so arrival-time PTS were clumpy and the
+// fps filter emitted frames in clumps. At 12 fps the heavy decimation
+// hid it; at 15/20 fps the clumps overran the encoder input queue ->
+// lost P-frames -> ~5 s GOP smear, despite only ~7% CPU.
 //
-// `-use_wallclock_as_timestamps 1` tells the demuxer to use the
-// arrival wallclock as PTS instead, so PTS-time tracks reality 1:1
-// and -r at output reflects true wallclock fps.
+// `-r 30` before `-i` hands ffmpeg an even 1/30 PTS base for the raw
+// stream, so the fps filter samples evenly (verified: exactly 342
+// frames for fps=20 over 17 s). `-threads 4` lets the 1200x1600 decode
+// use all RPi4 cores. See docs/stream-server-decisions.md D-0003.
 //
 // S6-07 / S2-16 - why `-flags +low_delay` is deliberately NOT set:
 //
@@ -217,8 +220,13 @@ func buildFFmpegArgs(s EncodeSpec) []string {
 		"-nostats",
 		// S6-04: format-level demuxer "don't buffer".
 		"-fflags", "+nobuffer",
-		// S6-04: PTS = arrival wallclock - see the doc comment above.
-		"-use_wallclock_as_timestamps", "1",
+		// S3-01: give ffmpeg the TRUE source rate (constant 30 fps) instead
+		// of wallclock PTS - the raw stream gets an even 1/30 PTS base, so
+		// the fps filter samples evenly (no bursty overflow at 15-25 fps).
+		// See the doc comment above and D-0003.
+		"-r", "30",
+		// S3-01: decode the 1200x1600 High Profile source on all RPi4 cores.
+		"-threads", "4",
 		// Input: raw H.264 Annex-B on stdin.
 		"-f", "h264",
 		"-i", "pipe:0",

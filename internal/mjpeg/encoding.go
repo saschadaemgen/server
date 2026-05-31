@@ -81,10 +81,11 @@ func (s EncodeSpec) Validate() error {
 // Putting `fps=N` first in the FILTER GRAPH solves both halves:
 //
 //   - The fps filter explicitly samples input frames evenly based on
-//     PTS (which `-use_wallclock_as_timestamps 1` from S6-04
-//     anchors to real wall-clock). 30 → 12 fps becomes deterministic
-//     "pick the frame nearest each 1/12 s boundary" instead of
-//     "whichever frame happened to fit in the input channel".
+//     PTS (which `-r 30` from S3-01 anchors to an even 1/30 base;
+//     S6-04's `-use_wallclock_as_timestamps` was the wrong medicine
+//     and was removed). 30 -> target fps becomes deterministic "pick
+//     the frame nearest each boundary" instead of "whichever frame
+//     happened to fit in the input channel".
 //   - ffmpeg consumes stdin at line speed (the filter graph runs as
 //     fast as input arrives); no more stdin-pipe backpressure, no
 //     more "encoder input channel full" drops.
@@ -94,13 +95,25 @@ func (s EncodeSpec) Validate() error {
 //
 // `-r N` at output is intentionally REMOVED — it was redundant with
 // the fps filter and the cause of the input throttling. Container
-// rate is inferred from the filter graph output.
+// rate is inferred from the filter graph output. (S3-01 adds `-r 30`
+// on the INPUT side in encoder.go; the output still has no -r.)
+//
+// S3-01 — `scale=…:flags=fast_bilinear`:
+//
+// Downscaling the 1200x1600 source to the profile size with the
+// default (bicubic) scaler was the real throughput bottleneck (CPU was
+// never the limit at ~7%, but the scaler starved the pipeline).
+// fast_bilinear is visually indistinguishable for a downscale yet far
+// cheaper - measured on the RPi4: fps=20 went 1.23x -> 2.61x, fps=25
+// runs at 2.42x. This is what makes 20-25 fps viable; 12 was the prior
+// ceiling. See docs/stream-server-decisions.md D-0003.
 func (s EncodeSpec) OutputArgs() []string {
 	return []string{
 		"-an", // no audio
 		// S6-13: fps first (drops evenly), then scale (now runs at
-		// target rate). See doc comment above.
-		"-vf", fmt.Sprintf("fps=%d,scale=%d:%d", s.FPS, s.Width, s.Height),
+		// target rate). S3-01: fast_bilinear scaler (cheap downscale).
+		// See doc comment above.
+		"-vf", fmt.Sprintf("fps=%d,scale=%d:%d:flags=fast_bilinear", s.FPS, s.Width, s.Height),
 		"-c:v", "mjpeg",
 		"-q:v", strconv.Itoa(s.Quality),
 		// S6-06: suppress the libavcodec COM marker that the ESP-P4

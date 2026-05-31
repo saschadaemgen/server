@@ -16,6 +16,61 @@ says so explicitly and the other doc is corrected to point here.
 
 ---
 
+## D-0003 (S3-01, 31 May 2026): even 30 fps input rate + decode threading + fast_bilinear scaler
+
+**Decision:** Three changes to the MJPEG encode path (`internal/mjpeg`), all
+measured on the RPi4 against the live 1200x1600 High Profile source:
+
+- Replace `-use_wallclock_as_timestamps 1` with **`-r 30` before `-i`** (an
+  even 1/30 PTS base for the raw H.264 demuxer).
+- Add **`-threads 4`** before `-i` (decode-side, all RPi4 cores).
+- Append **`flags=fast_bilinear`** to the scale filter
+  (`-vf fps=N,scale=W:H:flags=fast_bilinear`).
+
+**This corrects architecture.md Section 6, rule 4 (S6-04).** That rule
+mandated `-use_wallclock_as_timestamps 1` "for honest PTS"; it rested on a
+wrong measurement (camera ~15-17 fps) and now points here.
+
+**Context / symptom:** After the low_delay fix (D-0002) MJPEG was stable at 12
+fps but would not scale up - raising mjpeg_bal to 15/20/25 fps brought back
+stutter and GOP smear even though ffmpeg CPU sat at ~7%. CPU was clearly not
+the limit, so something upstream was starving the pipeline.
+
+**Root cause (measured, proven):**
+- The camera does NOT run ~15-17 fps; it delivers a **constant 30 fps** (UniFi
+  UI + ffprobe on a live dump). S6-04's wallclock PTS stamped each frame with
+  its pipe-arrival time, but raw H.264 arrives bursty (large keyframes, GOP
+  ~105), so arrival-time PTS were clumpy and the `fps` filter emitted frames
+  in clumps. At 12 fps the heavy decimation hid it; at 15-25 fps the clumps
+  overran the encoder input queue -> lost P-frames -> ~5 s GOP smear. `-r 30`
+  hands ffmpeg the true even rate, so the `fps` filter samples evenly
+  (verified: exactly 342 frames for fps=20 over 17 s).
+- The **default (bicubic) scaler** doing the 1200x1600 -> profile downscale
+  was the actual throughput bottleneck. `fast_bilinear` is visually
+  indistinguishable for a downscale yet far cheaper: fps=20 went **1.23x ->
+  2.61x**, fps=25 runs at 2.42x. This is what makes 20-25 fps viable; 12 was
+  the prior ceiling.
+- `-threads 4` lets the 1200x1600 decode use all four RPi4 cores explicitly.
+
+**Rejected / not the cause:** enlarging buffers (regresses latency - rule 3 /
+D-0001); blaming CPU (~7%, never the limit); keeping wallclock and adding `-r`
+at the OUTPUT (output `-r` is the S6-13 throttling footgun - the rate fix
+belongs on the INPUT side only).
+
+**Consequence:** ESP live went ~11 -> ~13 fps with `frames_dropped 0` at the
+server, ffmpeg ~8% CPU, no more pixelation/smear on motion. WebRTC is
+untouched (H.264 passthrough, no ffmpeg decode). The S6-04 expectation is
+inverted into the `NoWallclockEvenRate` test canary, which fails if wallclock
+returns or if `-r 30` / `-threads 4` go missing; the OutputArgs test asserts
+`fast_bilinear`.
+
+**Lesson:** when CPU is low but a transcode still can't keep up, the
+bottleneck is a pipeline stage starving the rest (here the scaler), not raw
+compute. And measure the source rate before designing around it - wallclock
+PTS is the wrong tool for a bursty constant-rate stream.
+
+---
+
 ## D-0002 (S2-16, 31 May 2026): `-flags +low_delay` is a THROUGHPUT footgun, removed
 
 **Decision:** Removed `-flags +low_delay` from the ffmpeg decode args in both
@@ -114,5 +169,5 @@ not by a rising source_fps.
 
 ---
 
-*Living document. Newest entry on top. Last: 2026-05-31 (Stream season 2,
-low_delay throughput finding).*
+*Living document. Newest entry on top. Last: 2026-05-31 (Stream season 3,
+S3-01: even-rate input + fast_bilinear throughput, D-0003).*

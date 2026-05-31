@@ -99,9 +99,11 @@ encryption field is display-only since S6-14.
 
 ```
 1. fps reduction (source_fps > target_fps) MUST be an even input sample:
-   -vf fps=N,scale=W:H (fps BEFORE scale). Never -r N at the output - that
-   only throttles the container clock and causes bursty channel-full drops
-   (= streaks on the ESP). (S6-13)
+   -vf fps=N,scale=W:H:flags=fast_bilinear (fps BEFORE scale). Never -r N at
+   the OUTPUT - that only throttles the container clock and causes bursty
+   channel-full drops (= streaks on the ESP). (S6-13; S3-01 added the
+   fast_bilinear scaler - the default bicubic downscale of the 1200x1600
+   source was the real throughput bottleneck, see D-0003)
 2. -flags +bitexact to kill the ffmpeg COM marker (the P4 HW decoder fails on
    it). Note: -flags (codec) != -fflags (format). (S6-06)
 3. -fflags +nobuffer + small channels (cap=2) for latency. Do NOT enlarge
@@ -111,8 +113,13 @@ encryption field is display-only since S6-14.
    encoder-input backup -> P-frame loss -> stutter at GOP 105). See
    stream-server-decisions.md D-0002. Do NOT reintroduce it; the
    NoCodecLowDelay test canary guards this.
-4. -use_wallclock_as_timestamps 1 at the input (honest PTS; the fps filter
-   needs it). (S6-04)
+   NOTE (S3-01): -threads 4 before -i makes the all-core decode of the
+   1200x1600 source explicit. (D-0003)
+4. -r 30 before -i: hand ffmpeg the camera's true constant 30 fps as an even
+   1/30 PTS base, so the fps filter samples evenly. Replaced
+   -use_wallclock_as_timestamps 1 (S6-04), whose arrival-time PTS were clumpy
+   on the bursty raw H.264 and overran the encoder queue above 12 fps.
+   (S3-01, D-0003)
 5. Encoder spec is frozen at ffmpeg spawn. A profile change needs a fresh
    encode: compare spec on subscribe, retire+restart on mismatch. (S6-10)
 ```
@@ -154,5 +161,6 @@ transcoder_cpu_percent (/proc).
 
 ---
 
-*Living document. Last: 2026-05-31 (end of Stream season 2). See
-stream-server-decisions.md for the low_delay throughput finding (D-0002).*
+*Living document. Last: 2026-05-31 (Stream season 3, S3-01). See
+stream-server-decisions.md for the encode-throughput findings (D-0002
+low_delay, D-0003 even-rate input + fast_bilinear scaler).*

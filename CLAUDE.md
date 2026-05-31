@@ -145,14 +145,21 @@ streaming-server/
 ```
 internal/mjpeg:   ffmpeg subprocess, byte-exact multipart/x-mixed-replace.
    ffmpeg args (hard-won):
-     -use_wallclock_as_timestamps 1   (input timing, S6-04)
+     -r 30                            (INPUT rate: camera's true constant
+                                       30 fps = even 1/30 PTS base; replaced
+                                       -use_wallclock_as_timestamps in S3-01,
+                                       whose bursty arrival PTS clumped, D-0003)
+     -threads 4                       (all-core decode of 1200x1600, S3-01)
      -flags +bitexact                 (kill COM marker, ESP HW decoder, S6-06)
      -fflags +nobuffer                (format-level low-delay, S6-04)
      (NO -flags +low_delay: REMOVED S2-16/D-0002 - the codec-level flag
       disabled multi-core decode threading and starved the 1200x1600
       decode; HW v4l2m2m decode was measured even slower)
-     -vf fps=N,scale=W:H              (even input sampling, S6-13 - fps BEFORE
-                                       scale; never -r N at output)
+     -vf fps=N,scale=W:H:flags=fast_bilinear
+                                      (even input sampling, S6-13 - fps BEFORE
+                                       scale; never -r N at OUTPUT. S3-01:
+                                       fast_bilinear, the default bicubic
+                                       downscale was the real bottleneck, D-0003)
 internal/h264esp: H.264-CBP transcode (/stream/h264), same fps-filter rule.
 internal/webrtc (in cmd/streaming-server): pion h264 passthrough, NO ffmpeg.
 ```
