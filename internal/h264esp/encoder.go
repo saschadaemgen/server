@@ -168,12 +168,10 @@ func buildFFmpegArgs(s EncodeSpec) []string {
 		"-nostats",
 		// S6-04: format-level demuxer "don't buffer".
 		"-fflags", "+nobuffer",
-		// S6-07: codec-level decoder "low-delay mode". See
-		// internal/mjpeg/encoder.go for the go2rtc-comparison rationale;
-		// same camera, same fix.
-		"-flags", "+low_delay",
-		// S6-04: PTS = arrival wallclock — see internal/mjpeg/encoder.go
-		// for the long-form reasoning. Same camera, same fix.
+		// S2-16: `-flags +low_delay` deliberately NOT set - it disables
+		// ffmpeg's multi-core frame threading, which the 1200x1600 source
+		// needs to decode in realtime. See internal/mjpeg/encoder.go for
+		// the measured rationale; same camera, same decision.
 		"-use_wallclock_as_timestamps", "1",
 		// Input: raw H.264 Annex-B on stdin.
 		"-f", "h264",

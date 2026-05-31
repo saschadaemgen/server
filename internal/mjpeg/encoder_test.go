@@ -116,34 +116,38 @@ func TestNewEncoder_DefaultLabel(t *testing.T) {
 	}
 }
 
-// TestBuildFFmpegArgs_HasLowDelayFlags is the S6-07 latency-floor
-// canary. The MJPEG endpoint had ~2 s of perceived latency vs.
-// go2rtc's reference; the diagnosis (S6-07 briefing) pinpointed
-// missing `-flags +low_delay` at the codec/decoder level. go2rtc
-// applies BOTH `-fflags nobuffer` (format) AND `-flags low_delay`
-// (codec) on every RTSP/HTTP input — we now do the same.
+// TestBuildFFmpegArgs_NoCodecLowDelay is the S2-16 throughput canary
+// (it replaces the S6-07 latency canary that asserted the opposite).
 //
-// If anyone drops one of these flags while "tidying" the args,
-// latency regresses immediately. The test fails LOUDLY with a
-// briefing-anchored message before that lands.
-func TestBuildFFmpegArgs_HasLowDelayFlags(t *testing.T) {
+// S6-07 once added `-flags +low_delay` (codec-level) to trim a couple
+// of frames of decode latency. S2-16 measured on the RPi4 that this
+// flag ALSO disables ffmpeg's multi-core frame threading, forcing
+// single-threaded H.264 decode. With the 1200x1600 High Profile source
+// that meant decode could no longer keep up with the source rate
+// (~1.3x vs ~2x realtime without it); the encoder input backed up, and
+// at GOP ~105 each lost P-frame smeared the image for up to ~5 s.
+//
+// This test fails LOUDLY if anyone reintroduces `-flags +low_delay`
+// while "tidying" the args - it would re-throttle the decode. The
+// format-level `-fflags +nobuffer` (S6-04) is the one we KEEP; it does
+// not gate threading.
+func TestBuildFFmpegArgs_NoCodecLowDelay(t *testing.T) {
 	args := buildFFmpegArgs(EncodeSpec{Width: 800, Height: 1280, FPS: 12, Quality: 6})
 	joined := strings.Join(args, " ")
 
-	// Format-level (demuxer "don't buffer").
+	// Kept: format-level demuxer "don't buffer" (does not gate threading).
 	if !strings.Contains(joined, "-fflags +nobuffer") {
-		t.Errorf("missing -fflags +nobuffer (format-level low-delay); args=%v", args)
+		t.Errorf("missing -fflags +nobuffer (format-level, S6-04); args=%v", args)
 	}
-	// Codec-level (decoder low-delay mode).
-	if !strings.Contains(joined, "-flags +low_delay") {
-		t.Errorf("missing -flags +low_delay (codec-level low-delay); the ~2s MJPEG lag was traced to this in S6-07. args=%v", args)
+	// Removed in S2-16: codec-level low_delay throttles multi-core decode.
+	if strings.Contains(joined, "+low_delay") {
+		t.Errorf("`-flags +low_delay` must NOT be present: S2-16 measured it disables multi-core decode threading and breaks realtime decode of the 1200x1600 source. args=%v", args)
 	}
-	// Both flags must appear BEFORE the -i pipe:0 input, otherwise
-	// they apply to the wrong context.
-	iLowDelay := strings.Index(joined, "-flags +low_delay")
+	// PTS = arrival wallclock (S6-04) still applied before the input.
+	iWall := strings.Index(joined, "-use_wallclock_as_timestamps 1")
 	iInput := strings.Index(joined, "-i pipe:0")
-	if iLowDelay < 0 || iInput < 0 || iLowDelay > iInput {
-		t.Errorf("-flags +low_delay must precede -i pipe:0; args=%v", args)
+	if iWall < 0 || iInput < 0 || iWall > iInput {
+		t.Errorf("-use_wallclock_as_timestamps 1 must precede -i pipe:0; args=%v", args)
 	}
 }
 

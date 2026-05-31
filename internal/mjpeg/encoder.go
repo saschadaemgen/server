@@ -195,16 +195,21 @@ func (e *Encoder) Start() error {
 // arrival wallclock as PTS instead, so PTS-time tracks reality 1:1
 // and -r at output reflects true wallclock fps.
 //
-// S6-07 fix — `-flags +low_delay`:
+// S6-07 / S2-16 - why `-flags +low_delay` is deliberately NOT set:
 //
-// go2rtc applies BOTH `-fflags nobuffer` (format-level) AND
-// `-flags low_delay` (codec-level) on every RTSP input. The format
-// flag we already had (S6-04). The codec flag tells the H.264
-// DECODER not to wait for reorder-buffer fill before emitting
-// frames — even though our profiles are -bf 0 / no B-frames, the
-// default decoder still allocates a small reorder buffer which
-// adds 1-2 frames of latency per session. Same camera, same RTSP
-// stream, same depacketizer; we just match go2rtc here.
+// S6-07 once added `-flags +low_delay` (codec-level) to match go2rtc
+// and shave the decoder's 1-2 frame reorder buffer. S2-16 measured the
+// real cost on the RPi4: low_delay also disables ffmpeg's multi-core
+// frame threading, forcing single-threaded H.264 decode. Once the
+// camera source became 1200x1600 High Profile, single-threaded software
+// decode could no longer keep up with the source rate (~1.3x realtime
+// on a 30 s dump); the encoder input backed up, P-frames were lost, and
+// at GOP ~105 a single lost P-frame smeared the image for up to ~5 s.
+// Dropping the flag re-enables 4-core threading (~2x realtime on the
+// same dump, artifact-free) at the cost of a few frames of decode
+// latency. HW decode (h264_v4l2m2m) was measured even SLOWER than
+// threaded software on the RPi4, so it is not used either. `-fflags
+// +nobuffer` (format-level, S6-04) stays: it does not gate threading.
 func buildFFmpegArgs(s EncodeSpec) []string {
 	args := []string{
 		"-hide_banner",
@@ -212,9 +217,7 @@ func buildFFmpegArgs(s EncodeSpec) []string {
 		"-nostats",
 		// S6-04: format-level demuxer "don't buffer".
 		"-fflags", "+nobuffer",
-		// S6-07: codec-level decoder "low-delay mode".
-		"-flags", "+low_delay",
-		// S6-04: PTS = arrival wallclock — see the doc comment above.
+		// S6-04: PTS = arrival wallclock - see the doc comment above.
 		"-use_wallclock_as_timestamps", "1",
 		// Input: raw H.264 Annex-B on stdin.
 		"-f", "h264",
