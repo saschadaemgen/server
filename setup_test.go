@@ -2,14 +2,18 @@ package stream
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"carvilon.local/stream/internal/source"
 	"carvilon.local/stream/internal/sourcereg"
+	"carvilon.local/stream/internal/stats"
 )
 
 func edgeOpts(t *testing.T) EdgeSetupOptions {
@@ -90,6 +94,73 @@ func TestSetupEdgeInProcess_SharedRegistry(t *testing.T) {
 	}
 	got, _ := backend.Get(ctx, "intercom_web")
 	t.Fatalf("backend consumers = %d, want 1 (shared registry across the seam)", got.Consumers)
+}
+
+// --- S2-11: EnableStats ------------------------------------------------------
+
+// statsSnapshot drives a GET /stream/stats against the server and decodes
+// the JSON, asserting the endpoint is nil-safe (200 + valid body).
+func statsSnapshot(t *testing.T, srv *Server) stats.Snapshot {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	srv.handleStats(rr, httptest.NewRequest(http.MethodGet, "/stream/stats", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("/stream/stats status = %d, want 200", rr.Code)
+	}
+	var snap stats.Snapshot
+	if err := json.Unmarshal(rr.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode stats: %v; body=%s", err, rr.Body.String())
+	}
+	return snap
+}
+
+func TestSetupEdgeInProcess_EnableStatsBuildsRegistry(t *testing.T) {
+	opts := edgeOpts(t)
+	opts.EnableStats = true
+	srv, _, shutdown, err := SetupEdgeInProcess(opts)
+	if err != nil {
+		t.Fatalf("SetupEdgeInProcess: %v", err)
+	}
+	t.Cleanup(func() { _ = shutdown() })
+
+	if srv.stats == nil {
+		t.Fatal("EnableStats=true: server has nil stats registry")
+	}
+	// Endpoint works and reflects the live registry (empty but valid).
+	_ = statsSnapshot(t, srv)
+}
+
+func TestSetupEdgeInProcess_NoStatsByDefaultIsNilSafe(t *testing.T) {
+	srv, _, shutdown, err := SetupEdgeInProcess(edgeOpts(t)) // EnableStats false, no Stats
+	if err != nil {
+		t.Fatalf("SetupEdgeInProcess: %v", err)
+	}
+	t.Cleanup(func() { _ = shutdown() })
+
+	if srv.stats != nil {
+		t.Error("default (EnableStats=false, no Stats): want nil registry")
+	}
+	// /stream/stats must still answer 200 with an empty snapshot — no panic.
+	snap := statsSnapshot(t, srv)
+	if snap.Global.Clients != 0 {
+		t.Errorf("nil-stats snapshot clients = %d, want 0", snap.Global.Clients)
+	}
+}
+
+func TestSetupEdgeInProcess_ExplicitStatsWins(t *testing.T) {
+	reg := stats.New()
+	opts := edgeOpts(t)
+	opts.Stats = reg
+	opts.EnableStats = true // explicit Stats must still win over the bool
+	srv, _, shutdown, err := SetupEdgeInProcess(opts)
+	if err != nil {
+		t.Fatalf("SetupEdgeInProcess: %v", err)
+	}
+	t.Cleanup(func() { _ = shutdown() })
+
+	if srv.stats != reg {
+		t.Error("explicit Stats must take precedence over EnableStats")
+	}
 }
 
 func TestSetupEdgeInProcess_ShutdownIdempotent(t *testing.T) {

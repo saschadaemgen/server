@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"carvilon.local/stream/internal/proccpu"
 	"carvilon.local/stream/internal/profile"
@@ -44,7 +45,20 @@ type EdgeSetupOptions struct {
 	EnableMJPEG bool
 	// SubscriberBuffer - 0 means hub default.
 	SubscriberBuffer int
-	// Stats, CPU - optional, may be nil.
+
+	// EnableStats turns on the per-client throughput tracker that powers
+	// /stream/stats. The stats.Registry is built INTERNALLY here, because
+	// internal/stats is not importable from the embedding module
+	// (carvilon-edge) — so the caller flips a bool rather than passing a
+	// type. Set true to get src-fps / per-profile fps / drop counters in
+	// /stream/stats (and, while on, a periodic stats line on stdout) —
+	// needed to diagnose the in-process binary, which otherwise reports
+	// an empty snapshot. (S2-11)
+	EnableStats bool
+
+	// Stats, CPU - optional, may be nil. An explicitly supplied Stats
+	// takes precedence over EnableStats (lets cmd / tests inject their
+	// own registry); carvilon-edge just sets EnableStats: true.
 	Stats *stats.Registry
 	CPU   *proccpu.Sampler
 
@@ -55,6 +69,12 @@ type EdgeSetupOptions struct {
 	// unifi factory built from NVRHost/APIKey below.
 	sourceFactory sourcereg.Factory
 }
+
+// edgeStatsLogInterval is how often the in-process binary prints the
+// periodic "stats: ... src=Xfps fps=Y" line to stdout when stats are on
+// (S2-11). 10 s gives a tight-enough resolution to watch the src-fps
+// evolve during a diagnostic session without spamming the log.
+const edgeStatsLogInterval = 10 * time.Second
 
 // SetupEdgeInProcess builds the in-process streaming stack: one shared
 // source registry + profile registry feed BOTH a *Server (for
@@ -152,6 +172,21 @@ func SetupEdgeInProcess(opts EdgeSetupOptions) (*Server, *streambackend.Backend,
 		return nil, nil, nil, fmt.Errorf("stream: backend: %w", err)
 	}
 
+	// S2-11: stats registry for /stream/stats. internal/stats is not
+	// importable from carvilon-edge, so the caller flips EnableStats and
+	// we build it here. An explicit opts.Stats wins (cmd / tests). While
+	// stats are on, also drive the periodic stdout stats line so the
+	// in-process binary surfaces src-fps + drop counters in its log, not
+	// only via curl.
+	statsReg := opts.Stats
+	if statsReg == nil && opts.EnableStats {
+		statsReg = stats.New()
+	}
+	var statsLog time.Duration
+	if statsReg != nil {
+		statsLog = edgeStatsLogInterval
+	}
+
 	srv, err := NewServer(ServerOptions{
 		Profiles:         reg,    // SAME profile registry as the backend
 		Sources:          srcReg, // SAME source registry -> one camera pull
@@ -161,7 +196,8 @@ func SetupEdgeInProcess(opts EdgeSetupOptions) (*Server, *streambackend.Backend,
 		FFmpegPath:       opts.FFmpegPath,
 		EnableMJPEG:      opts.EnableMJPEG,
 		SubscriberBuffer: opts.SubscriberBuffer,
-		Stats:            opts.Stats,
+		Stats:            statsReg,
+		StatsLogInterval: statsLog,
 		CPU:              opts.CPU,
 		ProfileWriter:    backend, // PUT/DELETE /api/profiles via the backend
 	})
