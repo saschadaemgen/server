@@ -321,6 +321,10 @@ func (s *Server) routes() {
 	// ServeMux gives literals precedence over wildcards.
 	s.mux.Handle("GET /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsList)))
 	s.mux.Handle("GET /a/streams.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsListJSON)))
+	// Live dashboard poll. The literal stats.json segment takes
+	// precedence over GET /a/streams/{name} (edit form) in the Go 1.22
+	// mux, so it never collides with a profile named edit route.
+	s.mux.Handle("GET /a/streams/stats.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamsStatsJSON)))
 	s.mux.Handle("GET /a/streams/new", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamNew)))
 	s.mux.Handle("GET /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamEdit)))
 	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamCreate)))
