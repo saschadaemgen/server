@@ -7,7 +7,7 @@
 // deliberately shaped like a JWS ("payload.signature") so the later
 // swap to a real (asymmetric) JWT is a single local change confined to
 // Issue/Validate. The wire field (publish_token) and every caller stay
-// the same. Target shape: security.md 12.7 (VPS verifies with a public
+// the same. Target shape: carvilon-server-security.md 12.7 (VPS verifies with a public
 // key, signs nothing itself).
 package publishtoken
 

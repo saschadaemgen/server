@@ -4,7 +4,7 @@ package outgoing
 //
 // Saison 13-04.5-A reverse-engineered the body off a hardware UA
 // Intercom Viewer (4 captures, 14 May 2026); see
-// docs/wire-format.md "/call_admin_result body schema" for the
+// docs/carvilon-server-wire-format.md "/call_admin_result body schema" for the
 // full hex sample plus side effects. Saison 13-04.5-B uses this
 // encoder so the carvilon mieter "Ignorieren" / "Anruf beenden"
 // buttons can silence the intercom immediately instead of waiting

@@ -9,7 +9,7 @@ import (
 // saison13CallAdminResultGolden is the byte-perfect capture from
 // the hardware UA Intercom Viewer on 14 May 2026 09:56:29:
 // requestId="oqreV", intercom_mac="28704e31e29c". Lives in
-// docs/wire-format.md as the reference hex; copying it here as
+// docs/carvilon-server-wire-format.md as the reference hex; copying it here as
 // a Go-byte literal so the encoder cannot drift without the test
 // noticing.
 var saison13CallAdminResultGolden = []byte{
@@ -70,10 +70,10 @@ func TestCallAdminResultTopic_MatchesCaptureFormat(t *testing.T) {
 // fakePublisher captures the most recent Publish call so the
 // publisher behavior can be asserted without a real MQTT broker.
 type fakePublisher struct {
-	topic    string
-	payload  []byte
-	err      error
-	called   int
+	topic   string
+	payload []byte
+	err     error
+	called  int
 }
 
 func (f *fakePublisher) Publish(topic string, payload []byte) error {

@@ -22,9 +22,16 @@ Thumbs.db
 # Claude Code local config (deny-rules, permissions)
 .claude/
 
-# Lokale Grunddokumentation, NIE ins Repo (echte Anlagen-Daten)
+# Lokale Grunddokumentation, NIE ins Repo (echte Anlagen-Daten).
+# Die fuenf lebenden Docs (docs/carvilon-server-*.md) und die
+# Saison-Protokolle/Uebergaben/Index (seasons/) tragen echte
+# Anlagen-Topologie (LAN-IPs, MACs, UUIDs, VPS-IP) und bleiben
+# lokal. README.md + NOTICE.md sind generisch und werden getrackt.
+# CLAUDE.md liegt aus Tooling-Konvention im Root, ist aber ebenso
+# ausgeschlossen.
 CLAUDE.md
-docs/wire-format.md
+docs/
+seasons/
 
 # systemd EnvironmentFiles with real secrets (the *.env.example
 # templates are committed; the filled-in *.env are not).

@@ -3,7 +3,7 @@
 // /relay/unlock method in "intercom-call" mode (caller specifies
 // hub, intercom and bell). Method-specific dispatch follows the
 // saison-11 reverse-engineered wire format documented in
-// docs/wire-format.md.
+// docs/carvilon-server-wire-format.md.
 package outgoing
 
 import (
@@ -65,7 +65,7 @@ func (r *RelayPublisher) Unlock(hubMAC, intercomMAC, bellID string) (string, err
 // body (intercom-call mode) and publishes it via mqtt. Returns the
 // generated 5-char request id.
 //
-// Wire format: see docs/wire-format.md and the LHoFs goldmine in
+// Wire format: see docs/carvilon-server-wire-format.md and the LHoFs goldmine in
 // mock/internal/outgoing/testdata/. Body has no outer 0x12 wrapper
 // (live capture confirmed device-to-UDM requests follow the same
 // wrapper-free shape as UDM-to-device requests).
