@@ -77,3 +77,47 @@ miekg/dns as a transitive dependency.
 - Project: https://github.com/hashicorp/mdns
 - License: MIT
 - Transitive: github.com/miekg/dns (BSD 3-Clause)
+
+## github.com/coder/websocket
+
+WebSocket transport, two uses: the mock's UDM notification stage
+(migrated from nhooyr.io/websocket in Saison 15-06 after that
+project was archived) and the outbound edge/cloud mTLS side-channel
+(Saison 17). Pure Go, no transitive dependencies.
+
+- Project: https://github.com/coder/websocket
+- License: MIT
+
+## golang.org/x/oauth2
+
+Service-account token minting for Firebase Cloud Messaging (FCM)
+HTTP v1, used by the edge to send the doorbell push to the Android
+app (Saison 17). We call the official FCM HTTP v1 endpoint directly
+rather than pulling in the Firebase Admin SDK.
+
+- Project:    https://golang.org/x/oauth2
+- License:    BSD-3-Clause
+- Transitive: cloud.google.com/go/compute/metadata (Apache-2.0)
+
+## modernc.org/sqlite
+
+The platform database driver: a pure-Go SQLite (no CGO), so the
+server cross-compiles with `CGO_ENABLED=0`. Backs all platform
+state (viewers, sessions, door events, admin users, and so on).
+
+- Project:    https://modernc.org/sqlite
+- License:    BSD-3-Clause
+- Transitive: modernc.org/libc, modernc.org/mathutil,
+              modernc.org/memory (all BSD-3-Clause)
+
+## pion/* and bluenviron/* (commercial build only)
+
+The WebRTC and RTSP stacks (github.com/pion/webrtc and its
+sub-modules, github.com/bluenviron/gortsplib and mediacommon) are
+linked ONLY through the `carvilon_stream` build tag, which compiles
+the closed streaming-server in-process (Saison 17). The public
+build does not import them - verified with `go list -deps`.
+
+- pion/webrtc and sub-modules: MIT
+- bluenviron/gortsplib, bluenviron/mediacommon: MIT
+- Linked only in the commercial build; never in the public build.
