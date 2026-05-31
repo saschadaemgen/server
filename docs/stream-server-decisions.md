@@ -16,6 +16,38 @@ says so explicitly and the other doc is corrected to point here.
 
 ---
 
+## D-0004 (S3-01, 31 May 2026): source fps is light-dependent - MJPEG fps tracks it
+
+**Finding:** After S3-01 the MJPEG fps appeared to fall to ~9.7 in the evening
+(vs ~13 at the ESP in the daytime test). The S3-01 fix was suspected first -
+REFUTED by measurement. Cause: the UniFi Intercom in FPS-Auto mode genuinely
+delivers fewer frames in low light (longer exposure). Measured: source_fps ~15
+in the dark, ~20-30 in light; proven live by brightening the room - source_fps
+jumped immediately from 15 to 20.4 (one variable changed, result followed).
+
+**Proof it is the SOURCE, not the transcode:** the intercom_web stream
+(h264_passthrough, no ffmpeg) showed the same ~15 fps. If even the pure
+pass-through is throttled, the throttling comes from the camera, not the
+server. The running ffmpeg cmdline was correct (`-r 30 -threads 4` +
+fast_bilinear), so S3-01 is sound - the source simply delivered half as much.
+The UniFi UI still reads "FPS 30", which is the configured maximum, not the
+delivered rate. Vendor guides confirm Protect lowers the frame rate in low
+light in FPS-Auto mode (12-15 fps is the recommended night value for entry
+areas).
+
+**Consequence:** achievable MJPEG output fps is capped by the source fps. 20-25
+fps is a DAYLIGHT promise. For fixed fps at night, switch the camera in UniFi
+(Settings -> Video) from FPS-Auto to a fixed value - price: more motion blur /
+noise at night. This is a CAMERA setting, not a server concern; ffmpeg cannot
+manufacture frames the source never sends.
+
+**Lesson:** for "too few fps", check source_fps in /stream/stats FIRST and
+cross-check a passthrough profile (intercom_web) before suspecting the
+transcode. A passthrough and a transcode showing the same low rate localizes
+the cause to the source in a single step.
+
+---
+
 ## D-0003 (S3-01, 31 May 2026): even 30 fps input rate + decode threading + fast_bilinear scaler
 
 **Decision:** Three changes to the MJPEG encode path (`internal/mjpeg`), all

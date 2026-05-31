@@ -124,6 +124,14 @@ encryption field is display-only since S6-14.
    encode: compare spec on subscribe, retire+restart on mismatch. (S6-10)
 ```
 
+**Note (D-0004):** the achievable MJPEG output fps is capped by the SOURCE
+fps. The UniFi camera in FPS-Auto mode delivers fewer frames in low light
+(longer exposure), so output fps drops at night regardless of encoder
+settings. The UI's "FPS 30" is the configured maximum, not the delivered
+rate. Diagnose via source_fps in /stream/stats and cross-check a passthrough
+profile (e.g. intercom_web) before suspecting the transcode. See
+stream-server-decisions.md D-0004.
+
 ## 7. Stats model
 
 ```
