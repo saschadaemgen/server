@@ -117,7 +117,13 @@ func New(cfg Config) (*Client, error) {
 // the actual publish runs in a worker goroutine. If a session for
 // streamID already exists, the call is logged and ignored (no
 // double-publish).
-func (c *Client) StartPublish(streamID, publishToken, cloudWhipURL string) {
+//
+// iceServers (S3 TURN) is set on the PeerConnection so the edge can form
+// relay candidates through CGNAT. It carries the TURN URL(s) + the
+// short-lived REST credentials the cloud minted and handed over via the
+// side-channel start_publish frame. Empty/nil -> host candidates only
+// (the pre-TURN behaviour).
+func (c *Client) StartPublish(streamID, publishToken, cloudWhipURL string, iceServers []webrtc.ICEServer) {
 	c.mu.Lock()
 	if _, exists := c.sessions[streamID]; exists {
 		c.mu.Unlock()
@@ -129,7 +135,7 @@ func (c *Client) StartPublish(streamID, publishToken, cloudWhipURL string) {
 	c.sessions[streamID] = sess
 	c.mu.Unlock()
 
-	go c.runPublish(ctx, streamID, publishToken, cloudWhipURL, sess)
+	go c.runPublish(ctx, streamID, publishToken, cloudWhipURL, iceServers, sess)
 }
 
 // StopPublish terminates the worker for streamID. Returns immediately;
@@ -169,7 +175,7 @@ func (c *Client) Close() error {
 // ICE failure cancels it. On any exit path it closes the PeerConnection
 // (which cloud-side triggers ICE-based session cleanup), removes itself
 // from the session map, and signals done.
-func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWhipURL string, sess *session) {
+func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWhipURL string, iceServers []webrtc.ICEServer, sess *session) {
 	defer close(sess.done)
 	defer c.removeSession(streamID)
 	defer sess.cancel() // release the context on every exit path
@@ -187,7 +193,7 @@ func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWh
 		defer stopTrack()
 	}
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		c.cfg.Logger.Printf("whipclient: new peer connection for streamID=%s: %v", streamID, err)
 		return

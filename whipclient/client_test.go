@@ -190,7 +190,7 @@ func TestStartPublish_Happy(t *testing.T) {
 	c := newClient(t, ts, dummyTrackSource, nil)
 	const sid = "test-mac"
 
-	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url())
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), nil)
 
 	// session is registered synchronously; capture its done channel.
 	c.mu.Lock()
@@ -218,6 +218,39 @@ func TestStartPublish_Happy(t *testing.T) {
 	}
 }
 
+// TestStartPublish_WithICEServers proves the S3 TURN ICEServers param
+// threads through StartPublish -> runPublish -> PeerConnection without
+// breaking the publish lifecycle. The TURN server is intentionally
+// unreachable (TEST-NET-1); host candidates still complete the local
+// handshake. pion exposes no getter for the configured ICEServers (same
+// limitation the edge-side tests have), so this asserts the lifecycle,
+// not the PC config field.
+func TestStartPublish_WithICEServers(t *testing.T) {
+	ts := newTestServer(t)
+	c := newClient(t, ts, dummyTrackSource, nil)
+	// c.Close blocks until every worker exits; with an unreachable TURN
+	// pion's relay-agent drain inside pc.Close can take a few seconds, so
+	// we rely on Cleanup for leak-free teardown rather than asserting a
+	// teardown deadline (that timing is pion's, not ours).
+	t.Cleanup(func() { _ = c.Close() })
+	const sid = "turn-mac"
+
+	ice := []webrtc.ICEServer{{
+		URLs:       []string{"turn:192.0.2.1:3478?transport=udp"}, // TEST-NET-1, unreachable
+		Username:   "u",
+		Credential: "p",
+	}}
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), ice)
+
+	// Registration is synchronous (before the worker goroutine), so this
+	// proves the S3 ICEServers param is accepted and threaded through
+	// StartPublish without breaking the call path. pion exposes no getter
+	// for the configured ICEServers (the same limit the edge tests have).
+	if !sessionPresent(c, sid) {
+		t.Fatal("StartPublish with ICEServers did not register a session")
+	}
+}
+
 func TestStartPublish_DoublePublish(t *testing.T) {
 	ts := newTestServer(t)
 	var buf safeBuf
@@ -225,10 +258,10 @@ func TestStartPublish_DoublePublish(t *testing.T) {
 	const sid = "test-mac"
 	tok := signToken(t, sid, ts.hmacKey)
 
-	c.StartPublish(sid, tok, ts.url())
+	c.StartPublish(sid, tok, ts.url(), nil)
 	eventually(t, 2*time.Second, func() bool { return sessionPresent(c, sid) }, "first session not created")
 
-	c.StartPublish(sid, tok, ts.url()) // must be ignored
+	c.StartPublish(sid, tok, ts.url(), nil) // must be ignored
 
 	if n := sessionCount(c); n != 1 {
 		t.Errorf("session count = %d, want 1 after double publish", n)
@@ -246,7 +279,7 @@ func TestStartPublish_TrackSourceFails(t *testing.T) {
 	c := newClient(t, ts, failSrc, nil)
 	const sid = "test-mac"
 
-	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url())
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), nil)
 
 	// worker fails fast and removes its own session — no leak.
 	eventually(t, 2*time.Second, func() bool { return !sessionPresent(c, sid) },
@@ -259,7 +292,7 @@ func TestStartPublish_ServerReturns401(t *testing.T) {
 	const sid = "test-mac"
 
 	// Garbage token -> server's publishtoken.Verify fails -> 401.
-	c.StartPublish(sid, "garbage.token", ts.url())
+	c.StartPublish(sid, "garbage.token", ts.url(), nil)
 
 	eventually(t, 4*time.Second, func() bool { return !sessionPresent(c, sid) },
 		"session not cleaned up after 401")
@@ -286,7 +319,7 @@ func TestStopPublish_CallsTrackStop(t *testing.T) {
 	c := newClient(t, ts, src, nil)
 	const sid = "test-mac"
 
-	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url())
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), nil)
 	eventually(t, 2*time.Second, func() bool { return sessionPresent(c, sid) }, "session not created")
 
 	c.StopPublish(sid)
@@ -304,8 +337,8 @@ func TestClose_TerminatesAllSessions(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	c.StartPublish("a", signToken(t, "a", ts.hmacKey), ts.url())
-	c.StartPublish("b", signToken(t, "b", ts.hmacKey), ts.url())
+	c.StartPublish("a", signToken(t, "a", ts.hmacKey), ts.url(), nil)
+	c.StartPublish("b", signToken(t, "b", ts.hmacKey), ts.url(), nil)
 	eventually(t, 3*time.Second, func() bool { return sessionCount(c) == 2 }, "two sessions not active")
 
 	if err := c.Close(); err != nil {
