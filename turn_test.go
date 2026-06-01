@@ -46,13 +46,23 @@ func TestTURNCredentials_EmptySecret(t *testing.T) {
 
 func TestTURNICEServers_Shape(t *testing.T) {
 	srv := TURNICEServers("203.0.113.7", 3478, "user", "pass")
-	if len(srv) != 1 {
-		t.Fatalf("want 1 ICE server, got %d", len(srv))
+	if len(srv) != 2 {
+		t.Fatalf("want 2 ICE servers (stun + turn), got %d", len(srv))
 	}
-	if len(srv[0].URLs) != 1 || srv[0].URLs[0] != "turn:203.0.113.7:3478?transport=udp" {
-		t.Errorf("unexpected URLs: %v", srv[0].URLs)
+
+	// [0] STUN: credential-less (pion only accepts creds on turn:/turns:).
+	if len(srv[0].URLs) != 1 || srv[0].URLs[0] != "stun:203.0.113.7:3478" {
+		t.Errorf("unexpected STUN URLs: %v", srv[0].URLs)
 	}
-	if srv[0].Username != "user" || srv[0].Credential != "pass" {
-		t.Errorf("creds not set on ICE server: %+v", srv[0])
+	if srv[0].Username != "" || srv[0].Credential != nil {
+		t.Errorf("STUN entry must be credential-less, got %+v", srv[0])
+	}
+
+	// [1] TURN: with the ephemeral REST creds.
+	if len(srv[1].URLs) != 1 || srv[1].URLs[0] != "turn:203.0.113.7:3478?transport=udp" {
+		t.Errorf("unexpected TURN URLs: %v", srv[1].URLs)
+	}
+	if srv[1].Username != "user" || srv[1].Credential != "pass" {
+		t.Errorf("TURN creds not set: %+v", srv[1])
 	}
 }

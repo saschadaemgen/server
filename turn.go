@@ -35,14 +35,31 @@ func TURNCredentials(sharedSecret []byte, user string, ttl time.Duration) (usern
 }
 
 // TURNICEServers builds the webrtc.ICEServer list advertising the
-// in-process relay at publicIP, authenticated with the given ephemeral
-// credentials. v1 advertises the UDP relay only
-// (turn:<publicIP>:<udpPort>?transport=udp) - the UDP relay is the CGNAT
-// workhorse; the TLS leg (turns:...:tlsPort) is a documented follow-up.
+// in-process relay at publicIP. It returns TWO entries:
+//
+//  1. a credential-LESS STUN entry (stun:<publicIP>:<udpPort>), and
+//  2. the TURN entry (turn:<publicIP>:<udpPort>?transport=udp) with the
+//     given ephemeral credentials.
+//
+// Both are served by the SAME in-process pion relay on the same UDP port:
+// a pion TURN server answers STUN Binding requests automatically and
+// unauthenticated (pion/turn internal/server handleBindingRequest), so
+// STUN costs nothing extra - no second server, no second port, no extra
+// firewall rule.
+//
+// STUN is a SEPARATE, credential-less entry (not a stun: URL bolted onto
+// the TURN entry's creds): ICE prefers the direct srflx path STUN
+// discovers and only falls back to the TURN relay when that fails, and
+// pion only accepts credentials on turn:/turns: URLs (a STUN entry must be
+// credential-less). v1 advertises the UDP legs only; the TLS leg
+// (turns:...:tlsPort) is a documented follow-up.
 func TURNICEServers(publicIP string, udpPort int, username, password string) []webrtc.ICEServer {
-	return []webrtc.ICEServer{{
-		URLs:       []string{fmt.Sprintf("turn:%s:%d?transport=udp", publicIP, udpPort)},
-		Username:   username,
-		Credential: password,
-	}}
+	return []webrtc.ICEServer{
+		{URLs: []string{fmt.Sprintf("stun:%s:%d", publicIP, udpPort)}},
+		{
+			URLs:       []string{fmt.Sprintf("turn:%s:%d?transport=udp", publicIP, udpPort)},
+			Username:   username,
+			Credential: password,
+		},
+	}
 }
