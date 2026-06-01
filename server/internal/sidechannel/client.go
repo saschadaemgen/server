@@ -11,6 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+
+	"carvilon.local/server/internal/streampublish"
 )
 
 const (
@@ -54,9 +56,10 @@ type ClientOptions struct {
 	// OnRequestPublish, when set, is invoked (in its own goroutine)
 	// when the cloud sends a request_publish frame. The edge wiring
 	// implements it: authorise the stream, issue a publish token,
-	// Send a start_publish, and kick the StreamPublisher. nil ignores
-	// the frame.
-	OnRequestPublish func(streamID string)
+	// Send a start_publish, and kick the StreamPublisher. iceServers
+	// carries the cloud-minted TURN credentials from the frame (nil ->
+	// host-only). A nil callback ignores the frame.
+	OnRequestPublish func(streamID string, iceServers []streampublish.ICEServer)
 }
 
 // Client is the edge-side dialer. It keeps a single mTLS WebSocket to
@@ -182,13 +185,14 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 					c.opts.OnPong()
 				}
 			case TypeRequestPublish:
-				c.log.Info("sidechannel request_publish received", "stream_id", env.StreamID)
+				c.log.Info("sidechannel request_publish received", "stream_id", env.StreamID, "ice_servers", len(env.ICEServers))
 				if c.opts.OnRequestPublish != nil {
 					sid := env.StreamID
+					ice := env.ICEServers
 					// Own goroutine: the edge business logic (authz,
 					// token, StreamPublisher) must never block the
 					// read loop.
-					go c.opts.OnRequestPublish(sid)
+					go c.opts.OnRequestPublish(sid, ice)
 				}
 			default:
 				c.log.Warn("sidechannel unknown message type", "type", env.Type)

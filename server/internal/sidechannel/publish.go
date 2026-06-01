@@ -51,7 +51,7 @@ func (e *EdgePublisher) logger() *slog.Logger {
 // silently (logged) - the cloud simply gets no start_publish and can
 // retry. It never returns an error and never blocks the caller beyond
 // the (fast) token issue.
-func (e *EdgePublisher) HandleRequestPublish(streamID string) {
+func (e *EdgePublisher) HandleRequestPublish(streamID string, iceServers []streampublish.ICEServer) {
 	log := e.logger()
 	if streamID == "" {
 		log.Warn("request_publish with empty stream_id, ignoring")
@@ -69,9 +69,10 @@ func (e *EdgePublisher) HandleRequestPublish(streamID string) {
 	if e.Send != nil {
 		e.Send(Envelope{Type: TypeStartPublish, StreamID: streamID, PublishToken: token})
 	}
-	// Kick the (async, non-blocking) WHIP push.
-	e.Publisher.StartPublish(streamID, token, e.CloudWhipURL)
-	log.Info("edge accepted publish request", "stream_id", streamID)
+	// Kick the (async, non-blocking) WHIP push with the cloud-minted TURN
+	// ICE servers carried on the request_publish frame (nil -> host-only).
+	e.Publisher.StartPublish(streamID, token, e.CloudWhipURL, iceServers)
+	log.Info("edge accepted publish request", "stream_id", streamID, "ice_servers", len(iceServers))
 }
 
 // StopPublish stops a stream: tell the cloud, then the publisher.

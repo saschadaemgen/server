@@ -9,7 +9,7 @@ import (
 func TestNoop_SatisfiesInterfaceAndDoesNotPanic(t *testing.T) {
 	// Compile-time: Noop satisfies StreamPublisher.
 	var p StreamPublisher = NewNoop(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	p.StartPublish("0c:ea:14:00:00:01", "tok-abc", "https://vps.example/whip")
+	p.StartPublish("0c:ea:14:00:00:01", "tok-abc", "https://vps.example/whip", nil)
 	p.StopPublish("0c:ea:14:00:00:01")
 }
 

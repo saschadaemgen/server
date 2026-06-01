@@ -13,19 +13,36 @@ package streampublish
 
 import "log/slog"
 
+// ICEServer is a carvilon-owned ICE/TURN server descriptor (the standard
+// RTCIceServer shape). It is deliberately NOT pion's webrtc.ICEServer:
+// this package lives in the public build, and importing pion here would
+// break the open-core boundary (public build = 0 pion imports). The
+// carvilon_stream-tagged edge naht translates this to webrtc.ICEServer
+// when it calls the real WHIP client; the cloud closure mints these from
+// the TURN shared secret and the side-channel carries them on
+// request_publish.
+type ICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
 // StreamPublisher is the edge-side push surface the side-channel calls
 // when the cloud asks for a stream.
 //
-//   StartPublish - begin pushing streamID to cloudWhipURL, presenting
-//                  publishToken in the WHIP Authorization header.
-//   StopPublish  - stop pushing streamID.
+//	StartPublish - begin pushing streamID to cloudWhipURL, presenting
+//	               publishToken in the WHIP Authorization header, using
+//	               iceServers (cloud-minted short-lived TURN credentials;
+//	               may be nil -> host candidates only) for the WebRTC
+//	               path.
+//	StopPublish  - stop pushing streamID.
 //
 // Implementations MUST NOT block: StartPublish/StopPublish should kick
 // off or signal asynchronous work and return promptly, so a slow or
 // dead cloud never stalls the side-channel read loop or the local LAN
 // path (Grundregel: the cloud is additive).
 type StreamPublisher interface {
-	StartPublish(streamID, publishToken, cloudWhipURL string)
+	StartPublish(streamID, publishToken, cloudWhipURL string, iceServers []ICEServer)
 	StopPublish(streamID string)
 }
 
@@ -45,11 +62,12 @@ func NewNoop(log *slog.Logger) *Noop {
 
 // StartPublish logs the intent. The publish_token is never logged
 // verbatim (only its presence) to keep it out of the log trail.
-func (n *Noop) StartPublish(streamID, publishToken, cloudWhipURL string) {
+func (n *Noop) StartPublish(streamID, publishToken, cloudWhipURL string, iceServers []ICEServer) {
 	n.log.Info("stream publish (no-op): would start WHIP push",
 		"stream_id", streamID,
 		"cloud_whip_url", cloudWhipURL,
 		"has_token", publishToken != "",
+		"ice_servers", len(iceServers),
 	)
 }
 

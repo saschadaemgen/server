@@ -12,6 +12,8 @@
 // cloud outage only triggers reconnect attempts.
 package sidechannel
 
+import "carvilon.local/server/internal/streampublish"
+
 // Envelope is the JSON wire frame exchanged in both directions. Both
 // sides dispatch on the "type" discriminator; adding a new message
 // type is one more switch branch. Cargo fields are optional and only
@@ -31,6 +33,14 @@ type Envelope struct {
 
 	// Reason explains a stop_publish (see Reason* constants).
 	Reason string `json:"reason,omitempty"`
+
+	// ICEServers carries cloud-minted short-lived TURN credentials on
+	// request_publish (cloud -> edge), so the edge can hand them to the
+	// WHIP client for the WebRTC media path through CGNAT. Empty/nil ->
+	// host candidates only (the pre-TURN behaviour, no break). Only
+	// meaningful on request_publish: the cloud mints them (it holds the
+	// shared secret), the edge never does.
+	ICEServers []streampublish.ICEServer `json:"ice_servers,omitempty"`
 }
 
 // Message types.

@@ -99,7 +99,7 @@ func init() {
 		if client, perr := buildWHIPClient(ctx, log, cfg, srv, viewerMgr); perr != nil {
 			log.Error("whip publisher init failed; cloud push disabled (local stream unaffected)", "err", perr)
 		} else {
-			publisher = client
+			publisher = whipPublisher{c: client}
 			cleanup = func() { _ = client.Close(); _ = shutdown() }
 		}
 
@@ -156,4 +156,35 @@ func whipTLSConfig(caPath string) (*tls.Config, error) {
 		return nil, fmt.Errorf("whip: ca cert %s has no usable certificates", caPath)
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
+}
+
+// whipPublisher adapts *whipclient.Client to streampublish.StreamPublisher.
+// The public interface uses carvilon's transport-neutral
+// streampublish.ICEServer (the public build must not import pion); this
+// tagged adapter is the single place that translates to pion's
+// webrtc.ICEServer for the real WHIP client.
+type whipPublisher struct{ c *whipclient.Client }
+
+func (w whipPublisher) StartPublish(streamID, publishToken, cloudWhipURL string, ice []streampublish.ICEServer) {
+	w.c.StartPublish(streamID, publishToken, cloudWhipURL, toPionICE(ice))
+}
+
+func (w whipPublisher) StopPublish(streamID string) { w.c.StopPublish(streamID) }
+
+// toPionICE converts carvilon's transport-neutral ICE-server list (carried
+// on the side-channel request_publish frame) to the pion type the
+// whipclient needs. Only compiled in the carvilon_stream build.
+func toPionICE(in []streampublish.ICEServer) []webrtc.ICEServer {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]webrtc.ICEServer, 0, len(in))
+	for _, s := range in {
+		out = append(out, webrtc.ICEServer{
+			URLs:       s.URLs,
+			Username:   s.Username,
+			Credential: s.Credential,
+		})
+	}
+	return out
 }

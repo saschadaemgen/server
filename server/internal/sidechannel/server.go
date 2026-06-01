@@ -16,6 +16,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+
+	"carvilon.local/server/internal/streampublish"
 )
 
 // ServerOptions configures the cloud-side listener.
@@ -59,6 +61,23 @@ type Server struct {
 	mu            sync.Mutex
 	conns         map[*serverConn]struct{}
 	activeStreams map[string]struct{}
+	// iceMinter, when set, mints the per-request TURN ICE servers the
+	// cloud attaches to each request_publish frame. Set by the
+	// carvilon_stream-tagged cloud closure (which holds the TURN shared
+	// secret); nil in the public build -> request_publish carries no ICE
+	// (host-only, the pre-TURN behaviour).
+	iceMinter func(streamID string) []streampublish.ICEServer
+}
+
+// SetICEMinter installs the per-request TURN ICE-server minter. The
+// carvilon_stream-tagged cloud closure calls this with a closure that
+// mints short-lived credentials from the TURN shared secret; the public
+// build never calls it. Set once before Run; guarded by the same mutex
+// RequestPublish reads under.
+func (s *Server) SetICEMinter(m func(streamID string) []streampublish.ICEServer) {
+	s.mu.Lock()
+	s.iceMinter = m
+	s.mu.Unlock()
 }
 
 // serverConn is one accepted edge connection plus a write mutex.
@@ -211,11 +230,19 @@ func (s *Server) RequestPublish(ctx context.Context, streamID string) int {
 	for sc := range s.conns {
 		targets = append(targets, sc)
 	}
+	minter := s.iceMinter
 	s.mu.Unlock()
+
+	// Cloud-mint the short-lived TURN ICE servers for this request
+	// (carvilon_stream sets the minter; nil -> host-only, no relay).
+	var ice []streampublish.ICEServer
+	if minter != nil {
+		ice = minter(streamID)
+	}
 
 	sent := 0
 	for _, sc := range targets {
-		if err := sc.write(ctx, Envelope{Type: TypeRequestPublish, StreamID: streamID}); err != nil {
+		if err := sc.write(ctx, Envelope{Type: TypeRequestPublish, StreamID: streamID, ICEServers: ice}); err != nil {
 			s.log.Warn("sidechannel request_publish write failed",
 				"peer", sc.peer, "stream_id", streamID, "err", err)
 			continue

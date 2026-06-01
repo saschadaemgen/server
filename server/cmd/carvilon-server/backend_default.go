@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/viewermanager"
@@ -53,4 +54,5 @@ var startInProcessCloudStream func(
 	ctx context.Context,
 	log *slog.Logger,
 	cfg config.Config,
+	sc *sidechannel.Server,
 ) (func(), error)

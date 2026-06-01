@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"carvilon.local/server/internal/streampublish"
 )
 
 // --- test helpers ---------------------------------------------------
@@ -185,7 +187,12 @@ func TestSidechannel_PingPongRoundtrip(t *testing.T) {
 		Log:            quietLogger(),
 		PingInterval:   50 * time.Millisecond,
 		InitialBackoff: 50 * time.Millisecond,
-		OnPong:         func() { select { case pong <- struct{}{}: default: } },
+		OnPong: func() {
+			select {
+			case pong <- struct{}{}:
+			default:
+			}
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -279,7 +286,12 @@ func TestSidechannel_ReconnectsAfterServerDrop(t *testing.T) {
 		Log:            quietLogger(),
 		PingInterval:   50 * time.Millisecond,
 		InitialBackoff: 50 * time.Millisecond,
-		OnPong:         func() { select { case pong <- struct{}{}: default: } },
+		OnPong: func() {
+			select {
+			case pong <- struct{}{}:
+			default:
+			}
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -360,7 +372,7 @@ func TestSidechannel_PublishControlRoundtrip(t *testing.T) {
 		// Minimal edge stand-in: reply to request_publish with a
 		// start_publish carrying a token. (The real authz+token logic
 		// is the EdgePublisher, tested separately.)
-		OnRequestPublish: func(id string) {
+		OnRequestPublish: func(id string, _ []streampublish.ICEServer) {
 			cli.Send(Envelope{Type: TypeStartPublish, StreamID: id, PublishToken: "tok-" + id})
 		},
 	})

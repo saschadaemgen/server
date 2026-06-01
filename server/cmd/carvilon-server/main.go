@@ -352,7 +352,7 @@ func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// failure only logs and disables the stream subsystem; the
 	// side-channel keeps running (Grundregel), symmetric to runEdge.
 	if startInProcessCloudStream != nil {
-		shutdown, err := startInProcessCloudStream(ctx, log, cfg)
+		shutdown, err := startInProcessCloudStream(ctx, log, cfg, srv)
 		switch {
 		case err != nil:
 			log.Error("in-process cloud stream setup failed; stream subsystem disabled", "err", err)
