@@ -39,6 +39,7 @@ func AcceptPublisher(
 	logger *log.Logger,
 	streamID string,
 	sdpOffer string,
+	iceServers []webrtc.ICEServer,
 ) (sdpAnswer string, sessionID string, err error) {
 	me, err := newH264MediaEngine()
 	if err != nil {
@@ -46,9 +47,10 @@ func AcceptPublisher(
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
-	// Cloud side runs on a public IP — host candidates suffice, so no
-	// STUN/TURN. Client-side ICE is a later season (port planning open).
-	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: nil})
+	// S3 TURN: iceServers is the relay list the server minted (TURN URLs +
+	// fresh ephemeral creds) when TURN is on; nil -> host candidates only
+	// (the pre-TURN behaviour on a public-IP VPS).
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		return "", "", fmt.Errorf("whip: new peer connection: %w", err)
 	}

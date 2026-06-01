@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pion/webrtc/v4"
+
 	"carvilon.local/stream/internal/publishtoken"
 	"carvilon.local/stream/internal/streamhub"
 )
@@ -36,12 +38,16 @@ const shutdownTimeout = 5 * time.Second
 
 // Config configures a [Server].
 type Config struct {
-	Addr     string            // listen address, e.g. ":8444" (default if empty)
-	CertFile string            // absolute path to the server certificate (PEM)
-	KeyFile  string            // absolute path to the server private key (PEM)
-	HMACKey  []byte            // publish-token HMAC key, already hex-decoded
-	Hub      *streamhub.Hub    // active-publisher registry (S2-04)
+	Addr     string         // listen address, e.g. ":8444" (default if empty)
+	CertFile string         // absolute path to the server certificate (PEM)
+	KeyFile  string         // absolute path to the server private key (PEM)
+	HMACKey  []byte         // publish-token HMAC key, already hex-decoded
+	Hub      *streamhub.Hub // active-publisher registry (S2-04)
 	Logger   *log.Logger
+	// ICEServers, when set, mints the ICE server list (TURN URLs + fresh
+	// ephemeral creds) for each accepted peer. nil -> peers use no
+	// ICEServers (host-candidate only, the pre-TURN behaviour). (S3 TURN)
+	ICEServers func() ([]webrtc.ICEServer, error)
 }
 
 const defaultAddr = ":8444"
@@ -56,6 +62,10 @@ type Server struct {
 	hub      *streamhub.Hub
 	logger   *log.Logger
 	srv      *http.Server
+
+	// iceServers mints a fresh ICE server list per peer (TURN; S3). nil
+	// -> no ICEServers (host-candidate only).
+	iceServers func() ([]webrtc.ICEServer, error)
 }
 
 // New validates the config and builds the (not-yet-listening) server.
@@ -80,12 +90,13 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		addr:     cfg.Addr,
-		certFile: cfg.CertFile,
-		keyFile:  cfg.KeyFile,
-		hmacKey:  cfg.HMACKey,
-		hub:      cfg.Hub,
-		logger:   logger,
+		addr:       cfg.Addr,
+		certFile:   cfg.CertFile,
+		keyFile:    cfg.KeyFile,
+		hmacKey:    cfg.HMACKey,
+		hub:        cfg.Hub,
+		logger:     logger,
+		iceServers: cfg.ICEServers,
 	}
 
 	mux := http.NewServeMux()
@@ -139,6 +150,16 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
+// mintICEServers returns the ICE server list for a freshly accepted peer
+// (TURN URLs + fresh ephemeral creds via the configured minter), or nil
+// when TURN is off (host-candidate only). (S3)
+func (s *Server) mintICEServers() ([]webrtc.ICEServer, error) {
+	if s.iceServers == nil {
+		return nil, nil
+	}
+	return s.iceServers()
+}
+
 // handlePublish implements POST /whip/{streamID}. See the package doc
 // for the auth-vs-501 contract. Check order is security-relevant:
 // auth before content-type before body, so an unauthenticated client
@@ -189,7 +210,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	// the publisher's RTP into the hub, and answer per WHIP (RFC 9725):
 	// 201 Created, SDP answer in the body, Location header pointing at
 	// the (future) session resource.
-	sdpAnswer, sessionID, err := AcceptPublisher(r.Context(), s.hub, s.logger, streamID, string(body))
+	iceServers, err := s.mintICEServers()
+	if err != nil {
+		s.logger.Printf("whip ingress: sid=%s ICE servers: %v", streamID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	sdpAnswer, sessionID, err := AcceptPublisher(r.Context(), s.hub, s.logger, streamID, string(body), iceServers)
 	if err != nil {
 		if errors.Is(err, streamhub.ErrConflict) {
 			s.logger.Printf("whip ingress: conflict for sid=%s (already publishing)", streamID)
@@ -241,7 +268,13 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body))
+	iceServers, err := s.mintICEServers()
+	if err != nil {
+		s.logger.Printf("whep egress: sid=%s ICE servers: %v", streamID, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body), iceServers)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoPublisher):

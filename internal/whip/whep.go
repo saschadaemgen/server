@@ -47,6 +47,7 @@ func AcceptSubscriber(
 	logger *log.Logger,
 	streamID string,
 	sdpOffer string,
+	iceServers []webrtc.ICEServer,
 ) (sdpAnswer string, sessionID string, err error) {
 	sess, ok := hub.Get(streamID)
 	if !ok {
@@ -74,9 +75,9 @@ func AcceptSubscriber(
 	}
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
 
-	// Cloud side runs on a public IP — host candidates suffice (no
-	// STUN/TURN), same posture as the ingress.
-	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: nil})
+	// S3 TURN: iceServers is the relay list the server minted (TURN URLs +
+	// fresh ephemeral creds) when TURN is on; nil -> host candidates only.
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		return "", "", fmt.Errorf("whip: new peer connection: %w", err)
 	}
