@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -169,6 +171,29 @@ type Config struct {
 	// cert/key (PEM). Required together to enable the cloud stream.
 	WhipCert string
 	WhipKey  string
+
+	// --- In-process TURN relay (Saison 18-05, cloud role,
+	// carvilon_stream build) ---
+	//
+	// pion/turn embedded on the VPS so a CGNAT edge and a remote viewer
+	// can find a media path. Read in every build, only CONSUMED under the
+	// build tag. Optional and gated INDEPENDENTLY of WHIP
+	// (CloudTURNConfigured): TURNPublicIP + TURNSharedSecret are the v1
+	// minimum. Realm + ports default in FromEnv.
+
+	// TURNPublicIP is the VPS's real public IP (the address the relay
+	// advertises in ICE candidates). NOT a 172.x docker-bridge IP.
+	TURNPublicIP string
+	// TURNSharedSecret is the long-term secret the TURN server and the
+	// credential minter share (RFC 5766 long-term credentials). SECRET:
+	// never logged, never echoed into an error.
+	TURNSharedSecret string
+	// TURNRealm is the TURN realm. Empty -> "carvilon" (FromEnv default).
+	TURNRealm string
+	// TURNUDPPort / TURNTLSPort are the relay's UDP and TLS listen ports.
+	// Empty -> 3478 / 5349 (FromEnv defaults).
+	TURNUDPPort int
+	TURNTLSPort int
 }
 
 const (
@@ -214,7 +239,15 @@ const (
 	envWhipListen              = "CARVILON_WHIP_LISTEN"
 	envWhipCert                = "CARVILON_WHIP_CERT"
 	envWhipKey                 = "CARVILON_WHIP_KEY"
+	envTURNPublicIP            = "CARVILON_TURN_PUBLIC_IP"
+	envTURNSharedSecret        = "CARVILON_TURN_SHARED_SECRET"
+	envTURNRealm               = "CARVILON_TURN_REALM"
+	envTURNUDPPort             = "CARVILON_TURN_UDP_PORT"
+	envTURNTLSPort             = "CARVILON_TURN_TLS_PORT"
 	defaultSidechannelListen   = ":8443"
+	defaultTURNRealm           = "carvilon"
+	defaultTURNUDPPort         = 3478
+	defaultTURNTLSPort         = 5349
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
 	legacyCertFile         = "UNIFIX_CERT_FILE"
@@ -283,6 +316,12 @@ func FromEnv() Config {
 		WhipListen: lookupEnv(envWhipListen),
 		WhipCert:   lookupEnv(envWhipCert),
 		WhipKey:    lookupEnv(envWhipKey),
+
+		TURNPublicIP:     lookupEnv(envTURNPublicIP),
+		TURNSharedSecret: lookupEnv(envTURNSharedSecret),
+		TURNRealm:        lookupEnv(envTURNRealm),
+		TURNUDPPort:      parsePort(lookupEnv(envTURNUDPPort), defaultTURNUDPPort),
+		TURNTLSPort:      parsePort(lookupEnv(envTURNTLSPort), defaultTURNTLSPort),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -302,6 +341,9 @@ func FromEnv() Config {
 	}
 	if cfg.MockStateDir == "" {
 		cfg.MockStateDir = defaultMockStateDir
+	}
+	if cfg.TURNRealm == "" {
+		cfg.TURNRealm = defaultTURNRealm
 	}
 	return cfg
 }
@@ -375,6 +417,17 @@ func (c Config) CloudStreamInProcessConfigured() bool {
 	return c.WhipCert != "" && c.WhipKey != ""
 }
 
+// CloudTURNConfigured reports whether the cloud role should stand up the
+// in-process TURN relay. Soft gate (skip-or-start), INDEPENDENT of the
+// WHIP/WHEP gate: true once the two mandatory fields (public IP + shared
+// secret) are set. Only meaningful in the carvilon_stream build.
+// ValidateCloud then checks the IP form and the optional port ranges; a
+// TURN config without the cloud stream is left to a soft runtime hint in
+// the (later) closure wiring, not hard-failed here.
+func (c Config) CloudTURNConfigured() bool {
+	return c.TURNPublicIP != "" && c.TURNSharedSecret != ""
+}
+
 // DecodePublishTokenHMACKey hex-decodes the publish-token HMAC key and
 // checks it is exactly 32 bytes (64 hex chars). Its own env var (not a
 // master-key subkey) so the stream-cloud verifier can hold the same key
@@ -425,6 +478,24 @@ func (c Config) ValidateCloud() error {
 			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
 		}
 	}
+	// In-process TURN relay (carvilon_stream build) is OPTIONAL and gated
+	// INDEPENDENTLY of WHIP. Once configured (public IP + shared secret),
+	// validate the IP form and the optional port ranges. A TURN config
+	// without the cloud stream is NOT hard-failed here (side-channel-only
+	// and public builds stay valid); the soft "TURN without a stream to
+	// relay" hint belongs in the closure wiring. The shared secret is a
+	// secret and is never echoed into an error.
+	if c.CloudTURNConfigured() {
+		if net.ParseIP(c.TURNPublicIP) == nil {
+			return fmt.Errorf("config: %s must be a valid IP address", envTURNPublicIP)
+		}
+		if c.TURNUDPPort < 1 || c.TURNUDPPort > 65535 {
+			return fmt.Errorf("config: %s must be in the range 1-65535", envTURNUDPPort)
+		}
+		if c.TURNTLSPort < 1 || c.TURNTLSPort > 65535 {
+			return fmt.Errorf("config: %s must be in the range 1-65535", envTURNTLSPort)
+		}
+	}
 	return nil
 }
 
@@ -446,4 +517,18 @@ func parseBool(s string) bool {
 	default:
 		return false
 	}
+}
+
+// parsePort returns def when s is empty, the parsed value when s is a
+// valid integer, or 0 when s is set but not a number (ValidateCloud's
+// range check then rejects it loudly). Used for the optional TURN ports.
+func parsePort(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
+	}
+	return n
 }

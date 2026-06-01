@@ -457,3 +457,101 @@ func TestFromEnv_WhipFields(t *testing.T) {
 		t.Errorf("WHIP fields not read correctly: %+v", cfg)
 	}
 }
+
+func TestCloudTURNConfigured(t *testing.T) {
+	// 203.0.113.x is RFC 5737 TEST-NET-3 (documentation), never a real IP.
+	full := Config{TURNPublicIP: "203.0.113.7", TURNSharedSecret: "test-secret"}
+	if !full.CloudTURNConfigured() {
+		t.Error("public-ip+secret set: CloudTURNConfigured() = false, want true")
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"only public ip", func(c *Config) { c.TURNSharedSecret = "" }},
+		{"only secret", func(c *Config) { c.TURNPublicIP = "" }},
+		{"neither", func(c *Config) { c.TURNPublicIP = ""; c.TURNSharedSecret = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := full
+			tc.mut(&c)
+			if c.CloudTURNConfigured() {
+				t.Errorf("%s: CloudTURNConfigured() = true, want false", tc.name)
+			}
+		})
+	}
+}
+
+// TestValidateCloud_TURNConsistency: a side-channel-only cloud config (no
+// TURN) is valid; a fully configured TURN is valid (and does NOT require
+// the cloud stream); a bad IP or out-of-range port fails.
+func TestValidateCloud_TURNConsistency(t *testing.T) {
+	base := Config{
+		SidechannelListenAddr: ":8443",
+		SidechannelCACert:     "ca.crt",
+		SidechannelServerCert: "server.crt",
+		SidechannelServerKey:  "server.key",
+	}
+	if err := base.ValidateCloud(); err != nil {
+		t.Errorf("no-TURN ValidateCloud() = %v, want nil", err)
+	}
+	ok := base
+	ok.TURNPublicIP = "203.0.113.7"
+	ok.TURNSharedSecret = "test-secret"
+	ok.TURNRealm = "carvilon"
+	ok.TURNUDPPort = 3478
+	ok.TURNTLSPort = 5349
+	if err := ok.ValidateCloud(); err != nil {
+		t.Errorf("full-TURN ValidateCloud() = %v, want nil", err)
+	}
+	// TURN configured but no cloud stream (no WHIP) is NOT a hard error.
+	if err := ok.ValidateCloud(); err != nil {
+		t.Errorf("TURN without WHIP must not fail ValidateCloud: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"bad ip", func(c *Config) { c.TURNPublicIP = "not-an-ip" }},
+		{"udp port zero", func(c *Config) { c.TURNUDPPort = 0 }},
+		{"udp port too high", func(c *Config) { c.TURNUDPPort = 70000 }},
+		{"tls port zero", func(c *Config) { c.TURNTLSPort = 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := ok
+			tc.mut(&c)
+			if err := c.ValidateCloud(); err == nil {
+				t.Errorf("ValidateCloud(%s) = nil, want error", tc.name)
+			}
+		})
+	}
+}
+
+func TestFromEnv_TURNFields(t *testing.T) {
+	t.Setenv(envTURNPublicIP, "203.0.113.7")
+	t.Setenv(envTURNSharedSecret, "test-secret")
+	// Realm + ports left unset: the FromEnv defaults must apply.
+	cfg := FromEnv()
+	if cfg.TURNPublicIP != "203.0.113.7" {
+		t.Errorf("TURNPublicIP = %q, want 203.0.113.7", cfg.TURNPublicIP)
+	}
+	if cfg.TURNSharedSecret == "" {
+		t.Error("TURNSharedSecret not read from env") // do not echo the value
+	}
+	if cfg.TURNRealm != defaultTURNRealm {
+		t.Errorf("TURNRealm = %q, want default %q", cfg.TURNRealm, defaultTURNRealm)
+	}
+	if cfg.TURNUDPPort != defaultTURNUDPPort || cfg.TURNTLSPort != defaultTURNTLSPort {
+		t.Errorf("TURN port defaults not applied: udp=%d tls=%d, want %d/%d",
+			cfg.TURNUDPPort, cfg.TURNTLSPort, defaultTURNUDPPort, defaultTURNTLSPort)
+	}
+	// Explicit overrides are read.
+	t.Setenv(envTURNRealm, "myrealm")
+	t.Setenv(envTURNUDPPort, "3500")
+	t.Setenv(envTURNTLSPort, "5400")
+	cfg = FromEnv()
+	if cfg.TURNRealm != "myrealm" || cfg.TURNUDPPort != 3500 || cfg.TURNTLSPort != 5400 {
+		t.Errorf("TURN overrides not read: realm=%q udp=%d tls=%d",
+			cfg.TURNRealm, cfg.TURNUDPPort, cfg.TURNTLSPort)
+	}
+}
