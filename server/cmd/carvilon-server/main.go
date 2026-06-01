@@ -31,7 +31,6 @@ import (
 	"carvilon.local/server/internal/fcm"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
-	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/secrets"
@@ -39,6 +38,7 @@ import (
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
 )
 
@@ -250,7 +250,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		Config:         cfg,
 		Sessions:       sessionSvc,
 		AdminSessions:  adminSessionSvc,
-		ViewerManager:    viewerMgr,
+		ViewerManager:  viewerMgr,
 		Admin:          adminSvc,
 		PlatformConfig: platformCfg,
 		Audit:          auditSvc,
@@ -343,6 +343,23 @@ func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// in its own goroutine; srv.Run blocks below. Disabled unless the
 	// addr is configured.
 	startInterimRequestPublishHook(ctx, log, cfg, srv)
+
+	// Saison 18-04: in-process WHIP/WHEP stream server (carvilon_stream
+	// build only). startInProcessCloudStream is nil in the public build,
+	// so this is skipped there; the combined binary runs the stream
+	// in-process on the VPS instead of a separate stream-cloud binary.
+	// Soft gate: unset WHIP config logs and runs side-channel-only. Setup
+	// failure only logs and disables the stream subsystem; the
+	// side-channel keeps running (Grundregel), symmetric to runEdge.
+	if startInProcessCloudStream != nil {
+		shutdown, err := startInProcessCloudStream(ctx, log, cfg)
+		switch {
+		case err != nil:
+			log.Error("in-process cloud stream setup failed; stream subsystem disabled", "err", err)
+		case shutdown != nil:
+			defer shutdown()
+		}
+	}
 
 	log.Info("carvilon-server starting",
 		"role", "cloud",

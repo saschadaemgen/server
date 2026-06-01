@@ -381,3 +381,79 @@ func TestDecodePublishTokenHMACKey(t *testing.T) {
 		t.Error("16-byte key accepted")
 	}
 }
+
+func TestCloudStreamInProcessConfigured(t *testing.T) {
+	full := Config{WhipCert: "whip.crt", WhipKey: "whip.key"}
+	if !full.CloudStreamInProcessConfigured() {
+		t.Error("cert+key set: CloudStreamInProcessConfigured() = false, want true")
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"no cert", func(c *Config) { c.WhipCert = "" }},
+		{"no key", func(c *Config) { c.WhipKey = "" }},
+		{"neither", func(c *Config) { c.WhipCert = ""; c.WhipKey = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := full
+			tc.mut(&c)
+			if c.CloudStreamInProcessConfigured() {
+				t.Errorf("%s: CloudStreamInProcessConfigured() = true, want false", tc.name)
+			}
+		})
+	}
+}
+
+// TestValidateCloud_CloudStreamConsistency covers the soft gate: a
+// side-channel-only cloud config is valid, a fully configured cloud
+// stream is valid, but a partially configured one (cert without key, or
+// a missing/invalid HMAC key) fails loudly.
+func TestValidateCloud_CloudStreamConsistency(t *testing.T) {
+	base := Config{
+		SidechannelListenAddr: ":8443",
+		SidechannelCACert:     "ca.crt",
+		SidechannelServerCert: "server.crt",
+		SidechannelServerKey:  "server.key",
+	}
+	// Side-channel only (no WHIP fields): valid.
+	if err := base.ValidateCloud(); err != nil {
+		t.Errorf("side-channel-only ValidateCloud() = %v, want nil", err)
+	}
+	// Fully configured cloud stream: valid.
+	ok := base
+	ok.WhipCert = "whip.crt"
+	ok.WhipKey = "whip.key"
+	ok.PublishTokenHMACKey = strings.Repeat("ab", 32)
+	if err := ok.ValidateCloud(); err != nil {
+		t.Errorf("full cloud-stream ValidateCloud() = %v, want nil", err)
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*Config)
+	}{
+		{"cert without key", func(c *Config) { c.WhipKey = "" }},
+		{"key without cert", func(c *Config) { c.WhipCert = "" }},
+		{"no hmac", func(c *Config) { c.PublishTokenHMACKey = "" }},
+		{"invalid hmac", func(c *Config) { c.PublishTokenHMACKey = "nothex" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := ok
+			tc.mut(&c)
+			if err := c.ValidateCloud(); err == nil {
+				t.Errorf("ValidateCloud(%s) = nil, want error", tc.name)
+			}
+		})
+	}
+}
+
+func TestFromEnv_WhipFields(t *testing.T) {
+	t.Setenv(envWhipListen, ":8444")
+	t.Setenv(envWhipCert, "/etc/carvilon/whip.crt")
+	t.Setenv(envWhipKey, "/etc/carvilon/whip.key")
+	cfg := FromEnv()
+	if cfg.WhipListen != ":8444" || cfg.WhipCert != "/etc/carvilon/whip.crt" ||
+		cfg.WhipKey != "/etc/carvilon/whip.key" {
+		t.Errorf("WHIP fields not read correctly: %+v", cfg)
+	}
+}

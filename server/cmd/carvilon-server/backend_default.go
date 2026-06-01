@@ -40,3 +40,17 @@ var startInProcessStream func(
 	cfg config.Config,
 	viewerMgr *viewermanager.Manager,
 ) (streams.StreamBackend, streampublish.StreamPublisher, func(), error)
+
+// startInProcessCloudStream is nil in the public build. The
+// carvilon_stream build assigns it (init() in
+// stream_inprocess_cloud_carvilon_stream.go) to a function that boots the
+// in-process WHIP-ingress + WHEP-egress cloud stream server and returns a
+// shutdown func. runCloud calls it only when non-nil, so the public build
+// never reaches any carvilon.local/stream code. The signature references
+// only public carvilon types, so this declaration compiles in both
+// builds. It is the cloud mirror of startInProcessStream (the edge seam).
+var startInProcessCloudStream func(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg config.Config,
+) (func(), error)

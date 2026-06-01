@@ -151,6 +151,24 @@ type Config struct {
 	StreamFFmpegPath string
 	// StreamEnableMJPEG turns on the MJPEG / h264_cbp ffmpeg paths.
 	StreamEnableMJPEG bool
+
+	// --- In-process cloud WHIP/WHEP stream (Saison 18-04, cloud role,
+	// carvilon_stream build) ---
+	//
+	// The cloud mirror of the edge stream fields above. Read in every
+	// build but only CONSUMED under the build tag (runCloud). Optional:
+	// the cloud role can run side-channel-only. WhipCert + WhipKey set
+	// together enable the in-process WHIP-ingress + WHEP-egress server
+	// (CloudStreamInProcessConfigured); ValidateCloud then also requires
+	// the publish-token HMAC key so the ingress can verify tokens.
+
+	// WhipListen is the WHIP/WHEP TLS listen address (e.g. ":8444").
+	// Empty -> the stream server defaults it to ":8444".
+	WhipListen string
+	// WhipCert / WhipKey are absolute paths to the WHIP server TLS
+	// cert/key (PEM). Required together to enable the cloud stream.
+	WhipCert string
+	WhipKey  string
 }
 
 const (
@@ -174,11 +192,11 @@ const (
 	envSecretsKey       = "CARVILON_SECRETS_KEY"
 	envStreamBackendURL = "CARVILON_STREAM_BACKEND_URL"
 	// Side-channel (Saison 17). CARVILON_-only, no legacy alias.
-	envSidechannelListenAddr = "CARVILON_SIDECHANNEL_LISTEN_ADDR"
-	envSidechannelDialURL    = "CARVILON_SIDECHANNEL_DIAL_URL"
-	envSidechannelCACert     = "CARVILON_SIDECHANNEL_CA_CERT"
-	envSidechannelServerCert = "CARVILON_SIDECHANNEL_SERVER_CERT"
-	envSidechannelServerKey  = "CARVILON_SIDECHANNEL_SERVER_KEY"
+	envSidechannelListenAddr   = "CARVILON_SIDECHANNEL_LISTEN_ADDR"
+	envSidechannelDialURL      = "CARVILON_SIDECHANNEL_DIAL_URL"
+	envSidechannelCACert       = "CARVILON_SIDECHANNEL_CA_CERT"
+	envSidechannelServerCert   = "CARVILON_SIDECHANNEL_SERVER_CERT"
+	envSidechannelServerKey    = "CARVILON_SIDECHANNEL_SERVER_KEY"
 	envSidechannelClientCert   = "CARVILON_SIDECHANNEL_CLIENT_CERT"
 	envSidechannelClientKey    = "CARVILON_SIDECHANNEL_CLIENT_KEY"
 	envSidechannelCloudWhipURL = "CARVILON_SIDECHANNEL_CLOUD_WHIP_URL"
@@ -193,6 +211,9 @@ const (
 	envStreamAddr              = "CARVILON_STREAM_ADDR"
 	envStreamFFmpegPath        = "CARVILON_STREAM_FFMPEG_PATH"
 	envStreamEnableMJPEG       = "CARVILON_STREAM_ENABLE_MJPEG"
+	envWhipListen              = "CARVILON_WHIP_LISTEN"
+	envWhipCert                = "CARVILON_WHIP_CERT"
+	envWhipKey                 = "CARVILON_WHIP_KEY"
 	defaultSidechannelListen   = ":8443"
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
@@ -258,6 +279,10 @@ func FromEnv() Config {
 		StreamAddr:        lookupEnv(envStreamAddr),
 		StreamFFmpegPath:  lookupEnv(envStreamFFmpegPath),
 		StreamEnableMJPEG: parseBool(lookupEnv(envStreamEnableMJPEG)),
+
+		WhipListen: lookupEnv(envWhipListen),
+		WhipCert:   lookupEnv(envWhipCert),
+		WhipKey:    lookupEnv(envWhipKey),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -339,6 +364,17 @@ func (c Config) StreamInProcessConfigured() bool {
 		c.StreamDBPath != "" && c.StreamAddr != "" && c.StreamBackendURL != ""
 }
 
+// CloudStreamInProcessConfigured reports whether the cloud role should
+// stand up the in-process WHIP/WHEP stream server. Soft gate (skip-or-
+// start), mirroring StreamInProcessConfigured on the edge: an incomplete
+// config logs and skips, so the cloud keeps running the side-channel
+// only. Only meaningful in the carvilon_stream build. ValidateCloud
+// enforces that, once configured, the cert/key pair is complete and the
+// publish-token HMAC key is present.
+func (c Config) CloudStreamInProcessConfigured() bool {
+	return c.WhipCert != "" && c.WhipKey != ""
+}
+
 // DecodePublishTokenHMACKey hex-decodes the publish-token HMAC key and
 // checks it is exactly 32 bytes (64 hex chars). Its own env var (not a
 // master-key subkey) so the stream-cloud verifier can hold the same key
@@ -370,6 +406,24 @@ func (c Config) ValidateCloud() error {
 	}
 	if c.SidechannelServerKey == "" {
 		return fmt.Errorf("config: %s is required for the cloud role", envSidechannelServerKey)
+	}
+	// In-process WHIP/WHEP stream (carvilon_stream build) is OPTIONAL in
+	// the cloud role - the cloud may run side-channel-only. But if it is
+	// partially configured, fail loudly instead of half-starting it, and
+	// require the HMAC key so the ingress can verify publish tokens.
+	if c.WhipCert != "" || c.WhipKey != "" {
+		if c.WhipCert == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envWhipCert, envWhipKey)
+		}
+		if c.WhipKey == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envWhipKey, envWhipCert)
+		}
+		if c.PublishTokenHMACKey == "" {
+			return fmt.Errorf("config: %s is required for the cloud in-process stream (%s/%s set)", envPublishTokenHMACKey, envWhipCert, envWhipKey)
+		}
+		if _, err := c.DecodePublishTokenHMACKey(); err != nil {
+			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
+		}
 	}
 	return nil
 }
