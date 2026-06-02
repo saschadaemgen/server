@@ -20,6 +20,7 @@
 package httpserver
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -39,6 +40,7 @@ import (
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
@@ -52,6 +54,15 @@ import (
 type UserStoreLike interface {
 	access.UserStore
 	IsConfigured() bool
+}
+
+// ICERequester pulls a fresh set of subscriber ICE servers from the cloud
+// over the side-channel (the cloud holds the TURN shared secret; the edge
+// never does). Satisfied by *sidechannel.Client and wired in by main after
+// the client is built. Nil -> the stream-start bundle reports ICE
+// unavailable (503), keeping the LAN path unaffected.
+type ICERequester interface {
+	RequestICE(ctx context.Context) ([]streampublish.ICEServer, error)
 }
 
 // Deps bundles every dependency the HTTP layer needs. Pass the
@@ -154,6 +165,10 @@ type Server struct {
 	streamStats  *streams.Client
 	weather      *weather.Client
 	egressIssuer *egresstoken.Issuer
+	// iceRequester pulls subscriber ICE from the cloud for the stream-start
+	// bundle. Set post-construction by main (SetICERequester) once the
+	// side-channel client exists; nil when the cloud link is unconfigured.
+	iceRequester ICERequester
 	log          *slog.Logger
 	mux          *http.ServeMux
 	tpl          *adminTemplates
@@ -234,6 +249,15 @@ func (s *Server) SetUAClient(c *uaapi.Client) {
 	s.ua = c
 }
 
+// SetICERequester wires the side-channel client as the ICE source for the
+// stream-start bundle. main calls this once after building the client and
+// BEFORE ListenAndServe, so the field is published to the serving goroutines
+// without locking (happens-before the server starts). Nil-safe: an
+// unconfigured cloud link leaves it nil and stream-start 503s.
+func (s *Server) SetICERequester(r ICERequester) {
+	s.iceRequester = r
+}
+
 func (s *Server) routes() {
 	// Static assets (CSS, JS, icons). Embedded into the binary
 	// via go:embed; served with a long Cache-Control.
@@ -264,6 +288,12 @@ func (s *Server) routes() {
 	// app requests a 5-min streamID-bound token to present to the cloud
 	// WHEP egress. 503 when no egress key is configured.
 	s.mux.Handle("GET /webviewer/egress-token", s.requireViewerAuth(http.HandlerFunc(s.handleMieterEgressToken)))
+	// Saison 19: stream-start bundle for a remote (Android) subscriber -
+	// public WHEP URL + sid-bound egress token + cloud-minted subscriber
+	// ICE servers. Same auth as egress-token; a separate handler because the
+	// bundle has a cloud dependency (the ICE pull), so egress-token stays
+	// single-purpose. 503 when the cloud link or egress key is unavailable.
+	s.mux.Handle("GET /webviewer/stream-start", s.requireViewerAuth(http.HandlerFunc(s.handleMieterStreamStart)))
 	// Tenant settings (idle-view-mode) and weather pull for the
 	// screensaver.
 	s.mux.Handle("GET /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsGet)))

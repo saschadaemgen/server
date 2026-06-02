@@ -331,7 +331,13 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher, turnWriter, turnSnapshots)
+	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher, turnWriter, turnSnapshots)
+	if scClient != nil {
+		// Wire the cloud link as the ICE source for GET /webviewer/stream-start
+		// (Saison 19). Set before ListenAndServe below, so the serving
+		// goroutines see it without locking. nil client -> stream-start 503s.
+		srv.SetICERequester(scClient)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -462,10 +468,13 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // nil - the public build, or an unconfigured/failed in-process stream -
 // it falls back to the no-op publisher, so a request_publish issues a
 // token but pushes nothing.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) {
+// It returns the running *sidechannel.Client so the caller can wire it as the
+// httpserver's ICE source (the stream-start bundle), or nil when the link is
+// unconfigured or failed to init - in which case stream-start 503s.
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
-		return
+		return nil
 	}
 	if publisher == nil {
 		publisher = streamPublisher(log)
@@ -479,7 +488,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 	hmacKey, err := cfg.DecodePublishTokenHMACKey()
 	if err != nil {
 		log.Error("publish-token hmac key invalid; cloud link disabled", "err", err)
-		return
+		return nil
 	}
 
 	// Edge publish controller: on request_publish from the cloud it
@@ -514,7 +523,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 	if err != nil {
 		// A misconfigured side-channel must NOT take down the edge.
 		log.Error("sidechannel client init failed; continuing without cloud link", "err", err)
-		return
+		return nil
 	}
 	edgePub.Send = client.Send
 
@@ -527,6 +536,7 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		"url", cfg.SidechannelDialURL,
 		"cloud_whip_url", cfg.SidechannelCloudWhipURL,
 	)
+	return client
 }
 
 // streamPublisher selects the edge-side video publisher handed to the
