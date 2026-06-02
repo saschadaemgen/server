@@ -92,7 +92,7 @@ func init() {
 				// turns: is announced only when tlsPort > 0 AND turnsHost is
 				// set; otherwise TURNICEServers returns stun + turn on the IP.
 				return fromPionICE(stream.TURNICEServers(publicIP, turnsHost, udpPort, tlsPort, user, pass))
-			})
+			}, int(stream.DefaultTURNCredentialTTL.Seconds()))
 			log.Info("in-process TURN relay configured", "udp_port", udpPort, "tls_port", tlsPort, "realm", cfg.TURNRealm)
 		} else {
 			log.Info("TURN not configured; request_publish carries host-only ICE " +

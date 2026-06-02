@@ -63,21 +63,27 @@ type Server struct {
 	conns         map[*serverConn]struct{}
 	activeStreams map[string]struct{}
 	// iceMinter, when set, mints the per-request TURN ICE servers the
-	// cloud attaches to each request_publish frame. Set by the
-	// carvilon_stream-tagged cloud closure (which holds the TURN shared
-	// secret); nil in the public build -> request_publish carries no ICE
-	// (host-only, the pre-TURN behaviour).
+	// cloud attaches to each request_publish frame AND answers request_ice
+	// with. Set by the carvilon_stream-tagged cloud closure (which holds the
+	// TURN shared secret); nil in the public build -> request_publish carries
+	// no ICE and request_ice replies empty (host-only, the pre-TURN behaviour).
 	iceMinter func(streamID string) []streampublish.ICEServer
+	// iceCredTTLSeconds is the lifetime of the minted TURN credentials,
+	// reported back to the edge on ice_servers. Set together with iceMinter
+	// (the closure derives it from the mint TTL); 0 until set.
+	iceCredTTLSeconds int
 }
 
-// SetICEMinter installs the per-request TURN ICE-server minter. The
-// carvilon_stream-tagged cloud closure calls this with a closure that
-// mints short-lived credentials from the TURN shared secret; the public
-// build never calls it. Set once before Run; guarded by the same mutex
-// RequestPublish reads under.
-func (s *Server) SetICEMinter(m func(streamID string) []streampublish.ICEServer) {
+// SetICEMinter installs the per-request TURN ICE-server minter and the TTL
+// (seconds) of the credentials it mints. The carvilon_stream-tagged cloud
+// closure calls this with a closure that mints short-lived credentials from
+// the TURN shared secret plus the derived credential TTL; the public build
+// never calls it. Set once before Run; guarded by the same mutex
+// RequestPublish and the request_ice handler read under.
+func (s *Server) SetICEMinter(m func(streamID string) []streampublish.ICEServer, credTTLSeconds int) {
 	s.mu.Lock()
 	s.iceMinter = m
+	s.iceCredTTLSeconds = credTTLSeconds
 	s.mu.Unlock()
 }
 
@@ -214,6 +220,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			if s.opts.OnStopPublish != nil {
 				s.opts.OnStopPublish(env.StreamID, env.Reason)
 			}
+		case TypeRequestICE:
+			// Mint a fresh ICE set and reply to GENAU this connection. A
+			// write failure drops the conn (same as the pong path); the
+			// edge's RequestICE then times out and the bundle 503s.
+			if err := s.replyICE(ctx, sc, env); err != nil {
+				s.log.Warn("sidechannel ice_servers write failed",
+					"peer", sc.peer, "request_id", env.RequestID, "err", err)
+				return
+			}
 		default:
 			// Forward-compatible: a newer edge may send cargo types
 			// this cloud build predates. Log and ignore, never crash.
@@ -252,6 +267,38 @@ func (s *Server) RequestPublish(ctx context.Context, streamID string) int {
 	}
 	s.log.Info("sidechannel request_publish sent", "stream_id", streamID, "edges", sent)
 	return sent
+}
+
+// replyICE answers an edge's request_ice: mint a fresh ICE set with the SAME
+// minter RequestPublish uses (the creds are sid-agnostic, so StreamID is only
+// passed through for the closure's own logging) and send an ice_servers frame
+// back to GENAU the requesting connection sc - never a broadcast - mirroring
+// the RequestID and reporting the credential TTL. With no minter set (public
+// build / TURN off) it replies with an empty ICE list, which the edge treats
+// as a failure, plus a WARN. Returns the write error so the read loop can drop
+// the conn on a failed write, matching the pong path.
+func (s *Server) replyICE(ctx context.Context, sc *serverConn, env Envelope) error {
+	s.mu.Lock()
+	minter := s.iceMinter
+	ttl := s.iceCredTTLSeconds
+	s.mu.Unlock()
+
+	var ice []streampublish.ICEServer
+	if minter != nil {
+		ice = minter(env.StreamID)
+	} else {
+		s.log.Warn("sidechannel request_ice but no ICE minter set; replying empty",
+			"peer", sc.peer, "request_id", env.RequestID)
+	}
+	s.log.Info("sidechannel request_ice answered",
+		"peer", sc.peer, "request_id", env.RequestID,
+		"stream_id", env.StreamID, "ice_servers", len(ice))
+	return sc.write(ctx, Envelope{
+		Type:             TypeICEServers,
+		RequestID:        env.RequestID,
+		ICEServers:       ice,
+		ExpiresInSeconds: ttl,
+	})
 }
 
 // SendTURNEvent broadcasts one TURN telemetry event to every connected
