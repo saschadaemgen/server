@@ -18,6 +18,18 @@ import (
 	"carvilon.local/stream/internal/whip"
 )
 
+// RequestPublishFunc asks the edge (via the side-channel the Master wires)
+// to start publishing streamID, returning how many connected edges received
+// the request. It is the cold-start WHEP trigger: a remote subscriber for a
+// stream with no active publisher causes the cloud to request the publish.
+//
+// Open-core: a pure stdlib signature (context.Context is stdlib). No
+// side-channel or pion type crosses the seam, so the embedding module wires
+// it to sidechannel.Server.RequestPublish without our layer ever importing
+// the side-channel. It mirrors the SetICEMinter callback pattern, in the
+// stream->Master direction.
+type RequestPublishFunc func(ctx context.Context, streamID string) (edges int)
+
 // CloudSetupOptions carries everything [SetupCloudInProcess] needs to
 // stand up the in-process WHIP-ingress + WHEP-egress for the CLOUD role,
 // for embedding in carvilon-server's runCloud (the carvilon_stream build).
@@ -88,6 +100,14 @@ type CloudSetupOptions struct {
 	// pion may invoke it concurrently from its own goroutines; the callback
 	// must be safe for concurrent use.
 	OnTURNEvent func(TURNEvent)
+
+	// OnRequestPublish, when set, is the cold-start WHEP trigger: a WHEP
+	// subscriber for a stream with no active publisher makes the egress call
+	// this to ask the edge to publish, then waits for the publisher to dock
+	// before attaching. OPTIONAL: nil -> the egress returns 404 on a missing
+	// publisher (today's behaviour, no break). The Master wires it to
+	// sidechannel.Server.RequestPublish.
+	OnRequestPublish RequestPublishFunc
 
 	// turnListenPacket / turnListenTLS are UNEXPORTED test seams: when set
 	// they replace the real UDP bind / TLS listener so a test need not bind
@@ -181,13 +201,14 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 	}
 
 	srv, err := whip.New(whip.Config{
-		Addr:       opts.Addr,
-		CertFile:   opts.CertFile,
-		KeyFile:    opts.KeyFile,
-		HMACKey:    opts.HMACKey,
-		Hub:        hub,
-		Logger:     logger,
-		ICEServers: iceServers, // nil when TURN is off -> empty ICEServers
+		Addr:           opts.Addr,
+		CertFile:       opts.CertFile,
+		KeyFile:        opts.KeyFile,
+		HMACKey:        opts.HMACKey,
+		Hub:            hub,
+		Logger:         logger,
+		ICEServers:     iceServers,            // nil when TURN is off -> empty ICEServers
+		RequestPublish: opts.OnRequestPublish, // nil -> egress 404 on missing publisher (today's behaviour)
 	})
 	if err != nil {
 		if turnSrv != nil {

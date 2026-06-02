@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -48,6 +49,12 @@ type Config struct {
 	// ephemeral creds) for each accepted peer. nil -> peers use no
 	// ICEServers (host-candidate only, the pre-TURN behaviour). (S3 TURN)
 	ICEServers func() ([]webrtc.ICEServer, error)
+	// RequestPublish, when set, is the cold-start WHEP trigger: a subscriber
+	// for a stream with no active publisher makes handleWHEP call this to
+	// ask the edge to publish, then wait for the publisher to dock. It
+	// returns the number of edges that received the request. nil -> 404 on a
+	// missing publisher (the pre-trigger behaviour). (S3 WHEP trigger)
+	RequestPublish func(ctx context.Context, streamID string) (edges int)
 }
 
 const defaultAddr = ":8444"
@@ -66,6 +73,17 @@ type Server struct {
 	// iceServers mints a fresh ICE server list per peer (TURN; S3). nil
 	// -> no ICEServers (host-candidate only).
 	iceServers func() ([]webrtc.ICEServer, error)
+
+	// requestPublish is the cold-start WHEP trigger (S3). nil -> 404 on a
+	// missing publisher.
+	requestPublish func(ctx context.Context, streamID string) (edges int)
+	// inflight is the per-streamID single-flight guard for the cold-start
+	// trigger: at most one request_publish is in flight per stream while
+	// simultaneous subscribers wait for the same publisher. A double
+	// request_publish would be harmless (the edge publishes once), but this
+	// avoids N frames for N simultaneous cold subscribers.
+	inflightMu sync.Mutex
+	inflight   map[string]struct{}
 }
 
 // New validates the config and builds the (not-yet-listening) server.
@@ -90,13 +108,15 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		addr:       cfg.Addr,
-		certFile:   cfg.CertFile,
-		keyFile:    cfg.KeyFile,
-		hmacKey:    cfg.HMACKey,
-		hub:        cfg.Hub,
-		logger:     logger,
-		iceServers: cfg.ICEServers,
+		addr:           cfg.Addr,
+		certFile:       cfg.CertFile,
+		keyFile:        cfg.KeyFile,
+		hmacKey:        cfg.HMACKey,
+		hub:            cfg.Hub,
+		logger:         logger,
+		iceServers:     cfg.ICEServers,
+		requestPublish: cfg.RequestPublish,
+		inflight:       make(map[string]struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -275,6 +295,12 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body), iceServers)
+	// Cold-start trigger (S3): no publisher yet AND the Master wired the
+	// soft-gated RequestPublish callback -> ask the edge to publish, wait
+	// for it to dock, then attach. nil callback -> unchanged (404 below).
+	if errors.Is(err, ErrNoPublisher) && s.requestPublish != nil {
+		sdpAnswer, sessionID, err = s.coldSubscribe(r.Context(), streamID, string(body), iceServers)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoPublisher):
@@ -283,6 +309,11 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrTrackNotReady):
 			s.logger.Printf("whep egress: sid=%s track not ready", streamID)
 			http.Error(w, "stream starting, retry", http.StatusServiceUnavailable)
+		case errors.Is(err, errNoEdge), errors.Is(err, errColdPublishTimeout):
+			// The trigger ran (an edge was asked), so this is NOT a 404:
+			// the publisher could not be brought up in time / no edge took it.
+			s.logger.Printf("whep egress: sid=%s cold publish failed: %v", streamID, err)
+			http.Error(w, "stream could not be started", http.StatusGatewayTimeout)
 		default:
 			s.logger.Printf("whep egress: sid=%s subscriber setup failed: %v", streamID, err)
 			http.Error(w, "subscriber setup failed", http.StatusInternalServerError)
@@ -296,6 +327,56 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_, _ = io.WriteString(w, sdpAnswer)
 	s.logger.Printf("whep egress: accepted sid=%s session=%s, offer bytes=%d", streamID, sessionID, len(body))
+}
+
+// coldSubscribe handles the cold-start path: no publisher exists yet, so it
+// asks the edge to publish (via the soft-gated RequestPublish callback) and
+// waits up to coldPublishTimeout for the publisher to dock in the hub, then
+// attaches the subscriber normally. Single-flight per streamID: simultaneous
+// cold subscribers trigger at most one request_publish; the followers just
+// wait for the same publisher. Caller guarantees s.requestPublish != nil.
+func (s *Server) coldSubscribe(ctx context.Context, streamID, sdpOffer string, iceServers []webrtc.ICEServer) (string, string, error) {
+	lead, done := s.beginTrigger(streamID)
+	if lead {
+		defer done()
+		edges := s.requestPublish(ctx, streamID)
+		s.logger.Printf("whep egress: sid=%s cold subscribe -> request_publish (edges=%d)", streamID, edges)
+		if edges < 1 {
+			// No edge received the request; the stream cannot start. Fail
+			// fast WITHOUT waiting.
+			return "", "", errNoEdge
+		}
+	} else {
+		s.logger.Printf("whep egress: sid=%s cold subscribe -> request_publish already in flight, waiting", streamID)
+	}
+
+	// Wait for the publisher to dock (request_publish -> edge -> POST /whip
+	// -> hub session). AcceptSubscriber's own WaitTrack then covers the
+	// session->track gap.
+	waitCtx, cancel := context.WithTimeout(ctx, coldPublishTimeout)
+	defer cancel()
+	if !waitForPublisherSession(waitCtx, s.hub, streamID) {
+		return "", "", errColdPublishTimeout
+	}
+	return AcceptSubscriber(ctx, s.hub, s.logger, streamID, sdpOffer, iceServers)
+}
+
+// beginTrigger returns lead=true to exactly one caller per streamID while a
+// request_publish is in flight; concurrent callers get lead=false and should
+// just wait for the publisher (the leader already triggered). done clears the
+// in-flight mark and must be called by the leader on completion.
+func (s *Server) beginTrigger(streamID string) (lead bool, done func()) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if _, busy := s.inflight[streamID]; busy {
+		return false, func() {}
+	}
+	s.inflight[streamID] = struct{}{}
+	return true, func() {
+		s.inflightMu.Lock()
+		delete(s.inflight, streamID)
+		s.inflightMu.Unlock()
+	}
 }
 
 // isSDP reports whether the Content-Type names application/sdp,

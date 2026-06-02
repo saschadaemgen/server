@@ -28,6 +28,25 @@ var (
 	ErrTrackNotReady = errors.New("whip: publisher track not ready")
 )
 
+// coldPublishTimeout bounds the wait for a publisher to dock after a cold
+// WHEP subscribe triggered a request_publish (the round trip request_publish
+// -> side-channel -> edge whipclient -> POST /whip -> hub session). A package
+// var so tests can shrink it. The per-track readiness wait (trackReadyTimeout)
+// applies on top, inside AcceptSubscriber.
+var coldPublishTimeout = 12 * time.Second
+
+// Cold-start sentinels (WHEP trigger path), both mapped to 504 by handleWHEP
+// (not 404: the trigger DID run, so this is an upstream failure, not a
+// missing route).
+var (
+	// errNoEdge means the RequestPublish callback reached no edge (edges < 1),
+	// so the stream cannot start; fail fast without waiting.
+	errNoEdge = errors.New("whip: request_publish reached no edge")
+	// errColdPublishTimeout means an edge accepted the request_publish but no
+	// publisher docked within coldPublishTimeout.
+	errColdPublishTimeout = errors.New("whip: publisher did not dock after request_publish")
+)
+
 // AcceptSubscriber takes a WHEP SDP offer and builds a PeerConnection
 // that sends the hub's fan-out track to the subscriber. It returns the
 // SDP answer and the generated session id (used in the WHEP Location
@@ -151,6 +170,29 @@ func AcceptSubscriber(
 
 	logger.Printf("whep: sid=%s session=%s subscriber attached", streamID, sessionID)
 	return pc.LocalDescription().SDP, sessionID, nil
+}
+
+// waitForPublisherSession blocks until a publisher session is registered in
+// the hub for streamID, or ctx is done. The hub exposes no session-arrival
+// signal, so it polls Get (a cheap RLock map read) on a short ticker. It
+// returns true once a session exists, false on ctx timeout/cancel. The
+// per-track readiness wait stays in AcceptSubscriber (WaitTrack).
+func waitForPublisherSession(ctx context.Context, hub *streamhub.Hub, streamID string) bool {
+	if _, ok := hub.Get(streamID); ok {
+		return true
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			if _, ok := hub.Get(streamID); ok {
+				return true
+			}
+		}
+	}
 }
 
 // drainRTCP reads and discards inbound RTCP on an egress RTP sender

@@ -133,6 +133,38 @@ func newTestServer(t *testing.T) (baseURL string, key []byte) {
 	return "https://" + ln.Addr().String(), key
 }
 
+// newTestServerWithTrigger is newTestServer plus a wired RequestPublish
+// callback (the cold-start WHEP trigger) on a caller-supplied hub, so a test
+// can dock a publisher into that hub after the trigger fires.
+func newTestServerWithTrigger(t *testing.T, hub *streamhub.Hub, requestPublish func(context.Context, string) int) (baseURL string, key []byte) {
+	t.Helper()
+	certFile, keyFile := writeSelfSignedCert(t)
+	key = bytes.Repeat([]byte{0xAB}, 32)
+
+	srv, err := New(Config{
+		Addr:           "127.0.0.1:0",
+		CertFile:       certFile,
+		KeyFile:        keyFile,
+		HMACKey:        key,
+		Hub:            hub,
+		Logger:         log.New(io.Discard, "", 0),
+		RequestPublish: requestPublish,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.serve(ctx, ln) }()
+
+	return "https://" + ln.Addr().String(), key
+}
+
 func insecureClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
