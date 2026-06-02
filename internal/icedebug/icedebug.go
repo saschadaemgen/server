@@ -93,6 +93,22 @@ func (s *StateTracker) Log(state webrtc.ICEConnectionState) {
 	s.logger.Printf("ICE-DEBUG %s: state=%s t+%.1fs", s.label, state.String(), time.Since(s.start).Seconds())
 }
 
+// MaskAddr is the exported masker reused by the TURN telemetry layer
+// (package stream) so all IP masking in the repo shares one implementation.
+// It accepts a bare IP or a host:port (e.g. "203.0.113.5:54321"), strips
+// the port, and masks the host exactly like the candidate logger. It NEVER
+// returns the full address. An empty input yields "".
+func MaskAddr(addr string) string {
+	if addr == "" {
+		return ""
+	}
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	return maskAddr(host)
+}
+
 // maskAddr returns a low-cardinality, non-reversible tag for an ICE
 // candidate address: family + a coarse prefix + a short hash. It NEVER
 // returns the full address, so it is safe to log. A non-IP address (e.g.

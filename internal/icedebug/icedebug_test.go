@@ -41,3 +41,33 @@ func TestMaskAddr_Distinct(t *testing.T) {
 		t.Errorf("maskAddr collides for distinct hosts: %q == %q", a, b)
 	}
 }
+
+// TestMaskAddr_Exported verifies the exported MaskAddr (reused by the TURN
+// telemetry layer) strips a host:port and masks the host, never leaking the
+// full address OR the port - the TURN callbacks feed it "ip:port" client
+// addresses.
+func TestMaskAddr_Exported(t *testing.T) {
+	tests := []struct {
+		addr           string
+		wantPrefix     string
+		mustNotContain string // a fragment that would leak the host
+	}{
+		{"203.0.113.5:54321", "v4:203.0.x.x#", "203.0.113.5"}, // host:port -> port stripped, host masked
+		{"192.168.1.42", "v4:192.168.x.x#", "192.168.1.42"},   // bare IP (no port) still works
+		{"[2001:db8::1]:5349", "v6:", "2001:db8::1"},          // bracketed v6 host:port
+		{"", "", ""}, // empty -> empty
+	}
+	for _, tt := range tests {
+		got := MaskAddr(tt.addr)
+		if !strings.HasPrefix(got, tt.wantPrefix) {
+			t.Errorf("MaskAddr(%q) = %q, want prefix %q", tt.addr, got, tt.wantPrefix)
+		}
+		if tt.mustNotContain != "" && strings.Contains(got, tt.mustNotContain) {
+			t.Errorf("MaskAddr(%q) = %q LEAKS %q", tt.addr, got, tt.mustNotContain)
+		}
+		// the port must never survive into the masked output
+		if strings.Contains(got, "54321") || strings.Contains(got, "5349") {
+			t.Errorf("MaskAddr(%q) = %q leaks the port", tt.addr, got)
+		}
+	}
+}

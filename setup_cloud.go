@@ -79,6 +79,16 @@ type CloudSetupOptions struct {
 	TURNTLSCertFile string
 	TURNTLSKeyFile  string
 
+	// OnTURNEvent, when non-nil, is called for every TURN lifecycle/auth
+	// event (allocation created/deleted/error, auth verdict) so the
+	// embedding module can persist a real event history (the master wires
+	// it to SQLite). OPTIONAL: nil -> no callback. Open-core: the event
+	// carries only stdlib types (no pion/net.Addr), the mieter IP both raw
+	// and masked, and NEVER the shared secret or the credential password.
+	// pion may invoke it concurrently from its own goroutines; the callback
+	// must be safe for concurrent use.
+	OnTURNEvent func(TURNEvent)
+
 	// turnListenPacket / turnListenTLS are UNEXPORTED test seams: when set
 	// they replace the real UDP bind / TLS listener so a test need not bind
 	// a fixed port or load a real cert. nil -> net.ListenPacket /
@@ -94,12 +104,44 @@ type CloudSetupOptions struct {
 //
 // It is an INTERFACE, not the concrete internal/whip type, so the
 // embedding module can name and store the handle without importing
-// internal/whip (which is cross-module-unreachable). The concrete
-// *whip.Server satisfies it.
+// internal/whip (which is cross-module-unreachable). The unexported
+// cloudServer wrapper satisfies it (it delegates ListenAndServe to the WHIP
+// server and answers TURNStats from the in-process relay).
 type CloudServer interface {
 	// ListenAndServe binds the WHIP/WHEP TLS endpoint and serves until ctx
 	// is cancelled, then drains gracefully. It BLOCKS - run in a goroutine.
 	ListenAndServe(ctx context.Context) error
+
+	// TURNStats returns a point-in-time snapshot of the in-process TURN
+	// relay for the admin to poll (analogous to /stream/stats). When TURN
+	// is soft-gated off it returns TURNStats{Enabled: false}. Safe to call
+	// concurrently with the relay's own goroutines.
+	TURNStats() TURNStats
+}
+
+// cloudServer is the concrete CloudServer: it delegates ListenAndServe to
+// the WHIP/WHEP server and answers TURNStats from the in-process relay plus
+// the EventHandler-maintained client set. turnSrv/clients are nil when TURN
+// is soft-gated off (TURNStats then reports Enabled:false).
+type cloudServer struct {
+	whip    *whip.Server
+	turnSrv *turn.Server
+	clients *turnClientSet
+}
+
+func (c *cloudServer) ListenAndServe(ctx context.Context) error {
+	return c.whip.ListenAndServe(ctx)
+}
+
+func (c *cloudServer) TURNStats() TURNStats {
+	if c.turnSrv == nil {
+		return TURNStats{Enabled: false}
+	}
+	stats := TURNStats{Enabled: true, AllocationCount: c.turnSrv.AllocationCount()}
+	if c.clients != nil {
+		stats.Clients = c.clients.snapshot()
+	}
+	return stats
 }
 
 // SetupCloudInProcess builds the in-process WHIP-ingress + WHEP-egress
@@ -133,7 +175,7 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 	// credential minter for the cloud peers' ICEServers. Soft-gated: with
 	// no public IP, turnSrv + iceServers are nil and the peers stay
 	// host-candidate only (today's behaviour).
-	turnSrv, iceServers, err := setupTURN(opts, logger)
+	turnSrv, clientSet, iceServers, err := setupTURN(opts, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -168,7 +210,7 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 		return nil
 	}
 
-	return srv, shutdown, nil
+	return &cloudServer{whip: srv, turnSrv: turnSrv, clients: clientSet}, shutdown, nil
 }
 
 // setupTURN builds the in-process pion/turn relay and a per-peer ephemeral
@@ -180,17 +222,17 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 // immediately and has no ListenAndServe(ctx); the caller stops it via the
 // shutdown func (turnSrv.Close) at ctx end - that is why SetupCloudInProcess
 // threads turnSrv into its shutdown.
-func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func() ([]webrtc.ICEServer, error), error) {
+func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, *turnClientSet, func() ([]webrtc.ICEServer, error), error) {
 	if opts.TURNPublicIP == "" {
 		logger.Printf("stream: TURN disabled (no public IP); cloud peers stay host-candidate only")
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	relayIP := net.ParseIP(opts.TURNPublicIP)
 	if relayIP == nil {
-		return nil, nil, fmt.Errorf("stream: TURNPublicIP %q is not a valid IP", opts.TURNPublicIP)
+		return nil, nil, nil, fmt.Errorf("stream: TURNPublicIP %q is not a valid IP", opts.TURNPublicIP)
 	}
 	if len(opts.TURNSharedSecret) == 0 {
-		return nil, nil, errors.New("stream: TURNSharedSecret is required when TURN is enabled")
+		return nil, nil, nil, errors.New("stream: TURNSharedSecret is required when TURN is enabled")
 	}
 	realm := opts.TURNRealm
 	if realm == "" {
@@ -207,7 +249,7 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 	}
 	udpConn, err := listenPacket("udp", fmt.Sprintf(":%d", udpPort))
 	if err != nil {
-		return nil, nil, fmt.Errorf("stream: TURN UDP listen :%d: %w", udpPort, err)
+		return nil, nil, nil, fmt.Errorf("stream: TURN UDP listen :%d: %w", udpPort, err)
 	}
 
 	// A fresh static relay generator per config (announces the public IP,
@@ -230,7 +272,7 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 		tlsLn, lerr := turnTLSListener(opts, tlsPort)
 		if lerr != nil {
 			_ = udpConn.Close()
-			return nil, nil, fmt.Errorf("stream: TURN TLS listen :%d: %w", tlsPort, lerr)
+			return nil, nil, nil, fmt.Errorf("stream: TURN TLS listen :%d: %w", tlsPort, lerr)
 		}
 		listenerConfigs = []turn.ListenerConfig{{
 			Listener:              tlsLn,
@@ -243,10 +285,18 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 	lf := logging.NewDefaultLoggerFactory()
 	lf.Writer = io.Discard
 
+	// S3 telemetry: the EventHandler maintains the live client set behind
+	// TURNStats and forwards lifecycle/auth events to opts.OnTURNEvent (when
+	// set). It reads pion's net.Addr only at the boundary (addrPair) and
+	// emits open-core TURNEvents - no pion/net type and no secret escapes.
+	clientSet := newTURNClientSet()
+	eventHandler := newTURNEventHandler(clientSet, opts.OnTURNEvent)
+
 	turnSrv, err := turn.NewServer(turn.ServerConfig{
 		Realm:         realm,
 		LoggerFactory: lf,
 		AuthHandler:   turn.LongTermTURNRESTAuthHandler(string(opts.TURNSharedSecret), lf.NewLogger("turn")),
+		EventHandler:  eventHandler,
 		PacketConnConfigs: []turn.PacketConnConfig{{
 			PacketConn:            udpConn,
 			RelayAddressGenerator: mkRelay(),
@@ -255,7 +305,7 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 	})
 	if err != nil {
 		_ = udpConn.Close()
-		return nil, nil, fmt.Errorf("stream: TURN server: %w", err)
+		return nil, nil, nil, fmt.Errorf("stream: TURN server: %w", err)
 	}
 
 	// Per-peer minter: fresh ephemeral creds each call (they expire), no
@@ -280,7 +330,7 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 		logger.Printf("stream: TURN relay on udp:%d (realm=%q, relay-ip=%s); TLS leg disabled (TURNTLSPort=0)",
 			udpPort, realm, opts.TURNPublicIP)
 	}
-	return turnSrv, minter, nil
+	return turnSrv, clientSet, minter, nil
 }
 
 // turnTLSListener builds the TLS listener for the turns: leg. It uses the
