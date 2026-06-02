@@ -8,10 +8,11 @@
 //
 // It is a DIAGNOSTIC HELPER, not part of the production build: the edge and
 // cloud binaries (cmd/streaming-server, carvilon-server) never import it (it
-// is its own package main). It sends NO Authorization header - the WHEP
-// egress has no auth yet - and by default trusts any TLS cert (-insecure),
-// because the :8444 WHEP endpoint uses the private cloudca cert, not a
-// publicly-trusted one.
+// is its own package main). It sends a Bearer egress token only when -token
+// is set (the WHEP egress requires one; omitting -token is the 401 test
+// case), and by default trusts any TLS cert (-insecure), because the :8444
+// WHEP endpoint uses the private cloudca cert, not a publicly-trusted one.
+// The token value is never logged.
 //
 // Usage:
 //
@@ -19,6 +20,7 @@
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -hold 20s
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -insecure=false
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -stun stun:host:3478
+//	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -token "$EGRESS_TOKEN" -stun stun:host:3478
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 \
 //	    -turn 'turn:host:3478?transport=udp,turns:host:5349?transport=tcp' \
 //	    -turn-user USER -turn-pass PASS
@@ -54,6 +56,7 @@ func main() {
 	turnURLs := flag.String("turn", "", "comma-separated TURN/TURNS URLs (need -turn-user/-turn-pass), e.g. turn:host:3478?transport=udp,turns:host:5349?transport=tcp")
 	turnUser := flag.String("turn-user", "", "TURN username (short-lived REST credential, supplied externally)")
 	turnPass := flag.String("turn-pass", "", "TURN password (short-lived REST credential; NEVER logged, NEVER the shared secret)")
+	token := flag.String("token", "", "Bearer egress token for the Authorization header (empty -> no header = the 401 test). NEVER logged.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "whep-probe: ", log.LstdFlags|log.Lmsgprefix)
@@ -107,8 +110,12 @@ func main() {
 	}
 	<-gather // non-trickle WHEP: gather fully before posting
 
-	logger.Printf("posting WHEP offer to %s (insecure=%t)", *url, *insecure)
-	answer, status, err := postOffer(*url, *insecure, pc.LocalDescription().SDP)
+	tokenState := "none"
+	if *token != "" {
+		tokenState = "set"
+	}
+	logger.Printf("posting WHEP offer to %s (insecure=%t, token=%s)", *url, *insecure, tokenState)
+	answer, status, err := postOffer(*url, *insecure, *token, pc.LocalDescription().SDP)
 	if err != nil {
 		logger.Fatalf("post offer: %v", err)
 	}
@@ -117,6 +124,9 @@ func main() {
 	switch status {
 	case http.StatusCreated:
 		// proceed to apply the answer below
+	case http.StatusUnauthorized:
+		logger.Printf("401: egress auth rejected (no/invalid token, wrong key, expired, or wrong stream) - expected without -token or with a publish-key token")
+		return
 	case http.StatusGatewayTimeout:
 		logger.Printf("504: the trigger fired (request_publish) but no publisher docked in time / no edge - coupling OK, media path not started")
 		return
@@ -143,11 +153,13 @@ func main() {
 }
 
 // postOffer POSTs the SDP offer to the WHEP URL and returns the answer body +
-// HTTP status. No Authorization header: the WHEP egress has no auth yet. With
-// insecure, TLS verification is skipped (the :8444 endpoint uses the private
-// cloudca cert). The 30s timeout covers the server-side cold-start wait
-// (request_publish -> edge publish -> hub session, up to ~12s) before the 201.
-func postOffer(url string, insecure bool, offerSDP string) (answer string, status int, err error) {
+// HTTP status. When token != "" it sets Authorization: Bearer <token> (the
+// WHEP egress requires a valid egress token; empty -> no header = the 401
+// case). With insecure, TLS verification is skipped (the :8444 endpoint uses
+// the private cloudca cert). The 30s timeout covers the server-side cold-start
+// wait (request_publish -> edge publish -> hub session, up to ~12s) before the
+// 201. The token is set on the request but NEVER logged.
+func postOffer(url string, insecure bool, token, offerSDP string) (answer string, status int, err error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	if insecure {
 		client.Transport = &http.Transport{
@@ -159,6 +171,9 @@ func postOffer(url string, insecure bool, offerSDP string) (answer string, statu
 		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/sdp")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
