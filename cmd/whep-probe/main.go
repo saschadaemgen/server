@@ -18,6 +18,15 @@
 //	go run ./cmd/whep-probe -url https://<vps>:8444/whep/<streamID>
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -hold 20s
 //	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -insecure=false
+//	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 -stun stun:host:3478
+//	go run ./cmd/whep-probe -url https://host:8444/whep/cam-1 \
+//	    -turn 'turn:host:3478?transport=udp,turns:host:5349?transport=tcp' \
+//	    -turn-user USER -turn-pass PASS
+//
+// Behind NAT the probe needs its own ICE servers to form srflx/relay
+// candidates (-stun is credential-less and often enough; -turn is the relay
+// fallback and takes short-lived REST credentials supplied externally - the
+// probe never holds the TURN shared secret and never logs the password).
 //
 // It never starts a publisher or touches a camera - it is only the WHEP
 // client; the cold-subscribe trigger (request_publish) is driven server-side.
@@ -41,6 +50,10 @@ func main() {
 	url := flag.String("url", "", "WHEP URL, e.g. https://<vps>:8444/whep/<streamID> (required)")
 	insecure := flag.Bool("insecure", true, "skip TLS verification (the :8444 WHEP port uses the private cloudca cert)")
 	hold := flag.Duration("hold", 12*time.Second, "how long to hold the PeerConnection after a 201 before closing")
+	stunURLs := flag.String("stun", "", "comma-separated STUN URLs (credential-less), e.g. stun:turn.carvilon.com:3478")
+	turnURLs := flag.String("turn", "", "comma-separated TURN/TURNS URLs (need -turn-user/-turn-pass), e.g. turn:host:3478?transport=udp,turns:host:5349?transport=tcp")
+	turnUser := flag.String("turn-user", "", "TURN username (short-lived REST credential, supplied externally)")
+	turnPass := flag.String("turn-pass", "", "TURN password (short-lived REST credential; NEVER logged, NEVER the shared secret)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "whep-probe: ", log.LstdFlags|log.Lmsgprefix)
@@ -49,7 +62,9 @@ func main() {
 	}
 	start := time.Now()
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	iceServers := buildICEServers(logger, *stunURLs, *turnURLs, *turnUser, *turnPass)
+
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
 	if err != nil {
 		logger.Fatalf("new peer connection: %v", err)
 	}
@@ -156,4 +171,44 @@ func postOffer(url string, insecure bool, offerSDP string) (answer string, statu
 		return "", resp.StatusCode, err
 	}
 	return string(body), resp.StatusCode, nil
+}
+
+// buildICEServers assembles the probe's ICE server list from the -stun/-turn
+// flags. STUN entries are credential-less; TURN entries require -turn-user
+// and -turn-pass - short-lived REST credentials supplied externally, so the
+// probe NEVER holds the TURN shared secret. Empty flags -> nil (host
+// candidates only, the LAN-test default; no break). The password is NEVER
+// logged (only the URLs and the public username are).
+func buildICEServers(logger *log.Logger, stun, turn, turnUser, turnPass string) []webrtc.ICEServer {
+	var servers []webrtc.ICEServer
+	if urls := splitURLs(stun); len(urls) > 0 {
+		servers = append(servers, webrtc.ICEServer{URLs: urls})
+		logger.Printf("STUN ICE servers: %v", urls)
+	}
+	if urls := splitURLs(turn); len(urls) > 0 {
+		if turnUser == "" || turnPass == "" {
+			logger.Fatal("-turn requires -turn-user and -turn-pass (short-lived TURN REST credentials)")
+		}
+		servers = append(servers, webrtc.ICEServer{
+			URLs:       urls,
+			Username:   turnUser,
+			Credential: turnPass,
+		})
+		logger.Printf("TURN ICE servers: %v (user=%s, credential=<redacted>)", urls, turnUser)
+	}
+	if len(servers) == 0 {
+		logger.Printf("no ICE servers configured (-stun/-turn unset): host candidates only - fine on a LAN, will fail behind NAT")
+	}
+	return servers
+}
+
+// splitURLs splits a comma-separated URL flag into a trimmed, non-empty list.
+func splitURLs(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
