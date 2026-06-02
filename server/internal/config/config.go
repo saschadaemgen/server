@@ -107,6 +107,13 @@ type Config struct {
 	// CARVILON_SIDECHANNEL_DIAL_URL is set (see Validate).
 	PublishTokenHMACKey string
 
+	// EgressTokenHMACKey (hex, 32 bytes / 64 chars) signs the short-lived
+	// WHEP egress tokens (Saison 18-14). Its OWN env var, separate from
+	// the publish key - that separate key IS the publish-vs-egress domain
+	// separation. OPTIONAL: unset -> /webviewer/egress-token soft-503s
+	// (the cloud egress is additive); if set it must be valid (Validate).
+	EgressTokenHMACKey string
+
 	// --- FCM doorbell push (Saison 17, edge role) ---
 	//
 	// Both optional and a pair: set together to enable FCM, leave both
@@ -241,6 +248,7 @@ const (
 	envSidechannelCloudWhipURL = "CARVILON_SIDECHANNEL_CLOUD_WHIP_URL"
 	envSidechannelInternalAddr = "CARVILON_SIDECHANNEL_INTERNAL_ADDR"
 	envPublishTokenHMACKey     = "CARVILON_PUBLISH_TOKEN_HMAC_KEY"
+	envEgressTokenHMACKey      = "CARVILON_EGRESS_TOKEN_HMAC_KEY"
 	envFCMServiceAccountJSON   = "CARVILON_FCM_SERVICE_ACCOUNT_JSON"
 	envFCMProjectID            = "CARVILON_FCM_PROJECT_ID"
 	envStreamNVRHost           = "CARVILON_STREAM_NVR_HOST"
@@ -318,6 +326,7 @@ func FromEnv() Config {
 		SidechannelInternalAddr: lookupEnv(envSidechannelInternalAddr),
 
 		PublishTokenHMACKey: lookupEnv(envPublishTokenHMACKey),
+		EgressTokenHMACKey:  lookupEnv(envEgressTokenHMACKey),
 
 		FCMServiceAccountJSON: lookupEnv(envFCMServiceAccountJSON),
 		FCMProjectID:          lookupEnv(envFCMProjectID),
@@ -398,6 +407,16 @@ func (c Config) Validate() error {
 			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
 		}
 	}
+	// Egress-token signing key (Saison 18-14): OPTIONAL. Unset is fine -
+	// the /webviewer/egress-token endpoint then soft-503s (the cloud
+	// egress is additive, no boot break). But if it IS set it must be
+	// valid, so a typo fails fast at boot. No coupling to DIAL_URL (no
+	// surprise boot-break on a deployed edge that has not set it yet).
+	if c.EgressTokenHMACKey != "" {
+		if _, err := c.DecodeEgressTokenHMACKey(); err != nil {
+			return fmt.Errorf("config: %s invalid: %w", envEgressTokenHMACKey, err)
+		}
+	}
 	// FCM is both-or-neither: either both the service-account path and
 	// the project id are set (FCM enabled) or both empty (FCM disabled).
 	// Exactly one set is a half-configuration, i.e. a config error.
@@ -454,6 +473,21 @@ func (c Config) CloudTURNConfigured() bool {
 // while the master key stays isolated on the RPi.
 func (c Config) DecodePublishTokenHMACKey() ([]byte, error) {
 	b, err := hex.DecodeString(c.PublishTokenHMACKey)
+	if err != nil {
+		return nil, fmt.Errorf("must be hex: %w", err)
+	}
+	if len(b) != 32 {
+		return nil, fmt.Errorf("must be 32 bytes (64 hex chars), got %d", len(b))
+	}
+	return b, nil
+}
+
+// DecodeEgressTokenHMACKey hex-decodes the egress-token HMAC key and
+// checks it is exactly 32 bytes (64 hex chars). Mirror of
+// DecodePublishTokenHMACKey under the egress key; the separate key is
+// the publish-vs-egress domain separation.
+func (c Config) DecodeEgressTokenHMACKey() ([]byte, error) {
+	b, err := hex.DecodeString(c.EgressTokenHMACKey)
 	if err != nil {
 		return nil, fmt.Errorf("must be hex: %w", err)
 	}

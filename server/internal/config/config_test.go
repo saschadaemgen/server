@@ -382,6 +382,18 @@ func TestDecodePublishTokenHMACKey(t *testing.T) {
 	}
 }
 
+func TestDecodeEgressTokenHMACKey(t *testing.T) {
+	if _, err := (Config{EgressTokenHMACKey: strings.Repeat("ab", 32)}).DecodeEgressTokenHMACKey(); err != nil {
+		t.Errorf("valid 32-byte hex rejected: %v", err)
+	}
+	if _, err := (Config{EgressTokenHMACKey: "zz"}).DecodeEgressTokenHMACKey(); err == nil {
+		t.Error("non-hex key accepted")
+	}
+	if _, err := (Config{EgressTokenHMACKey: strings.Repeat("ab", 16)}).DecodeEgressTokenHMACKey(); err == nil {
+		t.Error("16-byte key accepted")
+	}
+}
+
 func TestCloudStreamInProcessConfigured(t *testing.T) {
 	full := Config{WhipCert: "whip.crt", WhipKey: "whip.key"}
 	if !full.CloudStreamInProcessConfigured() {

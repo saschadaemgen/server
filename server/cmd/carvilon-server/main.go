@@ -27,6 +27,7 @@ import (
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/fcm"
 	"carvilon.local/server/internal/httpserver"
@@ -257,6 +258,24 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	weatherClient := weather.New()
 	log.Info("weather backend configured", "provider", "open-meteo")
 
+	// Saison 18-14: short-lived WHEP egress-token issuer. Optional: no
+	// key -> nil issuer -> GET /webviewer/egress-token soft-503s (the
+	// cloud egress is additive, no boot break). Validate already rejected
+	// a malformed key at boot, so a decode error here is defensive only.
+	var egressIssuer *egresstoken.Issuer
+	if cfg.EgressTokenHMACKey != "" {
+		key, err := cfg.DecodeEgressTokenHMACKey()
+		if err != nil {
+			log.Error("egress token key invalid; egress-token endpoint disabled", "err", err)
+		} else {
+			egressIssuer = egresstoken.NewIssuer(key)
+			log.Info("egress token issuance enabled")
+		}
+	} else {
+		log.Warn("egress token not configured: GET /webviewer/egress-token returns 503 " +
+			"(set CARVILON_EGRESS_TOKEN_HMAC_KEY to enable)")
+	}
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:         cfg,
 		Sessions:       sessionSvc,
@@ -277,6 +296,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		DoorbellCalls:  callsSvc,
 		Streams:        streamBackend,
 		Weather:        weatherClient,
+		EgressIssuer:   egressIssuer,
 		Log:            log,
 	})
 	if err != nil {

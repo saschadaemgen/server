@@ -36,6 +36,7 @@ import (
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streams"
@@ -113,7 +114,11 @@ type Deps struct {
 	// /a/weather with 503; the screensaver hides its weather
 	// block in that case.
 	Weather *weather.Client
-	Log     *slog.Logger
+	// EgressIssuer mints short-lived WHEP egress tokens for
+	// GET /webviewer/egress-token (Saison 18-14). Nil (no egress key
+	// configured) -> the endpoint soft-503s.
+	EgressIssuer *egresstoken.Issuer
+	Log          *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -146,11 +151,12 @@ type Server struct {
 	// Kept separate from `streams` because the in-process build's
 	// StreamBackend is a wrapper whose List/Consumers count is the
 	// coarse per-camera-hub number, not the per-profile stats.
-	streamStats *streams.Client
-	weather     *weather.Client
-	log         *slog.Logger
-	mux         *http.ServeMux
-	tpl         *adminTemplates
+	streamStats  *streams.Client
+	weather      *weather.Client
+	egressIssuer *egresstoken.Issuer
+	log          *slog.Logger
+	mux          *http.ServeMux
+	tpl          *adminTemplates
 
 	espStateMu sync.RWMutex
 	espState   map[string]ESPState
@@ -212,6 +218,7 @@ func New(deps Deps) (*Server, error) {
 		streams:         deps.Streams,
 		streamStats:     streamStats,
 		weather:         deps.Weather,
+		egressIssuer:    deps.EgressIssuer,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -253,6 +260,10 @@ func (s *Server) routes() {
 	// viewer's resolved profile and stream the SDP answer back.
 	// 503 when no backend is configured.
 	s.mux.Handle("POST /webviewer/offer", s.requireViewerAuth(http.HandlerFunc(s.handleMieterOffer)))
+	// Saison 18-14: short-lived WHEP egress-token issuance. The browser /
+	// app requests a 5-min streamID-bound token to present to the cloud
+	// WHEP egress. 503 when no egress key is configured.
+	s.mux.Handle("GET /webviewer/egress-token", s.requireViewerAuth(http.HandlerFunc(s.handleMieterEgressToken)))
 	// Tenant settings (idle-view-mode) and weather pull for the
 	// screensaver.
 	s.mux.Handle("GET /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsGet)))
