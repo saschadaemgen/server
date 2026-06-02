@@ -24,6 +24,11 @@ import (
 type Envelope struct {
 	Type string `json:"type"`
 
+	// RequestID correlates a request_ice with its ice_servers reply: the
+	// edge sets it on request_ice, the cloud mirrors it back on ice_servers.
+	// Empty on every other frame type.
+	RequestID string `json:"request_id,omitempty"`
+
 	// StreamID correlates a publish request/start/stop. It is the
 	// viewer/mock MAC - the stable per-viewer identity the doorbellhub
 	// already routes by and the edge can authorise against. Empty for
@@ -37,13 +42,18 @@ type Envelope struct {
 	// Reason explains a stop_publish (see Reason* constants).
 	Reason string `json:"reason,omitempty"`
 
-	// ICEServers carries cloud-minted short-lived TURN credentials on
-	// request_publish (cloud -> edge), so the edge can hand them to the
-	// WHIP client for the WebRTC media path through CGNAT. Empty/nil ->
-	// host candidates only (the pre-TURN behaviour, no break). Only
-	// meaningful on request_publish: the cloud mints them (it holds the
-	// shared secret), the edge never does.
+	// ICEServers carries cloud-minted short-lived TURN credentials. The
+	// cloud mints them (it holds the shared secret; the edge never does) and
+	// the edge hands them to the WebRTC media path through CGNAT. Empty/nil
+	// -> host candidates only (the pre-TURN behaviour, no break). Carried on
+	// request_publish (for the WHIP publisher) AND on ice_servers (the reply
+	// to a request_ice, for a remote WHEP subscriber - Saison 19).
 	ICEServers []streampublish.ICEServer `json:"ice_servers,omitempty"`
+
+	// ExpiresInSeconds is the lifetime of the credentials carried in
+	// ICEServers on an ice_servers frame (cloud -> edge), derived from the
+	// cloud mint TTL. Only meaningful on ice_servers.
+	ExpiresInSeconds int `json:"expires_in_seconds,omitempty"`
 
 	// TURNEvent carries one TURN lifecycle/auth event on a turn_event
 	// frame (cloud -> edge), so the edge persists the relay history for
@@ -77,6 +87,17 @@ const (
 	// TypeStopPublish (edge -> cloud): the edge stopped pushing
 	// StreamID (Reason says why).
 	TypeStopPublish = "stop_publish"
+
+	// TypeRequestICE (edge -> cloud): the edge asks the cloud to mint a
+	// fresh set of subscriber ICE servers (the cloud holds the TURN shared
+	// secret; the edge never does). Carries RequestID (correlation) and
+	// optionally StreamID (logging only - the creds are sid-agnostic).
+	// Decoupled from request_publish on purpose (Saison 19 decision).
+	TypeRequestICE = "request_ice"
+	// TypeICEServers (cloud -> edge): the reply to request_ice, mirroring
+	// RequestID and carrying ICEServers + ExpiresInSeconds. An empty
+	// ICEServers list signals "no minter / mint failed" to the edge.
+	TypeICEServers = "ice_servers"
 
 	// TypeTURNEvent (cloud -> edge): one TURN lifecycle/auth event for
 	// the edge to persist (carries TURNEvent). The relay lives on the
