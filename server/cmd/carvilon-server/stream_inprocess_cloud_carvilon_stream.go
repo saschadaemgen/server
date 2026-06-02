@@ -64,14 +64,16 @@ func init() {
 		if cfg.CloudTURNConfigured() {
 			turnSecret := []byte(cfg.TURNSharedSecret)
 			publicIP, udpPort, tlsPort := cfg.TURNPublicIP, cfg.TURNUDPPort, cfg.TURNTLSPort
+			turnsHost := cfg.TURNPublicHost
 			sc.SetICEMinter(func(streamID string) []streampublish.ICEServer {
 				user, pass, mErr := stream.TURNCredentials(turnSecret, "carvilon", stream.DefaultTURNCredentialTTL)
 				if mErr != nil {
 					log.Error("turn credential mint failed; request_publish will carry host-only ICE", "err", mErr)
 					return nil
 				}
-				// tlsPort 0 -> TURNICEServers omits the turns: leg (TLS off).
-				return fromPionICE(stream.TURNICEServers(publicIP, udpPort, tlsPort, user, pass))
+				// turns: is announced only when tlsPort > 0 AND turnsHost is
+				// set; otherwise TURNICEServers returns stun + turn on the IP.
+				return fromPionICE(stream.TURNICEServers(publicIP, turnsHost, udpPort, tlsPort, user, pass))
 			})
 			log.Info("in-process TURN relay configured", "udp_port", udpPort, "tls_port", tlsPort, "realm", cfg.TURNRealm)
 		} else {
@@ -89,6 +91,9 @@ func init() {
 			TURNRealm:        cfg.TURNRealm,
 			TURNUDPPort:      cfg.TURNUDPPort,
 			TURNTLSPort:      cfg.TURNTLSPort,
+			TURNPublicHost:   cfg.TURNPublicHost,
+			TURNTLSCertFile:  cfg.TURNTLSCertFile,
+			TURNTLSKeyFile:   cfg.TURNTLSKeyFile,
 			Logger:           stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
 		})
 		if err != nil {

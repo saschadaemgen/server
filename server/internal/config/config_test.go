@@ -553,13 +553,27 @@ func TestFromEnv_TURNFields(t *testing.T) {
 		t.Errorf("TURN port defaults not applied: udp=%d tls=%d, want %d/%d",
 			cfg.TURNUDPPort, cfg.TURNTLSPort, defaultTURNUDPPort, defaultTURNTLSPort)
 	}
+	// S18-08 turns-host fields default empty (no default, all optional).
+	if cfg.TURNPublicHost != "" || cfg.TURNTLSCertFile != "" || cfg.TURNTLSKeyFile != "" {
+		t.Errorf("turns-host fields should default empty: host=%q cert=%q key=%q",
+			cfg.TURNPublicHost, cfg.TURNTLSCertFile, cfg.TURNTLSKeyFile)
+	}
 	// Explicit overrides are read.
 	t.Setenv(envTURNRealm, "myrealm")
 	t.Setenv(envTURNUDPPort, "3500")
 	t.Setenv(envTURNTLSPort, "5400")
+	t.Setenv(envTURNPublicHost, "turn.example.com")
+	t.Setenv(envTURNTLSCert, "/etc/carvilon/turns.crt")
+	t.Setenv(envTURNTLSKey, "/etc/carvilon/turns.key")
 	cfg = FromEnv()
 	if cfg.TURNRealm != "myrealm" || cfg.TURNUDPPort != 3500 || cfg.TURNTLSPort != 5400 {
 		t.Errorf("TURN overrides not read: realm=%q udp=%d tls=%d",
 			cfg.TURNRealm, cfg.TURNUDPPort, cfg.TURNTLSPort)
+	}
+	if cfg.TURNPublicHost != "turn.example.com" ||
+		cfg.TURNTLSCertFile != "/etc/carvilon/turns.crt" ||
+		cfg.TURNTLSKeyFile != "/etc/carvilon/turns.key" {
+		t.Errorf("turns-host fields not read: host=%q cert=%q key=%q",
+			cfg.TURNPublicHost, cfg.TURNTLSCertFile, cfg.TURNTLSKeyFile)
 	}
 }

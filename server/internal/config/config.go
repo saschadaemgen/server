@@ -197,6 +197,17 @@ type Config struct {
 	// networks that only allow outbound TLS.
 	TURNUDPPort int
 	TURNTLSPort int
+	// TURNPublicHost is the public HOSTNAME the turns: leg is advertised
+	// on (Saison 18-08). Empty -> no turns: line (stun + turn stay on the
+	// IP). Only used when TURNTLSPort > 0.
+	TURNPublicHost string
+	// TURNTLSCertFile / TURNTLSKeyFile are the cert/key for the turns: TLS
+	// leg, SEPARATE from the WHIP certs (e.g. a Let's Encrypt cert for
+	// TURNPublicHost). Empty -> the stream falls back to the WHIP
+	// CertFile/KeyFile (dev / single-cert setups). The WHIP ingress always
+	// stays on the private cloudca.
+	TURNTLSCertFile string
+	TURNTLSKeyFile  string
 }
 
 const (
@@ -247,6 +258,9 @@ const (
 	envTURNRealm               = "CARVILON_TURN_REALM"
 	envTURNUDPPort             = "CARVILON_TURN_UDP_PORT"
 	envTURNTLSPort             = "CARVILON_TURN_TLS_PORT"
+	envTURNPublicHost          = "CARVILON_TURN_PUBLIC_HOST"
+	envTURNTLSCert             = "CARVILON_TURN_TLS_CERT"
+	envTURNTLSKey              = "CARVILON_TURN_TLS_KEY"
 	defaultSidechannelListen   = ":8443"
 	defaultTURNRealm           = "carvilon"
 	defaultTURNUDPPort         = 3478
@@ -325,6 +339,9 @@ func FromEnv() Config {
 		TURNRealm:        lookupEnv(envTURNRealm),
 		TURNUDPPort:      parsePort(lookupEnv(envTURNUDPPort), defaultTURNUDPPort),
 		TURNTLSPort:      parsePort(lookupEnv(envTURNTLSPort), defaultTURNTLSPort),
+		TURNPublicHost:   lookupEnv(envTURNPublicHost),
+		TURNTLSCertFile:  lookupEnv(envTURNTLSCert),
+		TURNTLSKeyFile:   lookupEnv(envTURNTLSKey),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
