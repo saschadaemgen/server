@@ -112,6 +112,12 @@ func init() {
 					log.Warn("turn event buffer full, dropping", "kind", e.Kind)
 				}
 			},
+			// S18-11: cold-start WHEP trigger. A remote WHEP subscriber for
+			// a stream with no active publisher asks the edge to publish
+			// over the side-channel. The method value matches
+			// RequestPublishFunc exactly; the WHEP request ctx flows
+			// through, so a subscriber disconnect aborts the trigger.
+			OnRequestPublish: sc.RequestPublish,
 		})
 		if err != nil {
 			return nil, err
