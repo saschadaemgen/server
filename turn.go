@@ -53,11 +53,15 @@ func TURNCredentials(sharedSecret []byte, user string, ttl time.Duration) (usern
 // pion only accepts credentials on turn:/turns: URLs (a STUN entry must be
 // credential-less).
 //
-// When tlsPort > 0 (S3 Posten A, the TLS relay leg is active) a third
-// entry advertises turns: (TURN over TLS/TCP) for strict firewalls that
-// only pass encrypted traffic on whitelisted ports. tlsPort == 0 -> just
-// stun: + turn: (the UDP legs).
-func TURNICEServers(publicIP string, udpPort, tlsPort int, username, password string) []webrtc.ICEServer {
+// The turns: (TURN over TLS/TCP) leg is added as a third entry ONLY when
+// tlsPort > 0 AND turnsHost != "". It is advertised on turnsHost, NOT
+// publicIP: pion verifies the turns: TLS handshake against the system root
+// pool with ServerName = the URL host, so it must be a HOSTNAME matching a
+// publicly-trusted cert's SAN (the S3 turns-befund - a bare-IP turns: with
+// a private-CA cert is rejected). stun:/turn: stay on publicIP (no cert).
+// Empty turnsHost -> no turns: line (an IP-turns would not verify), even
+// when tlsPort > 0.
+func TURNICEServers(publicIP, turnsHost string, udpPort, tlsPort int, username, password string) []webrtc.ICEServer {
 	servers := []webrtc.ICEServer{
 		{URLs: []string{fmt.Sprintf("stun:%s:%d", publicIP, udpPort)}},
 		{
@@ -66,10 +70,11 @@ func TURNICEServers(publicIP string, udpPort, tlsPort int, username, password st
 			Credential: password,
 		},
 	}
-	if tlsPort > 0 {
-		// turns: is authenticated like turn: (same ephemeral creds).
+	if tlsPort > 0 && turnsHost != "" {
+		// turns: on the public hostname (not the IP), authenticated like
+		// turn: (same ephemeral creds).
 		servers = append(servers, webrtc.ICEServer{
-			URLs:       []string{fmt.Sprintf("turns:%s:%d?transport=tcp", publicIP, tlsPort)},
+			URLs:       []string{fmt.Sprintf("turns:%s:%d?transport=tcp", turnsHost, tlsPort)},
 			Username:   username,
 			Credential: password,
 		})

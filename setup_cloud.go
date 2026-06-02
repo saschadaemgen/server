@@ -57,13 +57,27 @@ type CloudSetupOptions struct {
 	// TURNUDPPort - 0 -> 3478. The UDP relay is the CGNAT workhorse.
 	TURNUDPPort int
 	// TURNTLSPort enables the TLS relay leg (turns:, TURN over TLS/TCP) on
-	// that port when > 0 (S3 Posten A; 5349 is the turns: standard port).
-	// 0 -> TLS leg OFF (opt-in): only the UDP relay + STUN run. The TLS
-	// listener reuses CertFile/KeyFile (the WHIP certs), so the embedding
-	// module passes NO extra cert fields; a TLS-on setup with an unloadable
-	// cert is a hard error (no silent partial relay - and it is the same
-	// cert WHIP already requires).
+	// that port when > 0 (S3; 5349 is the turns: standard port). 0 -> TLS
+	// leg OFF (opt-in): only the UDP relay + STUN run. A TLS-on setup with
+	// an unloadable cert is a hard error (no silent partial relay).
 	TURNTLSPort int
+	// TURNPublicHost is the public HOSTNAME the turns: leg is advertised on
+	// (e.g. "turn.carvilon.com"), resolving to the relay's public IP. It
+	// MUST match the TLS cert's SAN: pion verifies the turns: handshake
+	// against the system root pool with ServerName = the URL host, so a
+	// turns: on a bare IP with a private-CA cert is rejected (the S3
+	// turns-befund). stun:/turn: stay on TURNPublicIP (they need no cert).
+	// Empty -> no turns: line is advertised (an IP-turns would not verify),
+	// even when TURNTLSPort > 0.
+	TURNPublicHost string
+	// TURNTLSCertFile / TURNTLSKeyFile are the cert/key for the TLS relay
+	// leg, SEPARATE from the WHIP certs: the WHIP ingress stays on the
+	// private cloudca CA (internal path) while the public turns: leg uses a
+	// publicly-trusted cert (e.g. Let's Encrypt for TURNPublicHost) that an
+	// arbitrary client's system pool trusts. Empty -> fall back to
+	// CertFile/KeyFile (the WHIP certs; dev / single-cert setups).
+	TURNTLSCertFile string
+	TURNTLSKeyFile  string
 
 	// turnListenPacket / turnListenTLS are UNEXPORTED test seams: when set
 	// they replace the real UDP bind / TLS listener so a test need not bind
@@ -246,35 +260,47 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 
 	// Per-peer minter: fresh ephemeral creds each call (they expire), no
 	// secret stored beyond this closure.
-	publicIP, secret := opts.TURNPublicIP, opts.TURNSharedSecret
+	publicIP, secret, turnsHost := opts.TURNPublicIP, opts.TURNSharedSecret, opts.TURNPublicHost
 	minter := func() ([]webrtc.ICEServer, error) {
 		user, pass, gerr := TURNCredentials(secret, "carvilon", DefaultTURNCredentialTTL)
 		if gerr != nil {
 			return nil, gerr
 		}
-		return TURNICEServers(publicIP, udpPort, tlsPort, user, pass), nil
+		return TURNICEServers(publicIP, turnsHost, udpPort, tlsPort, user, pass), nil
 	}
 
-	if tlsPort > 0 {
-		logger.Printf("stream: TURN relay on udp:%d + tls:%d (realm=%q, relay-ip=%s)",
+	switch {
+	case tlsPort > 0 && turnsHost != "":
+		logger.Printf("stream: TURN relay on udp:%d + tls:%d (turns host=%s, realm=%q, relay-ip=%s)",
+			udpPort, tlsPort, turnsHost, realm, opts.TURNPublicIP)
+	case tlsPort > 0:
+		logger.Printf("stream: TURN relay on udp:%d + tls:%d listening, but TURNPublicHost is empty -> turns: NOT advertised (realm=%q, relay-ip=%s)",
 			udpPort, tlsPort, realm, opts.TURNPublicIP)
-	} else {
+	default:
 		logger.Printf("stream: TURN relay on udp:%d (realm=%q, relay-ip=%s); TLS leg disabled (TURNTLSPort=0)",
 			udpPort, realm, opts.TURNPublicIP)
 	}
 	return turnSrv, minter, nil
 }
 
-// turnTLSListener builds the TLS listener for the turns: leg, reusing the
-// WHIP cert/key (eager load - a broken cert fails setup, surfaced by the
-// caller as a hard error). The test seam opts.turnListenTLS bypasses the
-// cert load + bind.
+// turnTLSListener builds the TLS listener for the turns: leg. It uses the
+// SEPARATE TURNTLSCertFile/KeyFile (the publicly-trusted host cert that an
+// arbitrary client's system pool trusts) when both are set, else falls
+// back to the WHIP CertFile/KeyFile (dev / single-cert setups). The WHIP
+// ingress itself is untouched - it keeps its own (private-CA) cert.
+//
+// Eager load - a broken cert fails setup, surfaced by the caller as a hard
+// error. The test seam opts.turnListenTLS bypasses the cert load + bind.
 func turnTLSListener(opts CloudSetupOptions, tlsPort int) (net.Listener, error) {
 	addr := fmt.Sprintf(":%d", tlsPort)
 	if opts.turnListenTLS != nil {
 		return opts.turnListenTLS(addr)
 	}
-	cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
+	certFile, keyFile := opts.TURNTLSCertFile, opts.TURNTLSKeyFile
+	if certFile == "" || keyFile == "" {
+		certFile, keyFile = opts.CertFile, opts.KeyFile // fall back to the WHIP certs
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("load cert/key: %w", err)
 	}
