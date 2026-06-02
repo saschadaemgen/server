@@ -63,16 +63,17 @@ func init() {
 		// Independent soft gate (S18-05): no TURN config -> host-only ICE.
 		if cfg.CloudTURNConfigured() {
 			turnSecret := []byte(cfg.TURNSharedSecret)
-			publicIP, udpPort := cfg.TURNPublicIP, cfg.TURNUDPPort
+			publicIP, udpPort, tlsPort := cfg.TURNPublicIP, cfg.TURNUDPPort, cfg.TURNTLSPort
 			sc.SetICEMinter(func(streamID string) []streampublish.ICEServer {
 				user, pass, mErr := stream.TURNCredentials(turnSecret, "carvilon", stream.DefaultTURNCredentialTTL)
 				if mErr != nil {
 					log.Error("turn credential mint failed; request_publish will carry host-only ICE", "err", mErr)
 					return nil
 				}
-				return fromPionICE(stream.TURNICEServers(publicIP, udpPort, user, pass))
+				// tlsPort 0 -> TURNICEServers omits the turns: leg (TLS off).
+				return fromPionICE(stream.TURNICEServers(publicIP, udpPort, tlsPort, user, pass))
 			})
-			log.Info("in-process TURN relay configured", "udp_port", udpPort, "realm", cfg.TURNRealm)
+			log.Info("in-process TURN relay configured", "udp_port", udpPort, "tls_port", tlsPort, "realm", cfg.TURNRealm)
 		} else {
 			log.Info("TURN not configured; request_publish carries host-only ICE " +
 				"(set CARVILON_TURN_PUBLIC_IP + CARVILON_TURN_SHARED_SECRET to enable the relay)")

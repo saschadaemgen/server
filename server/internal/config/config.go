@@ -191,7 +191,10 @@ type Config struct {
 	// TURNRealm is the TURN realm. Empty -> "carvilon" (FromEnv default).
 	TURNRealm string
 	// TURNUDPPort / TURNTLSPort are the relay's UDP and TLS listen ports.
-	// Empty -> 3478 / 5349 (FromEnv defaults).
+	// TURNUDPPort empty -> 3478 (the CGNAT workhorse). TURNTLSPort is
+	// OPT-IN: empty/0 -> the turns: TLS relay is OFF; set
+	// CARVILON_TURN_TLS_PORT (e.g. 5349) to enable the TLS leg for
+	// networks that only allow outbound TLS.
 	TURNUDPPort int
 	TURNTLSPort int
 }
@@ -247,7 +250,7 @@ const (
 	defaultSidechannelListen   = ":8443"
 	defaultTURNRealm           = "carvilon"
 	defaultTURNUDPPort         = 3478
-	defaultTURNTLSPort         = 5349
+	defaultTURNTLSPort         = 0 // TLS relay is opt-in; 0 = off
 	// Legacy aliases (Saison 14 rename, deprecation horizon S18+).
 	legacyListenAddr       = "UNIFIX_LISTEN_ADDR"
 	legacyCertFile         = "UNIFIX_CERT_FILE"
@@ -492,8 +495,9 @@ func (c Config) ValidateCloud() error {
 		if c.TURNUDPPort < 1 || c.TURNUDPPort > 65535 {
 			return fmt.Errorf("config: %s must be in the range 1-65535", envTURNUDPPort)
 		}
-		if c.TURNTLSPort < 1 || c.TURNTLSPort > 65535 {
-			return fmt.Errorf("config: %s must be in the range 1-65535", envTURNTLSPort)
+		// TLS relay is opt-in: 0 = OFF. Only range-check a non-zero port.
+		if c.TURNTLSPort != 0 && (c.TURNTLSPort < 1 || c.TURNTLSPort > 65535) {
+			return fmt.Errorf("config: %s must be 0 (TLS off) or in the range 1-65535", envTURNTLSPort)
 		}
 	}
 	return nil

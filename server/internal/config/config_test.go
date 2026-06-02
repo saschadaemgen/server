@@ -508,6 +508,14 @@ func TestValidateCloud_TURNConsistency(t *testing.T) {
 	if err := ok.ValidateCloud(); err != nil {
 		t.Errorf("TURN without WHIP must not fail ValidateCloud: %v", err)
 	}
+	// TLS relay is opt-in (S18-07): TURNTLSPort 0 means OFF and is valid,
+	// not an error. (The ok config above already covers the TLS-on path
+	// with port 5349.)
+	off := ok
+	off.TURNTLSPort = 0
+	if err := off.ValidateCloud(); err != nil {
+		t.Errorf("TURN with TLS off (port 0) must be valid: %v", err)
+	}
 	for _, tc := range []struct {
 		name string
 		mut  func(*Config)
@@ -515,7 +523,7 @@ func TestValidateCloud_TURNConsistency(t *testing.T) {
 		{"bad ip", func(c *Config) { c.TURNPublicIP = "not-an-ip" }},
 		{"udp port zero", func(c *Config) { c.TURNUDPPort = 0 }},
 		{"udp port too high", func(c *Config) { c.TURNUDPPort = 70000 }},
-		{"tls port zero", func(c *Config) { c.TURNTLSPort = 0 }},
+		{"tls port too high", func(c *Config) { c.TURNTLSPort = 70000 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := ok
