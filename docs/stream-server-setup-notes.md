@@ -73,6 +73,54 @@ UNIFI_ENCRYPTION   tls (default) | srtp - GLOBAL source encryption (S6-14)
 State: `./state/stream.db` (SQLite profile persistence). Survives restarts;
 the built-in default profile set is only seeded when the DB is empty (DB wins).
 
+### Cloud role env (Season 3) - names/purpose/format ONLY, never values
+
+```
+# read by `cmd/streaming-server -role=cloud` (the repo dev cloud server):
+CARVILON_WHIP_LISTEN            :8444 (default). WHIP ingress + WHEP egress.
+CARVILON_WHIP_CERT_FILE/_KEY    server TLS cert/key (private cloudca CA).
+CARVILON_PUBLISH_TOKEN_HMAC_KEY 32-byte hex. WHIP publish-token verify key.
+CARVILON_EGRESS_TOKEN_HMAC_KEY  32-byte hex. WHEP egress-token verify key.
+                                SEPARATE from the publish key. Empty -> the
+                                WHEP egress FAILS CLOSED (every subscribe 401).
+
+# read by the carvilon-server (Master cfg) and passed via CloudSetupOptions
+# (the stream package never reads these directly):
+CARVILON_TURN_PUBLIC_IP         public IP the relay announces (stun/turn).
+CARVILON_TURN_SHARED_SECRET     HMAC shared secret for ephemeral TURN creds.
+CARVILON_TURN_REALM             TURN realm (default "carvilon").
+CARVILON_TURN_UDP_PORT          UDP relay + STUN port (default 3478).
+CARVILON_TURN_TLS_PORT          turns: port (e.g. 5349). 0 -> TLS leg OFF.
+CARVILON_TURN_PUBLIC_HOST       public hostname for turns: (cert SAN must match).
+CARVILON_TURN_TLS_CERT_FILE/_KEY  publicly-trusted cert for the turns: leg,
+                                SEPARATE from the WHIP cloudca cert; empty ->
+                                falls back to the WHIP cert. Example path:
+                                /etc/letsencrypt/live/<turn-host>/fullchain.pem.
+```
+The HMAC keys and the TURN shared secret are SECRETS - never log/commit/echo
+a value (the code logs only the env NAME + byte length). See
+stream-server-security.md.
+
+### Test helpers (NOT in the production build)
+
+Two standalone `cmd/` diagnostics, each its own `package main`; the edge/cloud
+binaries never import them. Run with `go run` (the RPi has no `go`; the desktop
+does):
+
+```
+cmd/whep-probe   - a real pion WHEP subscriber: builds an offer, POSTs to
+                   /whep/{sid}, applies the answer, logs HTTP status + ICE
+                   state + RTP arrival. Flags: -url, -token (Bearer egress
+                   token), -stun/-turn (+ -turn-user/-turn-pass), -hold,
+                   -insecure (default true; :8444 uses the cloudca cert).
+cmd/mint-egress  - mints a token in the publish/egress format. Flags: -sid,
+                   -ttl, -key-env (default CARVILON_EGRESS_TOKEN_HMAC_KEY; set
+                   CARVILON_PUBLISH_TOKEN_HMAC_KEY for the key-separation test).
+                   Key ONLY from the env, never logged; stdout = ONLY the token.
+```
+Three-case egress test: no -token -> 401; valid egress token -> 201 + RTP;
+publish-key token -> 401 (key separation).
+
 ---
 
 ## Verify (stats + profiles)
@@ -134,5 +182,6 @@ security, profile-api) current?
 
 ---
 
-*Living document. Last: 2026-05-31 (end of Stream season 2). Sibling:
-stream-server-decisions.md (the WHY / learnings log).*
+*Living document. Last: end of Stream season 3 (cloud env + test helpers).
+Siblings: stream-server-decisions.md (WHY / learnings) and
+stream-server-security.md (the layer's security view).*

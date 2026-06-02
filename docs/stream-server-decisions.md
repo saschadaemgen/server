@@ -16,6 +16,126 @@ says so explicitly and the other doc is corrected to point here.
 
 ---
 
+## D-0008 (S3, egress-auth): WHEP egress token = separate HMAC key, fail-closed, verified before the cold-trigger
+
+**Decision:** The WHEP egress (`POST /whep/{streamID}`) now requires a Bearer
+egress token, verified with the EXISTING `publishtoken.Verify` against a
+SEPARATE key (`CARVILON_EGRESS_TOKEN_HMAC_KEY`, 32-byte hex). The egress token
+is byte-identical to a publish token (same `{sid,exp,nonce}` format) - no new
+crypto; the same Verify validates it with the egress key.
+
+**Why a separate key:** push (publish at the WHIP ingress) and pull (subscribe
+at the WHEP egress) must not be interchangeable - a publish token must not
+grant a pull, nor vice versa. Same format, different key: a publish-key-signed
+token presented at the egress fails the signature check (proven by a
+round-trip mint with the publish key -> `signature mismatch` at the egress).
+
+**Fail closed:** with no egress key configured, every WHEP subscribe is
+rejected 401 (a loud one-shot boot WARN flags the missing key). Chosen over
+fail-open because the door is meant to be locked and the key is already set on
+both machines; NOT fatal at boot, so the WHIP-ingress / MJPEG paths keep
+running. A bad FORMAT (set but not 32-byte-hex) IS fatal, like the publish key.
+
+**Order (security-relevant):** the 401 verify runs BEFORE the cold-start
+trigger (D-0007), so an unauthorized subscriber can never force the edge to
+publish. Bare 401, concrete failure class logged only (no oracle), mirroring
+the ingress. The key value is never logged (only env name + byte length).
+
+**Consequence:** external WHEP pull is gated. Open debt (see
+stream-server-security.md): symmetric HMAC (not asymmetric); the token is
+sid-bound but NOT client-bound (a leaked token is valid ~5 min for that sid);
+no egress rate-limit yet.
+
+---
+
+## D-0007 (S3, WHEP cold-trigger): subscriber-driven request_publish via an Open-Core callback
+
+**Decision:** A WHEP subscriber for a stream with no active publisher triggers
+a `request_publish` to the edge, waits up to `coldPublishTimeout` (12 s) for
+the publisher to dock in the hub, then attaches (201). Before this it was a
+bare 404 - only the Master's loopback hook could start a publish, unreachable
+to a remote client.
+
+**Open-Core seam:** the trigger is a plain
+`RequestPublishFunc func(ctx context.Context, streamID string) (edges int)`
+field on `CloudSetupOptions` (stdlib types only - `context.Context` is
+stdlib). The stream package does NOT import the side-channel; the Master wires
+the callback to `sidechannel.Server.RequestPublish`. Mirrors the SetICEMinter
+pattern, in the stream->Master direction.
+
+**Single-flight per streamID:** simultaneous cold subscribers fire at most one
+request_publish (a double trigger would be harmless - the edge publishes once).
+edges==0 -> fail fast (504, no wait); timeout -> 504 (NOT 404, the trigger
+ran); nil callback -> unchanged 404 behaviour.
+
+**Lesson:** a remote client cannot reach the loopback hook; the real trigger
+must be the subscriber arrival itself, coupled through an Open-Core callback so
+the dumb media layer stays free of tenant/side-channel types.
+
+---
+
+## D-0006 (S3, telemetry): TURN/ICE telemetry as Open-Core types, IP raw+masked, no secret
+
+**Decision:** The in-process TURN relay is a read-only data source for the
+admin: `CloudServer.TURNStats()` (allocation count + a live client set) and an
+`OnTURNEvent` callback (allocation created/deleted/error + auth verdict) wired
+into pion's `ServerConfig.EventHandler`. Plus an optional whipclient
+`OnICEState` callback (structured ICE-state transitions).
+
+**Open-Core:** TURNStats / TURNClient / TURNEvent / ICEStateEvent carry ONLY
+stdlib types (string/int/bool/time). pion's `net.Addr` is read only at the
+boundary and rendered to strings - no pion/net type crosses the seam (same
+rule as the ICEServer naht), so the embedding module's public build stays
+pion-free. The Master persists the events (SQLite) and polls TURNStats.
+
+**IP raw AND masked:** every event carries the mieter IP both raw and masked
+(reusing the icedebug masker); the Master chooses which to store. The TURN
+shared secret and the credential password NEVER appear in stats/events/logs.
+
+**What pion does NOT provide (honest):** relayed-byte counters and a
+STUN-binding count - pion/turn has no such counter (only AllocationCount +
+Close + the EventHandler). Cutting a single allocation is not cleanly possible
+via the public turn API. Those were deliberately not faked.
+
+---
+
+## D-0005 (S3, ICE/TURN): in-process pion/turn (UDP+TLS in one server), turns: on a public hostname
+
+**Decision (the cloud ICE fix for RPi-behind-CGNAT <-> public VPS):**
+- Embed **pion/turn** in the cloud setup (not a separate process). ONE pion
+  server carries the UDP relay AND the TLS relay (turns:) via
+  PacketConnConfigs + ListenerConfigs. The cloud peers and the edge whipclient
+  each get a fresh ephemeral REST credential per allocation (HMAC over the
+  shared secret, TTL 5 min); the long-term secret stays cloud-side.
+- **TURN, not pure STUN:** the RPi is behind CGNAT, so srflx alone does not
+  connect - a relay (TURN) is required. STUN is added as a credential-less
+  entry on the SAME relay UDP port (pion answers Binding unauthenticated):
+  free, no second server/port/firewall rule.
+- **turns: on a public HOSTNAME, not a bare IP:** pion verifies the turns: TLS
+  handshake against the system root pool with ServerName = the URL host, so a
+  private-CA cert on an IP is rejected. The WHIP ingress keeps its private
+  cloudca cert; the turns: leg uses a SEPARATE publicly-trusted cert
+  (TURNTLSCertFile/KeyFile, e.g. Let's Encrypt for the relay hostname).
+- **TURNTLSPort==0 = TLS leg OFF (opt-in);** a TLS-on setup with an unloadable
+  cert is a hard error (no silent partial relay).
+
+**Key findings (each cost a befund):**
+- A relay ICE candidate is labelled by its RELAYED transport (**udp**)
+  regardless of whether the client reached the relay over udp or tls/tcp. So
+  "no proto=tcp candidate" is EXPECTED, not a bug; the two relay candidates are
+  turn:udp + turns:tls.
+- **ICEServers do NOT travel in the SDP.** The SDP answer carries the server's
+  gathered candidates, not its ICEServers config. A NAT client therefore needs
+  its OWN ICEServers to form srflx/relay - this is the Android-subscriber
+  signalling debt (see feature-backlog).
+
+**Consequence:** ICE reaches `connected` over the UDP relay; turns: confirmed
+as the TLS allocation on :5349. The publish path (edge gets ICEServers via the
+request_publish frame) connects; the subscriber media path needs the CLIENT to
+carry ICEServers.
+
+---
+
 ## D-0004 (S3-01, 31 May 2026): source fps is light-dependent - MJPEG fps tracks it
 
 **Finding:** After S3-01 the MJPEG fps appeared to fall to ~9.7 in the evening
@@ -201,5 +321,6 @@ not by a rising source_fps.
 
 ---
 
-*Living document. Newest entry on top. Last: 2026-05-31 (Stream season 3,
-S3-01: even-rate input + fast_bilinear throughput, D-0003).*
+*Living document. Newest entry on top. Last: end of Stream season 3 (cloud
+arc: ICE/TURN D-0005, telemetry D-0006, WHEP cold-trigger D-0007, egress-auth
+D-0008).*

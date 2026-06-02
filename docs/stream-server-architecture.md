@@ -169,6 +169,54 @@ transcoder_cpu_percent (/proc).
 
 ---
 
-*Living document. Last: 2026-05-31 (Stream season 3, S3-01). See
-stream-server-decisions.md for the encode-throughput findings (D-0002
-low_delay, D-0003 even-rate input + fast_bilinear scaler).*
+## 9. Cloud role as built (Season 3)
+
+Several Section 8 points are now built. The cloud role is NOT a separate
+binary - it is the carvilon-server `carvilon_stream` build embedding the
+exported `stream` package in-process (mirror of the edge seam). Entry:
+`stream.SetupCloudInProcess(CloudSetupOptions) (CloudServer, shutdown, error)`.
+
+```
+WHIP ingress (POST /whip/{streamID}) + WHEP egress (POST /whep/{streamID}):
+  one TLS mux on :8444. Publisher RTP lands in a streamhub fan-out
+  (TrackLocalStaticRTP), drained by WHEP subscribers, no re-encode.
+
+In-process TURN relay (pion/turn), soft-gated on TURNPublicIP:
+  - ONE pion server carries UDP relay + STUN (same port) AND the optional
+    TLS relay (turns:) via PacketConnConfigs + ListenerConfigs.
+  - ICEMinter: a fresh ephemeral REST credential per accepted peer (HMAC over
+    the shared secret, TTL 5 min). Both WHIP and WHEP peers get the same
+    minted stun/turn/turns ICEServers.
+  - turns: advertised on a public hostname with a separate publicly-trusted
+    cert; stun:/turn: on the public IP. (D-0005)
+
+WHEP cold-start trigger (OnRequestPublish): a subscriber for a stream with no
+  publisher asks the edge to publish (Open-Core callback -> Master's
+  side-channel), waits for the publisher to dock, then attaches. (D-0007)
+
+Egress auth: WHEP verifies a Bearer egress token (separate HMAC key,
+  fail-closed) BEFORE the cold-trigger. (D-0008)
+
+Telemetry (read-only data source for the admin): CloudServer.TURNStats()
+  (allocations + live clients) + OnTURNEvent (lifecycle/auth) + whipclient
+  OnICEState. All Open-Core types, IP raw+masked, no secret. (D-0006)
+```
+
+**Master seam (CloudSetupOptions fields the carvilon-server wires):** `Addr`,
+`CertFile`/`KeyFile`, `HMACKey` (publish-token), `EgressHMACKey`,
+`TURNPublicIP`/`TURNSharedSecret`/`TURNRealm`/`TURNUDPPort`/`TURNTLSPort`/
+`TURNPublicHost`/`TURNTLSCertFile`/`TURNTLSKeyFile`, `OnRequestPublish`,
+`OnTURNEvent`. The stream package never imports the side-channel or any tenant
+type; everything crosses as stdlib values (Open-Core, ADR-STREAM-01).
+
+**Still open (Season 4 / Master-19):** the subscriber media path needs the
+CLIENT (Android) to carry its own ICEServers - ICEServers do not travel in the
+SDP (D-0005). The Master will hand them to Android at stream start (the
+symmetric counterpart of the edge's request_publish ICEServers). See
+stream-server-feature-backlog.md.
+
+---
+
+*Living document. Last: end of Stream season 3 (cloud role built: WHIP/WHEP,
+in-process TURN, WHEP cold-trigger, egress-auth, telemetry - Section 9). See
+stream-server-decisions.md (D-0005..D-0008) and stream-server-security.md.*

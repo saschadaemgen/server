@@ -126,8 +126,43 @@ endpoints above are the dev/standalone view. Reconcile with the carvilon
 wire-format.md when the seam changes.
 ```
 
+## 8. Cloud signalling (WHIP/WHEP, ICEServers, egress token) - Season 3
+
+```
+WHIP ingress  POST /whip/{streamID}   (edge -> cloud, the publisher)
+  Authorization: Bearer <publish_token>   (verified, separate from egress)
+  Content-Type: application/sdp           Body: raw SDP offer
+  201 -> SDP answer in body + Location: /whip/{streamID}/session/<id>
+  401 bare on any auth failure (detail logged server-side only).
+
+WHEP egress   POST /whep/{streamID}   (subscriber -> cloud)
+  Authorization: Bearer <egress_token>    (REQUIRED; S3 egress-auth)
+  Content-Type: application/sdp           Body: raw SDP offer
+  201 -> SDP answer + Location: /whep/{streamID}/session/<id>
+  401 bare (no/invalid/expired/wrong-sid token, or fail-closed no-key)
+  404 no publisher AND no cold-trigger wired
+  503 publisher session exists but track not ready in time
+  504 cold trigger ran but no publisher docked / no edge (NOT 404)
+```
+
+**ICEServers (minted per peer, served in the PeerConnection config - NOT in
+the SDP):** a credential-less STUN entry `stun:<publicIP>:<udpPort>`, a TURN
+entry `turn:<publicIP>:<udpPort>?transport=udp` with ephemeral REST creds,
+and (when a TLS port + public host are set) a turns entry
+`turns:<host>:<tlsPort>?transport=tcp`. The edge receives the same shape in
+the side-channel `request_publish` frame. IMPORTANT: ICEServers are a CLIENT
+config, they do NOT travel in the SDP - a NAT subscriber must be given its own
+(D-0005).
+
+**Egress token format:** byte-identical to the publish token
+(`base64url(json{sid,exp,nonce}).base64url(HMAC-SHA256(key, payloadString))`),
+signed with a SEPARATE key. The shared token/crypto format is owned centrally
+- see **secure-chat-wire-format.md**; it is NOT duplicated here. This doc only
+notes that the egress uses the same format with its own key (D-0008).
+
 ---
 
-*Living document. Last: 2026-05-31 (end of Stream season 2). Reconcile with
-carvilon wire-format.md and esp-wire-format.md on changes. Sibling:
-stream-server-decisions.md.*
+*Living document. Last: end of Stream season 3 (cloud signalling: WHIP/WHEP,
+ICEServers, egress token - Section 8). For the shared token/crypto format see
+secure-chat-wire-format.md. Reconcile with carvilon wire-format.md and
+esp-wire-format.md on changes. Sibling: stream-server-decisions.md.*
