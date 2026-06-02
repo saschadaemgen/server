@@ -360,3 +360,63 @@ func TestNew_RequiresLogger(t *testing.T) {
 		t.Error("New without Logger = nil error, want error")
 	}
 }
+
+// TestOnICEState_FiresStructuredEvent drives a real publish against the
+// loopback pion answerer; both ends are local so ICE progresses and the
+// optional OnICEState callback fires with a well-formed event (matching
+// streamID, a non-empty state string, a non-negative elapsed). This proves
+// the structured ICE-history hook, in addition to the existing log line.
+func TestOnICEState_FiresStructuredEvent(t *testing.T) {
+	ts := newTestServer(t)
+
+	var mu sync.Mutex
+	var events []ICEStateEvent
+	c, err := New(Config{
+		TrackSource: dummyTrackSource,
+		HTTPClient:  ts.client(),
+		Logger:      log.New(io.Discard, "", 0),
+		OnICEState: func(e ICEStateEvent) {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	const sid = "cam-ice"
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), nil)
+
+	eventually(t, 5*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(events) > 0
+	}, "expected at least one OnICEState event")
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range events {
+		if e.StreamID != sid {
+			t.Errorf("event StreamID = %q, want %q", e.StreamID, sid)
+		}
+		if e.State == "" {
+			t.Errorf("event has an empty State string")
+		}
+		if e.SinceStart < 0 {
+			t.Errorf("event SinceStart = %v, want >= 0", e.SinceStart)
+		}
+	}
+}
+
+// TestOnICEState_NilIsLogOnly proves a nil OnICEState does not break the
+// publish path (today's log-only behaviour stays intact).
+func TestOnICEState_NilIsLogOnly(t *testing.T) {
+	ts := newTestServer(t)
+	c := newClient(t, ts, dummyTrackSource, nil) // newClient sets no OnICEState
+	const sid = "cam-nilice"
+	c.StartPublish(sid, signToken(t, sid, ts.hmacKey), ts.url(), nil)
+	eventually(t, 5*time.Second, ts.gotPublish.Load,
+		"publish should still complete with a nil OnICEState")
+}

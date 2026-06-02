@@ -72,6 +72,24 @@ type Config struct {
 
 	// Logger is required (no nil default; the caller chooses the sink).
 	Logger *log.Logger
+
+	// OnICEState, when non-nil, is called on every ICE connection-state
+	// change with a structured event, IN ADDITION to the existing log line,
+	// so the embedding module (carvilon admin) can surface ICE history.
+	// OPTIONAL: nil -> log-only (today's behaviour; no break). Called from
+	// pion's ICE goroutine; must be safe for concurrent use. It carries
+	// only stdlib types (no pion type) - open-core, like the TURN naht.
+	OnICEState func(ICEStateEvent)
+}
+
+// ICEStateEvent is a structured ICE connection-state transition for the
+// optional Config.OnICEState callback. Stdlib types only (no pion type), so
+// the embedding module's public build stays pion-free.
+type ICEStateEvent struct {
+	StreamID   string
+	State      string        // pion ICEConnectionState as a string: "checking" | "connected" | "failed" | "closed" | ...
+	Time       time.Time     // when the transition was observed
+	SinceStart time.Duration // elapsed since the worker created the PeerConnection
 }
 
 // Client is a non-blocking WHIP publisher. Construct with [New].
@@ -212,10 +230,21 @@ func (c *Client) runPublish(ctx context.Context, streamID, publishToken, cloudWh
 	// (CARVILON_ICE_DEBUG). Purely additive; no-op when the flag is off.
 	icedebug.AttachCandidateLogging(pc, c.cfg.Logger, "whipclient streamID="+streamID)
 	iceTracker := icedebug.NewStateTracker(c.cfg.Logger, "whipclient streamID="+streamID)
+	iceStart := time.Now() // origin for ICEStateEvent.SinceStart
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		c.cfg.Logger.Printf("whipclient: streamID=%s ICE state=%s", streamID, state)
 		iceTracker.Log(state)
+		// S3 telemetry: optional structured event for the admin history,
+		// in addition to the log line. nil callback -> log-only.
+		if c.cfg.OnICEState != nil {
+			c.cfg.OnICEState(ICEStateEvent{
+				StreamID:   streamID,
+				State:      state.String(),
+				Time:       time.Now(),
+				SinceStart: time.Since(iceStart),
+			})
+		}
 		switch state {
 		case webrtc.ICEConnectionStateFailed,
 			webrtc.ICEConnectionStateDisconnected,
