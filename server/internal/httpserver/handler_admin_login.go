@@ -181,6 +181,8 @@ func navSlotFor(name string) string {
 		return "android-viewers"
 	case "streams":
 		return "streams"
+	case "turn":
+		return "turn"
 	case "settings":
 		return "settings"
 	case "viewer-detail":
@@ -221,6 +223,8 @@ func extractUser(data any) adminUser {
 	case adminStreamEditData:
 		return v.User
 	case adminViewerDetailData:
+		return v.User
+	case turnPageData:
 		return v.User
 	case placeholderData:
 		return v.User

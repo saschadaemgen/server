@@ -37,6 +37,7 @@ import (
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
@@ -118,6 +119,16 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	adminLimiter := ratelimit.New()
 	historyStore := doorhistory.NewSQLStore(database.DB)
 
+	// Saison 18-10: TURN/STUN/ICE telemetry. The writer serialises all
+	// SQLite writes (TURN events forwarded from the cloud over the
+	// side-channel + the edge whipclient's ICE-state events) through one
+	// goroutine and runs the 30-day retention purge; the snapshot holder
+	// caches the latest cloud-pushed live snapshot for /a/turn.
+	turnStore := turnstore.NewStore(database.DB)
+	turnWriter := turnstore.NewWriter(turnStore, log.With("component", "turnstore"), turnstore.Options{})
+	turnSnapshots := turnstore.NewSnapshotHolder()
+	go turnWriter.Run(ctx)
+
 	viewerMgr := viewermanager.New(database, log, viewermanager.Options{
 		StateDirBase: cfg.MockStateDir,
 		ServerIPv4:   cfg.ServerIPv4,
@@ -191,7 +202,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// (mocks, WS, MQTT, side-channel, FCM) keeps running (Grundregel).
 	var inProcStreamPublisher streampublish.StreamPublisher
 	if startInProcessStream != nil {
-		backend, publisher, shutdown, err := startInProcessStream(ctx, log, cfg, viewerMgr)
+		backend, publisher, shutdown, err := startInProcessStream(ctx, log, cfg, viewerMgr, turnWriter)
 		switch {
 		case err != nil:
 			log.Error("in-process stream setup failed; stream subsystem disabled", "err", err)
@@ -260,6 +271,8 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		UserStore:      userStore,
 		Hub:            hub,
 		History:        historyStore,
+		TURNStore:      turnStore,
+		TURNSnapshots:  turnSnapshots,
 		EventBus:       eventBus,
 		DoorbellCalls:  callsSvc,
 		Streams:        streamBackend,
@@ -298,7 +311,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher)
+	startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher, turnWriter, turnSnapshots)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -429,7 +442,7 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // nil - the public build, or an unconfigured/failed in-process stream -
 // it falls back to the no-op publisher, so a request_publish issues a
 // token but pushes nothing.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher) {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return
@@ -472,6 +485,11 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		ClientKey:        cfg.SidechannelClientKey,
 		Log:              log.With("component", "sidechannel-client"),
 		OnRequestPublish: edgePub.HandleRequestPublish,
+		// Saison 18-10: persist cloud-forwarded TURN telemetry and cache
+		// the latest live snapshot (stamped with the edge receive time)
+		// for the /a/turn admin page.
+		OnTURNEvent: turnWriter.SubmitEvent,
+		OnTURNStats: func(s turnstore.Snapshot) { turnSnapshots.Set(s, time.Now()) },
 	})
 	if err != nil {
 		// A misconfigured side-channel must NOT take down the edge.

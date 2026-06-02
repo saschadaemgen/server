@@ -15,6 +15,7 @@ import (
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/viewermanager"
 )
 
@@ -34,12 +35,18 @@ var commercialBackend streams.StreamBackend
 //
 // runEdge calls it only when non-nil, so the public build never reaches
 // any carvilon.local/stream code. The signature references only public
-// carvilon types, so this declaration compiles in both builds.
+// carvilon types (turnstore.Writer is pure carvilon, no pion), so this
+// declaration compiles in both builds.
+//
+// iceWriter is the edge-local sink for the whipclient's ICE-state
+// events (Saison 18-10); the tagged build points whipclient.OnICEState
+// at it. Nil disables that leg.
 var startInProcessStream func(
 	ctx context.Context,
 	log *slog.Logger,
 	cfg config.Config,
 	viewerMgr *viewermanager.Manager,
+	iceWriter *turnstore.Writer,
 ) (streams.StreamBackend, streampublish.StreamPublisher, func(), error)
 
 // startInProcessCloudStream is nil in the public build. The

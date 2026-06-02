@@ -53,18 +53,19 @@ func macIDFromMAC(mac string) string {
 // snippets, and the library is kept immutable as a design
 // source).
 var adminLibraryFor = map[string][]string{
-	"login":       {"admin-login.html"},
-	"dashboard":   {},
-	"settings":    {},
-	"web-viewers": {},
-	"esp-viewers": {},
-	"users":       {},
-	"user-detail": {},
-	"esp-pager":   {},
-	"streams":       {},
-	"stream-edit":  {},
+	"login":           {"admin-login.html"},
+	"dashboard":       {},
+	"settings":        {},
+	"web-viewers":     {},
+	"esp-viewers":     {},
+	"users":           {},
+	"user-detail":     {},
+	"esp-pager":       {},
+	"streams":         {},
+	"stream-edit":     {},
+	"turn":            {},
 	"android-viewers": {},
-	"viewer-detail": {},
+	"viewer-detail":   {},
 }
 
 func newAdminTemplates() (*adminTemplates, error) {

@@ -15,6 +15,7 @@ import (
 	stdlog "log"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 
@@ -23,6 +24,7 @@ import (
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/turnstore"
 )
 
 // init assigns the runtime slot declared in backend_default.go.
@@ -81,6 +83,12 @@ func init() {
 				"(set CARVILON_TURN_PUBLIC_IP + CARVILON_TURN_SHARED_SECRET to enable the relay)")
 		}
 
+		// Saison 18-10: TURN telemetry forwarder. OnTURNEvent fires from
+		// pion's goroutines; it drops the raw IP and enqueues on this
+		// buffered channel so the relay never blocks on the side-channel
+		// write. A drain goroutine (started below) does the send.
+		turnEvents := make(chan turnstore.Event, 256)
+
 		srv, shutdown, err := stream.SetupCloudInProcess(stream.CloudSetupOptions{
 			Addr:             cfg.WhipListen, // empty -> stream defaults to :8444
 			CertFile:         cfg.WhipCert,
@@ -95,6 +103,15 @@ func init() {
 			TURNTLSCertFile:  cfg.TURNTLSCertFile,
 			TURNTLSKeyFile:   cfg.TURNTLSKeyFile,
 			Logger:           stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
+			OnTURNEvent: func(e stream.TURNEvent) {
+				// Privacy: drop the raw IP here on the VPS; only the
+				// masked form is enqueued and ever leaves this process.
+				select {
+				case turnEvents <- toTurnstoreEvent(e):
+				default:
+					log.Warn("turn event buffer full, dropping", "kind", e.Kind)
+				}
+			},
 		})
 		if err != nil {
 			return nil, err
@@ -108,6 +125,36 @@ func init() {
 		go func() {
 			if err := srv.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				log.Error("in-process cloud stream server stopped", "err", err)
+			}
+		}()
+
+		// Drain enqueued TURN events to the edge, decoupled from pion's
+		// goroutines (Saison 18-10).
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev := <-turnEvents:
+					sc.SendTURNEvent(ctx, ev)
+				}
+			}
+		}()
+
+		// Push a periodic live snapshot (+ config view) so the edge admin
+		// shows current relay numbers with an honest "Stand vor Xs". The
+		// snapshot carries Enabled=false when TURN is off, so the edge can
+		// tell "cloud up, TURN off" from "cloud unreachable".
+		go func() {
+			ticker := time.NewTicker(turnSnapshotInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					sc.SendTURNStats(ctx, buildTURNSnapshot(srv.TURNStats(), cfg))
+				}
 			}
 		}()
 
@@ -132,4 +179,66 @@ func fromPionICE(in []webrtc.ICEServer) []streampublish.ICEServer {
 		})
 	}
 	return out
+}
+
+// turnSnapshotInterval is how often the cloud pushes a live TURN
+// snapshot to the edge. Kept small (Sascha: seconds, not minutes); the
+// edge's stale threshold (turnstore.DefaultStaleAfter) is 3x this.
+const turnSnapshotInterval = 10 * time.Second
+
+// toTurnstoreEvent converts the stream layer's TURN event to carvilon's
+// transport-neutral type, KEEPING ONLY the masked address. The raw IP
+// (e.SrcAddr / e.DstAddr) is deliberately not copied, so it never
+// leaves the VPS. Compiled only in the carvilon_stream build.
+func toTurnstoreEvent(e stream.TURNEvent) turnstore.Event {
+	out := turnstore.Event{
+		Kind:      e.Kind,
+		Time:      e.Time,
+		SrcMasked: e.SrcAddrMasked,
+		DstMasked: e.DstAddrMasked,
+		Protocol:  e.Protocol,
+		Username:  e.Username,
+		Realm:     e.Realm,
+		Err:       e.Err,
+	}
+	if e.AuthOK != nil {
+		v := *e.AuthOK
+		out.AuthOK = &v
+	}
+	return out
+}
+
+// buildTURNSnapshot assembles the live snapshot the cloud pushes to the
+// edge: pion's live numbers plus the static config view the edge cannot
+// see itself (the TURN config is cloud-side). Masked addresses only.
+func buildTURNSnapshot(st stream.TURNStats, cfg config.Config) turnstore.Snapshot {
+	snap := turnstore.Snapshot{
+		Enabled:         st.Enabled,
+		AllocationCount: st.AllocationCount,
+		GeneratedAt:     time.Now(),
+		STUNActive:      st.Enabled, // credential-less STUN rides the relay's UDP port
+	}
+	for _, c := range st.Clients {
+		snap.Clients = append(snap.Clients, turnstore.Client{
+			SrcMasked: c.SrcAddrMasked,
+			Username:  c.Username,
+			Since:     c.Since,
+		})
+	}
+	if cfg.CloudTURNConfigured() {
+		snap.UDPPort = cfg.TURNUDPPort
+		snap.TLSPort = cfg.TURNTLSPort
+		snap.Realm = cfg.TURNRealm
+		snap.TURNSHost = cfg.TURNPublicHost
+		snap.CredTTLSeconds = int(stream.DefaultTURNCredentialTTL.Seconds())
+		switch {
+		case cfg.TURNTLSPort == 0:
+			snap.CertMode = "" // TLS relay leg off
+		case cfg.TURNTLSCertFile != "":
+			snap.CertMode = "separate"
+		default:
+			snap.CertMode = "shared"
+		}
+	}
+	return snap
 }

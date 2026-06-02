@@ -37,10 +37,11 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
 )
 
@@ -80,6 +81,12 @@ type Deps struct {
 	// /a/ dashboard statistics. Nil means the UI shows an empty
 	// list and zero counters.
 	History doorhistory.Store
+	// TURNStore persists the TURN/ICE telemetry shown on /a/turn
+	// (Saison 18-10). Nil leaves the page empty ("not active").
+	TURNStore *turnstore.Store
+	// TURNSnapshots caches the latest cloud-pushed live snapshot for
+	// the /a/turn live-stats panel. Nil -> no live stats.
+	TURNSnapshots *turnstore.SnapshotHolder
 	// EventsHeartbeat overrides the SSE keepalive interval.
 	// Zero falls back to defaultEventsHeartbeat (30s); tests
 	// inject something shorter.
@@ -114,7 +121,7 @@ type Server struct {
 	cfg             config.Config
 	sessions        *session.Service
 	adminSessions   *adminsession.Service
-	viewerMgr         *viewermanager.Manager
+	viewerMgr       *viewermanager.Manager
 	admin           *admin.Service
 	platformCfg     *platformconfig.Service
 	audit           *loginaudit.Service
@@ -124,6 +131,8 @@ type Server struct {
 	userStore       UserStoreLike
 	hub             *doorbellhub.Hub
 	history         doorhistory.Store
+	turnStore       *turnstore.Store
+	turnSnapshots   *turnstore.SnapshotHolder
 	eventsHeartbeat time.Duration
 	eventBus        *eventbus.Bus
 	calls           *doorbellcalls.Service
@@ -137,11 +146,11 @@ type Server struct {
 	// Kept separate from `streams` because the in-process build's
 	// StreamBackend is a wrapper whose List/Consumers count is the
 	// coarse per-camera-hub number, not the per-profile stats.
-	streamStats     *streams.Client
-	weather         *weather.Client
-	log             *slog.Logger
-	mux             *http.ServeMux
-	tpl             *adminTemplates
+	streamStats *streams.Client
+	weather     *weather.Client
+	log         *slog.Logger
+	mux         *http.ServeMux
+	tpl         *adminTemplates
 
 	espStateMu sync.RWMutex
 	espState   map[string]ESPState
@@ -185,7 +194,7 @@ func New(deps Deps) (*Server, error) {
 		cfg:             deps.Config,
 		sessions:        deps.Sessions,
 		adminSessions:   deps.AdminSessions,
-		viewerMgr:         deps.ViewerManager,
+		viewerMgr:       deps.ViewerManager,
 		admin:           deps.Admin,
 		platformCfg:     deps.PlatformConfig,
 		audit:           deps.Audit,
@@ -195,6 +204,8 @@ func New(deps Deps) (*Server, error) {
 		userStore:       deps.UserStore,
 		hub:             deps.Hub,
 		history:         deps.History,
+		turnStore:       deps.TURNStore,
+		turnSnapshots:   deps.TURNSnapshots,
 		eventsHeartbeat: deps.EventsHeartbeat,
 		eventBus:        deps.EventBus,
 		calls:           deps.DoorbellCalls,
@@ -330,6 +341,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/streams", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamCreate)))
 	s.mux.Handle("POST /a/streams/{name}", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamSave)))
 	s.mux.Handle("POST /a/streams/{name}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminStreamDelete)))
+
+	// TURN/STUN/ICE admin menu (Saison 18-10). Read-only: a config +
+	// live-stats + history view of the cloud TURN relay, fed by the
+	// telemetry the cloud forwards over the side-channel.
+	s.mux.Handle("GET /a/turn", s.requireAdminSession(http.HandlerFunc(s.handleAdminTurn)))
+	s.mux.Handle("GET /a/turn/stats.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminTurnStatsJSON)))
 
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
 	// auth happens at the /webviewer/* tree; here we just CRUD

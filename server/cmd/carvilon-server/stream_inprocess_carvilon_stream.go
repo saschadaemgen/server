@@ -28,6 +28,7 @@ import (
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/viewermanager"
 )
 
@@ -38,6 +39,7 @@ func init() {
 		log *slog.Logger,
 		cfg config.Config,
 		viewerMgr *viewermanager.Manager,
+		iceWriter *turnstore.Writer,
 	) (streams.StreamBackend, streampublish.StreamPublisher, func(), error) {
 		if !cfg.StreamInProcessConfigured() {
 			log.Info("in-process stream not configured; using the HTTP stream backend instead " +
@@ -96,7 +98,7 @@ func init() {
 		// the stream stack.
 		cleanup := func() { _ = shutdown() }
 		var publisher streampublish.StreamPublisher
-		if client, perr := buildWHIPClient(ctx, log, cfg, srv, viewerMgr); perr != nil {
+		if client, perr := buildWHIPClient(ctx, log, cfg, srv, viewerMgr, iceWriter); perr != nil {
 			log.Error("whip publisher init failed; cloud push disabled (local stream unaffected)", "err", perr)
 		} else {
 			publisher = whipPublisher{c: client}
@@ -118,6 +120,7 @@ func buildWHIPClient(
 	cfg config.Config,
 	srv *stream.Server,
 	viewerMgr *viewermanager.Manager,
+	iceWriter *turnstore.Writer,
 ) (*whipclient.Client, error) {
 	tlsCfg, err := whipTLSConfig(cfg.SidechannelCACert)
 	if err != nil {
@@ -137,6 +140,19 @@ func buildWHIPClient(
 		TrackSource: trackSource,
 		TLSConfig:   tlsCfg,
 		Logger:      stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
+		// Edge-local ICE-state telemetry for /a/turn (Saison 18-10).
+		// Converted to carvilon's type at this seam (no pion crosses
+		// into turnstore); SubmitICE is non-blocking.
+		OnICEState: func(e whipclient.ICEStateEvent) {
+			if iceWriter != nil {
+				iceWriter.SubmitICE(turnstore.ICEEvent{
+					StreamID:     e.StreamID,
+					State:        e.State,
+					Time:         e.Time,
+					SinceStartMS: e.SinceStart.Milliseconds(),
+				})
+			}
+		},
 	})
 }
 
