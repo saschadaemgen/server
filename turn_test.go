@@ -44,8 +44,8 @@ func TestTURNCredentials_EmptySecret(t *testing.T) {
 	}
 }
 
-func TestTURNICEServers_Shape(t *testing.T) {
-	srv := TURNICEServers("203.0.113.7", 3478, "user", "pass")
+func TestTURNICEServers_NoTLS(t *testing.T) {
+	srv := TURNICEServers("203.0.113.7", 3478, 0, "user", "pass") // tlsPort 0 -> no turns:
 	if len(srv) != 2 {
 		t.Fatalf("want 2 ICE servers (stun + turn), got %d", len(srv))
 	}
@@ -64,5 +64,19 @@ func TestTURNICEServers_Shape(t *testing.T) {
 	}
 	if srv[1].Username != "user" || srv[1].Credential != "pass" {
 		t.Errorf("TURN creds not set: %+v", srv[1])
+	}
+}
+
+func TestTURNICEServers_WithTLS(t *testing.T) {
+	srv := TURNICEServers("203.0.113.7", 3478, 5349, "user", "pass") // tlsPort 5349 -> turns:
+	if len(srv) != 3 {
+		t.Fatalf("want 3 ICE servers (stun + turn + turns), got %d", len(srv))
+	}
+	// [2] turns: authenticated like turn:, over TLS/TCP on the TLS port.
+	if len(srv[2].URLs) != 1 || srv[2].URLs[0] != "turns:203.0.113.7:5349?transport=tcp" {
+		t.Errorf("unexpected turns URLs: %v", srv[2].URLs)
+	}
+	if srv[2].Username != "user" || srv[2].Credential != "pass" {
+		t.Errorf("turns creds not set: %+v", srv[2])
 	}
 }

@@ -51,10 +51,14 @@ func TURNCredentials(sharedSecret []byte, user string, ttl time.Duration) (usern
 // the TURN entry's creds): ICE prefers the direct srflx path STUN
 // discovers and only falls back to the TURN relay when that fails, and
 // pion only accepts credentials on turn:/turns: URLs (a STUN entry must be
-// credential-less). v1 advertises the UDP legs only; the TLS leg
-// (turns:...:tlsPort) is a documented follow-up.
-func TURNICEServers(publicIP string, udpPort int, username, password string) []webrtc.ICEServer {
-	return []webrtc.ICEServer{
+// credential-less).
+//
+// When tlsPort > 0 (S3 Posten A, the TLS relay leg is active) a third
+// entry advertises turns: (TURN over TLS/TCP) for strict firewalls that
+// only pass encrypted traffic on whitelisted ports. tlsPort == 0 -> just
+// stun: + turn: (the UDP legs).
+func TURNICEServers(publicIP string, udpPort, tlsPort int, username, password string) []webrtc.ICEServer {
+	servers := []webrtc.ICEServer{
 		{URLs: []string{fmt.Sprintf("stun:%s:%d", publicIP, udpPort)}},
 		{
 			URLs:       []string{fmt.Sprintf("turn:%s:%d?transport=udp", publicIP, udpPort)},
@@ -62,4 +66,13 @@ func TURNICEServers(publicIP string, udpPort int, username, password string) []w
 			Credential: password,
 		},
 	}
+	if tlsPort > 0 {
+		// turns: is authenticated like turn: (same ephemeral creds).
+		servers = append(servers, webrtc.ICEServer{
+			URLs:       []string{fmt.Sprintf("turns:%s:%d?transport=tcp", publicIP, tlsPort)},
+			Username:   username,
+			Credential: password,
+		})
+	}
+	return servers
 }

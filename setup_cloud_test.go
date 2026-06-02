@@ -131,3 +131,46 @@ func TestSetupCloudInProcess_TURNMissingSecret(t *testing.T) {
 		t.Fatal("expected error for TURN enabled without shared secret")
 	}
 }
+
+// ephemeralTLSSeam returns a turnListenTLS seam binding an ephemeral
+// loopback TCP listener - no real cert/port - for the TLS-leg
+// construction test. Production uses LoadX509KeyPair + tls.Listen.
+func ephemeralTLSSeam() func(address string) (net.Listener, error) {
+	return func(string) (net.Listener, error) {
+		return net.Listen("tcp", "127.0.0.1:0")
+	}
+}
+
+func TestSetupCloudInProcess_TURNWithTLS(t *testing.T) {
+	opts := cloudOpts()
+	opts.TURNPublicIP = "203.0.113.9"
+	opts.TURNSharedSecret = []byte("test-secret")
+	opts.TURNTLSPort = 5349
+	opts.turnListenPacket = ephemeralUDPSeam()
+	opts.turnListenTLS = ephemeralTLSSeam()
+
+	srv, shutdown, err := SetupCloudInProcess(opts)
+	if err != nil {
+		t.Fatalf("SetupCloudInProcess (TURN + TLS): %v", err)
+	}
+	if srv == nil || shutdown == nil {
+		t.Fatal("nil handle/shutdown")
+	}
+	if err := shutdown(); err != nil {
+		t.Errorf("shutdown: %v", err)
+	}
+}
+
+func TestSetupCloudInProcess_TURNTLSBadCert(t *testing.T) {
+	// TLS on, no TLS seam -> real LoadX509KeyPair on cloudOpts()'s
+	// non-existent cert paths -> hard error (no silent partial relay).
+	opts := cloudOpts()
+	opts.TURNPublicIP = "203.0.113.9"
+	opts.TURNSharedSecret = []byte("test-secret")
+	opts.TURNTLSPort = 5349
+	opts.turnListenPacket = ephemeralUDPSeam()
+	// turnListenTLS deliberately unset -> exercises the eager cert load.
+	if _, _, err := SetupCloudInProcess(opts); err == nil {
+		t.Fatal("expected error for TLS-on with an unloadable cert")
+	}
+}

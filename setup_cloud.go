@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -55,15 +56,21 @@ type CloudSetupOptions struct {
 	TURNRealm string
 	// TURNUDPPort - 0 -> 3478. The UDP relay is the CGNAT workhorse.
 	TURNUDPPort int
-	// TURNTLSPort - 0 -> 5349. Reserved: v1 runs the UDP relay only; the
-	// TLS listener (turns:) is a follow-up. The field is accepted now so
-	// the embedding module can wire its env once.
+	// TURNTLSPort enables the TLS relay leg (turns:, TURN over TLS/TCP) on
+	// that port when > 0 (S3 Posten A; 5349 is the turns: standard port).
+	// 0 -> TLS leg OFF (opt-in): only the UDP relay + STUN run. The TLS
+	// listener reuses CertFile/KeyFile (the WHIP certs), so the embedding
+	// module passes NO extra cert fields; a TLS-on setup with an unloadable
+	// cert is a hard error (no silent partial relay - and it is the same
+	// cert WHIP already requires).
 	TURNTLSPort int
 
-	// turnListenPacket is an UNEXPORTED test seam: when set it replaces the
-	// real UDP bind so a test does not bind a fixed port. nil ->
-	// net.ListenPacket. Invisible to external importers.
+	// turnListenPacket / turnListenTLS are UNEXPORTED test seams: when set
+	// they replace the real UDP bind / TLS listener so a test need not bind
+	// a fixed port or load a real cert. nil -> net.ListenPacket /
+	// LoadX509KeyPair+tls.Listen. Invisible to external importers.
 	turnListenPacket func(network, address string) (net.PacketConn, error)
+	turnListenTLS    func(address string) (net.Listener, error)
 }
 
 // CloudServer is the run-handle returned by [SetupCloudInProcess]. The
@@ -189,6 +196,34 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 		return nil, nil, fmt.Errorf("stream: TURN UDP listen :%d: %w", udpPort, err)
 	}
 
+	// A fresh static relay generator per config (announces the public IP,
+	// NOT a docker bridge). Separate instances keep the UDP and TLS legs
+	// from sharing generator state.
+	mkRelay := func() turn.RelayAddressGenerator {
+		return &turn.RelayAddressGeneratorStatic{
+			RelayAddress: relayIP,   // the announced relay address (public IP)
+			Address:      "0.0.0.0", // bind address for the relay sockets
+		}
+	}
+
+	// S3 Posten A: optional TLS relay leg (turns:) on TURNTLSPort, reusing
+	// the WHIP cert/key. tlsPort == 0 -> off (opt-in). A TLS-on setup with
+	// an unloadable cert is a HARD error (no silent partial relay) - and it
+	// is the SAME cert WHIP requires, so a broken one is already fatal.
+	var listenerConfigs []turn.ListenerConfig
+	tlsPort := opts.TURNTLSPort
+	if tlsPort > 0 {
+		tlsLn, lerr := turnTLSListener(opts, tlsPort)
+		if lerr != nil {
+			_ = udpConn.Close()
+			return nil, nil, fmt.Errorf("stream: TURN TLS listen :%d: %w", tlsPort, lerr)
+		}
+		listenerConfigs = []turn.ListenerConfig{{
+			Listener:              tlsLn,
+			RelayAddressGenerator: mkRelay(),
+		}}
+	}
+
 	// Discard pion's TURN logging so nothing about auth attempts (which
 	// carry the ephemeral username) ever reaches a log sink.
 	lf := logging.NewDefaultLoggerFactory()
@@ -199,12 +234,10 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 		LoggerFactory: lf,
 		AuthHandler:   turn.LongTermTURNRESTAuthHandler(string(opts.TURNSharedSecret), lf.NewLogger("turn")),
 		PacketConnConfigs: []turn.PacketConnConfig{{
-			PacketConn: udpConn,
-			RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
-				RelayAddress: relayIP,   // the announced relay address (public IP)
-				Address:      "0.0.0.0", // bind address for the relay sockets
-			},
+			PacketConn:            udpConn,
+			RelayAddressGenerator: mkRelay(),
 		}},
+		ListenerConfigs: listenerConfigs, // nil -> UDP-only (TLS leg off)
 	})
 	if err != nil {
 		_ = udpConn.Close()
@@ -219,9 +252,31 @@ func setupTURN(opts CloudSetupOptions, logger *log.Logger) (*turn.Server, func()
 		if gerr != nil {
 			return nil, gerr
 		}
-		return TURNICEServers(publicIP, udpPort, user, pass), nil
+		return TURNICEServers(publicIP, udpPort, tlsPort, user, pass), nil
 	}
 
-	logger.Printf("stream: TURN relay on :%d (realm=%q, relay-ip=%s)", udpPort, realm, opts.TURNPublicIP)
+	if tlsPort > 0 {
+		logger.Printf("stream: TURN relay on udp:%d + tls:%d (realm=%q, relay-ip=%s)",
+			udpPort, tlsPort, realm, opts.TURNPublicIP)
+	} else {
+		logger.Printf("stream: TURN relay on udp:%d (realm=%q, relay-ip=%s); TLS leg disabled (TURNTLSPort=0)",
+			udpPort, realm, opts.TURNPublicIP)
+	}
 	return turnSrv, minter, nil
+}
+
+// turnTLSListener builds the TLS listener for the turns: leg, reusing the
+// WHIP cert/key (eager load - a broken cert fails setup, surfaced by the
+// caller as a hard error). The test seam opts.turnListenTLS bypasses the
+// cert load + bind.
+func turnTLSListener(opts CloudSetupOptions, tlsPort int) (net.Listener, error) {
+	addr := fmt.Sprintf(":%d", tlsPort)
+	if opts.turnListenTLS != nil {
+		return opts.turnListenTLS(addr)
+	}
+	cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load cert/key: %w", err)
+	}
+	return tls.Listen("tcp", addr, &tls.Config{Certificates: []tls.Certificate{cert}})
 }
