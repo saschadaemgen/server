@@ -2,11 +2,14 @@ package sidechannel
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -23,7 +26,21 @@ const (
 	dialTimeout           = 10 * time.Second
 	writeTimeout          = 10 * time.Second
 	sendQueueSize         = 16
+	// iceRequestTimeout bounds a RequestICE round-trip when the caller's
+	// ctx carries no deadline of its own.
+	iceRequestTimeout = 5 * time.Second
 )
+
+// ErrNoICEServers is returned by RequestICE when the cloud answered with an
+// empty ICE set (no minter configured cloud-side, or the mint failed).
+var ErrNoICEServers = errors.New("sidechannel: cloud returned no ICE servers")
+
+// iceReply is the cloud's ice_servers answer routed back to the waiting
+// RequestICE call by RequestID.
+type iceReply struct {
+	servers   []streampublish.ICEServer
+	expiresIn int
+}
 
 // ClientOptions configures the edge-side dialer.
 type ClientOptions struct {
@@ -89,6 +106,13 @@ type Client struct {
 	// single writer in connectAndServe. Buffered + non-blocking so a
 	// caller never stalls on a down link.
 	send chan Envelope
+
+	// pending correlates an in-flight RequestICE (by request_id) with the
+	// ice_servers reply the read loop delivers. Guarded by mu. The reply
+	// chans are buffered (cap 1) and deleted on RequestICE return, so the
+	// read loop never blocks and timed-out entries do not leak.
+	mu      sync.Mutex
+	pending map[string]chan iceReply
 }
 
 // NewClient validates options and loads the TLS material.
@@ -120,6 +144,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		pingEvery: pingEvery,
 		initialBO: initialBO,
 		send:      make(chan Envelope, sendQueueSize),
+		pending:   make(map[string]chan iceReply),
 	}, nil
 }
 
@@ -134,6 +159,81 @@ func (c *Client) Send(env Envelope) {
 		c.log.Warn("sidechannel send queue full, dropping frame",
 			"type", env.Type, "stream_id", env.StreamID)
 	}
+}
+
+// RequestICE asks the cloud to mint a fresh set of subscriber ICE servers and
+// waits for the matching ice_servers reply (the request_ice/ice_servers RPC).
+// A random request_id correlates the reply back to this call. Returns the
+// neutral ICE set, ErrNoICEServers if the cloud had no minter, or ctx.Err()
+// if no reply arrives before ctx (or the internal fallback) elapses or the
+// link is down. The cloud link is additive: callers treat any error as
+// "remote unavailable" (the local LAN path is unaffected).
+func (c *Client) RequestICE(ctx context.Context) ([]streampublish.ICEServer, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, iceRequestTimeout)
+		defer cancel()
+	}
+	id, err := newRequestID()
+	if err != nil {
+		return nil, fmt.Errorf("sidechannel: request id: %w", err)
+	}
+
+	// Buffered cap-1 so the read loop's delivery never blocks; deleted on
+	// return so a timed-out request leaves no pending entry behind.
+	ch := make(chan iceReply, 1)
+	c.mu.Lock()
+	c.pending[id] = ch
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}()
+
+	// Fire-and-forget enqueue: a dropped frame (full queue / down link) just
+	// means no reply arrives and ctx elapses -> error -> caller treats it as
+	// remote-unavailable.
+	c.Send(Envelope{Type: TypeRequestICE, RequestID: id})
+
+	select {
+	case reply := <-ch:
+		if len(reply.servers) == 0 {
+			return nil, ErrNoICEServers
+		}
+		return reply.servers, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// deliverICEReply routes an ice_servers frame to the waiting RequestICE call
+// by RequestID. A missing entry means the caller already timed out and
+// deregistered -> log and drop. The send is non-blocking (cap-1 chan), so the
+// read loop is never stalled by a slow or vanished caller.
+func (c *Client) deliverICEReply(env Envelope) {
+	c.mu.Lock()
+	ch, ok := c.pending[env.RequestID]
+	c.mu.Unlock()
+	if !ok {
+		c.log.Warn("sidechannel ice_servers for unknown/expired request, dropping",
+			"request_id", env.RequestID, "ice_servers", len(env.ICEServers))
+		return
+	}
+	select {
+	case ch <- iceReply{servers: env.ICEServers, expiresIn: env.ExpiresInSeconds}:
+	default:
+		c.log.Warn("sidechannel duplicate ice_servers, dropping", "request_id", env.RequestID)
+	}
+}
+
+// newRequestID returns a short random hex correlation id for request_ice.
+func newRequestID() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // Run loops until ctx is cancelled, reconnecting with exponential
@@ -204,6 +304,11 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 					// read loop.
 					go c.opts.OnRequestPublish(sid, ice)
 				}
+			case TypeICEServers:
+				// Reply to an edge-initiated RequestICE; route it to the
+				// waiting caller by RequestID. Quick map lookup + buffered
+				// send, so run inline on the read loop.
+				c.deliverICEReply(env)
 			case TypeTURNEvent:
 				// Cloud-forwarded TURN history event. The callback is a
 				// non-blocking turnstore Submit, so run it inline (this
