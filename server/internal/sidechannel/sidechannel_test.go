@@ -22,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/turnstore"
 )
 
 // --- test helpers ---------------------------------------------------
@@ -414,6 +415,67 @@ func TestSidechannel_PublishControlRoundtrip(t *testing.T) {
 		t.Fatal("no stop_publish within 5s")
 	}
 	waitFor(t, func() bool { return len(srv.ActiveStreams()) == 0 }, 3*time.Second)
+}
+
+// TestSidechannel_TURNTelemetryRoundtrip proves the cloud -> edge
+// turn_event / turn_stats frames carry their payloads (incl. the
+// nullable AuthOK and the config view) intact across the link.
+func TestSidechannel_TURNTelemetryRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv, url := startServer(t, ctx, p)
+
+	events := make(chan turnstore.Event, 8)
+	snaps := make(chan turnstore.Snapshot, 8)
+	cli, err := NewClient(ClientOptions{
+		URL:            url,
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		OnTURNEvent:    func(e turnstore.Event) { events <- e },
+		OnTURNStats:    func(s turnstore.Snapshot) { snaps <- s },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	waitFor(t, func() bool { return srv.ConnCount() >= 1 }, 5*time.Second)
+
+	yes := true
+	if sent := srv.SendTURNEvent(ctx, turnstore.Event{
+		Kind: "auth", SrcMasked: "v4:203.0.x.x#a1", Username: "carvilon", Realm: "carvilon", AuthOK: &yes,
+	}); sent < 1 {
+		t.Fatalf("SendTURNEvent reached %d edges, want >= 1", sent)
+	}
+	select {
+	case e := <-events:
+		if e.Kind != "auth" || e.SrcMasked != "v4:203.0.x.x#a1" || e.AuthOK == nil || !*e.AuthOK {
+			t.Errorf("turn_event = %+v", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no turn_event within 5s")
+	}
+
+	if sent := srv.SendTURNStats(ctx, turnstore.Snapshot{
+		Enabled: true, AllocationCount: 3, UDPPort: 3478, TLSPort: 5349, Realm: "carvilon", STUNActive: true,
+	}); sent < 1 {
+		t.Fatalf("SendTURNStats reached %d edges, want >= 1", sent)
+	}
+	select {
+	case s := <-snaps:
+		if !s.Enabled || s.AllocationCount != 3 || s.UDPPort != 3478 || s.TLSPort != 5349 || !s.STUNActive {
+			t.Errorf("turn_stats = %+v", s)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no turn_stats within 5s")
+	}
 }
 
 // rawDial attempts a WebSocket dial with an explicit TLS config and

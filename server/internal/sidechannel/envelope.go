@@ -12,7 +12,10 @@
 // cloud outage only triggers reconnect attempts.
 package sidechannel
 
-import "carvilon.local/server/internal/streampublish"
+import (
+	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/turnstore"
+)
 
 // Envelope is the JSON wire frame exchanged in both directions. Both
 // sides dispatch on the "type" discriminator; adding a new message
@@ -41,6 +44,18 @@ type Envelope struct {
 	// meaningful on request_publish: the cloud mints them (it holds the
 	// shared secret), the edge never does.
 	ICEServers []streampublish.ICEServer `json:"ice_servers,omitempty"`
+
+	// TURNEvent carries one TURN lifecycle/auth event on a turn_event
+	// frame (cloud -> edge), so the edge persists the relay history for
+	// the /a/turn admin menu. Only the masked address is present; the
+	// cloud drops the raw IP before sending (Saison 18-10).
+	TURNEvent *turnstore.Event `json:"turn_event,omitempty"`
+
+	// TURNStats carries a periodic live snapshot on a turn_stats frame
+	// (cloud -> edge): the relay's allocation count + client set plus a
+	// static config view. The edge shows it with a "Stand vor Xs"
+	// freshness based on the receive time, not GeneratedAt.
+	TURNStats *turnstore.Snapshot `json:"turn_stats,omitempty"`
 }
 
 // Message types.
@@ -62,6 +77,15 @@ const (
 	// TypeStopPublish (edge -> cloud): the edge stopped pushing
 	// StreamID (Reason says why).
 	TypeStopPublish = "stop_publish"
+
+	// TypeTURNEvent (cloud -> edge): one TURN lifecycle/auth event for
+	// the edge to persist (carries TURNEvent). The relay lives on the
+	// cloud; the admin UI + SQLite live on the edge, so the telemetry
+	// flows the same direction as request_publish.
+	TypeTURNEvent = "turn_event"
+	// TypeTURNStats (cloud -> edge): a periodic live snapshot for the
+	// admin live-stats panel (carries TURNStats).
+	TypeTURNStats = "turn_stats"
 )
 
 // stop_publish reasons.

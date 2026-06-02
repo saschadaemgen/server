@@ -18,6 +18,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/turnstore"
 )
 
 // ServerOptions configures the cloud-side listener.
@@ -250,6 +251,44 @@ func (s *Server) RequestPublish(ctx context.Context, streamID string) int {
 		sent++
 	}
 	s.log.Info("sidechannel request_publish sent", "stream_id", streamID, "edges", sent)
+	return sent
+}
+
+// SendTURNEvent broadcasts one TURN telemetry event to every connected
+// edge (cloud -> edge) and returns how many it reached. The relay lives
+// on the cloud but the admin UI + SQLite live on the edge, so telemetry
+// flows the same direction as request_publish. Safe to call
+// concurrently; per-conn writes serialise through writeMu. The caller
+// (cloud closure) funnels pion's concurrent events through a single
+// buffered drain goroutine so a slow write never backs up the relay.
+func (s *Server) SendTURNEvent(ctx context.Context, ev turnstore.Event) int {
+	return s.broadcast(ctx, Envelope{Type: TypeTURNEvent, TURNEvent: &ev})
+}
+
+// SendTURNStats broadcasts a live relay snapshot to every connected
+// edge (cloud -> edge), driven by the cloud's periodic ticker.
+func (s *Server) SendTURNStats(ctx context.Context, snap turnstore.Snapshot) int {
+	return s.broadcast(ctx, Envelope{Type: TypeTURNStats, TURNStats: &snap})
+}
+
+// broadcast writes env to every connected edge and returns how many it
+// reached. Per-conn writes serialise through writeMu (coder/websocket
+// forbids concurrent writers). One edge today; this broadcasts.
+func (s *Server) broadcast(ctx context.Context, env Envelope) int {
+	s.mu.Lock()
+	targets := make([]*serverConn, 0, len(s.conns))
+	for sc := range s.conns {
+		targets = append(targets, sc)
+	}
+	s.mu.Unlock()
+	sent := 0
+	for _, sc := range targets {
+		if err := sc.write(ctx, env); err != nil {
+			s.log.Warn("sidechannel broadcast write failed", "type", env.Type, "peer", sc.peer, "err", err)
+			continue
+		}
+		sent++
+	}
 	return sent
 }
 

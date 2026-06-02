@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/turnstore"
 )
 
 const (
@@ -60,6 +61,15 @@ type ClientOptions struct {
 	// carries the cloud-minted TURN credentials from the frame (nil ->
 	// host-only). A nil callback ignores the frame.
 	OnRequestPublish func(streamID string, iceServers []streampublish.ICEServer)
+
+	// OnTURNEvent / OnTURNStats, when set, receive the cloud-forwarded
+	// TURN telemetry (turn_event / turn_stats frames). The edge wiring
+	// points them at the turnstore writer (persist) and snapshot holder
+	// (live stats). Both are expected to be non-blocking (a buffered
+	// Submit / a quick mutex), so they run inline on the read loop and
+	// preserve frame order. A nil callback ignores the frame.
+	OnTURNEvent func(turnstore.Event)
+	OnTURNStats func(turnstore.Snapshot)
 }
 
 // Client is the edge-side dialer. It keeps a single mTLS WebSocket to
@@ -193,6 +203,19 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 					// token, StreamPublisher) must never block the
 					// read loop.
 					go c.opts.OnRequestPublish(sid, ice)
+				}
+			case TypeTURNEvent:
+				// Cloud-forwarded TURN history event. The callback is a
+				// non-blocking turnstore Submit, so run it inline (this
+				// also preserves frame order).
+				if c.opts.OnTURNEvent != nil && env.TURNEvent != nil {
+					c.opts.OnTURNEvent(*env.TURNEvent)
+				}
+			case TypeTURNStats:
+				// Periodic live snapshot; the callback just stores it
+				// (quick mutex), so run it inline.
+				if c.opts.OnTURNStats != nil && env.TURNStats != nil {
+					c.opts.OnTURNStats(*env.TURNStats)
 				}
 			default:
 				c.log.Warn("sidechannel unknown message type", "type", env.Type)
