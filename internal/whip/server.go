@@ -45,6 +45,14 @@ type Config struct {
 	HMACKey  []byte         // publish-token HMAC key, already hex-decoded
 	Hub      *streamhub.Hub // active-publisher registry (S2-04)
 	Logger   *log.Logger
+	// EgressHMACKey is the egress-token HMAC key, already hex-decoded
+	// (S3 egress-auth). It is SEPARATE from HMACKey: an egress token is
+	// byte-identical to a publish token (same format/claims) but signed
+	// with this key, so the same Verify validates it. When set, a WHEP
+	// subscriber must present a valid Bearer egress token. When EMPTY, the
+	// WHEP egress FAILS CLOSED - every subscribe is rejected 401 (the door
+	// is locked by default, never accidentally open).
+	EgressHMACKey []byte
 	// ICEServers, when set, mints the ICE server list (TURN URLs + fresh
 	// ephemeral creds) for each accepted peer. nil -> peers use no
 	// ICEServers (host-candidate only, the pre-TURN behaviour). (S3 TURN)
@@ -62,13 +70,14 @@ const defaultAddr = ":8444"
 // Server is the WHIP ingress TLS listener. Construct with [New], run
 // with [Server.ListenAndServe].
 type Server struct {
-	addr     string
-	certFile string
-	keyFile  string
-	hmacKey  []byte
-	hub      *streamhub.Hub
-	logger   *log.Logger
-	srv      *http.Server
+	addr      string
+	certFile  string
+	keyFile   string
+	hmacKey   []byte
+	egressKey []byte
+	hub       *streamhub.Hub
+	logger    *log.Logger
+	srv       *http.Server
 
 	// iceServers mints a fresh ICE server list per peer (TURN; S3). nil
 	// -> no ICEServers (host-candidate only).
@@ -112,11 +121,17 @@ func New(cfg Config) (*Server, error) {
 		certFile:       cfg.CertFile,
 		keyFile:        cfg.KeyFile,
 		hmacKey:        cfg.HMACKey,
+		egressKey:      cfg.EgressHMACKey,
 		hub:            cfg.Hub,
 		logger:         logger,
 		iceServers:     cfg.ICEServers,
 		requestPublish: cfg.RequestPublish,
 		inflight:       make(map[string]struct{}),
+	}
+	if len(s.egressKey) == 0 {
+		// Fail closed: without an egress key the WHEP egress rejects every
+		// subscribe (401). Loud one-shot WARN so a missing key is obvious.
+		logger.Printf("whep egress: WARNING egress auth not configured (no key) -> ALL WHEP subscribes will be rejected 401 (fail closed)")
 	}
 
 	mux := http.NewServeMux()
@@ -257,11 +272,11 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWHEP implements POST /whep/{streamID} — the egress side. A
-// subscriber POSTs an SDP offer and receives the publisher's fan-out
-// track. Unlike the ingress, S2-05 does NOT verify a bearer token here:
-// the egress-auth scheme is deferred (Master Option 3), and
-// AcceptSubscriber carries the marked pass-through hook. Once that hook
-// gates, this handler grows a 401 branch.
+// subscriber POSTs an SDP offer and receives the publisher's fan-out track.
+// It verifies a Bearer egress token first (S3 egress-auth, a SEPARATE key),
+// mirroring the ingress: the concrete failure is logged, the client sees
+// only a bare 401. The auth check runs BEFORE the cold-start trigger, so an
+// unauthorized subscriber can never force the edge to publish.
 func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 	streamID := r.PathValue("streamID")
 	if streamID == "" {
@@ -269,9 +284,31 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO egress-auth: no token check in S2-05 (Master Option 3). When
-	// the egress-token spec lands, validate here BEFORE reading the body
-	// and surface a bare 401 on failure, mirroring the ingress.
+	// Egress auth (S3): verify the Bearer egress token BEFORE anything else
+	// - in particular BEFORE the cold-start trigger below - so an
+	// unauthorized subscriber can never force the edge to publish. The
+	// egress token is byte-identical to a publish token but signed with a
+	// SEPARATE key, so the same Verify validates it. Fail closed: with no
+	// egress key configured, reject every subscribe.
+	if len(s.egressKey) == 0 {
+		s.logger.Printf("whep egress: sid=%s rejected: egress auth not configured (no key)", streamID)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	const bearerPrefix = "Bearer "
+	authz := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authz, bearerPrefix) {
+		s.logger.Printf("whep egress: sid=%s rejected: missing bearer", streamID)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := publishtoken.Verify(strings.TrimPrefix(authz, bearerPrefix), streamID, s.egressKey, time.Now().UTC()); err != nil {
+		// Concrete failure class (ErrMalformed/ErrSignature/ErrSIDMismatch/
+		// ErrExpired) logged only; the client gets a bare 401, no oracle.
+		s.logger.Printf("whep egress: sid=%s rejected: %v", streamID, err)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	if !isSDP(r.Header.Get("Content-Type")) {
 		s.logger.Printf("whep egress: sid=%s rejected: content-type %q (want application/sdp)",

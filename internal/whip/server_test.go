@@ -101,22 +101,30 @@ func signToken(t *testing.T, p publishtoken.Payload, key []byte) string {
 	return payloadPart + "." + sigPart
 }
 
+// testEgressKey is the WHEP egress-auth key used by the test servers,
+// DISTINCT from the publish key (0xAB) so a publish-key-signed token is
+// rejected on the egress (key separation). whepSubscribe signs its Bearer
+// egress token with this key.
+var testEgressKey = bytes.Repeat([]byte{0xCD}, 32)
+
 // newTestServer starts a whip.Server on a dynamic loopback port with a
 // throwaway cert and returns its base URL and the HMAC key. The
 // listener is bound before serve() runs, so connections never race the
-// accept loop.
+// accept loop. The egress key is wired (testEgressKey) so WHEP subscribes
+// must present a valid egress token (whepSubscribe does).
 func newTestServer(t *testing.T) (baseURL string, key []byte) {
 	t.Helper()
 	certFile, keyFile := writeSelfSignedCert(t)
 	key = bytes.Repeat([]byte{0xAB}, 32)
 
 	srv, err := New(Config{
-		Addr:     "127.0.0.1:0",
-		CertFile: certFile,
-		KeyFile:  keyFile,
-		HMACKey:  key,
-		Hub:      streamhub.NewHub(),
-		Logger:   log.New(io.Discard, "", 0),
+		Addr:          "127.0.0.1:0",
+		CertFile:      certFile,
+		KeyFile:       keyFile,
+		HMACKey:       key,
+		EgressHMACKey: testEgressKey,
+		Hub:           streamhub.NewHub(),
+		Logger:        log.New(io.Discard, "", 0),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -146,6 +154,7 @@ func newTestServerWithTrigger(t *testing.T, hub *streamhub.Hub, requestPublish f
 		CertFile:       certFile,
 		KeyFile:        keyFile,
 		HMACKey:        key,
+		EgressHMACKey:  testEgressKey,
 		Hub:            hub,
 		Logger:         log.New(io.Discard, "", 0),
 		RequestPublish: requestPublish,

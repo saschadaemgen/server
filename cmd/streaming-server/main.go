@@ -22,8 +22,8 @@
 //     a. CARVILON_PROFILES_JSON  — explicit multi-camera config wins
 //     b. UNIFI_CAMERA_ID         — S6-set on this camera
 //     c. <none>                  — S6-set on the built-in default
-//                                  intercom camera (see
-//                                  defaultIntercomCameraID below)
+//     intercom camera (see
+//     defaultIntercomCameraID below)
 //  3. load the in-memory registry from the DB
 //  4. run.
 //
@@ -123,6 +123,7 @@ const (
 	envWHIPCertFile        = "CARVILON_WHIP_CERT_FILE"         // required in cloud mode
 	envWHIPKeyFile         = "CARVILON_WHIP_KEY_FILE"          // required in cloud mode
 	envPublishTokenHMACKey = "CARVILON_PUBLISH_TOKEN_HMAC_KEY" // required in cloud mode, 32-byte hex
+	envEgressTokenHMACKey  = "CARVILON_EGRESS_TOKEN_HMAC_KEY"  // optional, 32-byte hex; sets WHEP egress auth. Empty -> WHEP fails closed (401).
 
 	defaultWHIPListen = ":8444"
 )
@@ -174,15 +175,31 @@ func runCloud() {
 		logger.Fatalf("%s: must be 32 bytes hex-encoded (got %d bytes)", envPublishTokenHMACKey, len(hmacKey))
 	}
 
+	// Egress-token HMAC key (S3 egress-auth), SEPARATE from the publish key.
+	// Optional: unset -> WHEP egress fails closed (whip.New logs a WARN, every
+	// subscribe is rejected 401). A bad FORMAT is fatal, like the publish key.
+	// The key value itself is never logged.
+	var egressKey []byte
+	if egressHex := os.Getenv(envEgressTokenHMACKey); egressHex != "" {
+		egressKey, err = hex.DecodeString(egressHex)
+		if err != nil {
+			logger.Fatalf("%s: not valid hex: %v", envEgressTokenHMACKey, err)
+		}
+		if len(egressKey) != 32 {
+			logger.Fatalf("%s: must be 32 bytes hex-encoded (got %d bytes)", envEgressTokenHMACKey, len(egressKey))
+		}
+	}
+
 	hub := streamhub.NewHub()
 
 	srv, err := whip.New(whip.Config{
-		Addr:     addr,
-		CertFile: certFile,
-		KeyFile:  keyFile,
-		HMACKey:  hmacKey,
-		Hub:      hub,
-		Logger:   logger,
+		Addr:          addr,
+		CertFile:      certFile,
+		KeyFile:       keyFile,
+		HMACKey:       hmacKey,
+		EgressHMACKey: egressKey, // empty -> WHEP egress fails closed (401)
+		Hub:           hub,
+		Logger:        logger,
 	})
 	if err != nil {
 		logger.Fatalf("whip server init: %v", err)
@@ -304,11 +321,11 @@ func runEdge() {
 	// New() hydrates the in-memory registry from the DB. The HTTP server
 	// (built below) shares the same registry, so it sees the same data.
 	backend, err := streambackend.New(streambackend.Options{
-		Store:      st,
-		Profiles:   reg,
-		Sources:    srcReg,
-		Cameras:    cams,
-		BaseURL:    baseURL,
+		Store:    st,
+		Profiles: reg,
+		Sources:  srcReg,
+		Cameras:  cams,
+		BaseURL:  baseURL,
 		// S6-14: global encryption mode. Must match the value passed
 		// to stream.NewServer below so both layers build the same
 		// sourcereg.Key for the same camera.

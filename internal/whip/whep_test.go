@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
+	"carvilon.local/stream/internal/publishtoken"
 	"carvilon.local/stream/internal/streamhub"
 )
 
@@ -129,6 +131,7 @@ func whepSubscribe(t *testing.T, base, sid string) *whepResult {
 
 	req, _ := http.NewRequest(http.MethodPost, base+"/whep/"+sid, strings.NewReader(pc.LocalDescription().SDP))
 	req.Header.Set("Content-Type", "application/sdp")
+	req.Header.Set("Authorization", "Bearer "+validToken(t, sid, testEgressKey)) // S3 egress auth
 	resp, err := insecureClient().Do(req)
 	if err != nil {
 		t.Fatalf("subscriber POST: %v", err)
@@ -247,7 +250,8 @@ func TestWHEP_FanOut(t *testing.T) {
 func TestWHEP_WrongContentType(t *testing.T) {
 	base, _ := newTestServer(t)
 	req, _ := http.NewRequest(http.MethodPost, base+"/whep/test-mac", strings.NewReader("{}"))
-	req.Header.Set("Content-Type", "application/json") // not SDP
+	req.Header.Set("Content-Type", "application/json")                                  // not SDP
+	req.Header.Set("Authorization", "Bearer "+validToken(t, "test-mac", testEgressKey)) // pass auth -> reach the 415 path
 	resp, err := insecureClient().Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
@@ -379,4 +383,87 @@ func TestBeginTrigger_SingleFlight(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// rawWHEPStatus POSTs to /whep/<sid> with the given Authorization header
+// (empty -> none) and returns the HTTP status. The egress-auth check runs
+// first, so for 401 cases the body/content-type are irrelevant.
+func rawWHEPStatus(t *testing.T, base, sid, authHeader string) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, base+"/whep/"+sid, strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/sdp")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	resp, err := insecureClient().Do(req)
+	if err != nil {
+		t.Fatalf("WHEP POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode
+}
+
+func TestWHEP_EgressAuth_NoToken(t *testing.T) {
+	base, _ := newTestServer(t)
+	if got := rawWHEPStatus(t, base, "test-mac", ""); got != http.StatusUnauthorized {
+		t.Errorf("no Authorization: status = %d, want 401", got)
+	}
+}
+
+func TestWHEP_EgressAuth_WrongScheme(t *testing.T) {
+	base, _ := newTestServer(t)
+	// Valid token, but not the Bearer scheme -> 401.
+	if got := rawWHEPStatus(t, base, "test-mac", "Token "+validToken(t, "test-mac", testEgressKey)); got != http.StatusUnauthorized {
+		t.Errorf("non-Bearer scheme: status = %d, want 401", got)
+	}
+}
+
+// TestWHEP_EgressAuth_WrongKey proves key separation: a token signed with the
+// PUBLISH key is rejected on the egress (which verifies with the egress key).
+func TestWHEP_EgressAuth_WrongKey(t *testing.T) {
+	base, publishKey := newTestServer(t)
+	tok := validToken(t, "test-mac", publishKey) // signed with the publish key, not the egress key
+	if got := rawWHEPStatus(t, base, "test-mac", "Bearer "+tok); got != http.StatusUnauthorized {
+		t.Errorf("publish-key-signed token: status = %d, want 401", got)
+	}
+}
+
+func TestWHEP_EgressAuth_Expired(t *testing.T) {
+	base, _ := newTestServer(t)
+	expired := signToken(t, publishtoken.Payload{
+		SID:   "test-mac",
+		Exp:   time.Now().Add(-time.Second).Unix(), // already past (covers the exp<=now boundary)
+		Nonce: "n",
+	}, testEgressKey)
+	if got := rawWHEPStatus(t, base, "test-mac", "Bearer "+expired); got != http.StatusUnauthorized {
+		t.Errorf("expired token: status = %d, want 401", got)
+	}
+}
+
+func TestWHEP_EgressAuth_WrongSID(t *testing.T) {
+	base, _ := newTestServer(t)
+	otherSID := validToken(t, "other-cam", testEgressKey) // valid token, wrong stream
+	if got := rawWHEPStatus(t, base, "test-mac", "Bearer "+otherSID); got != http.StatusUnauthorized {
+		t.Errorf("wrong-sid token: status = %d, want 401", got)
+	}
+}
+
+// TestWHEP_EgressAuth_BeforeColdTrigger proves an unauthorized subscriber
+// never fires the cold-start request_publish - the auth check precedes it, so
+// a stranger cannot force the edge to publish.
+func TestWHEP_EgressAuth_BeforeColdTrigger(t *testing.T) {
+	hub := streamhub.NewHub()
+	var calls atomic.Int32
+	cb := func(_ context.Context, _ string) int {
+		calls.Add(1)
+		return 1
+	}
+	base, _ := newTestServerWithTrigger(t, hub, cb)
+
+	if got := rawWHEPStatus(t, base, "cam-cold", ""); got != http.StatusUnauthorized {
+		t.Fatalf("unauthorized cold subscribe: status = %d, want 401", got)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Errorf("request_publish called %d times for an unauthorized subscriber, want 0", n)
+	}
 }

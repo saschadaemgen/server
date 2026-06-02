@@ -51,6 +51,12 @@ type CloudSetupOptions struct {
 	// same key the edge signs publish tokens with, so the ingress can
 	// verify them. Required, must be non-empty.
 	HMACKey []byte
+	// EgressHMACKey is the egress-token HMAC key, already hex-decoded
+	// (S3 egress-auth), SEPARATE from HMACKey. When set, WHEP subscribers
+	// must present a valid Bearer egress token; when EMPTY, the WHEP egress
+	// fails closed (every subscribe 401). The Master decodes
+	// CARVILON_EGRESS_TOKEN_HMAC_KEY and passes it here.
+	EgressHMACKey []byte
 	// Logger - if nil, a default logger.
 	Logger *log.Logger
 
@@ -205,6 +211,7 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 		CertFile:       opts.CertFile,
 		KeyFile:        opts.KeyFile,
 		HMACKey:        opts.HMACKey,
+		EgressHMACKey:  opts.EgressHMACKey, // empty -> WHEP egress fails closed (401)
 		Hub:            hub,
 		Logger:         logger,
 		ICEServers:     iceServers,            // nil when TURN is off -> empty ICEServers
