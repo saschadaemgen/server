@@ -58,6 +58,22 @@ func init() {
 			return nil, fmt.Errorf("cloud in-process stream: publish-token HMAC key: %w", err)
 		}
 
+		// S18-16: egress-token key for the WHEP egress 401-verify.
+		// Fail-closed: empty/invalid -> nil -> the stream rejects every
+		// WHEP subscribe (401). The non-empty gate is required because
+		// DecodeEgressTokenHMACKey errors on an empty key; a set-but-
+		// invalid key is already rejected up front by ValidateCloud, so a
+		// decode error here is defensive only.
+		var egressKey []byte
+		if cfg.EgressTokenHMACKey != "" {
+			k, decErr := cfg.DecodeEgressTokenHMACKey()
+			if decErr != nil {
+				log.Error("egress token key invalid; WHEP egress stays fail-closed (401 for all)", "err", decErr)
+			} else {
+				egressKey = k
+			}
+		}
+
 		// TURN (S18-06): mint short-lived ICE credentials per
 		// request_publish. The side-channel Server calls this minter when it
 		// asks an edge to publish; the long-term shared secret stays
@@ -94,6 +110,7 @@ func init() {
 			CertFile:         cfg.WhipCert,
 			KeyFile:          cfg.WhipKey,
 			HMACKey:          hmacKey,
+			EgressHMACKey:    egressKey,        // empty -> WHEP egress fails closed (401)
 			TURNPublicIP:     cfg.TURNPublicIP, // empty -> stream soft-gates TURN off
 			TURNSharedSecret: []byte(cfg.TURNSharedSecret),
 			TURNRealm:        cfg.TURNRealm,

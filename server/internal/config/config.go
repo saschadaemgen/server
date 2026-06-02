@@ -532,6 +532,18 @@ func (c Config) ValidateCloud() error {
 			return fmt.Errorf("config: %s invalid: %w", envPublishTokenHMACKey, err)
 		}
 	}
+	// Egress-token signing key (Saison 18-16): OPTIONAL on the cloud role
+	// too. EMPTY is allowed - the WHEP egress then fails closed (401 for
+	// all, "not yet configured"). But a SET-but-invalid key is a typo
+	// ("misconfigured") and must fail loudly at boot, because the VPS
+	// (cloud role) is exactly where the egress key is used - otherwise it
+	// would silently reject every subscriber. Mirrors the edge check in
+	// Validate().
+	if c.EgressTokenHMACKey != "" {
+		if _, err := c.DecodeEgressTokenHMACKey(); err != nil {
+			return fmt.Errorf("config: %s invalid: %w", envEgressTokenHMACKey, err)
+		}
+	}
 	// In-process TURN relay (carvilon_stream build) is OPTIONAL and gated
 	// INDEPENDENTLY of WHIP. Once configured (public IP + shared secret),
 	// validate the IP form and the optional port ranges. A TURN config

@@ -440,6 +440,14 @@ func TestValidateCloud_CloudStreamConsistency(t *testing.T) {
 	if err := ok.ValidateCloud(); err != nil {
 		t.Errorf("full cloud-stream ValidateCloud() = %v, want nil", err)
 	}
+	// S18-16: the egress key is OPTIONAL on the cloud role. Empty is
+	// allowed (ok above has none and passes -> WHEP fails closed); a
+	// valid one is also fine. Only a set-but-invalid key fails (table).
+	okEgress := ok
+	okEgress.EgressTokenHMACKey = strings.Repeat("cd", 32)
+	if err := okEgress.ValidateCloud(); err != nil {
+		t.Errorf("valid egress key ValidateCloud() = %v, want nil", err)
+	}
 	for _, tc := range []struct {
 		name string
 		mut  func(*Config)
@@ -448,6 +456,7 @@ func TestValidateCloud_CloudStreamConsistency(t *testing.T) {
 		{"key without cert", func(c *Config) { c.WhipCert = "" }},
 		{"no hmac", func(c *Config) { c.PublishTokenHMACKey = "" }},
 		{"invalid hmac", func(c *Config) { c.PublishTokenHMACKey = "nothex" }},
+		{"invalid egress key", func(c *Config) { c.EgressTokenHMACKey = "nothex" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := ok
