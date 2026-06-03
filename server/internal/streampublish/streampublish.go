@@ -27,6 +27,18 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
+// ICEResult is the outcome of the side-channel request_ice/ice_servers RPC:
+// the cloud-minted subscriber ICE servers plus the public WHEP base URL the
+// cloud advertises (scheme+host+port, no path; empty when the cloud has no
+// public WHEP listener -> the edge falls back to its interim base). It lives
+// here, the neutral contract package both the side-channel and the HTTP layer
+// already import, so neither has to import the other and no pion type crosses
+// the seam.
+type ICEResult struct {
+	Servers     []ICEServer
+	WHEPBaseURL string
+}
+
 // StreamPublisher is the edge-side push surface the side-channel calls
 // when the cloud asks for a stream.
 //

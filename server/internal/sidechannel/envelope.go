@@ -55,6 +55,13 @@ type Envelope struct {
 	// cloud mint TTL. Only meaningful on ice_servers.
 	ExpiresInSeconds int `json:"expires_in_seconds,omitempty"`
 
+	// WHEPBaseURL is the public WHEP base URL the cloud advertises on an
+	// ice_servers reply (cloud -> edge): scheme+host+port, NO path, e.g.
+	// "https://<host>:8446". The edge appends "/whep/<mac>". Empty -> the edge
+	// falls back to its interim base (derived from the cloud WHIP ingress
+	// URL). Only meaningful on ice_servers. (Saison 19-08)
+	WHEPBaseURL string `json:"whep_base_url,omitempty"`
+
 	// TURNEvent carries one TURN lifecycle/auth event on a turn_event
 	// frame (cloud -> edge), so the edge persists the relay history for
 	// the /a/turn admin menu. Only the masked address is present; the
