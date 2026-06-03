@@ -78,6 +78,10 @@ type Server struct {
 	// empty when the public WHEP listener is off -> the edge uses its interim
 	// base.
 	whepBaseURL string
+	// bundlePending correlates an in-flight RequestBundle (by request_id) with
+	// the bundle_reply the read loop delivers - the cloud-side mirror of the
+	// edge's request_ice pending-map. Guarded by mu. (Saison 19-11)
+	bundlePending map[string]chan bundleReply
 }
 
 // SetICEMinter installs the per-request TURN ICE-server minter and the TTL
@@ -139,6 +143,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		log:           opts.Log,
 		conns:         make(map[*serverConn]struct{}),
 		activeStreams: make(map[string]struct{}),
+		bundlePending: make(map[string]chan bundleReply),
 	}, nil
 }
 
@@ -245,6 +250,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 					"peer", sc.peer, "request_id", env.RequestID, "err", err)
 				return
 			}
+		case TypeBundleReply:
+			// Edge's answer to a cloud RequestBundle; route it to the waiting
+			// caller by RequestID (mirror of the edge's ice_servers delivery).
+			s.deliverBundleReply(env)
 		default:
 			// Forward-compatible: a newer edge may send cargo types
 			// this cloud build predates. Log and ignore, never crash.
@@ -317,6 +326,134 @@ func (s *Server) replyICE(ctx context.Context, sc *serverConn, env Envelope) err
 		ExpiresInSeconds: ttl,
 		WHEPBaseURL:      whepBase,
 	})
+}
+
+// bundleRequestTimeout bounds a RequestBundle round-trip when the caller's ctx
+// carries no deadline of its own. The edge work (resolve + egress mint) is
+// sub-second; this is just a backstop.
+const bundleRequestTimeout = 5 * time.Second
+
+// ErrNoEdge is returned by RequestBundle when no edge is connected to relay
+// the bundle request to. The caller maps it (and any timeout) to 503.
+var ErrNoEdge = errors.New("sidechannel: no edge connected")
+
+// ErrBundleAuth is returned by RequestBundle when the edge rejected the
+// request (auth failed / could not mint). The caller maps it to a bare 401.
+// The concrete reason stays in the edge log; it never crosses to the client.
+var ErrBundleAuth = errors.New("sidechannel: bundle rejected by edge")
+
+// bundleReply is the edge's bundle_reply routed back to the waiting
+// RequestBundle call by RequestID.
+type bundleReply struct {
+	mac         string
+	egressToken string
+	expiresIn   int
+	errMsg      string
+}
+
+// RequestBundle asks the edge - over the side-channel - to resolve a remote
+// subscriber's Bearer to a viewer MAC and mint a sid-bound egress token. It is
+// the cloud-side mirror of the edge's RequestICE: a request_id correlates the
+// bundle_reply back to this call. It does NOT assemble the bundle (the cloud
+// adds ICE + WHEP URL via AssembleBundle); it returns only the two edge-only
+// parts. ErrBundleAuth -> the edge rejected (caller maps to 401); ErrNoEdge /
+// ctx.Err() -> no edge answered (caller maps to 503). The RPC is fast (no
+// publisher wait); the cold-start happens later, on the WHEP POST.
+func (s *Server) RequestBundle(ctx context.Context, credential string) (mac, egressToken string, expiresIn int, err error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, bundleRequestTimeout)
+		defer cancel()
+	}
+	id, gerr := newRequestID()
+	if gerr != nil {
+		return "", "", 0, fmt.Errorf("sidechannel: request id: %w", gerr)
+	}
+
+	// Pick one edge conn (one edge today; routing a viewer to a specific edge
+	// is future work, same caveat as RequestPublish). Buffered cap-1 reply
+	// chan + delete-on-return so a timeout never leaks a pending entry.
+	ch := make(chan bundleReply, 1)
+	s.mu.Lock()
+	var target *serverConn
+	for sc := range s.conns {
+		target = sc
+		break
+	}
+	s.bundlePending[id] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.bundlePending, id)
+		s.mu.Unlock()
+	}()
+
+	if target == nil {
+		return "", "", 0, ErrNoEdge
+	}
+	if werr := target.write(ctx, Envelope{Type: TypeBundleRequest, RequestID: id, Credential: credential}); werr != nil {
+		s.log.Warn("sidechannel bundle_request write failed", "peer", target.peer, "request_id", id, "err", werr)
+		return "", "", 0, ErrNoEdge
+	}
+
+	select {
+	case reply := <-ch:
+		if reply.errMsg != "" {
+			return "", "", 0, ErrBundleAuth
+		}
+		return reply.mac, reply.egressToken, reply.expiresIn, nil
+	case <-ctx.Done():
+		return "", "", 0, ctx.Err()
+	}
+}
+
+// deliverBundleReply routes a bundle_reply frame to the waiting RequestBundle
+// call by RequestID (cloud-side mirror of the edge's deliverICEReply). A
+// missing entry means the caller already timed out -> log and drop. The send
+// is non-blocking (cap-1 chan), so the read loop never stalls.
+func (s *Server) deliverBundleReply(env Envelope) {
+	s.mu.Lock()
+	ch, ok := s.bundlePending[env.RequestID]
+	s.mu.Unlock()
+	if !ok {
+		s.log.Warn("sidechannel bundle_reply for unknown/expired request, dropping", "request_id", env.RequestID)
+		return
+	}
+	select {
+	case ch <- bundleReply{mac: env.MAC, egressToken: env.EgressToken, expiresIn: env.ExpiresInSeconds, errMsg: env.Error}:
+	default:
+		s.log.Warn("sidechannel duplicate bundle_reply, dropping", "request_id", env.RequestID)
+	}
+}
+
+// AssembleBundle builds the full stream-start bundle from the edge-provided
+// parts (mac + egress token + TTL) plus the cloud-held parts: the ICE servers
+// (minted here - the cloud holds the TURN secret) and the public WHEP URL
+// (base + /whep/<mac>). It is the SINGLE cloud-side assembler. ICEServers is
+// empty when no minter is set; WHEPURL is empty when no public WHEP base is
+// set - the caller then declines (a bundle without a WHEP URL is not
+// actionable for the subscriber).
+func (s *Server) AssembleBundle(mac, egressToken string, expiresIn int) streampublish.StreamStartBundle {
+	s.mu.Lock()
+	minter := s.iceMinter
+	base := s.whepBaseURL
+	s.mu.Unlock()
+
+	var ice []streampublish.ICEServer
+	if minter != nil {
+		ice = minter(mac)
+	}
+	whepURL := ""
+	if base != "" {
+		whepURL = base + "/whep/" + mac
+	}
+	return streampublish.StreamStartBundle{
+		WHEPURL:     whepURL,
+		EgressToken: egressToken,
+		StreamID:    mac,
+		ICEServers:  ice,
+		ExpiresIn:   expiresIn,
+	}
 }
 
 // SendTURNEvent broadcasts one TURN telemetry event to every connected

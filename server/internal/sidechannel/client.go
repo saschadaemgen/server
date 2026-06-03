@@ -88,6 +88,17 @@ type ClientOptions struct {
 	// preserve frame order. A nil callback ignores the frame.
 	OnTURNEvent func(turnstore.Event)
 	OnTURNStats func(turnstore.Snapshot)
+
+	// OnBundleRequest, when set, answers a cloud bundle_request (Saison
+	// 19-11): given the raw viewer Bearer it resolves the viewer MAC and mints
+	// a sid-bound egress token, returning mac + egressToken + the token TTL in
+	// seconds, or an error when auth/mint fails. The edge wiring points it at
+	// resolveViewer + the egress issuer. Runs in its own goroutine (it hits
+	// the DB + Argon2id verify) so it never blocks the read loop; the concrete
+	// error is logged here and only a bare "unauthorized" crosses back to the
+	// cloud (no oracle). A nil callback ignores the frame (the cloud times out
+	// -> 503).
+	OnBundleRequest func(credential string) (mac, egressToken string, expiresIn int, err error)
 }
 
 // Client is the edge-side dialer. It keeps a single mTLS WebSocket to
@@ -311,6 +322,30 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 				// waiting caller by RequestID. Quick map lookup + buffered
 				// send, so run inline on the read loop.
 				c.deliverICEReply(env)
+			case TypeBundleRequest:
+				// Cloud relayed a remote subscriber's stream-start. Resolve +
+				// mint in a goroutine (it hits the DB + Argon2id), then reply -
+				// never block the read loop. nil callback -> ignore (the cloud
+				// times out -> 503).
+				if c.opts.OnBundleRequest != nil {
+					cred := env.Credential
+					id := env.RequestID
+					go func() {
+						mac, tok, ttl, err := c.opts.OnBundleRequest(cred)
+						reply := Envelope{Type: TypeBundleReply, RequestID: id}
+						if err != nil {
+							// Concrete reason logged on the edge ONLY; a fixed,
+							// non-revealing error crosses back (no oracle).
+							c.log.Warn("sidechannel bundle_request rejected", "request_id", id, "err", err)
+							reply.Error = "unauthorized"
+						} else {
+							reply.MAC = mac
+							reply.EgressToken = tok
+							reply.ExpiresInSeconds = ttl
+						}
+						c.Send(reply)
+					}()
+				}
 			case TypeTURNEvent:
 				// Cloud-forwarded TURN history event. The callback is a
 				// non-blocking turnstore Submit, so run it inline (this

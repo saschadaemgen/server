@@ -50,9 +50,9 @@ type Envelope struct {
 	// to a request_ice, for a remote WHEP subscriber - Saison 19).
 	ICEServers []streampublish.ICEServer `json:"ice_servers,omitempty"`
 
-	// ExpiresInSeconds is the lifetime of the credentials carried in
-	// ICEServers on an ice_servers frame (cloud -> edge), derived from the
-	// cloud mint TTL. Only meaningful on ice_servers.
+	// ExpiresInSeconds is a credential lifetime in seconds carried on a reply
+	// frame: on ice_servers (cloud -> edge) the TURN-cred TTL derived from the
+	// cloud mint TTL; on bundle_reply (edge -> cloud) the egress-token TTL.
 	ExpiresInSeconds int `json:"expires_in_seconds,omitempty"`
 
 	// WHEPBaseURL is the public WHEP base URL the cloud advertises on an
@@ -61,6 +61,24 @@ type Envelope struct {
 	// falls back to its interim base (derived from the cloud WHIP ingress
 	// URL). Only meaningful on ice_servers. (Saison 19-08)
 	WHEPBaseURL string `json:"whep_base_url,omitempty"`
+
+	// Credential carries the raw viewer Bearer (device_token) on a
+	// bundle_request (cloud -> edge): the cloud forwards what the remote
+	// subscriber presented so the edge can resolve it to a MAC and mint an
+	// egress token. Only meaningful on bundle_request. (Saison 19-11)
+	Credential string `json:"credential,omitempty"`
+
+	// MAC and EgressToken carry the edge's bundle_reply (edge -> cloud): the
+	// resolved viewer MAC and the freshly minted, sid-bound egress token. The
+	// cloud assembles the rest of the bundle (ICE + WHEP URL) itself. Both
+	// empty when Error is set. Only meaningful on bundle_reply. (Saison 19-11)
+	MAC         string `json:"mac,omitempty"`
+	EgressToken string `json:"egress_token,omitempty"`
+	// Error, when non-empty on a bundle_reply, signals the edge rejected the
+	// request (auth failed / could not mint). It is a fixed, non-revealing
+	// string - the concrete reason stays in the edge log - which the cloud
+	// maps to a bare 401. Only meaningful on bundle_reply. (Saison 19-11)
+	Error string `json:"error,omitempty"`
 
 	// TURNEvent carries one TURN lifecycle/auth event on a turn_event
 	// frame (cloud -> edge), so the edge persists the relay history for
@@ -105,6 +123,17 @@ const (
 	// RequestID and carrying ICEServers + ExpiresInSeconds. An empty
 	// ICEServers list signals "no minter / mint failed" to the edge.
 	TypeICEServers = "ice_servers"
+
+	// TypeBundleRequest (cloud -> edge): the cloud relays a remote
+	// subscriber's stream-start request. Carries RequestID + Credential (the
+	// raw viewer Bearer). Only the edge can resolve the viewer and mint the
+	// egress token; the cloud assembles the rest. The reverse-direction
+	// mirror of request_ice (cloud waits, edge replies). (Saison 19-11)
+	TypeBundleRequest = "bundle_request"
+	// TypeBundleReply (edge -> cloud): the edge's answer, mirroring RequestID
+	// and carrying MAC + EgressToken + ExpiresInSeconds, or Error when the
+	// edge rejected (auth/mint). (Saison 19-11)
+	TypeBundleReply = "bundle_reply"
 
 	// TypeTURNEvent (cloud -> edge): one TURN lifecycle/auth event for
 	// the edge to persist (carries TURNEvent). The relay lives on the
