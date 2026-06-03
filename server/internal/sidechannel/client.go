@@ -38,8 +38,9 @@ var ErrNoICEServers = errors.New("sidechannel: cloud returned no ICE servers")
 // iceReply is the cloud's ice_servers answer routed back to the waiting
 // RequestICE call by RequestID.
 type iceReply struct {
-	servers   []streampublish.ICEServer
-	expiresIn int
+	servers     []streampublish.ICEServer
+	expiresIn   int
+	whepBaseURL string
 }
 
 // ClientOptions configures the edge-side dialer.
@@ -164,11 +165,12 @@ func (c *Client) Send(env Envelope) {
 // RequestICE asks the cloud to mint a fresh set of subscriber ICE servers and
 // waits for the matching ice_servers reply (the request_ice/ice_servers RPC).
 // A random request_id correlates the reply back to this call. Returns the
-// neutral ICE set, ErrNoICEServers if the cloud had no minter, or ctx.Err()
-// if no reply arrives before ctx (or the internal fallback) elapses or the
-// link is down. The cloud link is additive: callers treat any error as
-// "remote unavailable" (the local LAN path is unaffected).
-func (c *Client) RequestICE(ctx context.Context) ([]streampublish.ICEServer, error) {
+// neutral ICE result (servers + the cloud's public WHEP base, "" when the
+// cloud has no public WHEP listener), ErrNoICEServers if the cloud had no
+// minter, or ctx.Err() if no reply arrives before ctx (or the internal
+// fallback) elapses or the link is down. The cloud link is additive: callers
+// treat any error as "remote unavailable" (the local LAN path is unaffected).
+func (c *Client) RequestICE(ctx context.Context) (streampublish.ICEResult, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, iceRequestTimeout)
@@ -176,7 +178,7 @@ func (c *Client) RequestICE(ctx context.Context) ([]streampublish.ICEServer, err
 	}
 	id, err := newRequestID()
 	if err != nil {
-		return nil, fmt.Errorf("sidechannel: request id: %w", err)
+		return streampublish.ICEResult{}, fmt.Errorf("sidechannel: request id: %w", err)
 	}
 
 	// Buffered cap-1 so the read loop's delivery never blocks; deleted on
@@ -199,11 +201,11 @@ func (c *Client) RequestICE(ctx context.Context) ([]streampublish.ICEServer, err
 	select {
 	case reply := <-ch:
 		if len(reply.servers) == 0 {
-			return nil, ErrNoICEServers
+			return streampublish.ICEResult{}, ErrNoICEServers
 		}
-		return reply.servers, nil
+		return streampublish.ICEResult{Servers: reply.servers, WHEPBaseURL: reply.whepBaseURL}, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return streampublish.ICEResult{}, ctx.Err()
 	}
 }
 
@@ -221,7 +223,7 @@ func (c *Client) deliverICEReply(env Envelope) {
 		return
 	}
 	select {
-	case ch <- iceReply{servers: env.ICEServers, expiresIn: env.ExpiresInSeconds}:
+	case ch <- iceReply{servers: env.ICEServers, expiresIn: env.ExpiresInSeconds, whepBaseURL: env.WHEPBaseURL}:
 	default:
 		c.log.Warn("sidechannel duplicate ice_servers, dropping", "request_id", env.RequestID)
 	}

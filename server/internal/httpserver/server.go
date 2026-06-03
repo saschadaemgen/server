@@ -62,7 +62,7 @@ type UserStoreLike interface {
 // the client is built. Nil -> the stream-start bundle reports ICE
 // unavailable (503), keeping the LAN path unaffected.
 type ICERequester interface {
-	RequestICE(ctx context.Context) ([]streampublish.ICEServer, error)
+	RequestICE(ctx context.Context) (streampublish.ICEResult, error)
 }
 
 // Deps bundles every dependency the HTTP layer needs. Pass the

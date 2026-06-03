@@ -9,8 +9,10 @@
 //
 // The endpoint lives on the EDGE because only the edge has the viewer auth
 // (requireViewerAuth -> the MAC) and the egress signing key. It pulls the
-// cloud-held half (ICE) via the request_ice/ice_servers RPC. A cloud outage
-// degrades to 503 and never touches the local LAN path (Grundregel).
+// cloud-held half (subscriber ICE + the cloud's public WHEP base) via the
+// request_ice/ice_servers RPC, and builds the WHEP URL from that public base
+// (or an interim fallback). A cloud outage degrades to 503 and never touches
+// the local LAN path (Grundregel).
 package httpserver
 
 import (
@@ -51,16 +53,9 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "stream start not configured", http.StatusServiceUnavailable)
 		return
 	}
-	// WHEP URL: derived (interim) from the edge's cloud WHIP ingress config.
-	whepURL, err := deriveWHEPURL(s.cfg.SidechannelCloudWhipURL, mac)
-	if err != nil {
-		s.log.Warn("stream-start: cannot derive WHEP URL "+
-			"(set CARVILON_SIDECHANNEL_CLOUD_WHIP_URL)", "viewer_mac", mac, "err", err)
-		http.Error(w, "stream start not configured", http.StatusServiceUnavailable)
-		return
-	}
-	// Subscriber ICE: pulled from the cloud. No client wired (LAN-only edge)
-	// or no answer -> 503 "ice unavailable"; the local path is unaffected.
+	// Subscriber ICE (+ the cloud's public WHEP base) pulled from the cloud.
+	// No client wired (LAN-only edge) or no answer -> 503 "ice unavailable";
+	// the local path is unaffected.
 	if s.iceRequester == nil {
 		s.log.Warn("stream-start requested but no side-channel client (cloud link down)", "viewer_mac", mac)
 		http.Error(w, "ice unavailable", http.StatusServiceUnavailable)
@@ -68,10 +63,23 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), streamStartICETimeout)
 	defer cancel()
-	ice, err := s.iceRequester.RequestICE(ctx)
-	if err != nil || len(ice) == 0 {
-		s.log.Warn("stream-start: ICE pull failed", "viewer_mac", mac, "err", err, "ice_servers", len(ice))
+	res, err := s.iceRequester.RequestICE(ctx)
+	if err != nil || len(res.Servers) == 0 {
+		s.log.Warn("stream-start: ICE pull failed", "viewer_mac", mac, "err", err, "ice_servers", len(res.Servers))
 		http.Error(w, "ice unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// WHEP URL: prefer the cloud-advertised public base (browser-trusted, from
+	// the public WHEP listener); fall back to the interim base derived from the
+	// cloud WHIP ingress (private cloudca / VPS IP) when the cloud advertises
+	// no public base.
+	whepURL := ""
+	if res.WHEPBaseURL != "" {
+		whepURL = fmt.Sprintf("%s/whep/%s", res.WHEPBaseURL, mac)
+	} else if whepURL, err = deriveWHEPURL(s.cfg.SidechannelCloudWhipURL, mac); err != nil {
+		s.log.Warn("stream-start: no WHEP URL (cloud sent no public base and "+
+			"CARVILON_SIDECHANNEL_CLOUD_WHIP_URL is unset/invalid)", "viewer_mac", mac, "err", err)
+		http.Error(w, "stream start not configured", http.StatusServiceUnavailable)
 		return
 	}
 	// Local egress mint last, once the bundle is otherwise complete.
@@ -82,13 +90,14 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Never log the token; only the viewer + counts.
-	s.log.Info("stream-start bundle issued", "viewer_mac", mac, "ice_servers", len(ice))
+	s.log.Info("stream-start bundle issued", "viewer_mac", mac,
+		"ice_servers", len(res.Servers), "public_whep", res.WHEPBaseURL != "")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"whep_url":     whepURL,
 		"egress_token": token,
 		"stream_id":    mac,
-		"ice_servers":  ice,
+		"ice_servers":  res.Servers,
 		"expires_in":   int(egresstoken.TTL.Seconds()),
 	})
 }
@@ -96,9 +105,10 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 // deriveWHEPURL builds the interim WHEP egress URL from the cloud WHIP ingress
 // URL: same scheme + host (incl. port), path /whep/<mac>. The cloud serves
 // WHIP and WHEP on the same in-process listener, so the host:port carries
-// over. Baustufe 1 only - this rides the private cloudca on the VPS IP;
-// Baustufe 2 replaces it with a public, browser-trusted WHEP hostname
-// delivered from the cloud.
+// over. This is now the FALLBACK, used only when the cloud advertises no
+// public WHEP base (whep_base_url empty): it rides the private cloudca on the
+// VPS IP and is NOT browser-trusted. When the cloud sends a public base
+// (Baustufe 2), the handler prefers it over this.
 func deriveWHEPURL(cloudWhipURL, mac string) (string, error) {
 	if cloudWhipURL == "" {
 		return "", errors.New("cloud whip url not set")
