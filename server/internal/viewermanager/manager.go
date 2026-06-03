@@ -1343,13 +1343,14 @@ func (m *Manager) TouchESPSeen(ctx context.Context, mac string) error {
 }
 
 // SetDeviceTokenHash stores a freshly generated token hash for an
-// adopted ESP viewer. The previous token-hash row is overwritten
-// (token rotation).
+// adopted ESP or Android viewer (both carry a device_token_hash and
+// share the bearer-token mechanic). The previous token-hash row is
+// overwritten (token rotation).
 func (m *Manager) SetDeviceTokenHash(ctx context.Context, mac, hash string) error {
 	now := m.opts.Now().UnixMilli()
 	res, err := m.db.ExecContext(ctx,
 		`UPDATE viewers SET device_token_hash = ?, updated_at = ?
-		 WHERE mac = ? AND type = 'esp'`,
+		 WHERE mac = ? AND type IN ('esp', 'android')`,
 		nullable(hash), now, mac)
 	if err != nil {
 		return fmt.Errorf("viewermanager: set esp token: %w", err)
