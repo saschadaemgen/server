@@ -115,6 +115,29 @@ type CloudSetupOptions struct {
 	// sidechannel.Server.RequestPublish.
 	OnRequestPublish RequestPublishFunc
 
+	// --- Public WHEP egress (S19-07 Baustufe 2): a SEPARATE TLS listener with
+	// a publicly-trusted cert, so a remote browser / Android can subscribe
+	// over a browser-trusted endpoint. The :8444 WHIP/WHEP listener (private
+	// cloudca) is UNTOUCHED - it stays the edge publisher path. Opt-in:
+	// WHEPPublicAddr empty -> the public listener is OFF and WHEPPublicBaseURL
+	// returns "". When set, host + cert + key are all required (hard error
+	// otherwise; no silent half-config). Mirrors the turns: separate-cert
+	// pattern (TURNTLSCertFile/KeyFile). ---
+
+	// WHEPPublicAddr is the public WHEP-egress TLS listen address (e.g.
+	// ":8446"). Empty -> the public WHEP listener is OFF.
+	WHEPPublicAddr string
+	// WHEPPublicHost is the public HOSTNAME the WHEP egress is advertised on
+	// (e.g. "whep.carvilon.com"), resolving to the relay's public IP and
+	// matching the public cert's SAN. It builds WHEPPublicBaseURL; the edge
+	// bundles "<base>/whep/<mac>". Required when WHEPPublicAddr is set.
+	WHEPPublicHost string
+	// WHEPPublicCertFile / WHEPPublicKeyFile are the publicly-trusted cert/key
+	// (e.g. Let's Encrypt for WHEPPublicHost), SEPARATE from the WHIP cloudca
+	// CertFile/KeyFile. Required when WHEPPublicAddr is set.
+	WHEPPublicCertFile string
+	WHEPPublicKeyFile  string
+
 	// turnListenPacket / turnListenTLS are UNEXPORTED test seams: when set
 	// they replace the real UDP bind / TLS listener so a test need not bind
 	// a fixed port or load a real cert. nil -> net.ListenPacket /
@@ -143,6 +166,16 @@ type CloudServer interface {
 	// is soft-gated off it returns TURNStats{Enabled: false}. Safe to call
 	// concurrently with the relay's own goroutines.
 	TURNStats() TURNStats
+
+	// WHEPPublicBaseURL returns the public WHEP base URL the edge should
+	// advertise to remote subscribers - scheme+host+port, NO path, NO
+	// streamID, e.g. "https://whep.carvilon.com:8446" (the edge appends
+	// "/whep/<mac>"). Returns "" when the public WHEP listener is off
+	// (WHEPPublicAddr empty), so the edge falls back to its interim base.
+	// The embedding module (carvilon-server) reads this and carries it on the
+	// ice_servers side-channel reply (whep_base_url); only this stdlib string
+	// crosses the seam (open-core).
+	WHEPPublicBaseURL() string
 }
 
 // cloudServer is the concrete CloudServer: it delegates ListenAndServe to
@@ -150,13 +183,18 @@ type CloudServer interface {
 // the EventHandler-maintained client set. turnSrv/clients are nil when TURN
 // is soft-gated off (TURNStats then reports Enabled:false).
 type cloudServer struct {
-	whip    *whip.Server
-	turnSrv *turn.Server
-	clients *turnClientSet
+	whip              *whip.Server
+	turnSrv           *turn.Server
+	clients           *turnClientSet
+	whepPublicBaseURL string // "" when the public WHEP listener is off
 }
 
 func (c *cloudServer) ListenAndServe(ctx context.Context) error {
 	return c.whip.ListenAndServe(ctx)
+}
+
+func (c *cloudServer) WHEPPublicBaseURL() string {
+	return c.whepPublicBaseURL
 }
 
 func (c *cloudServer) TURNStats() TURNStats {
@@ -206,16 +244,30 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 		return nil, nil, err
 	}
 
+	// Public WHEP base URL (S19-07): derived from the public addr + host, ""
+	// when the feature is off. Computed up front so a half-config (addr set
+	// but host empty, or an unparseable addr) fails before anything binds.
+	whepBase, err := whepPublicBaseURL(opts.WHEPPublicAddr, opts.WHEPPublicHost)
+	if err != nil {
+		if turnSrv != nil {
+			_ = turnSrv.Close()
+		}
+		return nil, nil, fmt.Errorf("stream: cloud whip server: %w", err)
+	}
+
 	srv, err := whip.New(whip.Config{
-		Addr:           opts.Addr,
-		CertFile:       opts.CertFile,
-		KeyFile:        opts.KeyFile,
-		HMACKey:        opts.HMACKey,
-		EgressHMACKey:  opts.EgressHMACKey, // empty -> WHEP egress fails closed (401)
-		Hub:            hub,
-		Logger:         logger,
-		ICEServers:     iceServers,            // nil when TURN is off -> empty ICEServers
-		RequestPublish: opts.OnRequestPublish, // nil -> egress 404 on missing publisher (today's behaviour)
+		Addr:               opts.Addr,
+		CertFile:           opts.CertFile,
+		KeyFile:            opts.KeyFile,
+		HMACKey:            opts.HMACKey,
+		EgressHMACKey:      opts.EgressHMACKey, // empty -> WHEP egress fails closed (401)
+		Hub:                hub,
+		Logger:             logger,
+		ICEServers:         iceServers,            // nil when TURN is off -> empty ICEServers
+		RequestPublish:     opts.OnRequestPublish, // nil -> egress 404 on missing publisher (today's behaviour)
+		WHEPPublicAddr:     opts.WHEPPublicAddr,
+		WHEPPublicCertFile: opts.WHEPPublicCertFile,
+		WHEPPublicKeyFile:  opts.WHEPPublicKeyFile,
 	})
 	if err != nil {
 		if turnSrv != nil {
@@ -238,7 +290,30 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 		return nil
 	}
 
-	return &cloudServer{whip: srv, turnSrv: turnSrv, clients: clientSet}, shutdown, nil
+	return &cloudServer{whip: srv, turnSrv: turnSrv, clients: clientSet, whepPublicBaseURL: whepBase}, shutdown, nil
+}
+
+// whepPublicBaseURL builds the public WHEP base URL the cloud advertises to
+// the edge - scheme+host+port, NO path - from the public listen addr + host.
+// An empty addr returns "" (the feature is off). A set addr with an empty
+// host or an unparseable/portless addr is a hard error (no silent
+// half-config), mirroring the module's "no silent partial" doctrine. The port
+// is taken from the listen addr so it always matches the listener.
+func whepPublicBaseURL(addr, host string) (string, error) {
+	if addr == "" {
+		return "", nil // public WHEP off
+	}
+	if host == "" {
+		return "", errors.New("WHEPPublicHost is required when WHEPPublicAddr is set")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("WHEPPublicAddr %q: %w", addr, err)
+	}
+	if port == "" {
+		return "", fmt.Errorf("WHEPPublicAddr %q has no port", addr)
+	}
+	return fmt.Sprintf("https://%s:%s", host, port), nil
 }
 
 // setupTURN builds the in-process pion/turn relay and a per-peer ephemeral
