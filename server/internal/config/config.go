@@ -239,6 +239,28 @@ type Config struct {
 	// Required when WHEPPublicAddr is set.
 	WHEPPublicCert string
 	WHEPPublicKey  string
+
+	// --- Cloud control endpoint (Saison 19-11 Baustufe 3, cloud role) ---
+	//
+	// A public HTTPS listener that lets a remote (Android) subscriber fetch
+	// the stream-start bundle that today only the LAN edge serves. The cloud
+	// relays the viewer Bearer to the edge over the side-channel
+	// (bundle_request/bundle_reply), then assembles the bundle itself. Opt-in
+	// via SignalPublicAddr; HOST + CERT + KEY are required once the addr is set
+	// (ValidateCloud). Pure carvilon - the stream module is not involved.
+
+	// SignalPublicAddr is the control-endpoint TLS listen address (e.g.
+	// ":8447"). Empty -> the control endpoint is OFF.
+	SignalPublicAddr string
+	// SignalPublicHost is the public hostname the control endpoint is reached
+	// on; used for logs / self-checks and matches the cert SAN. Required when
+	// SignalPublicAddr is set.
+	SignalPublicHost string
+	// SignalPublicCert / SignalPublicKey are the publicly-trusted cert/key for
+	// the control endpoint (its own Let's Encrypt cert, SEPARATE from the WHEP
+	// and cloudca certs). Required when SignalPublicAddr is set.
+	SignalPublicCert string
+	SignalPublicKey  string
 }
 
 const (
@@ -297,6 +319,10 @@ const (
 	envWHEPPublicHost          = "CARVILON_WHEP_PUBLIC_HOST"
 	envWHEPPublicCert          = "CARVILON_WHEP_PUBLIC_CERT"
 	envWHEPPublicKey           = "CARVILON_WHEP_PUBLIC_KEY"
+	envSignalPublicAddr        = "CARVILON_SIGNAL_PUBLIC_ADDR"
+	envSignalPublicHost        = "CARVILON_SIGNAL_PUBLIC_HOST"
+	envSignalPublicCert        = "CARVILON_SIGNAL_PUBLIC_CERT"
+	envSignalPublicKey         = "CARVILON_SIGNAL_PUBLIC_KEY"
 	defaultSidechannelListen   = ":8443"
 	defaultTURNRealm           = "carvilon"
 	defaultTURNUDPPort         = 3478
@@ -384,6 +410,11 @@ func FromEnv() Config {
 		WHEPPublicHost: lookupEnv(envWHEPPublicHost),
 		WHEPPublicCert: lookupEnv(envWHEPPublicCert),
 		WHEPPublicKey:  lookupEnv(envWHEPPublicKey),
+
+		SignalPublicAddr: lookupEnv(envSignalPublicAddr),
+		SignalPublicHost: lookupEnv(envSignalPublicHost),
+		SignalPublicCert: lookupEnv(envSignalPublicCert),
+		SignalPublicKey:  lookupEnv(envSignalPublicKey),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -611,6 +642,21 @@ func (c Config) ValidateCloud() error {
 		}
 		if c.WHEPPublicKey == "" {
 			return fmt.Errorf("config: %s is required when %s is set", envWHEPPublicKey, envWHEPPublicAddr)
+		}
+	}
+	// Cloud control endpoint (Saison 19-11): OPTIONAL, opt-in via
+	// CARVILON_SIGNAL_PUBLIC_ADDR. Once set, host + cert + key are all
+	// required (the listener needs the cert/key, the logs/self-check the
+	// host) - fail loud at boot, mirroring the WHEP block.
+	if c.SignalPublicAddr != "" {
+		if c.SignalPublicHost == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envSignalPublicHost, envSignalPublicAddr)
+		}
+		if c.SignalPublicCert == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envSignalPublicCert, envSignalPublicAddr)
+		}
+		if c.SignalPublicKey == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envSignalPublicKey, envSignalPublicAddr)
 		}
 	}
 	return nil

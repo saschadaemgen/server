@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -331,7 +332,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, inProcStreamPublisher, turnWriter, turnSnapshots)
+	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, egressIssuer, inProcStreamPublisher, turnWriter, turnSnapshots)
 	if scClient != nil {
 		// Wire the cloud link as the ICE source for GET /webviewer/stream-start
 		// (Saison 19). Set before ListenAndServe below, so the serving
@@ -382,6 +383,12 @@ func runCloud(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// in its own goroutine; srv.Run blocks below. Disabled unless the
 	// addr is configured.
 	startInterimRequestPublishHook(ctx, log, cfg, srv)
+
+	// Saison 19-11: public cloud control endpoint (signal host) so a remote
+	// subscriber can fetch the stream-start bundle the CGNAT'd edge cannot
+	// serve directly. Opt-in (CARVILON_SIGNAL_PUBLIC_ADDR); relays the viewer
+	// Bearer to the edge over the side-channel and assembles cloud-side.
+	startSignalControlListener(ctx, log, cfg, srv)
 
 	// Saison 18-04: in-process WHIP/WHEP stream server (carvilon_stream
 	// build only). startInProcessCloudStream is nil in the public build,
@@ -471,7 +478,7 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // It returns the running *sidechannel.Client so the caller can wire it as the
 // httpserver's ICE source (the stream-start bundle), or nil when the link is
 // unconfigured or failed to init - in which case stream-start 503s.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, egressIssuer *egresstoken.Issuer, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return nil
@@ -519,6 +526,24 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		// for the /a/turn admin page.
 		OnTURNEvent: turnWriter.SubmitEvent,
 		OnTURNStats: func(s turnstore.Snapshot) { turnSnapshots.Set(s, time.Now()) },
+		// Saison 19-11: answer cloud bundle_request (the remote stream-start
+		// relay). resolveViewer maps the Bearer to a viewer MAC; the egress
+		// issuer mints the sid-bound token. These are the two edge-only parts;
+		// the cloud assembles the rest. nil egress issuer -> reject (cloud 401).
+		OnBundleRequest: func(credential string) (string, string, int, error) {
+			mac, rerr := resolveViewer(ctx, viewerMgr, credential)
+			if rerr != nil {
+				return "", "", 0, rerr
+			}
+			if egressIssuer == nil {
+				return "", "", 0, errors.New("egress issuer not configured")
+			}
+			tok, ierr := egressIssuer.Issue(mac)
+			if ierr != nil {
+				return "", "", 0, ierr
+			}
+			return mac, tok, int(egresstoken.TTL.Seconds()), nil
+		},
 	})
 	if err != nil {
 		// A misconfigured side-channel must NOT take down the edge.
@@ -537,6 +562,85 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		"cloud_whip_url", cfg.SidechannelCloudWhipURL,
 	)
 	return client
+}
+
+// resolveViewer maps a raw Bearer device_token to a viewer MAC, reusing the
+// exact lookup requireViewerAuth's Bearer path uses (viewers WHERE type IN
+// ('esp','android')). It is the non-HTTP half of the viewer auth, for the
+// cloud bundle RPC (OnBundleRequest). Bearer-only on purpose: Android
+// authenticates with a device_token, not the browser session cookie.
+func resolveViewer(ctx context.Context, viewerMgr *viewermanager.Manager, bearer string) (string, error) {
+	return viewerMgr.LookupDeviceMACByToken(ctx, bearer)
+}
+
+// startSignalControlListener stands up the public cloud control endpoint
+// (Saison 19-11): GET /stream-start on a carvilon-owned HTTPS listener with
+// the signal cert, so a remote (Android) subscriber - which cannot reach the
+// CGNAT'd edge - fetches the stream-start bundle via the cloud. The cloud
+// relays the viewer Bearer to the edge over the side-channel (RequestBundle),
+// then assembles the bundle from its own ICE mint + WHEP base (AssembleBundle).
+// Opt-in: disabled unless CARVILON_SIGNAL_PUBLIC_ADDR is set. Runs in its own
+// goroutine; a failure only logs (the side-channel keeps running, Grundregel).
+// Pure carvilon - no stream import.
+func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg config.Config, srv *sidechannel.Server) {
+	if cfg.SignalPublicAddr == "" {
+		log.Info("signal control endpoint disabled (set CARVILON_SIGNAL_PUBLIC_ADDR to enable)")
+		return
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /stream-start", func(w http.ResponseWriter, r *http.Request) {
+		const bearerPrefix = "Bearer "
+		authz := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authz, bearerPrefix) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		bearer := strings.TrimPrefix(authz, bearerPrefix)
+
+		// Relay to the edge: it resolves the viewer + mints the egress token.
+		// Auth-fail -> 401; no edge / timeout / link down -> 503.
+		mac, egressToken, expiresIn, err := srv.RequestBundle(r.Context(), bearer)
+		if err != nil {
+			if errors.Is(err, sidechannel.ErrBundleAuth) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			} else {
+				http.Error(w, "stream start unavailable", http.StatusServiceUnavailable)
+			}
+			return
+		}
+
+		// Assemble cloud-side (the single cloud assembler): ICE + WHEP URL.
+		bundle := srv.AssembleBundle(mac, egressToken, expiresIn)
+		if bundle.WHEPURL == "" {
+			// Signal endpoint up but no public WHEP base configured -> the
+			// bundle has no subscribe target. Decline rather than hand out a
+			// useless bundle.
+			log.Warn("signal stream-start: assembled bundle has no whep_url (CARVILON_WHEP_PUBLIC_* not set)", "viewer_mac", mac)
+			http.Error(w, "stream start not configured", http.StatusServiceUnavailable)
+			return
+		}
+		log.Info("signal stream-start bundle issued", "viewer_mac", mac, "ice_servers", len(bundle.ICEServers))
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(bundle)
+	})
+	hsrv := &http.Server{
+		Addr:              cfg.SignalPublicAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	go func() {
+		log.Info("signal control endpoint listening", "addr", cfg.SignalPublicAddr, "host", cfg.SignalPublicHost)
+		if err := hsrv.ListenAndServeTLS(cfg.SignalPublicCert, cfg.SignalPublicKey); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("signal control endpoint stopped", "err", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		sh, c := context.WithTimeout(context.Background(), 2*time.Second)
+		defer c()
+		_ = hsrv.Shutdown(sh)
+	}()
 }
 
 // streamPublisher selects the edge-side video publisher handed to the
