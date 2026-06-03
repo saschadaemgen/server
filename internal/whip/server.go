@@ -63,6 +63,19 @@ type Config struct {
 	// returns the number of edges that received the request. nil -> 404 on a
 	// missing publisher (the pre-trigger behaviour). (S3 WHEP trigger)
 	RequestPublish func(ctx context.Context, streamID string) (edges int)
+
+	// WHEPPublicAddr, when non-empty, enables a SECOND TLS listener on that
+	// address serving ONLY the WHEP egress route (POST /whep/{streamID}) with
+	// the public cert below. The primary Addr listener (WHIP + WHEP, private
+	// cloudca) is left UNTOUCHED - it stays the edge publisher path. Empty ->
+	// the public WHEP listener is OFF (opt-in; no break for existing
+	// deployments). (S19-07 Baustufe 2)
+	WHEPPublicAddr string
+	// WHEPPublicCertFile / WHEPPublicKeyFile are the publicly-trusted cert/key
+	// (e.g. Let's Encrypt) for the public WHEP listener, SEPARATE from the
+	// cloudca CertFile/KeyFile. Required when WHEPPublicAddr is set.
+	WHEPPublicCertFile string
+	WHEPPublicKeyFile  string
 }
 
 const defaultAddr = ":8444"
@@ -78,6 +91,15 @@ type Server struct {
 	hub       *streamhub.Hub
 	logger    *log.Logger
 	srv       *http.Server
+
+	// Public WHEP egress listener (S19-07 Baustufe 2). whepPublicSrv is nil
+	// when WHEPPublicAddr was empty (feature off); when set it serves ONLY
+	// POST /whep/{streamID} on whepPublicAddr with the public cert/key, while
+	// the primary srv (WHIP + WHEP, cloudca) is untouched.
+	whepPublicAddr     string
+	whepPublicCertFile string
+	whepPublicKeyFile  string
+	whepPublicSrv      *http.Server
 
 	// iceServers mints a fresh ICE server list per peer (TURN; S3). nil
 	// -> no ICEServers (host-candidate only).
@@ -148,6 +170,29 @@ func New(cfg Config) (*Server, error) {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Optional public WHEP-egress listener (S19-07 Baustufe 2). When enabled
+	// it serves ONLY the WHEP egress route with a publicly-trusted cert, on a
+	// separate port; the primary listener above (WHIP + WHEP, cloudca) is
+	// untouched. Require cert+key when the addr is set - no silent half-config.
+	if cfg.WHEPPublicAddr != "" {
+		if cfg.WHEPPublicCertFile == "" || cfg.WHEPPublicKeyFile == "" {
+			return nil, errors.New("whip: WHEPPublicCertFile and WHEPPublicKeyFile are required when WHEPPublicAddr is set")
+		}
+		s.whepPublicAddr = cfg.WHEPPublicAddr
+		s.whepPublicCertFile = cfg.WHEPPublicCertFile
+		s.whepPublicKeyFile = cfg.WHEPPublicKeyFile
+		// Same handler as the primary listener (same egress-token auth, same
+		// hub, same cold-start trigger); only the cert + the route set differ.
+		// No /whip route here -> a publish attempt on the public port 404s.
+		publicMux := http.NewServeMux()
+		publicMux.HandleFunc("POST /whep/{streamID}", s.handleWHEP)
+		s.whepPublicSrv = &http.Server{
+			Addr:              cfg.WHEPPublicAddr,
+			Handler:           publicMux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+	}
 	return s, nil
 }
 
@@ -161,6 +206,20 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("whip: listen %s: %w", s.addr, err)
 	}
 	s.logger.Printf("whip: TLS ingress on %s", ln.Addr())
+
+	// Optional public WHEP-egress listener (S19-07 Baustufe 2): a SEPARATE
+	// port with a publicly-trusted cert serving ONLY POST /whep/{streamID}.
+	// The primary ingress above (WHIP + WHEP, private cloudca) is untouched -
+	// it stays the edge publisher path. nil when WHEPPublicAddr was empty.
+	if s.whepPublicSrv != nil {
+		pln, perr := net.Listen("tcp", s.whepPublicAddr)
+		if perr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("whip: public WHEP listen %s: %w", s.whepPublicAddr, perr)
+		}
+		s.logger.Printf("whip: public WHEP egress on %s (public cert)", pln.Addr())
+		return s.serveBoth(ctx, ln, pln)
+	}
 	return s.serve(ctx, ln)
 }
 
@@ -178,6 +237,41 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 		_ = s.srv.Shutdown(shutdownCtx)
 		return ctx.Err()
 	case err := <-serveDone:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
+// serveBoth runs the primary listener (WHIP + WHEP, cloudca) and the public
+// WHEP-egress listener (WHEP only, public cert) concurrently, draining both
+// on ctx cancel. A fatal error from either tears the other down and returns;
+// the embedding runCloud then disables the stream subsystem while the
+// side-channel keeps running. Mirrors serve()'s ctx/drain contract.
+func (s *Server) serveBoth(ctx context.Context, mainLn, publicLn net.Listener) error {
+	serveDone := make(chan error, 2)
+	go func() { serveDone <- s.srv.ServeTLS(mainLn, s.certFile, s.keyFile) }()
+	go func() {
+		serveDone <- s.whepPublicSrv.ServeTLS(publicLn, s.whepPublicCertFile, s.whepPublicKeyFile)
+	}()
+
+	shutdownBoth := func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = s.srv.Shutdown(shutdownCtx)
+		_ = s.whepPublicSrv.Shutdown(shutdownCtx)
+	}
+
+	select {
+	case <-ctx.Done():
+		shutdownBoth()
+		return ctx.Err()
+	case err := <-serveDone:
+		// One listener stopped; tear the other down too, then report. The
+		// other goroutine's ErrServerClosed lands in the buffered channel and
+		// is discarded.
+		shutdownBoth()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
