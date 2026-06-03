@@ -72,6 +72,12 @@ type Server struct {
 	// reported back to the edge on ice_servers. Set together with iceMinter
 	// (the closure derives it from the mint TTL); 0 until set.
 	iceCredTTLSeconds int
+	// whepBaseURL is the public WHEP base URL the cloud advertises on every
+	// ice_servers reply (Saison 19-08). Set once at setup by the
+	// carvilon_stream cloud closure from CloudServer.WHEPPublicBaseURL();
+	// empty when the public WHEP listener is off -> the edge uses its interim
+	// base.
+	whepBaseURL string
 }
 
 // SetICEMinter installs the per-request TURN ICE-server minter and the TTL
@@ -84,6 +90,16 @@ func (s *Server) SetICEMinter(m func(streamID string) []streampublish.ICEServer,
 	s.mu.Lock()
 	s.iceMinter = m
 	s.iceCredTTLSeconds = credTTLSeconds
+	s.mu.Unlock()
+}
+
+// SetWHEPBaseURL installs the public WHEP base URL the cloud advertises on
+// every ice_servers reply (Saison 19-08). The carvilon_stream cloud closure
+// calls it once at setup with CloudServer.WHEPPublicBaseURL() (empty when the
+// public WHEP listener is off). Guarded by the same mutex replyICE reads under.
+func (s *Server) SetWHEPBaseURL(base string) {
+	s.mu.Lock()
+	s.whepBaseURL = base
 	s.mu.Unlock()
 }
 
@@ -281,6 +297,7 @@ func (s *Server) replyICE(ctx context.Context, sc *serverConn, env Envelope) err
 	s.mu.Lock()
 	minter := s.iceMinter
 	ttl := s.iceCredTTLSeconds
+	whepBase := s.whepBaseURL
 	s.mu.Unlock()
 
 	var ice []streampublish.ICEServer
@@ -292,12 +309,13 @@ func (s *Server) replyICE(ctx context.Context, sc *serverConn, env Envelope) err
 	}
 	s.log.Info("sidechannel request_ice answered",
 		"peer", sc.peer, "request_id", env.RequestID,
-		"stream_id", env.StreamID, "ice_servers", len(ice))
+		"stream_id", env.StreamID, "ice_servers", len(ice), "whep_base", whepBase != "")
 	return sc.write(ctx, Envelope{
 		Type:             TypeICEServers,
 		RequestID:        env.RequestID,
 		ICEServers:       ice,
 		ExpiresInSeconds: ttl,
+		WHEPBaseURL:      whepBase,
 	})
 }
 

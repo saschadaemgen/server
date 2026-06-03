@@ -149,6 +149,12 @@ func init() {
 			return nil, err
 		}
 
+		// Saison 19-08: hand the cloud's public WHEP base to the side-channel
+		// so every ice_servers reply advertises it (empty when the public WHEP
+		// listener is off -> the edge uses its interim base). Set once here,
+		// after the stream server is built, analogous to SetICEMinter above.
+		sc.SetWHEPBaseURL(srv.WHEPPublicBaseURL())
+
 		// SetupCloudInProcess builds but does NOT listen (same contract as
 		// the edge). ListenAndServe binds the WHIP/WHEP TLS endpoint and the
 		// TURN relay and blocks until ctx is cancelled, then drains; run it
