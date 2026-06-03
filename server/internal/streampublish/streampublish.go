@@ -39,6 +39,22 @@ type ICEResult struct {
 	WHEPBaseURL string
 }
 
+// StreamStartBundle is the JSON contract a remote subscriber needs to open a
+// WHEP subscription: the public WHEP URL, a sid-bound egress token, the
+// stream id (viewer MAC), the ICE servers, and the bundle lifetime. It is
+// returned by BOTH the LAN edge endpoint (GET /webviewer/stream-start) and
+// the cloud control endpoint (GET /stream-start on the signal host). Defined
+// ONCE here - the neutral package the HTTP layer and the side-channel
+// assembler both import - so the wire form has a single definition even
+// though two sites fill it (drift guard). (Saison 19-11)
+type StreamStartBundle struct {
+	WHEPURL     string      `json:"whep_url"`
+	EgressToken string      `json:"egress_token"`
+	StreamID    string      `json:"stream_id"`
+	ICEServers  []ICEServer `json:"ice_servers"`
+	ExpiresIn   int         `json:"expires_in"`
+}
+
 // StreamPublisher is the edge-side push surface the side-channel calls
 // when the cloud asks for a stream.
 //

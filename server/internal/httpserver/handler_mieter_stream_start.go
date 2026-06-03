@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/egresstoken"
+	"carvilon.local/server/internal/streampublish"
 )
 
 // streamStartICETimeout bounds the cloud ICE round-trip for one bundle
@@ -93,12 +94,12 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 	s.log.Info("stream-start bundle issued", "viewer_mac", mac,
 		"ice_servers", len(res.Servers), "public_whep", res.WHEPBaseURL != "")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"whep_url":     whepURL,
-		"egress_token": token,
-		"stream_id":    mac,
-		"ice_servers":  res.Servers,
-		"expires_in":   int(egresstoken.TTL.Seconds()),
+	_ = json.NewEncoder(w).Encode(streampublish.StreamStartBundle{
+		WHEPURL:     whepURL,
+		EgressToken: token,
+		StreamID:    mac,
+		ICEServers:  res.Servers,
+		ExpiresIn:   int(egresstoken.TTL.Seconds()),
 	})
 }
 
