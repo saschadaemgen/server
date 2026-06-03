@@ -119,7 +119,16 @@ func init() {
 			TURNPublicHost:   cfg.TURNPublicHost,
 			TURNTLSCertFile:  cfg.TURNTLSCertFile,
 			TURNTLSKeyFile:   cfg.TURNTLSKeyFile,
-			Logger:           stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
+			// S19-07 Baustufe 2: separate public WHEP-egress listener + public
+			// cert. Empty WHEPPublicAddr -> off; the :8444 cloudca WHIP/WHEP
+			// listener stays untouched. ValidateCloud enforced host+cert+key
+			// once the addr is set; the stream module returns the public base
+			// via CloudServer.WHEPPublicBaseURL() for the edge to advertise.
+			WHEPPublicAddr:     cfg.WHEPPublicAddr,
+			WHEPPublicHost:     cfg.WHEPPublicHost,
+			WHEPPublicCertFile: cfg.WHEPPublicCert,
+			WHEPPublicKeyFile:  cfg.WHEPPublicKey,
+			Logger:             stdlog.New(os.Stderr, "whip: ", stdlog.LstdFlags|stdlog.Lmsgprefix),
 			OnTURNEvent: func(e stream.TURNEvent) {
 				// Privacy: drop the raw IP here on the VPS; only the
 				// masked form is enqueued and ever leaves this process.

@@ -215,6 +215,30 @@ type Config struct {
 	// stays on the private cloudca.
 	TURNTLSCertFile string
 	TURNTLSKeyFile  string
+
+	// --- Public WHEP egress (Saison 19-07 Baustufe 2, cloud role,
+	// carvilon_stream build) ---
+	//
+	// A SEPARATE public WHEP-egress listener with a publicly-trusted cert, so
+	// a remote browser/Android can subscribe over a browser-trusted endpoint.
+	// The :8444 WHIP/WHEP listener (private cloudca) is UNTOUCHED - it stays
+	// the edge publisher path. Opt-in via WHEPPublicAddr; the other three are
+	// required once the addr is set (ValidateCloud). The cloud announces the
+	// resulting public base to the edge over the side-channel, so the edge
+	// needs no WHEP config of its own.
+
+	// WHEPPublicAddr is the public WHEP-egress TLS listen address (e.g.
+	// ":8446"). Empty -> the public WHEP listener is OFF.
+	WHEPPublicAddr string
+	// WHEPPublicHost is the public HOSTNAME the WHEP egress is advertised on
+	// (e.g. the public WHEP host), matching the public cert's SAN. Builds the
+	// base URL the cloud sends the edge. Required when WHEPPublicAddr is set.
+	WHEPPublicHost string
+	// WHEPPublicCert / WHEPPublicKey are the publicly-trusted cert/key (e.g.
+	// Let's Encrypt for WHEPPublicHost), SEPARATE from the WHIP cloudca certs.
+	// Required when WHEPPublicAddr is set.
+	WHEPPublicCert string
+	WHEPPublicKey  string
 }
 
 const (
@@ -269,6 +293,10 @@ const (
 	envTURNPublicHost          = "CARVILON_TURN_PUBLIC_HOST"
 	envTURNTLSCert             = "CARVILON_TURN_TLS_CERT"
 	envTURNTLSKey              = "CARVILON_TURN_TLS_KEY"
+	envWHEPPublicAddr          = "CARVILON_WHEP_PUBLIC_ADDR"
+	envWHEPPublicHost          = "CARVILON_WHEP_PUBLIC_HOST"
+	envWHEPPublicCert          = "CARVILON_WHEP_PUBLIC_CERT"
+	envWHEPPublicKey           = "CARVILON_WHEP_PUBLIC_KEY"
 	defaultSidechannelListen   = ":8443"
 	defaultTURNRealm           = "carvilon"
 	defaultTURNUDPPort         = 3478
@@ -351,6 +379,11 @@ func FromEnv() Config {
 		TURNPublicHost:   lookupEnv(envTURNPublicHost),
 		TURNTLSCertFile:  lookupEnv(envTURNTLSCert),
 		TURNTLSKeyFile:   lookupEnv(envTURNTLSKey),
+
+		WHEPPublicAddr: lookupEnv(envWHEPPublicAddr),
+		WHEPPublicHost: lookupEnv(envWHEPPublicHost),
+		WHEPPublicCert: lookupEnv(envWHEPPublicCert),
+		WHEPPublicKey:  lookupEnv(envWHEPPublicKey),
 	}
 	if cfg.SidechannelListenAddr == "" {
 		cfg.SidechannelListenAddr = defaultSidechannelListen
@@ -561,6 +594,23 @@ func (c Config) ValidateCloud() error {
 		// TLS relay is opt-in: 0 = OFF. Only range-check a non-zero port.
 		if c.TURNTLSPort != 0 && (c.TURNTLSPort < 1 || c.TURNTLSPort > 65535) {
 			return fmt.Errorf("config: %s must be 0 (TLS off) or in the range 1-65535", envTURNTLSPort)
+		}
+	}
+	// Public WHEP egress listener (Saison 19-07 Baustufe 2): OPTIONAL, opt-in
+	// via CARVILON_WHEP_PUBLIC_ADDR. Once the addr is set, the public host +
+	// cert + key are ALL required - the separate listener needs the cert/key
+	// and the base URL the edge advertises needs the host - so a half-config
+	// fails loudly at boot rather than half-starting (mirrors the WHIP
+	// cert/key pair check). Empty addr -> feature off, no validation.
+	if c.WHEPPublicAddr != "" {
+		if c.WHEPPublicHost == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envWHEPPublicHost, envWHEPPublicAddr)
+		}
+		if c.WHEPPublicCert == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envWHEPPublicCert, envWHEPPublicAddr)
+		}
+		if c.WHEPPublicKey == "" {
+			return fmt.Errorf("config: %s is required when %s is set", envWHEPPublicKey, envWHEPPublicAddr)
 		}
 	}
 	return nil
