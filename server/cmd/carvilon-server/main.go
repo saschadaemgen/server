@@ -574,8 +574,10 @@ func resolveViewer(ctx context.Context, viewerMgr *viewermanager.Manager, bearer
 }
 
 // startSignalControlListener stands up the public cloud control endpoint
-// (Saison 19-11): GET /stream-start on a carvilon-owned HTTPS listener with
-// the signal cert, so a remote (Android) subscriber - which cannot reach the
+// (Saison 19-11): GET /webviewer/stream-start on a carvilon-owned HTTPS
+// listener with the signal cert (path kept identical to the LAN edge so the
+// app only swaps the base host, S19-09/S19-24), so a remote (Android)
+// subscriber - which cannot reach the
 // CGNAT'd edge - fetches the stream-start bundle via the cloud. The cloud
 // relays the viewer Bearer to the edge over the side-channel (RequestBundle),
 // then assembles the bundle from its own ICE mint + WHEP base (AssembleBundle).
@@ -588,7 +590,7 @@ func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg confi
 		return
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /stream-start", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /webviewer/stream-start", func(w http.ResponseWriter, r *http.Request) {
 		const bearerPrefix = "Bearer "
 		authz := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authz, bearerPrefix) {
