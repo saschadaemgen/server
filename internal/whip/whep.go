@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 
 	"carvilon.local/stream/internal/icedebug"
@@ -92,7 +93,20 @@ func AcceptSubscriber(
 	if err != nil {
 		return "", "", fmt.Errorf("whip: media engine: %w", err)
 	}
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
+	// S4 loss recovery: register the NACK responder (+ generator) on the
+	// EGRESS PeerConnection. Without an interceptor registry pion registers
+	// NONE, so the NACKs the subscriber sends (seen climbing in the phone's
+	// getStats) were ignored -> progressive freezing on a lossy radio leg.
+	// The H264 codec already advertises nack + nack pli (newH264MediaEngine);
+	// ConfigureNack is idempotent on that feedback and adds the responder that
+	// retransmits cached packets on the same SSRC. Edge->cloud is loss-free
+	// (measured), so every packet reaches the egress send-cache and can be
+	// retransmitted to the client.
+	ir := &interceptor.Registry{}
+	if err := webrtc.ConfigureNack(me, ir); err != nil {
+		return "", "", fmt.Errorf("whip: configure nack: %w", err)
+	}
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithInterceptorRegistry(ir))
 
 	// S3 TURN: iceServers is the relay list the server minted (TURN URLs +
 	// fresh ephemeral creds) when TURN is on; nil -> host candidates only.
