@@ -711,6 +711,10 @@ type recordingFCMSender struct {
 	token  string
 	push   fcm.DoorbellPush
 	retErr error
+	// cancel leg (Saison 19-20)
+	cancelCalls int
+	cancelToken string
+	cancelPush  fcm.DoorbellPush
 }
 
 func (r *recordingFCMSender) Send(_ context.Context, token string, push fcm.DoorbellPush) error {
@@ -719,6 +723,15 @@ func (r *recordingFCMSender) Send(_ context.Context, token string, push fcm.Door
 	r.calls++
 	r.token = token
 	r.push = push
+	return r.retErr
+}
+
+func (r *recordingFCMSender) SendCancel(_ context.Context, token string, push fcm.DoorbellPush) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancelCalls++
+	r.cancelToken = token
+	r.cancelPush = push
 	return r.retErr
 }
 
@@ -732,6 +745,18 @@ func (r *recordingFCMSender) snapshot() (string, fcm.DoorbellPush) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.token, r.push
+}
+
+func (r *recordingFCMSender) cancelCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cancelCalls
+}
+
+func (r *recordingFCMSender) cancelSnapshot() (string, fcm.DoorbellPush) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cancelToken, r.cancelPush
 }
 
 func TestDispatchDoorbell_FCMLeg_TokenPresentSends(t *testing.T) {
@@ -812,5 +837,59 @@ func TestDispatchDoorbell_FCMLeg_SendErrorDoesNotBreakDispatch(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("local SSE broadcast did not fire (FCM error broke dispatch?)")
+	}
+}
+
+// TestDispatchCancel_FCMLeg_TokenPresentSendsCancel mirrors the ring-leg test:
+// a UA-side abort fires a doorbell_cancel push keyed on cancel_token with the
+// lifecycle reason.
+func TestDispatchCancel_FCMLeg_TokenPresentSendsCancel(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: "phone-token-c"},
+		FCMSender: sender,
+	})
+
+	h.dispatchCancel(context.Background(), mock.DoorbellCancelEvent{
+		ViewerMAC:   "0c:ea:14:00:00:0a",
+		CancelToken: "cancel-aa",
+		ReceivedAt:  time.Unix(1747000020, 0),
+	})
+
+	// SendCancel runs in a detached goroutine; wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sender.cancelCallCount() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sender.cancelCallCount() != 1 {
+		t.Fatalf("FCM SendCancel call count = %d, want 1", sender.cancelCallCount())
+	}
+	token, push := sender.cancelSnapshot()
+	if token != "phone-token-c" {
+		t.Errorf("SendCancel token = %q, want phone-token-c", token)
+	}
+	if push.StreamID != "0c:ea:14:00:00:0a" || push.CancelToken != "cancel-aa" ||
+		push.Reason != doorbellcalls.ReasonTimeout {
+		t.Errorf("cancel push = %+v, want stream_id/cancel_token set + reason=%q",
+			push, doorbellcalls.ReasonTimeout)
+	}
+}
+
+func TestDispatchCancel_FCMLeg_NoTokenSkips(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: ""}, // no phone registered
+		FCMSender: sender,
+	})
+	h.dispatchCancel(context.Background(), mock.DoorbellCancelEvent{
+		ViewerMAC:   "0c:ea:14:00:00:0b",
+		CancelToken: "cancel-bb",
+	})
+
+	time.Sleep(100 * time.Millisecond)
+	if got := sender.cancelCallCount(); got != 0 {
+		t.Errorf("FCM SendCancel call count = %d, want 0 (empty token)", got)
 	}
 }

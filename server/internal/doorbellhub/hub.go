@@ -59,9 +59,11 @@ type FCMTokenReader interface {
 }
 
 // FCMPushSender sends a doorbell push to one device token.
-// *fcm.Sender satisfies it.
+// *fcm.Sender satisfies it. Send carries a doorbell_ring; SendCancel a
+// doorbell_cancel (Saison 19-20, same best-effort contract).
 type FCMPushSender interface {
 	Send(ctx context.Context, token string, push fcm.DoorbellPush) error
+	SendCancel(ctx context.Context, token string, push fcm.DoorbellPush) error
 }
 
 // Subscriber buffers events destined for one HTTP/SSE
@@ -279,6 +281,12 @@ func (h *Hub) dispatchCancel(ctx context.Context, ev mock.DoorbellCancelEvent) {
 	}
 	h.broadcast(ev.ViewerMAC, hubEvent)
 	h.publishToBus(ev.ViewerMAC, "doorbell.cancel", hubEvent)
+	// Additive cloud push leg (Saison 19-20): tell the viewer's phone to close
+	// the ring overlay it opened, matched by cancel_token. Mirror of publishFCM
+	// in dispatchDoorbell. reason = the lifecycle cancel_reason dispatchCancel
+	// stamps - a UA abort is generic, so ReasonTimeout (the same value
+	// endCallTimeout passes to MarkEnded above).
+	h.publishFCMCancel(ctx, ev.ViewerMAC, ev.CancelToken, doorbellcalls.ReasonTimeout)
 }
 
 // startCall best-effort registers the lifecycle row. The
@@ -383,6 +391,42 @@ func (h *Hub) publishFCM(ctx context.Context, ev mock.DoorbellEvent, eventID int
 		defer cancel()
 		if err := sender.Send(sendCtx, token, push); err != nil {
 			h.log.Warn("fcm: doorbell push failed", "mac", ev.ViewerMAC, "err", err)
+		}
+	}()
+}
+
+// publishFCMCancel is the cancel counterpart of publishFCM (Saison 19-20). On a
+// UA-side doorbell abort it tells the viewer's phone to close the overlay it
+// opened from the ring push, matched by cancelToken. Exactly mirrors publishFCM:
+// no-op unless both the token reader and the sender are wired, fast synchronous
+// token read, detached bounded send, every failure logged and swallowed (the
+// local cancel flow above is already done). reason is the lifecycle
+// cancel_reason so the app can label the dismissal (informational; the close
+// itself is keyed on cancelToken).
+func (h *Hub) publishFCMCancel(ctx context.Context, viewerMAC, cancelToken, reason string) {
+	if h.fcmSender == nil || h.fcmTokens == nil {
+		return
+	}
+	token, err := h.fcmTokens.GetFCMToken(ctx, viewerMAC)
+	if err != nil {
+		h.log.Warn("fcm: token lookup failed (cancel)", "mac", viewerMAC, "err", err)
+		return
+	}
+	if token == "" {
+		h.log.Debug("fcm: no token for viewer, skipping cancel push", "mac", viewerMAC)
+		return
+	}
+	push := fcm.DoorbellPush{
+		StreamID:    viewerMAC,
+		CancelToken: cancelToken,
+		Reason:      reason,
+	}
+	sender := h.fcmSender
+	go func() {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := sender.SendCancel(sendCtx, token, push); err != nil {
+			h.log.Warn("fcm: doorbell cancel push failed", "mac", viewerMAC, "err", err)
 		}
 	}()
 }
