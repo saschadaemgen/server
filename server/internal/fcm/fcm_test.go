@@ -120,3 +120,64 @@ func TestNewSender_MissingFileIsError(t *testing.T) {
 		t.Errorf("NewSender(missing file) = %v, want nil sender", s)
 	}
 }
+
+func TestSendCancel_BuildsDoorbellCancelMessage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"projects/p/messages/2"}`))
+	}))
+	defer srv.Close()
+
+	push := DoorbellPush{
+		StreamID:    "0c:ea:14:00:00:01",
+		CancelToken: "cancel-abc",
+		Reason:      "timeout",
+		// ring-only fields are set but must be IGNORED by SendCancel:
+		DeviceName: "Hauseingang",
+		RoomID:     "WR-room-1",
+		EventID:    "42",
+		TS:         "1716998400",
+	}
+	if err := senderTo(srv.URL).SendCancel(context.Background(), "device-token-xyz", push); err != nil {
+		t.Fatalf("SendCancel: %v", err)
+	}
+
+	message, ok := gotBody["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no message object: %v", gotBody)
+	}
+	if message["token"] != "device-token-xyz" {
+		t.Errorf("message.token = %v, want device-token-xyz", message["token"])
+	}
+	android, _ := message["android"].(map[string]any)
+	if android["priority"] != "high" {
+		t.Errorf("android.priority = %v, want high", android["priority"])
+	}
+	data, ok := message["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("message has no data object: %v", message)
+	}
+	want := map[string]string{
+		"type":         "doorbell_cancel",
+		"stream_id":    "0c:ea:14:00:00:01",
+		"cancel_token": "cancel-abc",
+		"reason":       "timeout",
+	}
+	for k, v := range want {
+		if data[k] != v {
+			t.Errorf("data[%q] = %v, want %q", k, data[k], v)
+		}
+	}
+	// ring-only keys must NOT appear on a cancel push.
+	for _, k := range []string{"device_name", "room_id", "event_id", "ts"} {
+		if _, present := data[k]; present {
+			t.Errorf("data[%q] present on doorbell_cancel; want absent", k)
+		}
+	}
+	if _, present := message["notification"]; present {
+		t.Error("message.notification present; want data-only message")
+	}
+}

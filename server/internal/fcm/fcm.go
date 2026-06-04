@@ -45,6 +45,10 @@ type DoorbellPush struct {
 	EventID     string // door_events row id (decimal string), may be "0"
 	CancelToken string // one-shot match key for the cancel push
 	TS          string // event timestamp, unix seconds (decimal string)
+	// Reason is ONLY carried on a doorbell_cancel push (SendCancel): the
+	// lifecycle cancel_reason ("timeout" for a UA abort today). The
+	// doorbell_ring Send ignores it. (Saison 19-20)
+	Reason string
 }
 
 // Sender posts doorbell pushes to FCM HTTP v1. Build with NewSender;
@@ -109,6 +113,59 @@ func (s *Sender) Send(ctx context.Context, token string, push DoorbellPush) erro
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("fcm: marshal message: %w", err)
+	}
+
+	tok, err := s.ts.Token()
+	if err != nil {
+		return fmt.Errorf("fcm: mint access token: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.sendURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("fcm: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("fcm: send: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("fcm: send returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// SendCancel posts a doorbell_cancel push, telling the app to close the ring
+// overlay it opened from the matching doorbell_ring (Saison 19-20). It mirrors
+// Send but with a SEPARATE, smaller data map - type "doorbell_cancel", the
+// stream_id + cancel_token (the app matches the open ring by cancel_token), and
+// the reason - so the doorbell_ring Send is left untouched. android.priority is
+// high, same as the ring, so it arrives in the background. Same best-effort
+// contract: the caller logs and swallows any error. The HTTP machinery is kept
+// inline (not factored out of Send) so the proven ring path stays byte-for-byte
+// unchanged.
+func (s *Sender) SendCancel(ctx context.Context, token string, push DoorbellPush) error {
+	msg := map[string]any{
+		"message": map[string]any{
+			"token": token,
+			"data": map[string]string{
+				"type":         "doorbell_cancel",
+				"stream_id":    push.StreamID,
+				"cancel_token": push.CancelToken,
+				"reason":       push.Reason,
+			},
+			"android": map[string]any{
+				"priority": "high",
+			},
+		},
+	}
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("fcm: marshal cancel message: %w", err)
 	}
 
 	tok, err := s.ts.Token()
