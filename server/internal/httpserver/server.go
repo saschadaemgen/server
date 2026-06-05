@@ -20,9 +20,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"time"
@@ -256,6 +258,40 @@ func (s *Server) SetUAClient(c *uaapi.Client) {
 // unconfigured cloud link leaves it nil and stream-start 503s.
 func (s *Server) SetICERequester(r ICERequester) {
 	s.iceRequester = r
+}
+
+// ServeRelayed runs a relayed control request through this server's OWN mux
+// (Saison 19-27, the generic cloud control relay). It reconstructs an
+// *http.Request from the relayed parts, sets the curated headers (Authorization
+// + Content-Type) and runs it through s.mux via an httptest recorder - so it
+// passes through requireViewerAuth + the UNCHANGED handler exactly as a real
+// request would. The edge is the auth authority; the relay never inspects the
+// credential. fullPath includes any path params so the mux matches its pattern
+// (e.g. {door_id}). Returns the captured status, the curated response header
+// (Content-Type) and body, or an error only when the request itself could not
+// be BUILT (a mechanism failure; a normal HTTP status, incl. 401, rides the
+// status return, not the error).
+func (s *Server) ServeRelayed(ctx context.Context, method, fullPath, rawQuery string, header map[string]string, body []byte) (status int, respHeader map[string]string, respBody []byte, err error) {
+	target := fullPath
+	if rawQuery != "" {
+		target += "?" + rawQuery
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	// Curated request headers only (the relay carries Authorization +
+	// Content-Type; never Host/Cookie/etc).
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	out := map[string]string{}
+	if ct := rec.Header().Get("Content-Type"); ct != "" {
+		out["Content-Type"] = ct
+	}
+	return rec.Code, out, rec.Body.Bytes(), nil
 }
 
 func (s *Server) routes() {

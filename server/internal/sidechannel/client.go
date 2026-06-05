@@ -29,6 +29,11 @@ const (
 	// iceRequestTimeout bounds a RequestICE round-trip when the caller's
 	// ctx carries no deadline of its own.
 	iceRequestTimeout = 5 * time.Second
+	// relayServeTimeout bounds the edge-side execution of a relayed control
+	// call (Saison 19-27). Generous (the handler may call the UA-API);
+	// matches the cloud's relayRequestTimeout so neither side waits much
+	// longer than the other.
+	relayServeTimeout = 10 * time.Second
 )
 
 // ErrNoICEServers is returned by RequestICE when the cloud answered with an
@@ -99,6 +104,17 @@ type ClientOptions struct {
 	// cloud (no oracle). A nil callback ignores the frame (the cloud times out
 	// -> 503).
 	OnBundleRequest func(credential string) (mac, egressToken string, expiresIn int, err error)
+
+	// OnHTTPRequest, when set, answers a cloud http_request (Saison 19-27, the
+	// generic control relay): it runs the relayed request through the edge's
+	// OWN httpserver mux (requireViewerAuth + the unchanged handler) and
+	// returns the captured response. The edge wiring points it at
+	// httpserver.Server.ServeRelayed. Runs in its own goroutine (it may hit the
+	// DB or the UA-API) so it never blocks the read loop. A non-nil error means
+	// the edge could not RUN the request (mechanism failure) -> framed as
+	// http_reply.Error (cloud 503); a normal HTTP status (incl. 401) rides the
+	// returned RelayResponse. A nil callback ignores the frame.
+	OnHTTPRequest func(ctx context.Context, req RelayRequest) (RelayResponse, error)
 }
 
 // Client is the edge-side dialer. It keeps a single mTLS WebSocket to
@@ -342,6 +358,38 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 							reply.MAC = mac
 							reply.EgressToken = tok
 							reply.ExpiresInSeconds = ttl
+						}
+						c.Send(reply)
+					}()
+				}
+			case TypeHTTPRequest:
+				// Cloud relayed a control call; run it through the edge's own mux
+				// in a goroutine (it may hit the DB or the UA-API), then frame the
+				// captured response. A mechanism failure crosses back as Error
+				// (cloud 503); a normal HTTP status (incl. 401) rides Status. nil
+				// callback -> ignore (the cloud times out -> 503).
+				if c.opts.OnHTTPRequest != nil {
+					req := RelayRequest{
+						Method:   env.Method,
+						Path:     env.Path,
+						RawQuery: env.RawQuery,
+						Header:   env.HTTPHeader,
+						Body:     env.Body,
+					}
+					id := env.RequestID
+					go func() {
+						rctx, cancel := context.WithTimeout(context.Background(), relayServeTimeout)
+						defer cancel()
+						reply := Envelope{Type: TypeHTTPReply, RequestID: id}
+						resp, err := c.opts.OnHTTPRequest(rctx, req)
+						if err != nil {
+							c.log.Warn("sidechannel http_request could not run",
+								"request_id", id, "path", req.Path, "err", err)
+							reply.Error = "relay failed"
+						} else {
+							reply.Status = resp.Status
+							reply.HTTPHeader = resp.Header
+							reply.Body = resp.Body
 						}
 						c.Send(reply)
 					}()
