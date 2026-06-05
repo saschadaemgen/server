@@ -82,6 +82,10 @@ type Server struct {
 	// the bundle_reply the read loop delivers - the cloud-side mirror of the
 	// edge's request_ice pending-map. Guarded by mu. (Saison 19-11)
 	bundlePending map[string]chan bundleReply
+	// httpPending correlates an in-flight RelayHTTP (by request_id) with the
+	// http_reply the read loop delivers - the generic control-relay's
+	// pending-map, same pattern as bundlePending. Guarded by mu. (Saison 19-27)
+	httpPending map[string]chan httpReply
 }
 
 // SetICEMinter installs the per-request TURN ICE-server minter and the TTL
@@ -144,6 +148,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		conns:         make(map[*serverConn]struct{}),
 		activeStreams: make(map[string]struct{}),
 		bundlePending: make(map[string]chan bundleReply),
+		httpPending:   make(map[string]chan httpReply),
 	}, nil
 }
 
@@ -254,6 +259,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			// Edge's answer to a cloud RequestBundle; route it to the waiting
 			// caller by RequestID (mirror of the edge's ice_servers delivery).
 			s.deliverBundleReply(env)
+		case TypeHTTPReply:
+			// Edge's answer to a cloud RelayHTTP; route it by RequestID.
+			s.deliverHTTPReply(env)
 		default:
 			// Forward-compatible: a newer edge may send cargo types
 			// this cloud build predates. Log and ignore, never crash.
@@ -453,6 +461,131 @@ func (s *Server) AssembleBundle(mac, egressToken string, expiresIn int) streampu
 		StreamID:    mac,
 		ICEServers:  ice,
 		ExpiresIn:   expiresIn,
+	}
+}
+
+// relayRequestTimeout bounds a RelayHTTP round-trip when the caller's ctx
+// carries no deadline. More generous than bundleRequestTimeout: the relayed
+// handler may itself call the UA-API (e.g. door unlock).
+const relayRequestTimeout = 10 * time.Second
+
+// maxRelayReplyBody defensively caps the response body framed back from the
+// edge (the control responses are tiny JSON).
+const maxRelayReplyBody = 64 * 1024
+
+// ErrRelayFailed is returned by RelayHTTP when the edge could not RUN the
+// request at all (mechanism failure). The caller maps it (and ErrNoEdge /
+// timeout) to a cloud-generated 503. A NORMAL HTTP status (incl. 401/404) is
+// NOT an error - it rides RelayResponse.Status.
+var ErrRelayFailed = errors.New("sidechannel: edge could not run relayed request")
+
+// RelayRequest is the curated HTTP request the cloud relays to the edge. Path
+// is the FULL path (incl. path params). Header carries only Authorization +
+// Content-Type. Body is capped by the caller.
+type RelayRequest struct {
+	Method   string
+	Path     string
+	RawQuery string
+	Header   map[string]string
+	Body     []byte
+}
+
+// RelayResponse is the edge's captured HTTP response. Header carries only
+// Content-Type.
+type RelayResponse struct {
+	Status int
+	Header map[string]string
+	Body   []byte
+}
+
+// httpReply is the edge's http_reply routed back to the waiting RelayHTTP call
+// by RequestID.
+type httpReply struct {
+	status int
+	header map[string]string
+	body   []byte
+	errMsg string
+}
+
+// RelayHTTP forwards a remote app's control call to the edge over the
+// side-channel and returns the edge's captured HTTP response. It is the
+// generalisation of RequestBundle: same request_id correlation, pending-map and
+// one-edge-today targeting. The relay is a DUMB PIPE - the edge runs the
+// request through its own mux (requireViewerAuth + the unchanged handler) and
+// IS the auth authority; RelayHTTP never inspects the credential. A normal HTTP
+// status (incl. 401) comes back in RelayResponse.Status; ErrNoEdge / ctx.Err()
+// / ErrRelayFailed mean the relay itself could not complete (caller -> 503).
+func (s *Server) RelayHTTP(ctx context.Context, req RelayRequest) (RelayResponse, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, relayRequestTimeout)
+		defer cancel()
+	}
+	id, gerr := newRequestID()
+	if gerr != nil {
+		return RelayResponse{}, fmt.Errorf("sidechannel: request id: %w", gerr)
+	}
+
+	ch := make(chan httpReply, 1)
+	s.mu.Lock()
+	var target *serverConn
+	for sc := range s.conns {
+		target = sc
+		break
+	}
+	s.httpPending[id] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.httpPending, id)
+		s.mu.Unlock()
+	}()
+
+	if target == nil {
+		return RelayResponse{}, ErrNoEdge
+	}
+	if werr := target.write(ctx, Envelope{
+		Type:       TypeHTTPRequest,
+		RequestID:  id,
+		Method:     req.Method,
+		Path:       req.Path,
+		RawQuery:   req.RawQuery,
+		HTTPHeader: req.Header,
+		Body:       req.Body,
+	}); werr != nil {
+		s.log.Warn("sidechannel http_request write failed", "peer", target.peer, "request_id", id, "err", werr)
+		return RelayResponse{}, ErrNoEdge
+	}
+
+	select {
+	case reply := <-ch:
+		if reply.errMsg != "" {
+			return RelayResponse{}, ErrRelayFailed
+		}
+		return RelayResponse{Status: reply.status, Header: reply.header, Body: reply.body}, nil
+	case <-ctx.Done():
+		return RelayResponse{}, ctx.Err()
+	}
+}
+
+// deliverHTTPReply routes an http_reply frame to the waiting RelayHTTP call by
+// RequestID (mirror of deliverBundleReply). The body is capped defensively.
+func (s *Server) deliverHTTPReply(env Envelope) {
+	s.mu.Lock()
+	ch, ok := s.httpPending[env.RequestID]
+	s.mu.Unlock()
+	if !ok {
+		s.log.Warn("sidechannel http_reply for unknown/expired request, dropping", "request_id", env.RequestID)
+		return
+	}
+	body := env.Body
+	if len(body) > maxRelayReplyBody {
+		body = body[:maxRelayReplyBody]
+	}
+	select {
+	case ch <- httpReply{status: env.Status, header: env.HTTPHeader, body: body, errMsg: env.Error}:
+	default:
+		s.log.Warn("sidechannel duplicate http_reply, dropping", "request_id", env.RequestID)
 	}
 }
 
