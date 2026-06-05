@@ -208,6 +208,12 @@ func TestIsIntercomType(t *testing.T) {
 		{"UA Intercom Viewer", true, "composite intercom+viewer"},
 		{"UA-Intercom-Viewer", true, "composite hyphen"},
 		{"UA-Intercom-Viewer-G2", true, "composite with suffix"},
+		// Match: Saison 19-30 doorbell / door-station family (the G3
+		// door station family - exact live string still to confirm).
+		{"UA-Doorbell", true, "doorbell token"},
+		{"G3 Doorbell", true, "doorbell with space"},
+		{"UVC Door Station", true, "door station token"},
+		{"Türstation", true, "german door station"},
 		// No match: other UA devices
 		{"UAH-DOOR", false, "hub door"},
 		{"UA-G2-Reader", false, "reader"},

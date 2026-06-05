@@ -138,35 +138,42 @@ func (c *Client) ListIntercoms(ctx context.Context) ([]Device, error) {
 }
 
 // isIntercomType decides whether a UA device_type string belongs
-// to the intercom family. Saison 13-05-HOTFIX2 broadened the
-// match because the original prefix-only logic missed
-// space-separated names ("UA Intercom") and viewer-style
-// composites ("UA Intercom Viewer", "UA-Intercom-Viewer-G2").
+// to the intercom family. Saison 13-05-HOTFIX2 broadened the match
+// to space-separated names ("UA Intercom") and viewer composites;
+// Saison 19-30 broadened it again because the live G3 door station
+// was NOT recognised (ListIntercoms came back empty -> empty
+// "Verknuepfte Klingel" dropdown). The viewer<->door assignment has
+// since moved to ListDoors, but this filter is repaired so it is not
+// left broken.
 //
 // Match rules (all case-insensitive, whitespace-trimmed):
 //
-//   - exact "ua-intercom" / "ua intercom"           hardware intercom
-//   - exact "ua-int-viewer"                          legacy viewer name
-//   - prefix "ua-intercom" or "ua intercom"          variants/Pro/G2
-//   - both "intercom" and "viewer" present anywhere  composite names
+//   - "intercom" anywhere                   hardware intercom + Pro/G2/composites
+//   - a doorbell / door-station spelling    "doorbell", "door bell",
+//     anywhere                              "door station", "tuer/tuerstation"
+//   - exact "ua-int-viewer" / "ua int viewer"  legacy viewer name (no
+//     "intercom" substring, so its own clause)
 //
-// Hubs ("UAH-DOOR"), readers ("UA-G2-Reader") and other devices
-// stay out by construction.
+// Readers ("UA-G2-Reader"), hubs ("UAH-DOOR", "UA-Hub-Door") and
+// cards carry NONE of these tokens, so they stay out (we never match
+// a bare "door"). NOTE: the live G3's exact type string is
+// unconfirmed from the repo; if it uses yet another spelling, widen
+// here once the "uaapi: ListIntercoms scanning devices" log line
+// shows the actual type histogram.
 func isIntercomType(deviceType string) bool {
 	t := strings.ToLower(strings.TrimSpace(deviceType))
 	if t == "" {
 		return false
 	}
-	if t == "ua-intercom" || t == "ua intercom" {
+	if strings.Contains(t, "intercom") ||
+		strings.Contains(t, "doorbell") ||
+		strings.Contains(t, "door bell") ||
+		strings.Contains(t, "door station") ||
+		strings.Contains(t, "türstation") ||
+		strings.Contains(t, "tuerstation") {
 		return true
 	}
 	if t == "ua-int-viewer" || t == "ua int viewer" {
-		return true
-	}
-	if strings.HasPrefix(t, "ua-intercom") || strings.HasPrefix(t, "ua intercom") {
-		return true
-	}
-	if strings.Contains(t, "intercom") && strings.Contains(t, "viewer") {
 		return true
 	}
 	return false
