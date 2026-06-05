@@ -564,6 +564,48 @@
       background: rgba(127, 29, 29, 0.96);
       border-color: rgba(239, 68, 68, 0.40);
     }
+
+    /* Tür-Zuordnung (Saison 19-32 redesign). Shared token vocabulary
+       instead of inline styles; reads as a clean list with one add
+       control, consistent with the other detail cards. */
+    .door-intro {
+      color: var(--color-text-tertiary);
+      font-size: var(--fs-sm);
+      margin-top: 0;
+    }
+    .door-list { list-style: none; margin: 0; padding: 0; }
+    .door-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+    }
+    .door-row:last-child { border-bottom: none; }
+    .door-row .door-name {
+      font-size: 14px;
+      color: var(--color-text-primary, #f0f4ff);
+    }
+    .door-row .door-remove { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+    .door-empty {
+      color: var(--color-text-tertiary);
+      font-size: var(--fs-sm);
+      margin: 8px 0 0;
+    }
+    .door-add { margin-top: 12px; }
+    .door-add select {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 0.5px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--color-text-primary, #f0f4ff);
+      font: inherit;
+      font-size: 14px;
+      color-scheme: dark;
+    }
+    .door-add select:focus { outline: none; border-color: var(--color-accent); }
   </style>
 </head>
 <body class="admin-shell">
@@ -658,24 +700,26 @@
     <section class="viewer-detail-section" id="doors-section"
              data-viewer-mac="{{.Page.MAC}}">
       <h2>Tür-Zuordnung</h2>
-      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
+      <p class="door-intro">
         Türen, die dieser Viewer öffnen darf - Standby-Knopf und App-Buttons.
         Mehrere möglich; bei genau einer öffnet „standby" direkt diese Tür.
       </p>
-      <ul data-bind="assigned-doors" style="list-style:none; padding:0; margin:0;">
+      <ul class="door-list" data-bind="assigned-doors">
         {{range .Page.AssignedDoors}}
-          <li data-door-id="{{.DoorID}}" style="display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.4rem 0; border-bottom:1px solid rgba(255,255,255,.08);">
+          <li class="door-row" data-door-id="{{.DoorID}}">
             <span class="door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span>
-            <button type="button" class="btn-secondary" data-action="remove-door" data-door-id="{{.DoorID}}">Entfernen</button>
+            <button type="button" class="btn btn-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}" title="Tür entfernen" aria-label="Tür entfernen">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+              Entfernen
+            </button>
           </li>
         {{end}}
       </ul>
-      <p data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}
-         style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">
+      <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>
         Noch keine Tür zugeordnet.
       </p>
-      <div style="margin-top:.6rem;">
-        <select data-bind="door-add-select" style="width:100%;">
+      <div class="door-add">
+        <select data-bind="door-add-select">
           <option value="">+ Tür hinzufügen …</option>
         </select>
       </div>
@@ -884,19 +928,22 @@
         });
       }
       function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
+      var TRASH_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
       function makeRow(doorID, name) {
         var li = document.createElement('li');
+        li.className = 'door-row';
         li.setAttribute('data-door-id', doorID);
-        li.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.4rem 0; border-bottom:1px solid rgba(255,255,255,.08);';
         var span = document.createElement('span');
         span.className = 'door-name';
-        span.textContent = name || doorID;
+        span.textContent = name || doorID; // textContent: no injection from the door name
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn-secondary';
+        btn.className = 'btn btn-ghost btn-sm door-remove';
         btn.setAttribute('data-action', 'remove-door');
         btn.setAttribute('data-door-id', doorID);
-        btn.textContent = 'Entfernen';
+        btn.setAttribute('title', 'Tür entfernen');
+        btn.setAttribute('aria-label', 'Tür entfernen');
+        btn.innerHTML = TRASH_SVG + ' Entfernen'; // fixed SVG literal, no user data
         li.appendChild(span);
         li.appendChild(btn);
         return li;
