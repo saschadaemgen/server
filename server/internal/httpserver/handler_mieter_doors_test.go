@@ -16,7 +16,7 @@ import (
 // otherwise (S19-30 Teil E).
 func TestMieterDoors_ReturnsAssignedWithNames(t *testing.T) {
 	uaStub := newUADoorsStub(t, uaDoorStubConfig{
-		doors: map[string]string{"door-uuid-front": "28704e31e29c"},
+		doors: map[string]string{"door-uuid-front": "aabbccddeeff"},
 	}, nil)
 	defer uaStub.Close()
 

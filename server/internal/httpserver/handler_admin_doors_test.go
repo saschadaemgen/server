@@ -14,7 +14,7 @@ import (
 // door-assignment UI (S19-30 Teil B).
 func TestAdminDoorsJSON_ListsDoors(t *testing.T) {
 	uaStub := newUADoorsStub(t, uaDoorStubConfig{
-		doors: map[string]string{"door-uuid-front": "28704e31e29c"},
+		doors: map[string]string{"door-uuid-front": "aabbccddeeff"},
 	}, nil)
 	defer uaStub.Close()
 
