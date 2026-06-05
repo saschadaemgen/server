@@ -1083,6 +1083,131 @@ func (m *Manager) SetPairedIntercomMAC(ctx context.Context, mac, intercomMAC str
 	return nil
 }
 
+// DoorAssignment is one entry in a viewer's 1:n door list
+// (viewer_doors, Saison 19-30). DoorID is a UA-Access door UUID;
+// Label is an optional UI display override; Sort orders the list.
+// This is the successor to the single paired_intercom_mac - which
+// stays as the in-call auto-resolution fallback, not removed.
+type DoorAssignment struct {
+	DoorID string
+	Label  string
+	Sort   int
+}
+
+// ListViewerDoors returns the doors assigned to a viewer, ordered
+// by sort then door_id. Returns an empty slice (nil error) when no
+// doors are assigned.
+func (m *Manager) ListViewerDoors(ctx context.Context, mac string) ([]DoorAssignment, error) {
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT door_id, label, sort
+		   FROM viewer_doors
+		  WHERE viewer_mac = ?
+		  ORDER BY sort, door_id`, mac)
+	if err != nil {
+		return nil, fmt.Errorf("viewermanager: list viewer doors: %w", err)
+	}
+	defer rows.Close()
+	out := make([]DoorAssignment, 0)
+	for rows.Next() {
+		var d DoorAssignment
+		if err := rows.Scan(&d.DoorID, &d.Label, &d.Sort); err != nil {
+			return nil, fmt.Errorf("viewermanager: scan viewer door: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("viewermanager: list viewer doors rows: %w", err)
+	}
+	return out, nil
+}
+
+// ViewerHasDoor reports whether door_id is assigned to the viewer.
+// The mieter-unlock path uses it as the authorisation gate before a
+// direct-UUID UnlockDoor: a viewer may only open doors an admin has
+// assigned. door_id is matched verbatim (UA door UUIDs are stored
+// as-is).
+func (m *Manager) ViewerHasDoor(ctx context.Context, mac, doorID string) (bool, error) {
+	doorID = strings.TrimSpace(doorID)
+	if doorID == "" {
+		return false, nil
+	}
+	var one int
+	err := m.db.QueryRowContext(ctx,
+		`SELECT 1 FROM viewer_doors WHERE viewer_mac = ? AND door_id = ?`,
+		mac, doorID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("viewermanager: viewer has door: %w", err)
+	}
+	return true, nil
+}
+
+// SetViewerDoors replaces a viewer's entire door assignment with
+// the given list in one transaction (delete-all then re-insert). An
+// empty/nil list clears the assignment. DoorIDs are trimmed; empty
+// ones are skipped. A zero Sort falls back to the slice index so a
+// caller can just pass doors in display order without numbering.
+func (m *Manager) SetViewerDoors(ctx context.Context, mac string, doors []DoorAssignment) error {
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("viewermanager: set viewer doors begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM viewer_doors WHERE viewer_mac = ?`, mac); err != nil {
+		return fmt.Errorf("viewermanager: set viewer doors clear: %w", err)
+	}
+	for i, d := range doors {
+		doorID := strings.TrimSpace(d.DoorID)
+		if doorID == "" {
+			continue
+		}
+		order := d.Sort
+		if order == 0 {
+			order = i
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR REPLACE INTO viewer_doors (viewer_mac, door_id, label, sort)
+			 VALUES (?, ?, ?, ?)`,
+			mac, doorID, strings.TrimSpace(d.Label), order); err != nil {
+			return fmt.Errorf("viewermanager: set viewer doors insert: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("viewermanager: set viewer doors commit: %w", err)
+	}
+	return nil
+}
+
+// AddViewerDoor adds (or updates) one door assignment. Idempotent
+// on (viewer_mac, door_id).
+func (m *Manager) AddViewerDoor(ctx context.Context, mac string, d DoorAssignment) error {
+	doorID := strings.TrimSpace(d.DoorID)
+	if doorID == "" {
+		return fmt.Errorf("viewermanager: add viewer door: door_id required")
+	}
+	if _, err := m.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO viewer_doors (viewer_mac, door_id, label, sort)
+		 VALUES (?, ?, ?, ?)`,
+		mac, doorID, strings.TrimSpace(d.Label), d.Sort); err != nil {
+		return fmt.Errorf("viewermanager: add viewer door: %w", err)
+	}
+	return nil
+}
+
+// RemoveViewerDoor deletes one door assignment. No error when the
+// row does not exist.
+func (m *Manager) RemoveViewerDoor(ctx context.Context, mac, doorID string) error {
+	if _, err := m.db.ExecContext(ctx,
+		`DELETE FROM viewer_doors WHERE viewer_mac = ? AND door_id = ?`,
+		mac, strings.TrimSpace(doorID)); err != nil {
+		return fmt.Errorf("viewermanager: remove viewer door: %w", err)
+	}
+	return nil
+}
+
 // SetStreamProfile updates a viewer's go2rtc stream profile name.
 // Empty string clears the override - the viewer falls back to the
 // type-based convention (see ResolveStreamProfile). The value is
