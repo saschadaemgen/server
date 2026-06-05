@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -332,7 +333,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, egressIssuer, inProcStreamPublisher, turnWriter, turnSnapshots)
+	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, egressIssuer, srv, inProcStreamPublisher, turnWriter, turnSnapshots)
 	if scClient != nil {
 		// Wire the cloud link as the ICE source for GET /webviewer/stream-start
 		// (Saison 19). Set before ListenAndServe below, so the serving
@@ -478,7 +479,7 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // It returns the running *sidechannel.Client so the caller can wire it as the
 // httpserver's ICE source (the stream-start bundle), or nil when the link is
 // unconfigured or failed to init - in which case stream-start 503s.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, egressIssuer *egresstoken.Issuer, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, egressIssuer *egresstoken.Issuer, srv *httpserver.Server, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return nil
@@ -543,6 +544,18 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 				return "", "", 0, ierr
 			}
 			return mac, tok, int(egresstoken.TTL.Seconds()), nil
+		},
+		// Saison 19-27: run a relayed control call (http_request) through the
+		// edge's OWN httpserver mux and frame the captured response back. The
+		// edge stays the auth authority (requireViewerAuth runs inside
+		// ServeRelayed); a relay/build failure crosses back as an error (-> the
+		// cloud 503s).
+		OnHTTPRequest: func(rctx context.Context, req sidechannel.RelayRequest) (sidechannel.RelayResponse, error) {
+			status, header, body, serr := srv.ServeRelayed(rctx, req.Method, req.Path, req.RawQuery, req.Header, req.Body)
+			if serr != nil {
+				return sidechannel.RelayResponse{}, serr
+			}
+			return sidechannel.RelayResponse{Status: status, Header: header, Body: body}, nil
 		},
 	})
 	if err != nil {
@@ -625,6 +638,56 @@ func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg confi
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(bundle)
 	})
+
+	// Saison 19-27: generic control relay. The allowlisted /webviewer/* control
+	// calls execute on the EDGE (via the side-channel); the cloud is a dumb
+	// pipe. EXPLICIT allowlist - NEVER a blanket /webviewer/* prefix: SSE
+	// (/events) and MJPEG (/stream.mjpeg) would hang the edge ResponseRecorder
+	// forever, and the HTML UI, /offer, egress-token, logout and stream-start
+	// are excluded too (stream-start runs over B-Strich above).
+	const maxRelayBody = 64 * 1024
+	relay := func(w http.ResponseWriter, r *http.Request) {
+		body, rerr := io.ReadAll(io.LimitReader(r.Body, maxRelayBody))
+		if rerr != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		// Curate the request headers: only Authorization + Content-Type cross.
+		header := map[string]string{}
+		if a := r.Header.Get("Authorization"); a != "" {
+			header["Authorization"] = a
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "" {
+			header["Content-Type"] = ct
+		}
+		resp, rerr := srv.RelayHTTP(r.Context(), sidechannel.RelayRequest{
+			Method:   r.Method,
+			Path:     r.URL.Path, // full path incl. the {door_id} segment
+			RawQuery: r.URL.RawQuery,
+			Header:   header,
+			Body:     body,
+		})
+		if rerr != nil {
+			// Relay mechanism failure (no edge / timeout / edge could not run) -
+			// NOT a viewer-auth failure (the edge returns that as a 401 in
+			// resp.Status). Detail to the log only.
+			log.Warn("signal control relay failed", "method", r.Method, "path", r.URL.Path, "err", rerr)
+			http.Error(w, "control endpoint unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		for k, v := range resp.Header {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(resp.Status)
+		_, _ = w.Write(resp.Body)
+	}
+	mux.HandleFunc("POST /webviewer/answer", relay)
+	mux.HandleFunc("POST /webviewer/reject", relay)
+	mux.HandleFunc("POST /webviewer/end-call", relay)
+	mux.HandleFunc("POST /webviewer/doors/{door_id}/unlock", relay)
+	mux.HandleFunc("POST /webviewer/fcm-token", relay)
+	mux.HandleFunc("DELETE /webviewer/fcm-token", relay)
+
 	hsrv := &http.Server{
 		Addr:              cfg.SignalPublicAddr,
 		Handler:           mux,
