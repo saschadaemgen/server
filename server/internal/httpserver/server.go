@@ -508,7 +508,12 @@ func (s *Server) routes() {
 	// the handlers.
 	s.mux.Handle("POST /a/viewers/{mac}/stammdaten", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerStammdaten)))
 	// Saison 19-30: per-viewer 1:n door assignment (all three types).
+	// Replace-all (kept for API; the UI uses the per-door endpoints).
 	s.mux.Handle("POST /a/viewers/{mac}/doors", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerDoors)))
+	// Saison 19-32: one-step flow - add/remove a single door, persists
+	// immediately (no separate "save" that could wipe on empty).
+	s.mux.Handle("POST /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerAddDoor)))
+	s.mux.Handle("DELETE /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRemoveDoor)))
 	s.mux.Handle("POST /a/viewers/{mac}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerSettings)))
 	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
 	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))

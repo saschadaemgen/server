@@ -674,14 +674,10 @@
          style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">
         Noch keine Tür zugeordnet.
       </p>
-      <div style="display:flex; gap:.5rem; margin-top:.6rem;">
-        <select data-bind="door-add-select" style="flex:1;">
-          <option value="">-- Tür wählen --</option>
+      <div style="margin-top:.6rem;">
+        <select data-bind="door-add-select" style="width:100%;">
+          <option value="">+ Tür hinzufügen …</option>
         </select>
-        <button type="button" class="btn-secondary" data-action="add-door">Hinzufügen</button>
-      </div>
-      <div class="stammdaten-edit-actions" style="margin-top:.6rem;">
-        <button type="button" class="btn-primary" data-action="save-doors">Türen speichern</button>
       </div>
     </section>
 
@@ -928,41 +924,50 @@
           });
         });
 
-      section.addEventListener('click', function (e) {
-        if (e.target.closest('[data-action="add-door"]')) {
-          var id = addSelect.value;
-          if (!id) return;
-          if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); return; }
-          var name = addSelect.options[addSelect.selectedIndex].textContent;
-          list.appendChild(makeRow(id, name));
-          addSelect.value = '';
-          refreshEmpty();
-          return;
-        }
-        var rem = e.target.closest('[data-action="remove-door"]');
-        if (rem) {
-          var li = rem.closest('li[data-door-id]');
-          if (li) li.remove();
-          refreshEmpty();
-          return;
-        }
-        if (e.target.closest('[data-action="save-doors"]')) {
-          var payload = { doors: doorIDs().map(function (id, i) { return { door_id: id, sort: i }; }) };
-          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(payload),
+      // One-step flow (S19-32): selecting a door in the dropdown
+      // persists it at once (POST .../doors/{id}); "Entfernen"
+      // deletes at once (DELETE). No separate "save" step that could
+      // wipe the list on an empty submit, and the toast reflects the
+      // actual server result.
+      function doorURL(id) {
+        return '/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors/' + encodeURIComponent(id);
+      }
+      addSelect.addEventListener('change', function () {
+        var id = addSelect.value;
+        if (!id) return;
+        if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); addSelect.value = ''; return; }
+        var name = addSelect.options[addSelect.selectedIndex].textContent;
+        addSelect.disabled = true;
+        fetch(doorURL(id) + '?label=' + encodeURIComponent(name), {
+          method: 'POST', headers: { 'Accept': 'application/json' },
+        })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+            return r.json();
           })
-            .then(function (r) {
-              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-              return r.json();
-            })
-            .then(function () { toast('Türen gespeichert'); })
-            .catch(function (err) {
-              toast((err && err.message ? String(err.message) : 'Speichern fehlgeschlagen').split('\n')[0], 'error');
-            });
-          return;
-        }
+          .then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tür hinzugefügt'); })
+          .catch(function (err) {
+            toast((err && err.message ? String(err.message) : 'Hinzufügen fehlgeschlagen').split('\n')[0], 'error');
+          })
+          .then(function () { addSelect.value = ''; addSelect.disabled = false; });
+      });
+      list.addEventListener('click', function (e) {
+        var rem = e.target.closest('[data-action="remove-door"]');
+        if (!rem) return;
+        var li = rem.closest('li[data-door-id]');
+        if (!li) return;
+        var id = li.getAttribute('data-door-id');
+        rem.disabled = true;
+        fetch(doorURL(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+            return r.json();
+          })
+          .then(function () { li.remove(); refreshEmpty(); toast('Tür entfernt'); })
+          .catch(function (err) {
+            rem.disabled = false;
+            toast((err && err.message ? String(err.message) : 'Entfernen fehlgeschlagen').split('\n')[0], 'error');
+          });
       });
     })();
   </script>

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // TestAdminDoorsJSON_ListsDoors proves /a/doors.json returns the live
@@ -87,6 +88,86 @@ func TestAdminViewerDoors_SaveRoundTrip(t *testing.T) {
 	got2, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
 	if len(got2) != 1 || got2[0].DoorID != "door-uuid-front" {
 		t.Errorf("after replace = %+v, want [front]", got2)
+	}
+}
+
+// Saison 19-32 one-step flow: POST/DELETE /a/viewers/{mac}/doors/{door_id}
+// persist a single door immediately.
+func TestAdminViewerAddDoor_PersistsImmediately(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+
+	url := env.ts.URL + "/a/viewers/" + testViewerMAC + "/doors/door-uuid-front?label=Haupteingang"
+	req, _ := http.NewRequest(http.MethodPost, url, nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST add door: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if len(got) != 1 || got[0].DoorID != "door-uuid-front" || got[0].Label != "Haupteingang" {
+		t.Fatalf("after add = %+v, want one front/Haupteingang", got)
+	}
+
+	// Idempotent: adding the same door again stays at one.
+	req2, _ := http.NewRequest(http.MethodPost, url, nil)
+	r2, _ := env.client.Do(req2)
+	r2.Body.Close()
+	got2, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if len(got2) != 1 {
+		t.Errorf("after re-add = %d, want 1 (idempotent)", len(got2))
+	}
+}
+
+func TestAdminViewerRemoveDoor_PersistsImmediately(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	if err := env.viewerMgr.AddViewerDoor(context.Background(), testViewerMAC,
+		viewermanager.DoorAssignment{DoorID: "door-uuid-front"}); err != nil {
+		t.Fatalf("AddViewerDoor: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		env.ts.URL+"/a/viewers/"+testViewerMAC+"/doors/door-uuid-front", nil)
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE door: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if len(got) != 0 {
+		t.Errorf("after remove = %d, want 0", len(got))
+	}
+}
+
+// The empty-replace-all guard: a {doors:[]} POST must be rejected and
+// must NOT wipe an existing assignment (the S19-31 bug).
+func TestAdminViewerDoors_EmptyReplaceAllRejected(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env)
+	if err := env.viewerMgr.AddViewerDoor(context.Background(), testViewerMAC,
+		viewermanager.DoorAssignment{DoorID: "door-uuid-front"}); err != nil {
+		t.Fatalf("AddViewerDoor: %v", err)
+	}
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/doors",
+		map[string]any{"doors": []any{}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty replace-all status = %d, want 400 (guard)", resp.StatusCode)
+	}
+	got, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if len(got) != 1 {
+		t.Errorf("assignment after rejected empty save = %d, want 1 (must NOT be wiped)", len(got))
 	}
 }
 

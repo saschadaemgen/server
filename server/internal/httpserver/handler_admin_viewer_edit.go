@@ -195,6 +195,15 @@ func (s *Server) handleAdminViewerDoors(w http.ResponseWriter, r *http.Request) 
 			Sort:   order,
 		})
 	}
+	// Guard (S19-32): the one-step UI uses the per-door Add/Remove
+	// endpoints, so the only way to reach this replace-all with an
+	// empty list is a direct API call. Refuse it - an empty
+	// replace-all silently wiped the assignment (the S19-31 bug).
+	// Clearing is done per door via DELETE.
+	if len(assignments) == 0 {
+		http.Error(w, "leere Tuer-Liste abgelehnt: einzelne Tueren per DELETE entfernen", http.StatusBadRequest)
+		return
+	}
 	if err := s.viewerMgr.SetViewerDoors(r.Context(), mac, assignments); err != nil {
 		s.log.Error("set viewer doors", "err", err, "mac_prefix", safePrefix(mac))
 		http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
@@ -213,6 +222,70 @@ func (s *Server) handleAdminViewerDoors(w http.ResponseWriter, r *http.Request) 
 		"ok":    true,
 		"doors": out,
 	})
+}
+
+// handleAdminViewerAddDoor assigns ONE door to a viewer (idempotent)
+// - the one-step UI's "add" action (dropdown change persists at
+// once). The display name rides as ?label= so the chip shows it
+// without a UA round-trip and survives a later UA outage. Broadcasts
+// config.changed like the replace-all save. (Saison 19-32)
+func (s *Server) handleAdminViewerAddDoor(w http.ResponseWriter, r *http.Request) {
+	mac, ok := parseMACPathValue(w, r)
+	if !ok {
+		return
+	}
+	doorID := strings.TrimSpace(r.PathValue("door_id"))
+	if doorID == "" {
+		http.Error(w, "door_id required", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("add viewer door get viewer", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.viewerMgr.AddViewerDoor(r.Context(), mac, viewermanager.DoorAssignment{
+		DoorID: doorID,
+		Label:  strings.TrimSpace(r.URL.Query().Get("label")),
+	}); err != nil {
+		s.log.Error("add viewer door", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "Hinzufuegen fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// handleAdminViewerRemoveDoor unassigns ONE door (no error if it was
+// not assigned) - the one-step UI's "remove" action. Broadcasts
+// config.changed. (Saison 19-32)
+func (s *Server) handleAdminViewerRemoveDoor(w http.ResponseWriter, r *http.Request) {
+	mac, ok := parseMACPathValue(w, r)
+	if !ok {
+		return
+	}
+	doorID := strings.TrimSpace(r.PathValue("door_id"))
+	if doorID == "" {
+		http.Error(w, "door_id required", http.StatusBadRequest)
+		return
+	}
+	if err := s.viewerMgr.RemoveViewerDoor(r.Context(), mac, doorID); err != nil {
+		s.log.Error("remove viewer door", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "Entfernen fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // adminViewerSettingsRequest is the JSON body for
