@@ -504,6 +504,8 @@ func (s *Server) routes() {
 	// web-only, regen-token is esp-only. Both checks live in
 	// the handlers.
 	s.mux.Handle("POST /a/viewers/{mac}/stammdaten", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerStammdaten)))
+	// Saison 19-30: per-viewer 1:n door assignment (all three types).
+	s.mux.Handle("POST /a/viewers/{mac}/doors", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerDoors)))
 	s.mux.Handle("POST /a/viewers/{mac}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerSettings)))
 	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
 	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))

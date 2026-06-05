@@ -138,6 +138,83 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// adminDoorAssignment is one door in the per-viewer 1:n assignment,
+// in the wire shape both POST /a/viewers/{mac}/doors and the save
+// response use. Saison 19-30.
+type adminDoorAssignment struct {
+	DoorID string `json:"door_id"`
+	Label  string `json:"label,omitempty"`
+	Sort   int    `json:"sort,omitempty"`
+}
+
+// adminViewerDoorsRequest is the JSON body for POST
+// /a/viewers/{mac}/doors: the FULL desired door list (replace-all
+// semantics, mirroring SetViewerDoors).
+type adminViewerDoorsRequest struct {
+	Doors []adminDoorAssignment `json:"doors"`
+}
+
+// handleAdminViewerDoors replaces a viewer's 1:n door assignment
+// (viewer_doors) and broadcasts config.changed so the viewer/app
+// refetches its config. Works identically for all three viewer
+// types. The door UUIDs are NOT validated against the live UA-API
+// here - an admin may assign a door that is briefly unreachable;
+// the unlock path resolves+authorises at open-time.
+func (s *Server) handleAdminViewerDoors(w http.ResponseWriter, r *http.Request) {
+	mac, ok := parseMACPathValue(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("viewer doors get viewer", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	var body adminViewerDoorsRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
+		return
+	}
+	assignments := make([]viewermanager.DoorAssignment, 0, len(body.Doors))
+	for i, d := range body.Doors {
+		doorID := strings.TrimSpace(d.DoorID)
+		if doorID == "" {
+			continue
+		}
+		order := d.Sort
+		if order == 0 {
+			order = i
+		}
+		assignments = append(assignments, viewermanager.DoorAssignment{
+			DoorID: doorID,
+			Label:  strings.TrimSpace(d.Label),
+			Sort:   order,
+		})
+	}
+	if err := s.viewerMgr.SetViewerDoors(r.Context(), mac, assignments); err != nil {
+		s.log.Error("set viewer doors", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
+	fresh, _ := s.viewerMgr.ListViewerDoors(r.Context(), mac)
+	out := make([]adminDoorAssignment, 0, len(fresh))
+	for _, d := range fresh {
+		out = append(out, adminDoorAssignment{DoorID: d.DoorID, Label: d.Label, Sort: d.Sort})
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":    true,
+		"doors": out,
+	})
+}
+
 // adminViewerSettingsRequest is the JSON body for
 // /a/viewers/{mac}/settings. Vocabulary is strictly identical to
 // /esp/settings, plus history_capture. ESP-specific fields are

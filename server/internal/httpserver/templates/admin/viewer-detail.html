@@ -617,7 +617,7 @@
           </dd>
         {{end}}
         <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
-        <dt>Verknuepfte Klingel</dt><dd data-bind="read-paired">{{if .Page.PairedIntercomMAC}}{{.Page.PairedIntercomMAC}}{{else}}-{{end}}</dd>
+        <dt>Türen</dt><dd>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} zugeordnet (siehe Tür-Zuordnung){{else}}keine zugeordnet{{end}}</dd>
         <dt>Stream-Profil</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
         <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
         <dt>Uhr-Anzeige</dt><dd>{{if eq .Page.ClockLayout "horizontal"}}Horizontal{{else}}Vertikal{{end}}</dd>
@@ -631,12 +631,6 @@
         <label>
           Mieter-Name
           <input type="text" name="name" value="{{.Page.Name}}" required maxlength="64">
-        </label>
-        <label>
-          Verknuepfte Klingel
-          <select name="paired_intercom_mac" data-current="{{.Page.PairedIntercomMAC}}">
-            <option value="">-</option>
-          </select>
         </label>
         <label>
           Stream-Profil
@@ -655,6 +649,40 @@
           <button type="submit" class="btn-primary">Speichern</button>
         </div>
       </form>
+    </section>
+
+    <!-- Saison 19-30: 1:n Tür-Zuordnung. Ersetzt die einzelne
+         "Verknüpfte Klingel". Auswahl-Quelle ist /a/doors.json
+         (ListDoors, funktioniert); Speichern -> POST
+         /a/viewers/{mac}/doors. Gilt für alle drei Viewer-Typen. -->
+    <section class="viewer-detail-section" id="doors-section"
+             data-viewer-mac="{{.Page.MAC}}">
+      <h2>Tür-Zuordnung</h2>
+      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
+        Türen, die dieser Viewer öffnen darf - Standby-Knopf und App-Buttons.
+        Mehrere möglich; bei genau einer öffnet „standby" direkt diese Tür.
+      </p>
+      <ul data-bind="assigned-doors" style="list-style:none; padding:0; margin:0;">
+        {{range .Page.AssignedDoors}}
+          <li data-door-id="{{.DoorID}}" style="display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.4rem 0; border-bottom:1px solid rgba(255,255,255,.08);">
+            <span class="door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span>
+            <button type="button" class="btn-secondary" data-action="remove-door" data-door-id="{{.DoorID}}">Entfernen</button>
+          </li>
+        {{end}}
+      </ul>
+      <p data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}
+         style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">
+        Noch keine Tür zugeordnet.
+      </p>
+      <div style="display:flex; gap:.5rem; margin-top:.6rem;">
+        <select data-bind="door-add-select" style="flex:1;">
+          <option value="">-- Tür wählen --</option>
+        </select>
+        <button type="button" class="btn-secondary" data-action="add-door">Hinzufügen</button>
+      </div>
+      <div class="stammdaten-edit-actions" style="margin-top:.6rem;">
+        <button type="button" class="btn-primary" data-action="save-doors">Türen speichern</button>
+      </div>
     </section>
 
     <!-- Settings-Auto-Save-Section.
@@ -832,6 +860,114 @@
   </main>
 
   <script>
+    // Door-assignment section (Saison 19-30). Lives AFTER </main> so
+    // the detail-page markup tests (which read up to the first
+    // <script> inside <main>) still see every section. Self-contained:
+    // depends only on the shared toast slot, not the main IIFE below.
+    (function () {
+      var section = document.getElementById('doors-section');
+      if (!section) return;
+      var viewerMAC = section.getAttribute('data-viewer-mac');
+      var list      = section.querySelector('[data-bind="assigned-doors"]');
+      var noDoors   = section.querySelector('[data-bind="no-doors"]');
+      var addSelect = section.querySelector('[data-bind="door-add-select"]');
+      var toastEl   = document.querySelector('[data-bind="toast"]');
+
+      function toast(msg, kind) {
+        if (!toastEl) return;
+        toastEl.textContent = msg;
+        toastEl.classList.remove('kind-error');
+        if (kind === 'error') toastEl.classList.add('kind-error');
+        toastEl.classList.add('is-visible');
+        setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
+      }
+      function rows() { return list.querySelectorAll('li[data-door-id]'); }
+      function doorIDs() {
+        return Array.prototype.map.call(rows(), function (li) {
+          return li.getAttribute('data-door-id');
+        });
+      }
+      function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
+      function makeRow(doorID, name) {
+        var li = document.createElement('li');
+        li.setAttribute('data-door-id', doorID);
+        li.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.4rem 0; border-bottom:1px solid rgba(255,255,255,.08);';
+        var span = document.createElement('span');
+        span.className = 'door-name';
+        span.textContent = name || doorID;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-secondary';
+        btn.setAttribute('data-action', 'remove-door');
+        btn.setAttribute('data-door-id', doorID);
+        btn.textContent = 'Entfernen';
+        li.appendChild(span);
+        li.appendChild(btn);
+        return li;
+      }
+
+      // Load the live door list: fill the add-dropdown and upgrade
+      // the server-rendered labels (UUID) to real door names.
+      fetch('/a/doors.json', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : { doors: [] }; })
+        .catch(function () { return { doors: [] }; })
+        .then(function (data) {
+          var doors = data.doors || [];
+          var nameByID = {};
+          doors.forEach(function (d) {
+            nameByID[d.door_id] = d.name || d.door_id;
+            var opt = document.createElement('option');
+            opt.value = d.door_id;
+            opt.textContent = d.name || d.door_id;
+            addSelect.appendChild(opt);
+          });
+          Array.prototype.forEach.call(rows(), function (li) {
+            var id = li.getAttribute('data-door-id');
+            var span = li.querySelector('.door-name');
+            if (span && nameByID[id] && span.textContent === id) span.textContent = nameByID[id];
+          });
+        });
+
+      section.addEventListener('click', function (e) {
+        if (e.target.closest('[data-action="add-door"]')) {
+          var id = addSelect.value;
+          if (!id) return;
+          if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); return; }
+          var name = addSelect.options[addSelect.selectedIndex].textContent;
+          list.appendChild(makeRow(id, name));
+          addSelect.value = '';
+          refreshEmpty();
+          return;
+        }
+        var rem = e.target.closest('[data-action="remove-door"]');
+        if (rem) {
+          var li = rem.closest('li[data-door-id]');
+          if (li) li.remove();
+          refreshEmpty();
+          return;
+        }
+        if (e.target.closest('[data-action="save-doors"]')) {
+          var payload = { doors: doorIDs().map(function (id, i) { return { door_id: id, sort: i }; }) };
+          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+            .then(function (r) {
+              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+              return r.json();
+            })
+            .then(function () { toast('Türen gespeichert'); })
+            .catch(function (err) {
+              toast((err && err.message ? String(err.message) : 'Speichern fehlgeschlagen').split('\n')[0], 'error');
+            });
+          return;
+        }
+      });
+    })();
+  </script>
+
+  <script>
     // Admin-Inline-Edit-Runtime.
     //
     // Drei Blocks:
@@ -917,23 +1053,20 @@
       });
 
       // Dropdowns lazy hydraten: erst beim ersten Klick auf
-      // "Bearbeiten" feuern wir drei parallele fetches gegen die
-      // existierenden JSON-Endpoints. data-current auf jedem
-      // <select> ist der serverseitig gerenderte Ist-Wert; wir
-      // markieren die passende Option dann als selected.
+      // "Bearbeiten" feuern wir die fetches gegen die existierenden
+      // JSON-Endpoints. data-current auf jedem <select> ist der
+      // serverseitig gerenderte Ist-Wert; wir markieren die passende
+      // Option dann als selected. Die Tür-Zuordnung lebt seit Saison
+      // 19-30 in einer eigenen Section (nicht mehr hier).
       function hydrateDropdowns() {
         dropdownsHydrated = true;
         Promise.all([
-          fetch('/a/intercoms.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { intercoms: [] }; }).catch(function () { return { intercoms: [] }; }),
           fetch('/a/streams.json',   { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] };  }).catch(function () { return { profiles: [] }; }),
           fetch('/a/users.json',     { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { users: [] };     }).catch(function () { return { users: [] }; }),
         ]).then(function (results) {
-          // intercomJSON hat JSON-Tags (mac, name); streamRow + userRow
-          // serialisieren mit Go-Defaults (PascalCase), daher hier
-          // unterschiedliche Key-Cases.
-          populateSelect(editForm.elements['paired_intercom_mac'], results[0].intercoms || [], 'mac',  'name');
-          populateSelect(editForm.elements['stream_profile'],      results[1].profiles  || [], 'Name', 'Name');
-          populateSelect(editForm.elements['linked_ua_user_id'],   results[2].users     || [], 'ID',   'DisplayName');
+          // streamRow + userRow serialisieren mit Go-Defaults (PascalCase).
+          populateSelect(editForm.elements['stream_profile'],    results[0].profiles || [], 'Name', 'Name');
+          populateSelect(editForm.elements['linked_ua_user_id'], results[1].users    || [], 'ID',   'DisplayName');
         });
       }
       function populateSelect(selectEl, items, valueKey, labelKey) {
@@ -954,10 +1087,9 @@
       editForm.addEventListener('submit', function (e) {
         e.preventDefault();
         var body = {
-          name:                editForm.elements['name'].value,
-          paired_intercom_mac: editForm.elements['paired_intercom_mac'].value,
-          stream_profile:      editForm.elements['stream_profile'].value,
-          linked_ua_user_id:   editForm.elements['linked_ua_user_id'].value,
+          name:              editForm.elements['name'].value,
+          stream_profile:    editForm.elements['stream_profile'].value,
+          linked_ua_user_id: editForm.elements['linked_ua_user_id'].value,
         };
         fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/stammdaten', {
           method: 'POST',

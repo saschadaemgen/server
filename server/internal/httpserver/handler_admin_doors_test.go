@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -48,6 +49,44 @@ func TestAdminDoorsJSON_ListsDoors(t *testing.T) {
 	}
 	if body.Doors[0].Name == "" {
 		t.Error("door name is empty, want the UA-reported name")
+	}
+}
+
+// TestAdminViewerDoors_SaveRoundTrip proves POST /a/viewers/{mac}/doors
+// persists the 1:n assignment (replace-all) for any viewer (S19-30 Teil D).
+func TestAdminViewerDoors_SaveRoundTrip(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	loginMieterForTest(t, env) // seeds testViewerMAC
+
+	body := map[string]any{"doors": []map[string]any{
+		{"door_id": "door-uuid-front", "label": "Haupteingang"},
+		{"door_id": "door-uuid-back"},
+	}}
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/doors", body)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST doors status = %d, want 200", resp.StatusCode)
+	}
+
+	got, err := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("ListViewerDoors: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("persisted doors = %d, want 2", len(got))
+	}
+	if got[0].DoorID != "door-uuid-front" || got[0].Label != "Haupteingang" {
+		t.Errorf("door[0] = %+v, want front/Haupteingang", got[0])
+	}
+
+	// Replace-all: posting a shorter list clears the rest.
+	resp2 := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/doors",
+		map[string]any{"doors": []map[string]any{{"door_id": "door-uuid-front"}}})
+	resp2.Body.Close()
+	got2, _ := env.viewerMgr.ListViewerDoors(context.Background(), testViewerMAC)
+	if len(got2) != 1 || got2[0].DoorID != "door-uuid-front" {
+		t.Errorf("after replace = %+v, want [front]", got2)
 	}
 }
 

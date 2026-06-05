@@ -53,6 +53,10 @@ type adminViewerDetailData struct {
 	ClockLayout       string
 	BackHref          string // "/a/web-viewers" or "/a/esp-viewers"
 	BackLabel         string
+	// AssignedDoors is the viewer's 1:n door assignment (Saison
+	// 19-30). Rendered server-side as door_id/label; the JS upgrades
+	// the labels to live names via /a/doors.json.
+	AssignedDoors []viewermanager.DoorAssignment
 }
 
 func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +106,15 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	default:
 		data.BackHref = "/a/web-viewers"
 		data.BackLabel = "Web-Viewer"
+	}
+	// 1:n door assignment for the "Tuer-Zuordnung" section. Best
+	// effort: an error degrades to an empty list (the section still
+	// renders + lets the admin assign doors). Names are resolved
+	// client-side via /a/doors.json.
+	if assigned, derr := s.viewerMgr.ListViewerDoors(r.Context(), mac); derr == nil {
+		data.AssignedDoors = assigned
+	} else {
+		s.log.Warn("viewer detail list doors", "err", derr, "mac_prefix", safePrefix(mac))
 	}
 	s.renderAdminPage(w, "viewer-detail", data)
 }
