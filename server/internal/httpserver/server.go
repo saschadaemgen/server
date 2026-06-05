@@ -442,6 +442,10 @@ func (s *Server) routes() {
 	// door is auto-resolved at doorbell time via
 	// uaapi.LookupDoorForIntercom.
 	s.mux.Handle("GET /a/intercoms.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminIntercomsJSON)))
+	// Saison 19-30: door list for the per-viewer door-assignment UI
+	// (assign the door, not the bell). Source = ListDoors (works),
+	// supersedes /a/intercoms.json for the assignment dropdowns.
+	s.mux.Handle("GET /a/doors.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminDoorsJSON)))
 
 	// ESP discovery. Public endpoints without an auth header -
 	// the bearer token only arrives after a successful admin
