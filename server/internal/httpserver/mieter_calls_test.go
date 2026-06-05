@@ -226,7 +226,11 @@ func TestMieterUnlock_IntercomNotBoundReturns404(t *testing.T) {
 	}
 }
 
-func TestMieterUnlock_BadPathParamReturns400(t *testing.T) {
+// Saison 19-30: a non-standby, non-MAC param is treated as a direct
+// door UUID and authorised against viewer_doors. An unassigned id
+// (here "garbage") is denied with 403 - no oracle distinguishing
+// "bad format" from "not yours".
+func TestMieterUnlock_UnassignedDoorReturns403(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	loginMieterForTest(t, env)
@@ -239,8 +243,8 @@ func TestMieterUnlock_BadPathParamReturns400(t *testing.T) {
 		t.Fatalf("POST: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (door not assigned)", resp.StatusCode)
 	}
 }
 

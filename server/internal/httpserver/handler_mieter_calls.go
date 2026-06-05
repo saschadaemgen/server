@@ -67,40 +67,11 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	intercomMAC, badReq := resolveIntercomMAC(pathParam, info.PairedIntercomMAC)
-	if badReq != "" {
-		http.Error(w, badReq, http.StatusBadRequest)
-		return
-	}
-	if intercomMAC == "" {
-		// Standby route, but the viewer has no paired intercom.
-		s.log.Warn("standby unlock without paired intercom",
-			"mac_prefix", viewerMAC[:8])
+	doorID, status, errMsg := s.resolveUnlockDoorID(r.Context(), viewerMAC, pathParam, info.PairedIntercomMAC)
+	if errMsg != "" {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":    false,
-			"error": "viewer is not paired with an intercom; admin must set 'Verknuepfte Klingel'",
-		})
-		return
-	}
-
-	doorID, err := s.ua.LookupDoorForIntercom(r.Context(), intercomMAC)
-	if err != nil {
-		s.log.Error("ua-api door lookup failed",
-			"err", err, "intercom", intercomMAC)
-		http.Error(w, "ua-api door lookup failed: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	if doorID == "" {
-		s.log.Warn("intercom not bound to any door (UA-Console misconfiguration)",
-			"intercom", intercomMAC)
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":    false,
-			"error": "intercom is not bound to any door (check UA-Console)",
-		})
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": errMsg})
 		return
 	}
 
@@ -120,7 +91,7 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.history != nil {
 		_, _ = s.history.Insert(r.Context(), doorhistory.Event{
-			ViewerMAC:    viewerMAC,
+			ViewerMAC:  viewerMAC,
 			EventType:  "door_unlocked",
 			OccurredAt: time.Now(),
 		}, nil)
@@ -128,27 +99,82 @@ func (s *Server) handleMieterUnlock(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("mieter unlock",
 		"mac_prefix", viewerMAC[:8],
 		"door_id", doorID,
-		"intercom", intercomMAC,
+		"via", pathParam,
 	)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
-// resolveIntercomMAC normalises the {door_id} path param into
-// a colon-form lowercase intercom MAC. Returns:
-//   - intercomMAC, "" on success
-//   - "", badRequestText if the param is neither "standby" nor
-//     a recognised MAC form
-//   - "", "" for the "standby" branch when the viewer has no
-//     paired intercom yet (caller emits a 404)
-func resolveIntercomMAC(pathParam, paired string) (intercomMAC string, badRequest string) {
+// resolveUnlockDoorID maps the {door_id} path param to the concrete
+// UA door UUID to open and applies the Saison 19-30 authorisation.
+// Returns (doorID, 0, "") on success, or ("", httpStatus, message)
+// to reject. Three branches:
+//
+//   - explicit door UUID: authorise against viewer_doors - a viewer
+//     may only open doors an admin assigned (else 403). This is the
+//     path the /webviewer/doors buttons use.
+//   - "standby": the viewer's 1:n assignment. Exactly one assigned
+//     door opens directly; several -> 409 (the client must send the
+//     concrete UUID); none -> legacy paired-intercom auto-resolution
+//     so single-bell setups keep working.
+//   - intercom MAC (the live SSE device_id): in-call auto-resolution
+//     via extras.door_thumbnail, UNCHANGED.
+func (s *Server) resolveUnlockDoorID(ctx context.Context, viewerMAC, pathParam, pairedIntercom string) (string, int, string) {
 	if pathParam == "standby" {
-		return paired, ""
+		assigned, err := s.viewerMgr.ListViewerDoors(ctx, viewerMAC)
+		if err != nil {
+			s.log.Error("unlock list viewer doors", "err", err, "mac_prefix", safePrefix(viewerMAC))
+			return "", http.StatusInternalServerError, "internal error"
+		}
+		switch {
+		case len(assigned) == 1:
+			return assigned[0].DoorID, 0, ""
+		case len(assigned) > 1:
+			return "", http.StatusConflict, "door_id required (multiple doors assigned)"
+		default:
+			// No assignment yet: fall back to the legacy paired-
+			// intercom auto-resolution (also covers the in-call
+			// standby path on single-bell setups).
+			return s.resolveDoorViaIntercom(ctx, pairedIntercom)
+		}
 	}
 	if macAnyForm.MatchString(pathParam) {
-		return normalizeMACToColonForm(pathParam), ""
+		return s.resolveDoorViaIntercom(ctx, normalizeMACToColonForm(pathParam))
 	}
-	return "", "door_id must be 'standby' or an intercom MAC"
+	// Otherwise: treat the param as a direct UA door UUID. AUTHORISE
+	// it - critical security gate, a viewer may only open doors that
+	// an admin assigned in viewer_doors.
+	ok, err := s.viewerMgr.ViewerHasDoor(ctx, viewerMAC, pathParam)
+	if err != nil {
+		s.log.Error("unlock authz check", "err", err, "mac_prefix", safePrefix(viewerMAC))
+		return "", http.StatusInternalServerError, "internal error"
+	}
+	if !ok {
+		s.log.Warn("unlock denied: door not assigned to viewer",
+			"mac_prefix", safePrefix(viewerMAC), "door_id", pathParam)
+		return "", http.StatusForbidden, "door not assigned to this viewer"
+	}
+	return pathParam, 0, ""
+}
+
+// resolveDoorViaIntercom is the legacy intercom-MAC -> door-UUID
+// auto-resolution (extras.door_thumbnail). Shared by the standby
+// zero-assignment fallback and the in-call MAC branch.
+func (s *Server) resolveDoorViaIntercom(ctx context.Context, intercomMAC string) (string, int, string) {
+	if intercomMAC == "" {
+		return "", http.StatusNotFound,
+			"viewer has no door assigned and no paired intercom; admin must assign a door (Tuer-Zuordnung)"
+	}
+	doorID, err := s.ua.LookupDoorForIntercom(ctx, intercomMAC)
+	if err != nil {
+		s.log.Error("ua-api door lookup failed", "err", err, "intercom", intercomMAC)
+		return "", http.StatusBadGateway, "ua-api door lookup failed: " + err.Error()
+	}
+	if doorID == "" {
+		s.log.Warn("intercom not bound to any door (UA-Console misconfiguration)", "intercom", intercomMAC)
+		return "", http.StatusNotFound, "intercom is not bound to any door (check UA-Console)"
+	}
+	return doorID, 0, ""
 }
 
 // callLifecycleRequest is the shared body shape for /answer,
