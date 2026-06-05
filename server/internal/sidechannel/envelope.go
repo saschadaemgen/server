@@ -77,8 +77,32 @@ type Envelope struct {
 	// Error, when non-empty on a bundle_reply, signals the edge rejected the
 	// request (auth failed / could not mint). It is a fixed, non-revealing
 	// string - the concrete reason stays in the edge log - which the cloud
-	// maps to a bare 401. Only meaningful on bundle_reply. (Saison 19-11)
+	// maps to a bare 401. Reused on http_reply (Saison 19-27): the edge could
+	// not RUN the request at all (mechanism failure -> cloud 503); a normal
+	// HTTP status (incl. 401) rides Status, not Error.
 	Error string `json:"error,omitempty"`
+
+	// --- Generic HTTP control relay (Saison 19-27) ---
+	// http_request (cloud -> edge): the cloud forwards a remote app's raw
+	// control call so the edge runs it through its OWN mux (requireViewerAuth
+	// + the unchanged handler). http_reply (edge -> cloud): the captured HTTP
+	// response. The edge stays the auth authority; the relay is a dumb pipe.
+
+	// Method / Path / RawQuery describe the relayed request (http_request).
+	// Path is the FULL path including any path params (e.g. the {door_id}
+	// segment) so the edge mux matches its pattern.
+	Method   string `json:"method,omitempty"`
+	Path     string `json:"path,omitempty"`
+	RawQuery string `json:"raw_query,omitempty"`
+	// HTTPHeader is the CURATED header set: on http_request only Authorization
+	// + Content-Type; on http_reply only Content-Type. Never Host/Cookie/etc.
+	HTTPHeader map[string]string `json:"http_header,omitempty"`
+	// Body is the request body (http_request) or response body (http_reply);
+	// base64 on the wire (JSON []byte), capped (~64 KB) by the sender - the
+	// side-channel is a control channel, not a data pipe.
+	Body []byte `json:"body,omitempty"`
+	// Status is the captured HTTP status on an http_reply (edge -> cloud).
+	Status int `json:"status,omitempty"`
 
 	// TURNEvent carries one TURN lifecycle/auth event on a turn_event
 	// frame (cloud -> edge), so the edge persists the relay history for
@@ -134,6 +158,16 @@ const (
 	// and carrying MAC + EgressToken + ExpiresInSeconds, or Error when the
 	// edge rejected (auth/mint). (Saison 19-11)
 	TypeBundleReply = "bundle_reply"
+
+	// TypeHTTPRequest (cloud -> edge): the cloud relays a remote app's raw
+	// control call (Method/Path/RawQuery/HTTPHeader/Body) so the edge runs it
+	// through its own mux unchanged. Generalisation of bundle_request, for the
+	// /webviewer/* control family (reject/end-call/answer/unlock/fcm-token).
+	// (Saison 19-27)
+	TypeHTTPRequest = "http_request"
+	// TypeHTTPReply (edge -> cloud): the edge's captured HTTP response
+	// (Status/HTTPHeader/Body), or Error on a mechanism failure. (Saison 19-27)
+	TypeHTTPReply = "http_reply"
 
 	// TypeTURNEvent (cloud -> edge): one TURN lifecycle/auth event for
 	// the edge to persist (carries TURNEvent). The relay lives on the
