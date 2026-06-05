@@ -84,6 +84,7 @@
                 </button>
               </td>
               <td style="text-align:right; white-space:nowrap;">
+                <button class="btn btn-primary btn-sm" type="button" data-action="unlock-door" data-mac="{{.MAC}}" data-name="{{.Name}}" title="Tür öffnen">Tür öffnen</button>
                 <button class="btn btn-secondary btn-sm" type="button"
                         data-action="open-edit"
                         data-mac="{{.MAC}}"
@@ -716,6 +717,27 @@
         });
       }
     })();
+  </script>
+  <script>
+    // Saison 19-32: per-row "Tür öffnen" with a mandatory confirm.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="unlock-door"]');
+      if (!btn) return;
+      var mac = btn.getAttribute('data-mac');
+      var name = btn.getAttribute('data-name') || 'diesem Mieter';
+      if (!window.confirm('Tür von ' + name + ' wirklich öffnen?')) return;
+      btn.disabled = true;
+      fetch('/a/viewers/' + encodeURIComponent(mac) + '/unlock', {
+        method: 'POST', headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok && res.j && res.j.ok) { window.alert('Tür geöffnet.'); }
+          else { window.alert('Öffnen fehlgeschlagen: ' + ((res.j && res.j.error) || 'Fehler')); }
+        })
+        .catch(function () { window.alert('Öffnen fehlgeschlagen (Netzwerk).'); })
+        .then(function () { btn.disabled = false; });
+    });
   </script>
 </body>
 </html>
