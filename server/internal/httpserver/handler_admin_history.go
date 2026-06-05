@@ -92,10 +92,14 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		Language:               info.ResolveLanguage(),
 		ClockLayout:            info.ResolveClockLayout(),
 	}
-	if info.Type == viewermanager.TypeESP {
+	switch info.Type {
+	case viewermanager.TypeESP:
 		data.BackHref = "/a/esp-viewers"
 		data.BackLabel = "ESP-Viewer"
-	} else {
+	case viewermanager.TypeAndroid:
+		data.BackHref = "/a/android-viewers"
+		data.BackLabel = "Android-Viewer"
+	default:
 		data.BackHref = "/a/web-viewers"
 		data.BackLabel = "Web-Viewer"
 	}

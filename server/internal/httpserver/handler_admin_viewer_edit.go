@@ -394,8 +394,8 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if info.Type != viewermanager.TypeESP {
-		http.Error(w, "Token-Regeneration nur fuer ESP-Viewer.", http.StatusBadRequest)
+	if info.Type != viewermanager.TypeESP && info.Type != viewermanager.TypeAndroid {
+		http.Error(w, "Token-Regeneration nur fuer ESP- und Android-Viewer.", http.StatusBadRequest)
 		return
 	}
 	clearText, hash, err := esptoken.Generate()
@@ -412,8 +412,11 @@ func (s *Server) handleAdminViewerRegenerateToken(w http.ResponseWriter, r *http
 	// Also park the token in the pending-handoff slot so a fresh
 	// status poll from a not-yet-updated ESP can pick it up
 	// automatically. Runs in parallel to the classic
-	// /a/esp-viewers/{mac}/regenerate-token path.
-	s.parkTokenForHandoff(r.Context(), mac, clearText)
+	// /a/esp-viewers/{mac}/regenerate-token path. ESP-only: Android
+	// receives its token directly (no esp_pending_devices poll).
+	if info.Type == viewermanager.TypeESP {
+		s.parkTokenForHandoff(r.Context(), mac, clearText)
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(adminViewerTokenResponse{
