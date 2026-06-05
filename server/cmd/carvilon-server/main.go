@@ -681,6 +681,7 @@ func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg confi
 		w.WriteHeader(resp.Status)
 		_, _ = w.Write(resp.Body)
 	}
+	mux.HandleFunc("GET /webviewer/doors", relay) // Saison 19-30: assigned-door list (small JSON)
 	mux.HandleFunc("POST /webviewer/answer", relay)
 	mux.HandleFunc("POST /webviewer/reject", relay)
 	mux.HandleFunc("POST /webviewer/end-call", relay)

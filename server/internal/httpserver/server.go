@@ -307,6 +307,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /login", s.handleViewerLoginPost)
 	s.mux.HandleFunc("POST /webviewer/logout", s.handleViewerLogout)
 	s.mux.Handle("GET /webviewer/events", s.requireViewerAuth(http.HandlerFunc(s.handleMieterEvents)))
+	// Saison 19-30: the viewer's assigned doors (1:n) for the unlock
+	// buttons. Replaces the bare "standby" assumption.
+	s.mux.Handle("GET /webviewer/doors", s.requireViewerAuth(http.HandlerFunc(s.handleMieterDoors)))
 	// Doorbell lifecycle.
 	s.mux.Handle("POST /webviewer/doors/{door_id}/unlock", s.requireViewerAuth(http.HandlerFunc(s.handleMieterUnlock)))
 	s.mux.Handle("POST /webviewer/answer", s.requireViewerAuth(http.HandlerFunc(s.handleMieterAnswer)))
