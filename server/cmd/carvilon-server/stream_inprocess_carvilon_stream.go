@@ -62,6 +62,18 @@ func init() {
 			// registry internally - carvilon cannot import the internal
 			// stats package, so it must not set Stats itself.
 			EnableStats: true,
+			// Saison 19-35: activate the LAN-direct WHEP endpoint when
+			// configured (0 = off -> no bind). The stream server binds a
+			// fixed-UDP-port ICE host candidate on this port so an on-LAN
+			// app can reach the edge directly instead of looping via the VPS.
+			// FLAGGE B: EgressHMACKey is deliberately LEFT UNSET here - the
+			// mieter egress token has sid=MAC but the edge path is the
+			// profile name, so enforcing "sid==path" would 401 the real
+			// token and lock the tenant out. The LAN-WHEP stays open (like
+			// /offer; media is DTLS-SRTP encrypted regardless); enforced
+			// edge-auth is a separate follow-up once the sid-vs-path binding
+			// is designed.
+			LANWHEPICEPort: cfg.StreamLANWHEPICEPort,
 		}
 		// Typed Encryption without importing the internal profile
 		// package: an untyped string constant is assignable to the named
