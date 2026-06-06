@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/flexfec"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
 
@@ -27,6 +28,26 @@ var trackReadyTimeout = 5 * time.Second
 // default is 1024 (~1.5s); this sets it explicitly and generously to rule
 // out the cache-depth hypothesis.
 const egressNackBufferSize = 4096
+
+// FlexFEC-03 forward error correction on the WHEP egress (S4 resilience
+// step 2): recovers losses WITHOUT retransmission, for the far/mobile case
+// where NACK round-trips are too slow. It is purely additive (repair packets
+// on a separate SSRC); the camera video bitrate is untouched (passthrough, no
+// encoder), so there is no quality/resolution reduction. Peers that do not
+// accept flexfec-03 (e.g. whep-probe) simply omit it from the answer and get
+// no FEC - it never breaks them.
+const (
+	// flexFECPayloadType is the dynamic RTP payload type for the flexfec-03
+	// repair stream (102/106 are the H264 codecs in newH264MediaEngine; 120
+	// is free).
+	flexFECPayloadType webrtc.PayloadType = 120
+	// flexFECMediaPackets / flexFECRepairPackets start at a moderate ~20% FEC
+	// overhead (2 repair per 10 media): recovers small bursts within a group.
+	// Tunable by measurement (up if freezes persist, down if FEC itself
+	// congests). pion's default is 5/2 = 40%, too heavy to start with.
+	flexFECMediaPackets  = 10
+	flexFECRepairPackets = 2
+)
 
 // Sentinel errors mapped to HTTP status by the WHEP handler.
 var (
@@ -118,6 +139,19 @@ func AcceptSubscriber(
 	// loss-free (measured), so every packet reaches the egress send-cache and
 	// can be retransmitted on the same SSRC.
 	ir := &interceptor.Registry{}
+	// S4 step 2: FlexFEC-03 FEC. Registered FIRST - pion requires the FEC
+	// interceptor before any RTP-modifying interceptor (so its repair packets
+	// are not altered). The egress sequence numbers are clean and monotone
+	// (the edge publishes via TrackLocalStaticSample, the cloud forwards them
+	// verbatim), which is the well-formed input FlexFEC needs. Coexists with
+	// the NACK responder below; a peer that does not offer flexfec-03 just
+	// gets no FEC.
+	if err := webrtc.ConfigureFlexFEC03(flexFECPayloadType, me, ir,
+		flexfec.NumMediaPackets(flexFECMediaPackets),
+		flexfec.NumFECPackets(flexFECRepairPackets),
+	); err != nil {
+		return "", "", fmt.Errorf("whip: configure flexfec-03: %w", err)
+	}
 	responder, err := nack.NewResponderInterceptor(nack.ResponderSize(egressNackBufferSize))
 	if err != nil {
 		return "", "", fmt.Errorf("whip: nack responder: %w", err)

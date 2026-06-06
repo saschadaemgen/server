@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -212,6 +213,66 @@ func TestWHEP_NoPublisher(t *testing.T) {
 	res := whepSubscribe(t, base, "ghost-stream")
 	if res.status != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", res.status)
+	}
+}
+
+// TestWHEP_FlexFEC_NegotiatedWhenOffered proves the egress advertises
+// flexfec-03 in the answer when a subscriber offers it - i.e. the FEC codec
+// is actually wired and negotiable, not a dead registration. (A subscriber
+// that does NOT offer flexfec-03 is covered by TestWHEP_Happy: the answer
+// still negotiates H264 + nack without it - backwards compatible.)
+func TestWHEP_FlexFEC_NegotiatedWhenOffered(t *testing.T) {
+	base, key := newTestServer(t)
+	const sid = "test-mac"
+	startConnectedPublisher(t, base, sid, key)
+
+	// A subscriber that supports flexfec-03: same H264 codecs as the egress
+	// (so the payload types align) plus flexfec-03 via the same pion helper.
+	subMe, err := newH264MediaEngine()
+	if err != nil {
+		t.Fatalf("subscriber media engine: %v", err)
+	}
+	subIr := &interceptor.Registry{}
+	if err := webrtc.ConfigureFlexFEC03(flexFECPayloadType, subMe, subIr); err != nil {
+		t.Fatalf("subscriber configure flexfec: %v", err)
+	}
+	subAPI := webrtc.NewAPI(webrtc.WithMediaEngine(subMe), webrtc.WithInterceptorRegistry(subIr))
+	pc, err := subAPI.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("subscriber pc: %v", err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo,
+		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		t.Fatalf("subscriber transceiver: %v", err)
+	}
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("subscriber offer: %v", err)
+	}
+	gather := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		t.Fatalf("subscriber set local: %v", err)
+	}
+	<-gather
+	if !strings.Contains(pc.LocalDescription().SDP, "flexfec-03") {
+		t.Fatal("subscriber offer does not carry flexfec-03 (test setup wrong)")
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, base+"/whep/"+sid, strings.NewReader(pc.LocalDescription().SDP))
+	req.Header.Set("Content-Type", "application/sdp")
+	req.Header.Set("Authorization", "Bearer "+validToken(t, sid, testEgressKey))
+	resp, err := insecureClient().Do(req)
+	if err != nil {
+		t.Fatalf("subscriber POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "flexfec-03") {
+		t.Errorf("egress answer does not advertise flexfec-03: %q", string(body))
 	}
 }
 
