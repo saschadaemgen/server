@@ -20,7 +20,7 @@ func TestEdgeWHEPURL(t *testing.T) {
 	}
 
 	t.Run("active carries the profile, not the mac", func(t *testing.T) {
-		got, ok := edgeWHEPURL(active, "intercom_android")
+		got, ok := EdgeWHEPURL(active, "intercom_android")
 		if !ok {
 			t.Fatal("ok=false, want true (LAN-WHEP active + IP known)")
 		}
@@ -36,7 +36,7 @@ func TestEdgeWHEPURL(t *testing.T) {
 	t.Run("port unset disables", func(t *testing.T) {
 		c := active
 		c.StreamLANWHEPICEPort = 0
-		if got, ok := edgeWHEPURL(c, "intercom_android"); ok || got != "" {
+		if got, ok := EdgeWHEPURL(c, "intercom_android"); ok || got != "" {
 			t.Errorf("port=0 -> (%q,%v), want (\"\",false)", got, ok)
 		}
 	})
@@ -44,13 +44,13 @@ func TestEdgeWHEPURL(t *testing.T) {
 	t.Run("unknown edge ip disables", func(t *testing.T) {
 		c := active
 		c.ServerIPv4 = ""
-		if got, ok := edgeWHEPURL(c, "intercom_android"); ok || got != "" {
+		if got, ok := EdgeWHEPURL(c, "intercom_android"); ok || got != "" {
 			t.Errorf("no ip -> (%q,%v), want (\"\",false)", got, ok)
 		}
 	})
 
 	t.Run("empty profile disables", func(t *testing.T) {
-		if got, ok := edgeWHEPURL(active, ""); ok || got != "" {
+		if got, ok := EdgeWHEPURL(active, ""); ok || got != "" {
 			t.Errorf("empty profile -> (%q,%v), want (\"\",false)", got, ok)
 		}
 	})
@@ -58,7 +58,7 @@ func TestEdgeWHEPURL(t *testing.T) {
 	t.Run("unparseable stream addr disables", func(t *testing.T) {
 		c := active
 		c.StreamAddr = ""
-		if got, ok := edgeWHEPURL(c, "intercom_android"); ok || got != "" {
+		if got, ok := EdgeWHEPURL(c, "intercom_android"); ok || got != "" {
 			t.Errorf("empty StreamAddr -> (%q,%v), want (\"\",false)", got, ok)
 		}
 	})

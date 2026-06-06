@@ -96,10 +96,10 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 	// edge LAN-WHEP is active and the edge LAN IP is known. Best-effort and
 	// ADDITIVE: a viewer-info miss or inactive LAN-WHEP just omits the field,
 	// and the app falls back to the cloud whep_url. The edge keys /whep by
-	// PROFILE name (not the MAC) - see edgeWHEPURL.
+	// PROFILE name (not the MAC) - see EdgeWHEPURL.
 	edgeURL := ""
 	if info, ierr := s.viewerMgr.GetViewerInfo(r.Context(), mac); ierr == nil {
-		edgeURL, _ = edgeWHEPURL(s.cfg, info.ResolveStreamProfile())
+		edgeURL, _ = EdgeWHEPURL(s.cfg, info.ResolveStreamProfile())
 	}
 
 	// Never log the token; only the viewer + counts.
@@ -117,7 +117,7 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// edgeWHEPURL builds the LAN-direct WHEP URL for a viewer's stream profile,
+// EdgeWHEPURL builds the LAN-direct WHEP URL for a viewer's stream profile,
 // or ("", false) when the LAN-WHEP is not active (StreamLANWHEPICEPort == 0)
 // or the edge LAN IP is unknown (ServerIPv4 == "") or the profile is empty.
 //
@@ -126,7 +126,7 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 // /whep by MAC. The HTTP port comes from StreamAddr (the existing edge stream
 // mux, e.g. :8555) - NOT the ICE/UDP port; StreamLANWHEPICEPort only gates
 // activation here. (Saison 19-35)
-func edgeWHEPURL(cfg config.Config, profile string) (string, bool) {
+func EdgeWHEPURL(cfg config.Config, profile string) (string, bool) {
 	if cfg.StreamLANWHEPICEPort == 0 || cfg.ServerIPv4 == "" || profile == "" {
 		return "", false
 	}

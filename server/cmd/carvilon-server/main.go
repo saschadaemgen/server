@@ -531,19 +531,28 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		// relay). resolveViewer maps the Bearer to a viewer MAC; the egress
 		// issuer mints the sid-bound token. These are the two edge-only parts;
 		// the cloud assembles the rest. nil egress issuer -> reject (cloud 401).
-		OnBundleRequest: func(credential string) (string, string, int, error) {
+		OnBundleRequest: func(credential string) (string, string, int, string, error) {
 			mac, rerr := resolveViewer(ctx, viewerMgr, credential)
 			if rerr != nil {
-				return "", "", 0, rerr
+				return "", "", 0, "", rerr
 			}
 			if egressIssuer == nil {
-				return "", "", 0, errors.New("egress issuer not configured")
+				return "", "", 0, "", errors.New("egress issuer not configured")
 			}
 			tok, ierr := egressIssuer.Issue(mac)
 			if ierr != nil {
-				return "", "", 0, ierr
+				return "", "", 0, "", ierr
 			}
-			return mac, tok, int(egresstoken.TTL.Seconds()), nil
+			// Saison 19-41 (Fall B): also supply the LAN-direct WHEP URL so the
+			// cloud can put it in the bundle. Built edge-side via the S19-35
+			// helper (profile-keyed, Flagge A); empty when LAN-WHEP is off ->
+			// omitted from the bundle, app uses the cloud path. Best-effort: a
+			// viewer-info miss just yields no edge URL (the bundle still works).
+			edgeURL := ""
+			if info, gerr := viewerMgr.GetViewerInfo(ctx, mac); gerr == nil {
+				edgeURL, _ = httpserver.EdgeWHEPURL(cfg, info.ResolveStreamProfile())
+			}
+			return mac, tok, int(egresstoken.TTL.Seconds()), edgeURL, nil
 		},
 		// Saison 19-27: run a relayed control call (http_request) through the
 		// edge's OWN httpserver mux and frame the captured response back. The
@@ -614,7 +623,7 @@ func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg confi
 
 		// Relay to the edge: it resolves the viewer + mints the egress token.
 		// Auth-fail -> 401; no edge / timeout / link down -> 503.
-		mac, egressToken, expiresIn, err := srv.RequestBundle(r.Context(), bearer)
+		mac, egressToken, expiresIn, edgeWHEPURL, err := srv.RequestBundle(r.Context(), bearer)
 		if err != nil {
 			if errors.Is(err, sidechannel.ErrBundleAuth) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -625,7 +634,7 @@ func startSignalControlListener(ctx context.Context, log *slog.Logger, cfg confi
 		}
 
 		// Assemble cloud-side (the single cloud assembler): ICE + WHEP URL.
-		bundle := srv.AssembleBundle(mac, egressToken, expiresIn)
+		bundle := srv.AssembleBundle(mac, egressToken, expiresIn, edgeWHEPURL)
 		if bundle.WHEPURL == "" {
 			// Signal endpoint up but no public WHEP base configured -> the
 			// bundle has no subscribe target. Decline rather than hand out a

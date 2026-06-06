@@ -103,7 +103,7 @@ type ClientOptions struct {
 	// error is logged here and only a bare "unauthorized" crosses back to the
 	// cloud (no oracle). A nil callback ignores the frame (the cloud times out
 	// -> 503).
-	OnBundleRequest func(credential string) (mac, egressToken string, expiresIn int, err error)
+	OnBundleRequest func(credential string) (mac, egressToken string, expiresIn int, edgeWHEPURL string, err error)
 
 	// OnHTTPRequest, when set, answers a cloud http_request (Saison 19-27, the
 	// generic control relay): it runs the relayed request through the edge's
@@ -347,7 +347,7 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 					cred := env.Credential
 					id := env.RequestID
 					go func() {
-						mac, tok, ttl, err := c.opts.OnBundleRequest(cred)
+						mac, tok, ttl, edgeURL, err := c.opts.OnBundleRequest(cred)
 						reply := Envelope{Type: TypeBundleReply, RequestID: id}
 						if err != nil {
 							// Concrete reason logged on the edge ONLY; a fixed,
@@ -358,6 +358,7 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 							reply.MAC = mac
 							reply.EgressToken = tok
 							reply.ExpiresInSeconds = ttl
+							reply.EdgeWHEPURL = edgeURL // Saison 19-41: LAN-direct URL (may be empty)
 						}
 						c.Send(reply)
 					}()

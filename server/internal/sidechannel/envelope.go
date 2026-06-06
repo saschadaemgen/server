@@ -74,6 +74,12 @@ type Envelope struct {
 	// empty when Error is set. Only meaningful on bundle_reply. (Saison 19-11)
 	MAC         string `json:"mac,omitempty"`
 	EgressToken string `json:"egress_token,omitempty"`
+	// EdgeWHEPURL rides the bundle_reply (edge -> cloud, Saison 19-41): the
+	// edge's LAN-direct WHEP URL for the resolved viewer (built edge-side via
+	// the S19-35 helper, profile-keyed per Flagge A). Empty when LAN-WHEP is
+	// off; the cloud passes it into the bundle so an on-LAN app can use the
+	// direct path. Only meaningful on bundle_reply.
+	EdgeWHEPURL string `json:"edge_whep_url,omitempty"`
 	// Error, when non-empty on a bundle_reply, signals the edge rejected the
 	// request (auth failed / could not mint). It is a fixed, non-revealing
 	// string - the concrete reason stays in the edge log - which the cloud

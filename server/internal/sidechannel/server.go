@@ -356,6 +356,7 @@ type bundleReply struct {
 	mac         string
 	egressToken string
 	expiresIn   int
+	edgeWHEPURL string // Saison 19-41: LAN-direct WHEP URL from the edge (may be empty)
 	errMsg      string
 }
 
@@ -367,7 +368,7 @@ type bundleReply struct {
 // parts. ErrBundleAuth -> the edge rejected (caller maps to 401); ErrNoEdge /
 // ctx.Err() -> no edge answered (caller maps to 503). The RPC is fast (no
 // publisher wait); the cold-start happens later, on the WHEP POST.
-func (s *Server) RequestBundle(ctx context.Context, credential string) (mac, egressToken string, expiresIn int, err error) {
+func (s *Server) RequestBundle(ctx context.Context, credential string) (mac, egressToken string, expiresIn int, edgeWHEPURL string, err error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, bundleRequestTimeout)
@@ -375,7 +376,7 @@ func (s *Server) RequestBundle(ctx context.Context, credential string) (mac, egr
 	}
 	id, gerr := newRequestID()
 	if gerr != nil {
-		return "", "", 0, fmt.Errorf("sidechannel: request id: %w", gerr)
+		return "", "", 0, "", fmt.Errorf("sidechannel: request id: %w", gerr)
 	}
 
 	// Pick one edge conn (one edge today; routing a viewer to a specific edge
@@ -397,21 +398,21 @@ func (s *Server) RequestBundle(ctx context.Context, credential string) (mac, egr
 	}()
 
 	if target == nil {
-		return "", "", 0, ErrNoEdge
+		return "", "", 0, "", ErrNoEdge
 	}
 	if werr := target.write(ctx, Envelope{Type: TypeBundleRequest, RequestID: id, Credential: credential}); werr != nil {
 		s.log.Warn("sidechannel bundle_request write failed", "peer", target.peer, "request_id", id, "err", werr)
-		return "", "", 0, ErrNoEdge
+		return "", "", 0, "", ErrNoEdge
 	}
 
 	select {
 	case reply := <-ch:
 		if reply.errMsg != "" {
-			return "", "", 0, ErrBundleAuth
+			return "", "", 0, "", ErrBundleAuth
 		}
-		return reply.mac, reply.egressToken, reply.expiresIn, nil
+		return reply.mac, reply.egressToken, reply.expiresIn, reply.edgeWHEPURL, nil
 	case <-ctx.Done():
-		return "", "", 0, ctx.Err()
+		return "", "", 0, "", ctx.Err()
 	}
 }
 
@@ -428,7 +429,7 @@ func (s *Server) deliverBundleReply(env Envelope) {
 		return
 	}
 	select {
-	case ch <- bundleReply{mac: env.MAC, egressToken: env.EgressToken, expiresIn: env.ExpiresInSeconds, errMsg: env.Error}:
+	case ch <- bundleReply{mac: env.MAC, egressToken: env.EgressToken, expiresIn: env.ExpiresInSeconds, edgeWHEPURL: env.EdgeWHEPURL, errMsg: env.Error}:
 	default:
 		s.log.Warn("sidechannel duplicate bundle_reply, dropping", "request_id", env.RequestID)
 	}
@@ -441,7 +442,7 @@ func (s *Server) deliverBundleReply(env Envelope) {
 // empty when no minter is set; WHEPURL is empty when no public WHEP base is
 // set - the caller then declines (a bundle without a WHEP URL is not
 // actionable for the subscriber).
-func (s *Server) AssembleBundle(mac, egressToken string, expiresIn int) streampublish.StreamStartBundle {
+func (s *Server) AssembleBundle(mac, egressToken string, expiresIn int, edgeWHEPURL string) streampublish.StreamStartBundle {
 	s.mu.Lock()
 	minter := s.iceMinter
 	base := s.whepBaseURL
@@ -461,6 +462,7 @@ func (s *Server) AssembleBundle(mac, egressToken string, expiresIn int) streampu
 		StreamID:    mac,
 		ICEServers:  ice,
 		ExpiresIn:   expiresIn,
+		EdgeWHEPURL: edgeWHEPURL, // Saison 19-41: edge-supplied LAN-direct URL (omitempty)
 	}
 }
 
