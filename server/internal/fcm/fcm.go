@@ -191,3 +191,55 @@ func (s *Sender) SendCancel(ctx context.Context, token string, push DoorbellPush
 	}
 	return nil
 }
+
+// SendConfigChanged posts a data-only config.changed wake-up to one device
+// token (Saison 19-34). It is the Android Doze transport for the existing
+// signal+refetch model: SSE/eventbus is the foreground channel; this FCM push
+// wakes a backgrounded app so it refetches /webviewer/settings. The payload is
+// SIGNAL-ONLY - type + viewer_mac, NO setting values - mirroring the empty SSE
+// config.changed frame so the app cannot drift on stale fields. data-only (no
+// notification block) so onMessageReceived fires without a system-tray banner;
+// android.priority high so it arrives in Doze. The HTTP machinery is inline
+// (not factored out of Send) so the proven ring/cancel paths stay byte-for-byte
+// unchanged. Same best-effort contract: the caller logs and swallows.
+func (s *Sender) SendConfigChanged(ctx context.Context, token, viewerMAC string) error {
+	msg := map[string]any{
+		"message": map[string]any{
+			"token": token,
+			"data": map[string]string{
+				"type":       "config.changed",
+				"viewer_mac": viewerMAC,
+			},
+			"android": map[string]any{
+				"priority": "high",
+			},
+		},
+	}
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("fcm: marshal config.changed message: %w", err)
+	}
+
+	tok, err := s.ts.Token()
+	if err != nil {
+		return fmt.Errorf("fcm: mint access token: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.sendURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("fcm: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("fcm: send: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("fcm: send returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}

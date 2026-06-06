@@ -101,6 +101,54 @@ func TestSend_Non2xxIsError(t *testing.T) {
 	}
 }
 
+func TestSendConfigChanged_BuildsDataOnlyMessage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"projects/p/messages/3"}`))
+	}))
+	defer srv.Close()
+
+	if err := senderTo(srv.URL).SendConfigChanged(context.Background(), "device-token-xyz", "0c:ea:14:00:00:09"); err != nil {
+		t.Fatalf("SendConfigChanged: %v", err)
+	}
+
+	message, ok := gotBody["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no message object: %v", gotBody)
+	}
+	if message["token"] != "device-token-xyz" {
+		t.Errorf("message.token = %v, want device-token-xyz", message["token"])
+	}
+	android, _ := message["android"].(map[string]any)
+	if android["priority"] != "high" {
+		t.Errorf("android.priority = %v, want high", android["priority"])
+	}
+	data, ok := message["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("message has no data object: %v", message)
+	}
+	want := map[string]string{
+		"type":       "config.changed",
+		"viewer_mac": "0c:ea:14:00:00:09",
+	}
+	for k, v := range want {
+		if data[k] != v {
+			t.Errorf("data[%q] = %v, want %q", k, data[k], v)
+		}
+	}
+	// Signal-only: no setting values, and none of the doorbell fields.
+	if len(data) != len(want) {
+		t.Errorf("data has %d keys (%v), want exactly %d (signal-only)", len(data), data, len(want))
+	}
+	// data-only: no notification block (so onMessageReceived fires in Doze).
+	if _, present := message["notification"]; present {
+		t.Error("message.notification present; want data-only message")
+	}
+}
+
 func TestNewSender_EmptyPathDisabled(t *testing.T) {
 	s, err := NewSender(context.Background(), "", "project-id")
 	if err != nil {
