@@ -192,6 +192,13 @@ func TestWHEP_Happy(t *testing.T) {
 	if !strings.Contains(res.answerSDP, "v=0") {
 		t.Errorf("answer is not SDP: %q", res.answerSDP)
 	}
+	// The egress answer must still advertise nack rtcp-fb (loss recovery):
+	// the explicit NACK responder relies on the codec feedback (media.go),
+	// not webrtc.ConfigureNack, so this guards that the SDP feedback survived
+	// the S4-step-1 swap.
+	if !strings.Contains(res.answerSDP, "nack") {
+		t.Errorf("answer SDP does not advertise nack rtcp-fb: %q", res.answerSDP)
+	}
 	// Real proof: RTP reaches the subscriber.
 	select {
 	case <-res.rtpArrived:

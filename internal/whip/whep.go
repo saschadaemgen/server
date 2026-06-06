@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/webrtc/v4"
 
 	"carvilon.local/stream/internal/icedebug"
@@ -18,6 +19,14 @@ import (
 // publisher's first RTP track to arrive before giving up with
 // [ErrTrackNotReady]. A package var (not const) so tests can shrink it.
 var trackReadyTimeout = 5 * time.Second
+
+// egressNackBufferSize is the NACK responder send-buffer in packets on the
+// WHEP egress (S4 resilience step 1). 4096 (a power of two, required by the
+// responder's ring buffer) is ~6.3s at the measured ~648 pkts/s - more than
+// one full GOP (~5s) - so a late retransmit is never a cache miss. pion's
+// default is 1024 (~1.5s); this sets it explicitly and generously to rule
+// out the cache-depth hypothesis.
+const egressNackBufferSize = 4096
 
 // Sentinel errors mapped to HTTP status by the WHEP handler.
 var (
@@ -93,19 +102,27 @@ func AcceptSubscriber(
 	if err != nil {
 		return "", "", fmt.Errorf("whip: media engine: %w", err)
 	}
-	// S4 loss recovery: register the NACK responder (+ generator) on the
-	// EGRESS PeerConnection. Without an interceptor registry pion registers
-	// NONE, so the NACKs the subscriber sends (seen climbing in the phone's
-	// getStats) were ignored -> progressive freezing on a lossy radio leg.
-	// The H264 codec already advertises nack + nack pli (newH264MediaEngine);
-	// ConfigureNack is idempotent on that feedback and adds the responder that
-	// retransmits cached packets on the same SSRC. Edge->cloud is loss-free
-	// (measured), so every packet reaches the egress send-cache and can be
-	// retransmitted to the client.
+	// S4 loss recovery: register the NACK responder on the EGRESS
+	// PeerConnection so the subscriber's NACKs are answered with retransmits.
+	// Without an interceptor registry pion registers NONE, so the NACKs the
+	// phone sends (seen climbing in getStats) were ignored -> progressive
+	// freezing on a lossy radio leg.
+	//
+	// S4 step 1: construct the responder EXPLICITLY with a generous send
+	// buffer (egressNackBufferSize) instead of webrtc.ConfigureNack's default
+	// (1024 ~= 1.5s), to rule out definitively that a retransmit arrives too
+	// late / has fallen out of the cache. The generator is omitted: the egress
+	// is sendonly, so it has no inbound media to NACK. The nack + nack pli
+	// rtcp-fb stays on the H264 codec (newH264MediaEngine), so the answer
+	// still advertises it (asserted in TestWHEP_Happy). Edge->cloud is
+	// loss-free (measured), so every packet reaches the egress send-cache and
+	// can be retransmitted on the same SSRC.
 	ir := &interceptor.Registry{}
-	if err := webrtc.ConfigureNack(me, ir); err != nil {
-		return "", "", fmt.Errorf("whip: configure nack: %w", err)
+	responder, err := nack.NewResponderInterceptor(nack.ResponderSize(egressNackBufferSize))
+	if err != nil {
+		return "", "", fmt.Errorf("whip: nack responder: %w", err)
 	}
+	ir.Add(responder)
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(me), webrtc.WithInterceptorRegistry(ir))
 
 	// S3 TURN: iceServers is the relay list the server minted (TURN URLs +
