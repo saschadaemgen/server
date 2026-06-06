@@ -288,6 +288,64 @@ func (s *Server) handleAdminViewerRemoveDoor(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
+// adminViewerVisibilityRequest is the JSON body for POST
+// /a/viewers/{mac}/visibility: one setting's tenant visibility.
+type adminViewerVisibilityRequest struct {
+	SettingKey string `json:"setting_key"`
+	Visible    bool   `json:"visible"`
+}
+
+// tenantVisibleSettingKeys are the settings the admin can hide from the
+// tenant ("dem Mieter anzeigen"). The DB column is free-text, but the
+// admin UI + the detail-page default-map cover exactly these. (S19-39)
+var tenantVisibleSettingKeys = []string{
+	"idle_view_mode",
+	"auto_screensaver_seconds",
+	"clock_layout",
+	"language",
+	"history_capture_enabled",
+}
+
+// handleAdminViewerVisibility upserts one per-setting tenant-visibility
+// flag (Saison 19-39) and broadcasts config.changed so the app refetches
+// and shows/hides the control. Works for all viewer types. The stored
+// VALUE is unaffected - this only gates whether the tenant sees/changes
+// the control. setting_key is free-text (premium-extensible).
+func (s *Server) handleAdminViewerVisibility(w http.ResponseWriter, r *http.Request) {
+	mac, ok := parseMACPathValue(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.viewerMgr.GetViewerInfo(r.Context(), mac); err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("viewer visibility get viewer", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	var body adminViewerVisibilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(body.SettingKey) == "" {
+		http.Error(w, "setting_key required", http.StatusBadRequest)
+		return
+	}
+	if err := s.viewerMgr.SetViewerSettingVisibility(r.Context(), mac, body.SettingKey, body.Visible); err != nil {
+		s.log.Error("set viewer setting visibility", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	if s.hub != nil {
+		s.hub.BroadcastConfigChanged(r.Context(), mac)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
 // adminViewerSettingsRequest is the JSON body for
 // /a/viewers/{mac}/settings. Vocabulary is strictly identical to
 // /esp/settings, plus history_capture. ESP-specific fields are

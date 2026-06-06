@@ -517,6 +517,8 @@ func (s *Server) routes() {
 	// immediately (no separate "save" that could wipe on empty).
 	s.mux.Handle("POST /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerAddDoor)))
 	s.mux.Handle("DELETE /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRemoveDoor)))
+	// Saison 19-39: per-setting tenant visibility ("dem Mieter anzeigen").
+	s.mux.Handle("POST /a/viewers/{mac}/visibility", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerVisibility)))
 	// Saison 19-32: admin-side door open from the viewer lists (per-row
 	// "Tuer oeffnen"). Standby semantics; admin-trusted, no door authz.
 	s.mux.Handle("POST /a/viewers/{mac}/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerUnlock)))

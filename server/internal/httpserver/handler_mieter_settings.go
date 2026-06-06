@@ -83,6 +83,13 @@ type mieterSettingsJSON struct {
 	// edge-vs-cloud endpoint; v1 is admin-set.
 	PathMode string `json:"path_mode"`
 	UnitName string `json:"unit_name"`
+	// Visibility maps setting_key -> whether the tenant may see/change the
+	// control (Saison 19-39). EXPLICIT rows only; a missing key = visible
+	// (default). omitempty -> the key is absent when there are no
+	// overrides, so the flat S19-37 contract stays byte-identical for
+	// unconfigured viewers. The flat values above are NEVER omitted - the
+	// app still applies a value even when its control is hidden.
+	Visibility map[string]bool `json:"visibility,omitempty"`
 }
 
 // handleMieterSettingsJSON returns the authenticated viewer's settings
@@ -107,6 +114,12 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// Per-setting visibility (Saison 19-39). Non-fatal: on error fall
+	// through with no map -> everything visible (default).
+	vis, verr := s.viewerMgr.ListViewerSettingVisibility(r.Context(), mac)
+	if verr != nil {
+		s.log.Warn("mieter settings json visibility", "err", verr, "mac_prefix", safePrefix(mac))
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(mieterSettingsJSON{
 		IdleViewMode:           info.ResolveIdleViewMode(),
@@ -116,6 +129,7 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
 		PathMode:               info.ResolvePathMode(),
 		UnitName:               info.Name,
+		Visibility:             vis,
 	})
 }
 

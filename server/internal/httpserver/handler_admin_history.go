@@ -52,6 +52,10 @@ type adminViewerDetailData struct {
 	Language          string
 	ClockLayout       string
 	PathMode          string // WEG-Schalter (Saison 19-39): auto|local|cloud
+	// SettingVisibility is a COMPLETE map (every tenantVisibleSettingKeys
+	// entry -> effective visible, default true) for the "dem Mieter
+	// anzeigen" toggles. (Saison 19-39)
+	SettingVisibility map[string]bool
 	BackHref          string // "/a/web-viewers" or "/a/esp-viewers"
 	BackLabel         string
 	// AssignedDoors is the viewer's 1:n door assignment (Saison
@@ -117,6 +121,20 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		data.AssignedDoors = assigned
 	} else {
 		s.log.Warn("viewer detail list doors", "err", derr, "mac_prefix", safePrefix(mac))
+	}
+	// Saison 19-39: per-setting tenant visibility for the toggles. A
+	// COMPLETE map (every toggleable key) so the template can index each
+	// one; default true (= visible), explicit rows overlaid.
+	data.SettingVisibility = make(map[string]bool, len(tenantVisibleSettingKeys))
+	for _, k := range tenantVisibleSettingKeys {
+		data.SettingVisibility[k] = true
+	}
+	if explicit, verr := s.viewerMgr.ListViewerSettingVisibility(r.Context(), mac); verr == nil {
+		for k, v := range explicit {
+			data.SettingVisibility[k] = v
+		}
+	} else {
+		s.log.Warn("viewer detail setting visibility", "err", verr, "mac_prefix", safePrefix(mac))
 	}
 	s.renderAdminPage(w, "viewer-detail", data)
 }

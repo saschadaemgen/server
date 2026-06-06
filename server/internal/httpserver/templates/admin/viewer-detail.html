@@ -812,6 +812,23 @@
       {{end}}
     </section>
 
+    <!-- Saison 19-39: per-Setting Sichtbarkeit für den Mieter. Aus = nur
+         Admin (die App blendet das Control aus; der gespeicherte Wert gilt
+         weiter). Speichern -> POST /a/viewers/{mac}/visibility + config.changed. -->
+    <section class="viewer-detail-section" id="visibility-section" data-viewer-mac="{{.Page.MAC}}">
+      <h2>Sichtbarkeit für den Mieter</h2>
+      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
+        Welche Einstellungen der Mieter in seiner App sieht und ändern darf. Aus = nur Admin.
+      </p>
+      <fieldset class="settings-field">
+        <label><input type="checkbox" data-vis-key="idle_view_mode"           {{if index .Page.SettingVisibility "idle_view_mode"}}checked{{end}}> Idle-Ansicht</label>
+        <label><input type="checkbox" data-vis-key="auto_screensaver_seconds" {{if index .Page.SettingVisibility "auto_screensaver_seconds"}}checked{{end}}> Auto-Bildschirmschoner</label>
+        <label><input type="checkbox" data-vis-key="clock_layout"             {{if index .Page.SettingVisibility "clock_layout"}}checked{{end}}> Uhr-Anzeige</label>
+        <label><input type="checkbox" data-vis-key="language"                 {{if index .Page.SettingVisibility "language"}}checked{{end}}> Sprache</label>
+        <label><input type="checkbox" data-vis-key="history_capture_enabled"  {{if index .Page.SettingVisibility "history_capture_enabled"}}checked{{end}}> Verlauf-Erfassung</label>
+      </fieldset>
+    </section>
+
     <section class="viewer-detail-section viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
       <h2>
         Verlauf
@@ -907,6 +924,48 @@
       </div>
     {{end}}
   </main>
+
+  <script>
+    // Visibility toggles (Saison 19-39). Lives AFTER </main> like the
+    // door-assignment script so the markup tests still see every section.
+    // Each checkbox change persists at once via POST .../visibility.
+    (function () {
+      var section = document.getElementById('visibility-section');
+      if (!section) return;
+      var viewerMAC = section.getAttribute('data-viewer-mac');
+      var toastEl = document.querySelector('[data-bind="toast"]');
+      function toast(msg, kind) {
+        if (!toastEl) return;
+        toastEl.textContent = msg;
+        toastEl.classList.remove('kind-error');
+        if (kind === 'error') toastEl.classList.add('kind-error');
+        toastEl.classList.add('is-visible');
+        setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
+      }
+      section.addEventListener('change', function (e) {
+        var cb = e.target.closest('[data-vis-key]');
+        if (!cb) return;
+        var key = cb.getAttribute('data-vis-key');
+        var visible = cb.checked;
+        cb.disabled = true;
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/visibility', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ setting_key: key, visible: visible }),
+        })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+            return r.json();
+          })
+          .then(function () { toast('Gespeichert'); })
+          .catch(function (err) {
+            cb.checked = !visible; // revert the toggle on failure
+            toast((err && err.message ? String(err.message) : 'Speichern fehlgeschlagen').split('\n')[0], 'error');
+          })
+          .then(function () { cb.disabled = false; });
+      });
+    })();
+  </script>
 
   <script>
     // Door-assignment section (Saison 19-30). Lives AFTER </main> so

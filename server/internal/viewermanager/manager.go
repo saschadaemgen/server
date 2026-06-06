@@ -1355,6 +1355,53 @@ func (m *Manager) SetPathMode(ctx context.Context, mac, value string) error {
 	return m.setColumnExec(ctx, "set path mode", mac, "path_mode", trimmed)
 }
 
+// ListViewerSettingVisibility returns the EXPLICIT per-setting
+// visibility rows for a viewer (setting_key -> visible). A setting with
+// NO row is visible by default, so the map carries only what the admin
+// explicitly set; callers treat a missing key as visible. (Saison 19-39)
+func (m *Manager) ListViewerSettingVisibility(ctx context.Context, mac string) (map[string]bool, error) {
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT setting_key, visible_to_tenant FROM viewer_setting_visibility WHERE viewer_mac = ?`, mac)
+	if err != nil {
+		return nil, fmt.Errorf("viewermanager: list setting visibility: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var key string
+		var vis int
+		if err := rows.Scan(&key, &vis); err != nil {
+			return nil, fmt.Errorf("viewermanager: scan setting visibility: %w", err)
+		}
+		out[key] = vis != 0
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("viewermanager: list setting visibility rows: %w", err)
+	}
+	return out, nil
+}
+
+// SetViewerSettingVisibility upserts the visibility of one setting for
+// one viewer (Saison 19-39). visible=true is stored explicitly as 1 (the
+// row is not deleted) so the admin's intent is recorded even when it
+// matches the default. setting_key is free-text (premium-extensible).
+func (m *Manager) SetViewerSettingVisibility(ctx context.Context, mac, settingKey string, visible bool) error {
+	settingKey = strings.TrimSpace(settingKey)
+	if settingKey == "" {
+		return fmt.Errorf("viewermanager: set setting visibility: setting_key required")
+	}
+	v := 0
+	if visible {
+		v = 1
+	}
+	if _, err := m.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO viewer_setting_visibility (viewer_mac, setting_key, visible_to_tenant)
+		 VALUES (?, ?, ?)`, mac, settingKey, v); err != nil {
+		return fmt.Errorf("viewermanager: set setting visibility: %w", err)
+	}
+	return nil
+}
+
 // SetHistoryCaptureEnabled persists the tenant privacy toggle.
 // true = tenant sees the history again; false = the tenant API
 // returns an empty list with capture_enabled=false. Admin paths
