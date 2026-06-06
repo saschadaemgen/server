@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -84,6 +85,16 @@ type Server struct {
 
 	api *webrtc.API
 	srv *http.Server
+
+	// S4 LAN-direct WHEP (edge_whep.go). whepAPI is built only when
+	// opts.LANWHEPICEPort > 0 (a separate webrtc.API with a fixed-UDP-port
+	// SettingEngine advertising the real LAN host candidate); the POST
+	// /whep/{streamID} route is registered only then. egressKey, when set,
+	// gates that endpoint with a Bearer egress_token (fail-closed); empty ->
+	// open like /offer on the LAN.
+	whepAPI   *webrtc.API
+	whepMux   ice.UDPMux // the fixed-port LAN ICE mux; closed on shutdown to release the UDP port
+	egressKey []byte
 }
 
 // ServerOptions configures a [Server].
@@ -181,6 +192,19 @@ type ServerOptions struct {
 	// Empty value (default) is treated as [profile.EncryptionTLS].
 	// cmd/streaming-server feeds this from the UNIFI_ENCRYPTION env var.
 	Encryption profile.Encryption
+
+	// LANWHEPICEPort enables the S4 LAN-direct WHEP endpoint (POST
+	// /whep/{streamID} on this same HTTP server) when > 0. The value is the
+	// FIXED UDP port the edge binds for ICE media; the advertised host
+	// candidate is <lan-ip>:<port>, so a same-WLAN phone connects directly
+	// to the edge instead of via the VPS relay. 0 (default) -> the endpoint
+	// is OFF (the standalone dev server and the cloud role do not bind it).
+	LANWHEPICEPort int
+	// EgressHMACKey, when set, gates the LAN WHEP endpoint with a Bearer
+	// egress_token (verified by the same publishtoken.Verify, fail-closed),
+	// mirroring the cloud egress. Empty -> the endpoint is open like /offer
+	// on the LAN. Only consulted when LANWHEPICEPort > 0.
+	EgressHMACKey []byte
 }
 
 // ProfileWriter is the mutating half of the profile surface — the
@@ -309,6 +333,27 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
+
+	// S4 LAN-direct WHEP: a separate webrtc.API pinned to a fixed UDP port,
+	// advertising the real LAN host candidate so a same-WLAN phone connects
+	// directly to the edge (host pref 126 > VPS srflx 100). OFF by default
+	// (port 0): the standalone dev server and the cloud role never bind it.
+	if opts.LANWHEPICEPort > 0 {
+		whepAPI, whepMux, werr := newLANWHEPAPI(opts.LANWHEPICEPort)
+		if werr != nil {
+			_ = srcReg.Close()
+			return nil, fmt.Errorf("stream: lan whep: %w", werr)
+		}
+		s.whepAPI = whepAPI
+		s.whepMux = whepMux
+		s.egressKey = opts.EgressHMACKey
+		mux.HandleFunc("POST /whep/{streamID}", s.handleEdgeWHEP)
+		auth := "OFF (open, no key)"
+		if len(s.egressKey) > 0 {
+			auth = "ON (egress_token)"
+		}
+		opts.Logger.Printf("stream: LAN-direct WHEP on /whep, ICE media UDP :%d, egress auth %s", opts.LANWHEPICEPort, auth)
+	}
 
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -446,6 +491,9 @@ func (s *Server) shutdownAll() {
 	}
 	if s.h264espHub != nil {
 		_ = s.h264espHub.Close()
+	}
+	if s.whepMux != nil {
+		_ = s.whepMux.Close() // release the fixed LAN ICE UDP port
 	}
 	_ = s.sources.Close()
 }

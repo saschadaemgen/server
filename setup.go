@@ -62,6 +62,16 @@ type EdgeSetupOptions struct {
 	Stats *stats.Registry
 	CPU   *proccpu.Sampler
 
+	// LANWHEPICEPort enables the S4 LAN-direct WHEP endpoint (POST /whep/...
+	// on the same local stream HTTP server) when > 0; the value is the fixed
+	// UDP port for ICE media, so a same-WLAN phone connects straight to the
+	// edge instead of via the VPS relay. 0 (default) -> off.
+	LANWHEPICEPort int
+	// EgressHMACKey, when set, gates the LAN WHEP endpoint with a Bearer
+	// egress_token (fail-closed), mirroring the cloud egress. Empty -> open
+	// like /offer on the LAN. The Master populates it later to enforce.
+	EgressHMACKey []byte
+
 	// sourceFactory is an UNEXPORTED test seam: when set, it replaces the
 	// built-in unifi source factory so in-package tests can subscribe
 	// against a fake source without dialing a real UDM. Invisible to
@@ -199,7 +209,9 @@ func SetupEdgeInProcess(opts EdgeSetupOptions) (*Server, *streambackend.Backend,
 		Stats:            statsReg,
 		StatsLogInterval: statsLog,
 		CPU:              opts.CPU,
-		ProfileWriter:    backend, // PUT/DELETE /api/profiles via the backend
+		ProfileWriter:    backend,             // PUT/DELETE /api/profiles via the backend
+		LANWHEPICEPort:   opts.LANWHEPICEPort, // S4 LAN-direct WHEP (0 -> off)
+		EgressHMACKey:    opts.EgressHMACKey,
 	})
 	if err != nil {
 		_ = srcReg.Close()
