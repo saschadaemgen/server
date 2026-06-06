@@ -337,6 +337,9 @@ func (s *Server) routes() {
 	// screensaver.
 	s.mux.Handle("GET /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsGet)))
 	s.mux.Handle("POST /webviewer/settings", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsPost)))
+	// Saison 19-37: JSON mirror for the app's config.changed refetch
+	// (Bearer/cookie auth; relay-allowlisted on :8447 for remote refetch).
+	s.mux.Handle("GET /webviewer/settings.json", s.requireViewerAuth(http.HandlerFunc(s.handleMieterSettingsJSON)))
 	s.mux.Handle("GET /webviewer/weather", s.requireViewerAuth(http.HandlerFunc(s.handleWeather)))
 	// Inline-history mode JSON feed (read-marks rows
 	// asynchronously so the browser still sees "NEU" on first

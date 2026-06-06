@@ -63,6 +63,57 @@ func (s *Server) handleMieterSettingsGet(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// mieterSettingsJSON is the JSON shape GET /webviewer/settings.json
+// returns - the JSON-refetch half of the config.changed contract
+// (Saison 19-37). Field names mirror /esp/config's "ui" block; the
+// values come from the SAME ViewerInfo.Resolve*() the HTML form and
+// /esp/config use (one source of truth, no drift). ESP-hardware
+// fields (screen_off_after_sec, brightness_idle, stream, weather) are
+// deliberately omitted - a phone does not need them. The schema is
+// extensible: path_mode lands here additively with the WEG switch
+// (S19-33).
+type mieterSettingsJSON struct {
+	IdleViewMode           string `json:"idle_view_mode"`
+	AutoScreensaverSeconds int    `json:"auto_screensaver_seconds"`
+	ClockLayout            string `json:"clock_layout"`
+	Language               string `json:"language"`
+	HistoryCaptureEnabled  bool   `json:"history_capture_enabled"`
+	UnitName               string `json:"unit_name"`
+}
+
+// handleMieterSettingsJSON returns the authenticated viewer's settings
+// as JSON. The viewer is identified by requireViewerAuth (Bearer for
+// android/esp, cookie for web) -> ViewerMACFromContext; the client
+// NEVER sends a MAC. This is what the app refetches on config.changed
+// (the SSE/eventbus/FCM legs carry only the signal). Mirrors
+// /webviewer/doors. The HTML GET /webviewer/settings is untouched.
+func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request) {
+	mac := ViewerMACFromContext(r.Context())
+	if mac == "" {
+		http.Error(w, "no session", http.StatusUnauthorized)
+		return
+	}
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
+	if err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("mieter settings json", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(mieterSettingsJSON{
+		IdleViewMode:           info.ResolveIdleViewMode(),
+		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
+		ClockLayout:            info.ResolveClockLayout(),
+		Language:               info.ResolveLanguage(),
+		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
+		UnitName:               info.Name,
+	})
+}
+
 func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request) {
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
