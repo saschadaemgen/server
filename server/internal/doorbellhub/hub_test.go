@@ -715,6 +715,10 @@ type recordingFCMSender struct {
 	cancelCalls int
 	cancelToken string
 	cancelPush  fcm.DoorbellPush
+	// config.changed leg (Saison 19-34)
+	configCalls     int
+	configToken     string
+	configViewerMAC string
 }
 
 func (r *recordingFCMSender) Send(_ context.Context, token string, push fcm.DoorbellPush) error {
@@ -757,6 +761,76 @@ func (r *recordingFCMSender) cancelSnapshot() (string, fcm.DoorbellPush) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.cancelToken, r.cancelPush
+}
+
+func (r *recordingFCMSender) SendConfigChanged(_ context.Context, token, viewerMAC string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configCalls++
+	r.configToken = token
+	r.configViewerMAC = viewerMAC
+	return r.retErr
+}
+
+func (r *recordingFCMSender) configCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.configCalls
+}
+
+func (r *recordingFCMSender) configSnapshot() (string, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.configToken, r.configViewerMAC
+}
+
+// ---------- FCM config.changed wake-up leg (Saison 19-34) ----------
+
+func TestBroadcastConfigChanged_FCMLeg_TokenPresentSends(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: "phone-token-cfg"},
+		FCMSender: sender,
+	})
+
+	h.BroadcastConfigChanged(context.Background(), "0c:ea:14:00:00:07")
+
+	// SendConfigChanged runs in a detached goroutine; wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sender.configCallCount() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sender.configCallCount() != 1 {
+		t.Fatalf("config.changed FCM calls = %d, want 1", sender.configCallCount())
+	}
+	tok, mac := sender.configSnapshot()
+	if tok != "phone-token-cfg" || mac != "0c:ea:14:00:00:07" {
+		t.Errorf("config push = (%q, %q), want (phone-token-cfg, 0c:ea:14:00:00:07)", tok, mac)
+	}
+	// A config broadcast must NOT fire the doorbell ring/cancel legs.
+	if sender.callCount() != 0 || sender.cancelCallCount() != 0 {
+		t.Errorf("doorbell legs fired on config.changed: send=%d cancel=%d",
+			sender.callCount(), sender.cancelCallCount())
+	}
+}
+
+// web/esp viewers carry no fcm_token -> no FCM leg fires (path unchanged).
+func TestBroadcastConfigChanged_FCMLeg_NoTokenNoSend(t *testing.T) {
+	src := newFakeSource()
+	sender := &recordingFCMSender{}
+	h := NewWithOptions(src, nil, quietLogger(), Options{
+		FCMTokens: fakeFCMTokens{token: ""}, // web/esp: no phone registered
+		FCMSender: sender,
+	})
+
+	h.BroadcastConfigChanged(context.Background(), "0c:ea:14:00:00:08")
+
+	// Give any (erroneous) goroutine a chance to fire before asserting none did.
+	time.Sleep(100 * time.Millisecond)
+	if sender.configCallCount() != 0 {
+		t.Errorf("config.changed FCM calls = %d, want 0 (no token)", sender.configCallCount())
+	}
 }
 
 func TestDispatchDoorbell_FCMLeg_TokenPresentSends(t *testing.T) {

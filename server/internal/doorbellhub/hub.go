@@ -64,6 +64,9 @@ type FCMTokenReader interface {
 type FCMPushSender interface {
 	Send(ctx context.Context, token string, push fcm.DoorbellPush) error
 	SendCancel(ctx context.Context, token string, push fcm.DoorbellPush) error
+	// SendConfigChanged is the Android Doze wake-up for the
+	// config.changed signal (Saison 19-34). Signal-only (no values).
+	SendConfigChanged(ctx context.Context, token, viewerMAC string) error
 }
 
 // Subscriber buffers events destined for one HTTP/SSE
@@ -431,6 +434,37 @@ func (h *Hub) publishFCMCancel(ctx context.Context, viewerMAC, cancelToken, reas
 	}()
 }
 
+// publishConfigChangedFCM is the Android Doze transport for the
+// config.changed signal (Saison 19-34). Mirrors publishFCM/Cancel exactly:
+// no-op unless both the token reader and sender are wired, fast synchronous
+// token read, detached bounded send, every failure logged and swallowed.
+// Signal-only - the app refetches /webviewer/settings, exactly like the
+// SSE/eventbus legs (no values cross). web/esp viewers carry no fcm_token, so
+// they get no FCM leg and BroadcastConfigChanged behaves unchanged for them.
+func (h *Hub) publishConfigChangedFCM(ctx context.Context, viewerMAC string) {
+	if h.fcmSender == nil || h.fcmTokens == nil {
+		return
+	}
+	token, err := h.fcmTokens.GetFCMToken(ctx, viewerMAC)
+	if err != nil {
+		h.log.Warn("fcm: token lookup failed (config.changed)", "mac", viewerMAC, "err", err)
+		return
+	}
+	if token == "" {
+		// web/esp viewer, or an android viewer without a registered phone.
+		h.log.Debug("fcm: no token for viewer, skipping config.changed push", "mac", viewerMAC)
+		return
+	}
+	sender := h.fcmSender
+	go func() {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := sender.SendConfigChanged(sendCtx, token, viewerMAC); err != nil {
+			h.log.Warn("fcm: config.changed push failed", "mac", viewerMAC, "err", err)
+		}
+	}()
+}
+
 // persistStart writes the doorbell_start row and returns the new
 // id (0 on failure or when history is nil). Failure does not
 // abort the SSE dispatch.
@@ -525,6 +559,10 @@ func (h *Hub) BroadcastConfigChanged(ctx context.Context, viewerMAC string) {
 	if h.bus != nil {
 		h.bus.Publish(viewerMAC, eventbus.Event{Type: TypeConfigChanged, JSON: "{}"})
 	}
+	// Saison 19-34: Android Doze wake-up. Additive, AFTER the SSE +
+	// eventbus legs; no-op for web/esp viewers (no fcm_token), so those
+	// paths are unchanged. Detached + best-effort like the doorbell leg.
+	h.publishConfigChangedFCM(ctx, viewerMAC)
 }
 
 // BroadcastUnreadCount queries the doorhistory store for the
