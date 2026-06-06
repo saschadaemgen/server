@@ -300,6 +300,7 @@ type adminViewerSettingsRequest struct {
 	ScreenOffAfterSec      *int    `json:"screen_off_after_sec,omitempty"`
 	BrightnessIdle         *int    `json:"brightness_idle,omitempty"`
 	Language               *string `json:"language,omitempty"`
+	PathMode               *string `json:"path_mode,omitempty"`
 }
 
 // handleAdminViewerSettings is the auto-save sink for every
@@ -388,6 +389,24 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		applied["clock_layout"] = v
+	}
+
+	// Saison 19-39: transport-path override (WEG-Schalter). Applies to
+	// all viewer types (not ESP-gated). Validated against the allow-list
+	// here so bad input is a 400, not a 500.
+	if body.PathMode != nil {
+		v := *body.PathMode
+		if !slices.Contains(viewermanager.PathModeAllowed, v) {
+			http.Error(w,
+				fmt.Sprintf("path_mode muss einer von %v sein", viewermanager.PathModeAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		if err := s.viewerMgr.SetPathMode(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "path_mode", err)
+			return
+		}
+		applied["path_mode"] = v
 	}
 
 	// ESP-only fields. type='web' -> 400 with a clear message.

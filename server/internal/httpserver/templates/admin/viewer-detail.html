@@ -775,6 +775,15 @@
         <label><input type="radio" name="clock_layout" value="horizontal" {{if eq .Page.ClockLayout "horizontal"}}checked{{end}}> Horizontal (HH:MM)</label>
       </fieldset>
 
+      <!-- Saison 19-39: Verbindungsweg (WEG-Schalter). Admin-gesetzt; die App
+           honoriert ihn bei der Endpunkt-Wahl (auto = LAN zuerst, Cloud-Fallback). -->
+      <fieldset class="settings-field">
+        <legend>Verbindungsweg</legend>
+        <label><input type="radio" name="path_mode" value="auto"  {{if eq .Page.PathMode "auto"}}checked{{end}}> Automatik (LAN zuerst, Cloud-Fallback)</label>
+        <label><input type="radio" name="path_mode" value="local" {{if eq .Page.PathMode "local"}}checked{{end}}> Nur LAN (Edge)</label>
+        <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}> Nur Cloud</label>
+      </fieldset>
+
       {{if eq .Page.Type "esp"}}
         <fieldset class="settings-field">
           <legend>Bildschirm aus nach (ESP)</legend>
@@ -1264,7 +1273,7 @@
         var brightnessTimer = null;
         function saveSetting(name, value) {
           var body = {};
-          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout') {
+          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'path_mode') {
             body[name] = String(value);
           } else if (name === 'history_capture') {
             body[name] = (value === '1' || value === 'true' || value === true);

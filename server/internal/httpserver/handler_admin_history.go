@@ -51,6 +51,7 @@ type adminViewerDetailData struct {
 	BrightnessIdle    int
 	Language          string
 	ClockLayout       string
+	PathMode          string // WEG-Schalter (Saison 19-39): auto|local|cloud
 	BackHref          string // "/a/web-viewers" or "/a/esp-viewers"
 	BackLabel         string
 	// AssignedDoors is the viewer's 1:n door assignment (Saison
@@ -95,6 +96,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		BrightnessIdle:         info.ResolveBrightnessIdle(),
 		Language:               info.ResolveLanguage(),
 		ClockLayout:            info.ResolveClockLayout(),
+		PathMode:               info.ResolvePathMode(),
 	}
 	switch info.Type {
 	case viewermanager.TypeESP:

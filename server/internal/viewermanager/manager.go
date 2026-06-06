@@ -176,6 +176,10 @@ type ViewerInfo struct {
 	// explicit "horizontal" or "vertical" come from mieter /
 	// admin / esp settings POSTs.
 	ClockLayout string
+	// PathMode is the per-viewer transport-path override (WEG-Schalter,
+	// Saison 19-39): "auto" (default) / "local" / "cloud". Read-only
+	// here; the app honours it when choosing the edge-vs-cloud endpoint.
+	PathMode string
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -258,6 +262,18 @@ const (
 // setter (web + ESP + admin).
 var ClockLayoutAllowed = []string{ClockLayoutHorizontal, ClockLayoutVertical}
 
+// PathMode values (Saison 19-39, the WEG-Schalter). "auto" = today's
+// LAN-first/cloud-fallback behaviour; "local" = edge only; "cloud" =
+// cloud only. carvilon only stores + serves the flag; the app honours it.
+const (
+	PathModeAuto  = "auto"
+	PathModeLocal = "local"
+	PathModeCloud = "cloud"
+)
+
+// PathModeAllowed is the strict allow-list for SetPathMode.
+var PathModeAllowed = []string{PathModeAuto, PathModeLocal, PathModeCloud}
+
 // ResolveBrightnessIdle returns the persisted idle-brightness or
 // DefaultBrightnessIdle when the column is NULL. ESP-only
 // concept; web viewers ignore it.
@@ -314,6 +330,24 @@ func (v *ViewerInfo) ResolveClockLayout() string {
 		return ClockLayoutVertical
 	default:
 		return DefaultClockLayout
+	}
+}
+
+// ResolvePathMode returns the viewer's transport-path override
+// (WEG-Schalter, Saison 19-39). NULL/empty/unknown falls back to
+// PathModeAuto (today's behaviour). carvilon only reports it; the app
+// honours it when choosing the edge-vs-cloud endpoint.
+func (v *ViewerInfo) ResolvePathMode() string {
+	if v == nil {
+		return PathModeAuto
+	}
+	switch v.PathMode {
+	case PathModeLocal:
+		return PathModeLocal
+	case PathModeCloud:
+		return PathModeCloud
+	default:
+		return PathModeAuto
 	}
 }
 
@@ -700,7 +734,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -727,7 +761,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout); err != nil {
+			&info.ClockLayout, &info.PathMode); err != nil {
 			return nil, "", fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -842,13 +876,13 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout)
+			&info.ClockLayout, &info.PathMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -904,7 +938,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("viewermanager: list: %w", err)
@@ -930,7 +964,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout); err != nil {
+			&info.ClockLayout, &info.PathMode); err != nil {
 			return nil, fmt.Errorf("viewermanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -1296,6 +1330,29 @@ func (m *Manager) SetClockLayout(ctx context.Context, mac, value string) error {
 		}
 	}
 	return m.setColumnExec(ctx, "set clock layout", mac, "clock_layout", nullable(trimmed))
+}
+
+// SetPathMode persists the per-viewer transport-path override
+// (WEG-Schalter, Saison 19-39). Strictly checked against
+// PathModeAllowed; anything else is an error. Empty normalises to
+// "auto". The column is NOT NULL DEFAULT 'auto', so the value is
+// always written non-null.
+func (m *Manager) SetPathMode(ctx context.Context, mac, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		trimmed = PathModeAuto
+	}
+	allowed := false
+	for _, v := range PathModeAllowed {
+		if v == trimmed {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("viewermanager: path_mode %q not in %v", trimmed, PathModeAllowed)
+	}
+	return m.setColumnExec(ctx, "set path mode", mac, "path_mode", trimmed)
 }
 
 // SetHistoryCaptureEnabled persists the tenant privacy toggle.

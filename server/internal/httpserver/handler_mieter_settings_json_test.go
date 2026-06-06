@@ -43,10 +43,14 @@ func TestMieterSettingsJSON_ReturnsViewerSettings(t *testing.T) {
 	if body["clock_layout"] != "horizontal" {
 		t.Errorf("clock_layout = %v, want horizontal", body["clock_layout"])
 	}
+	// path_mode defaults to "auto" (Saison 19-39).
+	if body["path_mode"] != "auto" {
+		t.Errorf("path_mode = %v, want auto (default)", body["path_mode"])
+	}
 	// Exactly the app fields must be present.
 	for _, k := range []string{
 		"idle_view_mode", "auto_screensaver_seconds", "clock_layout",
-		"language", "history_capture_enabled", "unit_name",
+		"language", "history_capture_enabled", "unit_name", "path_mode",
 	} {
 		if _, ok := body[k]; !ok {
 			t.Errorf("missing app field %q", k)

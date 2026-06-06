@@ -78,7 +78,11 @@ type mieterSettingsJSON struct {
 	ClockLayout            string `json:"clock_layout"`
 	Language               string `json:"language"`
 	HistoryCaptureEnabled  bool   `json:"history_capture_enabled"`
-	UnitName               string `json:"unit_name"`
+	// PathMode is the transport-path override (WEG-Schalter, S19-39):
+	// "auto" | "local" | "cloud". The app honours it when choosing the
+	// edge-vs-cloud endpoint; v1 is admin-set.
+	PathMode string `json:"path_mode"`
+	UnitName string `json:"unit_name"`
 }
 
 // handleMieterSettingsJSON returns the authenticated viewer's settings
@@ -110,6 +114,7 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 		ClockLayout:            info.ResolveClockLayout(),
 		Language:               info.ResolveLanguage(),
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
+		PathMode:               info.ResolvePathMode(),
 		UnitName:               info.Name,
 	})
 }
