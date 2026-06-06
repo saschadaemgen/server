@@ -160,6 +160,14 @@ type Config struct {
 	StreamFFmpegPath string
 	// StreamEnableMJPEG turns on the MJPEG / h264_cbp ffmpeg paths.
 	StreamEnableMJPEG bool
+	// StreamLANWHEPICEPort, when > 0, activates the edge LAN-direct WHEP
+	// endpoint (Saison 19-35): the in-process stream server binds a
+	// fixed-UDP-port ICE host candidate on this port, AND
+	// /webviewer/stream-start advertises edge_whep_url so an on-LAN app
+	// connects straight to the edge instead of looping through the VPS.
+	// 0 (default) = off: no bind, no edge_whep_url. The HTTP /whep path
+	// itself rides StreamAddr's port; this is the ICE (UDP) media port.
+	StreamLANWHEPICEPort int
 
 	// --- In-process cloud WHIP/WHEP stream (Saison 18-04, cloud role,
 	// carvilon_stream build) ---
@@ -304,6 +312,7 @@ const (
 	envStreamAddr              = "CARVILON_STREAM_ADDR"
 	envStreamFFmpegPath        = "CARVILON_STREAM_FFMPEG_PATH"
 	envStreamEnableMJPEG       = "CARVILON_STREAM_ENABLE_MJPEG"
+	envStreamLANWHEPICEPort    = "CARVILON_STREAM_LAN_WHEP_ICE_PORT"
 	envWhipListen              = "CARVILON_WHIP_LISTEN"
 	envWhipCert                = "CARVILON_WHIP_CERT"
 	envWhipKey                 = "CARVILON_WHIP_KEY"
@@ -385,13 +394,14 @@ func FromEnv() Config {
 		FCMServiceAccountJSON: lookupEnv(envFCMServiceAccountJSON),
 		FCMProjectID:          lookupEnv(envFCMProjectID),
 
-		StreamNVRHost:     lookupEnv(envStreamNVRHost),
-		StreamAPIKey:      lookupEnv(envStreamAPIKey),
-		StreamDBPath:      lookupEnv(envStreamDBPath),
-		StreamEncryption:  lookupEnv(envStreamEncryption),
-		StreamAddr:        lookupEnv(envStreamAddr),
-		StreamFFmpegPath:  lookupEnv(envStreamFFmpegPath),
-		StreamEnableMJPEG: parseBool(lookupEnv(envStreamEnableMJPEG)),
+		StreamNVRHost:        lookupEnv(envStreamNVRHost),
+		StreamAPIKey:         lookupEnv(envStreamAPIKey),
+		StreamDBPath:         lookupEnv(envStreamDBPath),
+		StreamEncryption:     lookupEnv(envStreamEncryption),
+		StreamAddr:           lookupEnv(envStreamAddr),
+		StreamFFmpegPath:     lookupEnv(envStreamFFmpegPath),
+		StreamEnableMJPEG:    parseBool(lookupEnv(envStreamEnableMJPEG)),
+		StreamLANWHEPICEPort: parsePort(lookupEnv(envStreamLANWHEPICEPort), 0),
 
 		WhipListen: lookupEnv(envWhipListen),
 		WhipCert:   lookupEnv(envWhipCert),

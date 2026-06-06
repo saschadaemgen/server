@@ -53,6 +53,13 @@ type StreamStartBundle struct {
 	StreamID    string      `json:"stream_id"`
 	ICEServers  []ICEServer `json:"ice_servers"`
 	ExpiresIn   int         `json:"expires_in"`
+	// EdgeWHEPURL is the LAN-direct WHEP URL (Saison 19-35). Present only
+	// when the edge LAN-WHEP is active and the edge LAN IP is known; the
+	// app tries it first (HTTP, same LAN) and falls back to WHEPURL (the
+	// cloud path). NOTE: it carries the stream PROFILE NAME, not the MAC -
+	// the edge keys /whep by profile (like /offer ?src=), unlike the cloud
+	// (/whep/<mac>). omitempty so the cloud-only case stays byte-identical.
+	EdgeWHEPURL string `json:"edge_whep_url,omitempty"`
 }
 
 // StreamPublisher is the edge-side push surface the side-channel calls

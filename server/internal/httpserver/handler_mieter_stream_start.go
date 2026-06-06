@@ -20,10 +20,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
 
+	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/streampublish"
 )
@@ -90,9 +92,20 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// Saison 19-35: additionally advertise the LAN-direct WHEP URL when the
+	// edge LAN-WHEP is active and the edge LAN IP is known. Best-effort and
+	// ADDITIVE: a viewer-info miss or inactive LAN-WHEP just omits the field,
+	// and the app falls back to the cloud whep_url. The edge keys /whep by
+	// PROFILE name (not the MAC) - see edgeWHEPURL.
+	edgeURL := ""
+	if info, ierr := s.viewerMgr.GetViewerInfo(r.Context(), mac); ierr == nil {
+		edgeURL, _ = edgeWHEPURL(s.cfg, info.ResolveStreamProfile())
+	}
+
 	// Never log the token; only the viewer + counts.
 	s.log.Info("stream-start bundle issued", "viewer_mac", mac,
-		"ice_servers", len(res.Servers), "public_whep", res.WHEPBaseURL != "")
+		"ice_servers", len(res.Servers), "public_whep", res.WHEPBaseURL != "",
+		"edge_whep", edgeURL != "")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(streampublish.StreamStartBundle{
 		WHEPURL:     whepURL,
@@ -100,7 +113,28 @@ func (s *Server) handleMieterStreamStart(w http.ResponseWriter, r *http.Request)
 		StreamID:    mac,
 		ICEServers:  res.Servers,
 		ExpiresIn:   int(egresstoken.TTL.Seconds()),
+		EdgeWHEPURL: edgeURL,
 	})
+}
+
+// edgeWHEPURL builds the LAN-direct WHEP URL for a viewer's stream profile,
+// or ("", false) when the LAN-WHEP is not active (StreamLANWHEPICEPort == 0)
+// or the edge LAN IP is unknown (ServerIPv4 == "") or the profile is empty.
+//
+// FLAGGE A (Stream-Chat): the edge keys /whep by the PROFILE NAME, not the
+// viewer MAC (like /offer ?src=intercom_web), unlike the cloud which keys
+// /whep by MAC. The HTTP port comes from StreamAddr (the existing edge stream
+// mux, e.g. :8555) - NOT the ICE/UDP port; StreamLANWHEPICEPort only gates
+// activation here. (Saison 19-35)
+func edgeWHEPURL(cfg config.Config, profile string) (string, bool) {
+	if cfg.StreamLANWHEPICEPort == 0 || cfg.ServerIPv4 == "" || profile == "" {
+		return "", false
+	}
+	_, port, err := net.SplitHostPort(cfg.StreamAddr)
+	if err != nil || port == "" {
+		return "", false
+	}
+	return fmt.Sprintf("http://%s:%s/whep/%s", cfg.ServerIPv4, port, profile), true
 }
 
 // deriveWHEPURL builds the interim WHEP egress URL from the cloud WHIP ingress
