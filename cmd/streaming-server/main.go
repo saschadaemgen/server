@@ -77,6 +77,7 @@ import (
 	"carvilon.local/stream/internal/proccpu"
 	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
+	"carvilon.local/stream/internal/source/reencode"
 	"carvilon.local/stream/internal/source/unifi"
 	"carvilon.local/stream/internal/sourcereg"
 	"carvilon.local/stream/internal/stats"
@@ -295,7 +296,27 @@ func runEdge() {
 	// here, no per-profile reading: this is the simplification that
 	// fixed the S6-12 bug where env=srtp was silently ignored because
 	// the per-profile encryption value canonicalised to "tls" and won.
+	// srcReg is declared before the factory so the S4 re-encode closure can
+	// capture it: the short-GOP re-encode pipeline does NOT open its own
+	// camera pull — it subscribes to the camera's passthrough hub in this
+	// same registry and re-encodes (one camera pull, one re-encode ffmpeg).
+	// Every other pipeline pulls the camera directly via unifi. srcReg is
+	// assigned just below, before any lazy factory call can fire.
+	var srcReg *sourcereg.Registry
 	srcFactory := func(key sourcereg.Key) (source.VideoSource, error) {
+		if key.Pipeline == profile.PipelineReencodeShortGOP {
+			passthroughKey := key
+			passthroughKey.Pipeline = profile.PipelinePassthrough
+			return reencode.NewSource(reencode.Options{
+				Subscribe: func() (reencode.Subscription, error) {
+					return srcReg.HubFor(passthroughKey).Subscribe()
+				},
+				FFmpegPath:  ffmpegPath,
+				GOP:         reencode.DefaultGOP,
+				BitrateKbps: reencode.DefaultBitrateKbps,
+				Logger:      logger,
+			})
+		}
 		return unifi.NewSource(unifi.Options{
 			NVRHost:    nvrHost,
 			APIKey:     apiKey,
@@ -305,7 +326,7 @@ func runEdge() {
 			Logger:     logger,
 		})
 	}
-	srcReg := sourcereg.New(srcFactory, logger)
+	srcReg = sourcereg.New(srcFactory, logger)
 	defer func() { _ = srcReg.Close() }()
 
 	cams, err := unifiapi.New(unifiapi.Options{

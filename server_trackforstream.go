@@ -36,11 +36,16 @@ func (s *Server) TrackForStream(profileName string) (webrtc.TrackLocal, func(), 
 	if err != nil {
 		return nil, nil, err // ErrUnknownProfile bubbles up unchanged
 	}
-	// Same gate as handleOffer: only h264_passthrough is a WebRTC
-	// passthrough stream; the transcoded codecs have dedicated paths.
-	if p.Codec != profile.CodecH264Passthrough {
-		return nil, nil, fmt.Errorf("profile %q has codec=%q, not %q (TrackForStream is WebRTC passthrough only; use the MJPEG/H264-CBP paths for those)",
-			p.Name, p.Codec, profile.CodecH264Passthrough)
+	// The cloud-push path ships H.264 over WebRTC. Two codecs qualify:
+	// the raw camera passthrough, and the S4 short-GOP re-encode (still
+	// H.264, just re-encoded with a small GOP for the 4G link). The
+	// transcoded ESP/MJPEG codecs have their own local paths. NOTE: the
+	// LAN endpoints (handleOffer, handleEdgeWHEP) stay passthrough-only on
+	// purpose — re-encoding for a LAN viewer would burn the edge encoder
+	// for no benefit; the re-encode exists solely for the cloud/4G egress.
+	if p.Codec != profile.CodecH264Passthrough && p.Codec != profile.CodecH264ReencodeShortGOP {
+		return nil, nil, fmt.Errorf("profile %q has codec=%q (TrackForStream serves %q or %q over WebRTC; use the MJPEG/H264-CBP paths for those)",
+			p.Name, p.Codec, profile.CodecH264Passthrough, profile.CodecH264ReencodeShortGOP)
 	}
 
 	srcHub := s.sources.HubFor(s.sourceKeyFor(p))

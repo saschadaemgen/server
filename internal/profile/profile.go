@@ -109,7 +109,48 @@ const (
 	// frame-by-frame. The CPU price of this transcode is the S6-01
 	// experiment; the cost is surfaced in /stream/stats.
 	CodecH264CBP Codec = "h264_cbp"
+
+	// CodecH264ReencodeShortGOP: S4 4G/cloud path. A dedicated short-GOP
+	// RE-ENCODE of the camera stream (no resolution change — the medium
+	// tier is re-encoded at its native size) with a small keyframe
+	// interval, so a viewer over a lossy 4G link recovers within a fraction
+	// of a second of the next IDR instead of freezing for a whole UniFi GOP
+	// (~105 frames). Unlike [CodecH264Passthrough] this is a true encode
+	// (RPi-edge h264_v4l2m2m, -g short); unlike [CodecMJPEG]/[CodecH264CBP]
+	// it stays H.264 and is shipped over WebRTC (the cloud egress applies
+	// FlexFEC + NACK on top of the now-clean short-GOP stream). It needs a
+	// DEDICATED source pipeline (see [Codec.Pipeline]) that taps the shared
+	// camera passthrough hub — one camera pull, one re-encode. The output
+	// dimensions follow the camera; Width/Height/FPS/EncodeQuality are
+	// IGNORED (like passthrough), so Validate does not require them.
+	CodecH264ReencodeShortGOP Codec = "h264_reencode_shortgop"
 )
+
+// Pipeline names the SOURCE-side processing a codec requires, used as the
+// fourth component of [sourcereg.Key] so that the same (camera, quality,
+// encryption) can host two distinct upstream processings without colliding
+// in the hub map. Most codecs share the raw camera passthrough hub (and
+// transcode, if at all, in their own per-consumer encoder downstream);
+// only [CodecH264ReencodeShortGOP] needs its own re-encode hub.
+//
+// Empty is treated as PipelinePassthrough so any pre-S4 caller / persisted
+// state keeps the historical single-pipeline behaviour.
+const (
+	PipelinePassthrough      = "passthrough"
+	PipelineReencodeShortGOP = "reencode_shortgop"
+)
+
+// Pipeline returns the source-side pipeline this codec is served from.
+// See the [PipelinePassthrough]/[PipelineReencodeShortGOP] doc. Only the
+// S4 short-GOP re-encode gets its own pipeline; everything else (including
+// MJPEG and H264-CBP, which transcode in their own downstream encoders off
+// the raw hub) shares the passthrough pipeline.
+func (c Codec) Pipeline() string {
+	if c == CodecH264ReencodeShortGOP {
+		return PipelineReencodeShortGOP
+	}
+	return PipelinePassthrough
+}
 
 // Profile is the admin-facing description of one named stream.
 type Profile struct {
@@ -191,12 +232,12 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("profile %q: invalid Usage %q (want browser/esp)", p.Name, p.Usage)
 	}
 	switch p.Codec {
-	case CodecH264Passthrough, CodecMJPEG, CodecH264CBP:
+	case CodecH264Passthrough, CodecMJPEG, CodecH264CBP, CodecH264ReencodeShortGOP:
 		// ok
 	case "":
 		return fmt.Errorf("profile %q: Codec is required", p.Name)
 	default:
-		return fmt.Errorf("profile %q: invalid Codec %q (want h264_passthrough/mjpeg/h264_cbp)", p.Name, p.Codec)
+		return fmt.Errorf("profile %q: invalid Codec %q (want h264_passthrough/mjpeg/h264_cbp/h264_reencode_shortgop)", p.Name, p.Codec)
 	}
 	// S6-12: Encryption is OPTIONAL. Empty value flows through as the
 	// canonical default ("tls") at the source-factory level.
@@ -206,7 +247,12 @@ func (p Profile) Validate() error {
 	default:
 		return fmt.Errorf("profile %q: invalid Encryption %q (want tls/srtp or empty)", p.Name, p.Encryption)
 	}
-	if p.Codec != CodecH264Passthrough {
+	// Width/Height/FPS/EncodeQuality are required ONLY for the codecs that
+	// transcode to an admin-chosen SPEC (MJPEG, H264-CBP). Passthrough
+	// ships the camera's wire shape; the S4 short-GOP re-encode keeps the
+	// camera's resolution/fps and uses fixed encoder params — both ignore
+	// these fields, so neither requires them.
+	if p.Codec == CodecMJPEG || p.Codec == CodecH264CBP {
 		if p.Width <= 0 || p.Width > 8192 {
 			return fmt.Errorf("profile %q: Width %d out of range (1..8192) for codec %s", p.Name, p.Width, p.Codec)
 		}

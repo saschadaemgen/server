@@ -388,6 +388,11 @@ func (s *Server) sourceKeyFor(p profile.Profile) sourcereg.Key {
 		CameraID:   p.CameraID,
 		Quality:    string(p.Quality),
 		Encryption: s.encryption,
+		// S4: the source-side pipeline (passthrough vs short-GOP re-encode)
+		// derives from the codec. The re-encode codec gets its OWN hub for
+		// the same (camera, quality, encryption) — fed by the passthrough
+		// hub, so still one camera pull.
+		Pipeline: p.Codec.Pipeline(),
 	}
 }
 

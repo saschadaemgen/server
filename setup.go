@@ -10,6 +10,7 @@ import (
 	"carvilon.local/stream/internal/proccpu"
 	"carvilon.local/stream/internal/profile"
 	"carvilon.local/stream/internal/source"
+	"carvilon.local/stream/internal/source/reencode"
 	"carvilon.local/stream/internal/source/unifi"
 	"carvilon.local/stream/internal/sourcereg"
 	"carvilon.local/stream/internal/stats"
@@ -141,10 +142,32 @@ func SetupEdgeInProcess(opts EdgeSetupOptions) (*Server, *streambackend.Backend,
 	// encryption mode reaches it via key.Encryption (stamped by the
 	// server / backend from their canonical Encryption), so the factory
 	// just trusts the key.
-	nvrHost, apiKey := opts.NVRHost, opts.APIKey
+	nvrHost, apiKey, ffmpegPath := opts.NVRHost, opts.APIKey, opts.FFmpegPath
+	// srcReg is declared here so the re-encode factory closure can capture
+	// it: the re-encode source taps the SAME registry's passthrough hub
+	// (set below, before any lazy factory call can run).
+	var srcReg *sourcereg.Registry
 	srcFactory := opts.sourceFactory
 	if srcFactory == nil {
 		srcFactory = func(key sourcereg.Key) (source.VideoSource, error) {
+			// S4: the short-GOP re-encode pipeline does NOT pull the camera
+			// itself — it subscribes to the camera's passthrough hub (same
+			// camera/quality/encryption, passthrough pipeline) and
+			// re-encodes, so the camera is pulled exactly once. Every other
+			// pipeline pulls the camera directly via unifi.
+			if key.Pipeline == profile.PipelineReencodeShortGOP {
+				passthroughKey := key
+				passthroughKey.Pipeline = profile.PipelinePassthrough
+				return reencode.NewSource(reencode.Options{
+					Subscribe: func() (reencode.Subscription, error) {
+						return srcReg.HubFor(passthroughKey).Subscribe()
+					},
+					FFmpegPath:  ffmpegPath,
+					GOP:         reencode.DefaultGOP,
+					BitrateKbps: reencode.DefaultBitrateKbps,
+					Logger:      logger,
+				})
+			}
 			return unifi.NewSource(unifi.Options{
 				NVRHost:    nvrHost,
 				APIKey:     apiKey,
@@ -157,7 +180,7 @@ func SetupEdgeInProcess(opts EdgeSetupOptions) (*Server, *streambackend.Backend,
 	}
 
 	// THE shared registry — handed to both Server and Backend below.
-	srcReg := sourcereg.New(srcFactory, logger)
+	srcReg = sourcereg.New(srcFactory, logger)
 
 	// Cameras client is optional: a construction failure (or a later
 	// ListCameras failure) must not sink the whole stack — the Backend

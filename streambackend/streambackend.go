@@ -359,7 +359,9 @@ func (b *Backend) toWire(p profile.Profile) Profile {
 	if enc == "" {
 		enc = string(profile.EncryptionTLS)
 	}
-	key := sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality), Encryption: enc}
+	// S4: include the source pipeline so the consumer count for a re-encode
+	// profile reads its OWN hub, matching stream.Server.sourceKeyFor.
+	key := sourcereg.Key{CameraID: p.CameraID, Quality: string(p.Quality), Encryption: enc, Pipeline: p.Codec.Pipeline()}
 	if b.opts.Sources.Has(key) {
 		consumers = b.opts.Sources.HubFor(key).SubscriberCount()
 	}

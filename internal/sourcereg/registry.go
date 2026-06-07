@@ -48,15 +48,33 @@ import (
 // Callers should pass the canonical Encryption value ("tls" or
 // "srtp", not ""); the source factory normalises "" → "tls" at the
 // streaming-server boundary before building the Key.
+//
+//   - Pipeline — S4. The source-side processing applied to this pull.
+//     "passthrough" (the default; raw camera H.264 that MJPEG / H264-CBP /
+//     WebRTC-passthrough all tap) versus "reencode_shortgop" (a dedicated
+//     short-GOP re-encode for the 4G/cloud egress). Two pipelines for the
+//     same (camera, quality, encryption) get DIFFERENT hubs — but they
+//     still cost ONE camera pull, because the re-encode hub's source
+//     SUBSCRIBES to the passthrough hub rather than opening a second pull
+//     (see the edge source factory). Empty == "passthrough" so pre-S4
+//     callers are unaffected. The mapping codec→pipeline lives in
+//     [profile.Codec.Pipeline]; sourcereg treats the value as an opaque
+//     map-key component.
 type Key struct {
 	CameraID   string
 	Quality    string
 	Encryption string
+	Pipeline   string
 }
 
-// String renders the key for log lines.
+// String renders the key for log lines. The passthrough pipeline (the
+// historical case) is rendered WITHOUT a pipeline suffix so existing log
+// lines stay byte-identical; only a non-passthrough pipeline is annotated.
 func (k Key) String() string {
-	return fmt.Sprintf("%s:%s/%s", k.CameraID, k.Quality, k.Encryption)
+	if k.Pipeline == "" || k.Pipeline == "passthrough" {
+		return fmt.Sprintf("%s:%s/%s", k.CameraID, k.Quality, k.Encryption)
+	}
+	return fmt.Sprintf("%s:%s/%s [%s]", k.CameraID, k.Quality, k.Encryption, k.Pipeline)
 }
 
 // Factory builds a fresh, un-Started [source.VideoSource] for the
