@@ -158,7 +158,8 @@ type ViewerInfo struct {
 	HasDeviceToken            bool
 	Running                bool
 	PairedIntercomMAC      string // standby intercom pairing
-	StreamProfile          string // go2rtc profile override
+	StreamProfile          string // go2rtc profile override (LAN path)
+	CloudStreamProfile     string // cloud WHIP-publish profile override; "" = LAN-resolution fallback (Saison 19-47)
 	IdleViewMode           string // "screensaver", "livestream" or "screen_off"; "" = default screensaver
 	AutoScreensaverSeconds *int   // auto-fallback timer; nil/0 = disabled
 	// ESP settings (also accessible to web viewers for the
@@ -428,6 +429,31 @@ func (v *ViewerInfo) ResolveStreamProfile() string {
 		return "intercom_android"
 	}
 	return "intercom_default"
+}
+
+// ResolveCloudStreamProfile picks the stream profile name the EDGE's
+// cloud WHIP-publish uses for this viewer (Saison 19-47, the two-field
+// model). Order:
+//
+//  1. explicit CloudStreamProfile if non-empty - the operator's Cloud-
+//     Profil pick in the viewer-detail UI (e.g. a 4G re-encode profile)
+//  2. else the viewer's LAN resolution (ResolveStreamProfile): the same
+//     per-viewer / type profile the local paths use. This is the non-
+//     breaking default - a viewer with no Cloud-Profil set behaves like
+//     before the split (the cloud publish reused the LAN profile).
+//
+// Replaces the removed CARVILON_CLOUD_STREAM_PROFILE env flag: the choice
+// is now per-viewer + admin-managed, with no hidden global switch. The
+// LAN paths (/offer, edge_whep_url, ESP MJPEG) keep ResolveStreamProfile;
+// only the cloud WHIP TrackSource consults this method.
+func (v *ViewerInfo) ResolveCloudStreamProfile() string {
+	if v == nil {
+		return "intercom_default"
+	}
+	if v.CloudStreamProfile != "" {
+		return v.CloudStreamProfile
+	}
+	return v.ResolveStreamProfile()
 }
 
 // Options configures Manager construction.
@@ -767,7 +793,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -794,7 +820,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile); err != nil {
 			return nil, "", fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -909,13 +935,13 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode)
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -971,7 +997,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("viewermanager: list: %w", err)
@@ -997,7 +1023,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile); err != nil {
 			return nil, fmt.Errorf("viewermanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -1288,6 +1314,20 @@ func (m *Manager) SetStreamProfile(ctx context.Context, mac, profile string) err
 	}
 	m.updateCachedSpec(mac, func(s *ViewerSpec) { s.StreamProfile = trimmed })
 	return nil
+}
+
+// SetCloudStreamProfile updates a viewer's CLOUD stream profile name -
+// the profile the edge WHIP-publish uses for the cloud / 4G path (Saison
+// 19-47). Empty string clears the override; the cloud publish then falls
+// back to the viewer's LAN resolution (see ResolveCloudStreamProfile).
+// Stored trimmed + nullable. No value-validation here, same as
+// SetStreamProfile (LAN): the stream server may hold profiles carvilon
+// does not know, and the admin UI already limits input to the live
+// profile list. Not part of ViewerSpec, so (like SetResolutionMode) it
+// does not touch the cached spec; the value is read back from the DB.
+func (m *Manager) SetCloudStreamProfile(ctx context.Context, mac, profile string) error {
+	trimmed := strings.TrimSpace(profile)
+	return m.setColumnExec(ctx, "set cloud stream profile", mac, "cloud_stream_profile", nullable(trimmed))
 }
 
 // SetIdleViewMode updates a viewer's idle-view-mode preference.
