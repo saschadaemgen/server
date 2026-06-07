@@ -9,11 +9,12 @@
 // that cannot be retransmitted in time corrupts every frame until the NEXT
 // keyframe, i.e. the viewer FREEZES for up to a whole GOP (several seconds).
 //
-// This source re-encodes the camera stream with a SMALL keyframe interval
-// (-g ~20..25), so a 4G viewer recovers within a fraction of a second.
-// FlexFEC + NACK on the cloud egress then ride on top of the now-clean
-// short-GOP stream. The LAN-high passthrough path is untouched — this is a
-// SEPARATE pipeline, selected per profile via
+// This source re-encodes the camera stream with a bounded keyframe interval
+// (-g, default 60) so the periodic IDR burst stays infrequent. Loss recovery
+// on the cloud egress is done by RTX (retransmission) plus FlexFEC; the GOP no
+// longer carries the recovery job it did when it was very short (~25), it just
+// limits how often the big-IDR burst happens. The LAN-high passthrough path is
+// untouched — this is a SEPARATE pipeline, selected per profile via
 // [profile.CodecH264ReencodeShortGOP].
 //
 // # One camera pull
@@ -65,10 +66,15 @@ import (
 // for a 4G uplink and are flagged RPi-verify (the real numbers come from
 // measuring on the Pi against a live 4G link).
 const (
-	// DefaultGOP is the keyframe interval in frames. ~20..25 keeps the
-	// freeze-on-loss window under a second at the camera's medium fps while
-	// not exploding the bitrate. v4l2m2m honours -g (NOT -force_key_frames).
-	DefaultGOP = 25
+	// DefaultGOP is the keyframe interval in frames. RAISED 25 -> 60 once RTX
+	// (000886a) took over loss recovery on the 4G egress: the short GOP's
+	// original job (bounding the freeze window on loss) is now RTX's, so the
+	// only remaining job of the GOP is keyframe-burst FREQUENCY - and fewer,
+	// less-frequent IDR bursts mean fewer of the rare short stalls. At the
+	// camera's dynamic 15-30 fps, -g 60 is ~2-4s between keyframes; RTX covers
+	// the longer corruption window. v4l2m2m honours -g (NOT -force_key_frames).
+	// Iterative knob, 60-120 band.
+	DefaultGOP = 60
 	// DefaultBitrateKbps is the v4l2m2m target bitrate. v4l2m2m is
 	// bitrate-driven (no libx264-style CRF), so rate control is a kbit/s
 	// budget. LOWERED to 800 kbit/s after the cloud/4G field test: smaller
