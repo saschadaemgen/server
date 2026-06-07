@@ -41,12 +41,16 @@ const (
 	// repair stream (102/106 are the H264 codecs in newH264MediaEngine; 120
 	// is free).
 	flexFECPayloadType webrtc.PayloadType = 120
-	// flexFECMediaPackets / flexFECRepairPackets start at a moderate ~20% FEC
-	// overhead (2 repair per 10 media): recovers small bursts within a group.
-	// Tunable by measurement (up if freezes persist, down if FEC itself
-	// congests). pion's default is 5/2 = 40%, too heavy to start with.
+	// flexFECMediaPackets / flexFECRepairPackets: ~50% FEC overhead (5 repair
+	// per 10 media). RAISED from the initial 10:2 (~20%) after the cloud/4G
+	// field test: with 10:2 FlexFEC flowed and 960x1280 arrived, but residual
+	// loss stayed (lost 0->50, freeze 0->13) - 20% did not cover the periodic
+	// short-GOP keyframe bursts. pion FlexFEC is 1D, so burst coverage scales
+	// with NumFECPackets PER GROUP; this is an iterative knob. Next step if
+	// still short: a SMALLER group at high rate (e.g. 8:4 / 6:4) covers longer
+	// bursts relative to the group size.
 	flexFECMediaPackets  = 10
-	flexFECRepairPackets = 2
+	flexFECRepairPackets = 5
 )
 
 // Sentinel errors mapped to HTTP status by the WHEP handler.
