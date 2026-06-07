@@ -168,15 +168,6 @@ type Config struct {
 	// 0 (default) = off: no bind, no edge_whep_url. The HTTP /whep path
 	// itself rides StreamAddr's port; this is the ICE (UDP) media port.
 	StreamLANWHEPICEPort int
-	// CloudStreamProfile, when non-empty, is the stream profile the EDGE's
-	// cloud WHIP-publish uses INSTEAD of the viewer's normal profile
-	// (Saison 19-44). Set it to the 4G re-encode profile
-	// (h264_reencode_shortgop) so the cloud path gets the short-GOP medium
-	// stream, while the LAN paths (/offer, edge_whep_url) stay on the
-	// per-viewer passthrough profile. Empty (default) = no change: the
-	// cloud publish uses ResolveStreamProfile like today. Read in every
-	// build, consumed only under carvilon_stream (the WHIP TrackSource).
-	CloudStreamProfile string
 
 	// --- In-process cloud WHIP/WHEP stream (Saison 18-04, cloud role,
 	// carvilon_stream build) ---
@@ -322,7 +313,6 @@ const (
 	envStreamFFmpegPath        = "CARVILON_STREAM_FFMPEG_PATH"
 	envStreamEnableMJPEG       = "CARVILON_STREAM_ENABLE_MJPEG"
 	envStreamLANWHEPICEPort    = "CARVILON_STREAM_LAN_WHEP_ICE_PORT"
-	envCloudStreamProfile      = "CARVILON_CLOUD_STREAM_PROFILE"
 	envWhipListen              = "CARVILON_WHIP_LISTEN"
 	envWhipCert                = "CARVILON_WHIP_CERT"
 	envWhipKey                 = "CARVILON_WHIP_KEY"
@@ -412,7 +402,6 @@ func FromEnv() Config {
 		StreamFFmpegPath:     lookupEnv(envStreamFFmpegPath),
 		StreamEnableMJPEG:    parseBool(lookupEnv(envStreamEnableMJPEG)),
 		StreamLANWHEPICEPort: parsePort(lookupEnv(envStreamLANWHEPICEPort), 0),
-		CloudStreamProfile:   lookupEnv(envCloudStreamProfile),
 
 		WhipListen: lookupEnv(envWhipListen),
 		WhipCert:   lookupEnv(envWhipCert),
@@ -528,17 +517,6 @@ func (c Config) FCMEnabled() bool {
 func (c Config) StreamInProcessConfigured() bool {
 	return c.StreamNVRHost != "" && c.StreamAPIKey != "" &&
 		c.StreamDBPath != "" && c.StreamAddr != "" && c.StreamBackendURL != ""
-}
-
-// CloudPublishProfileOr returns CloudStreamProfile when set, else the given
-// fallback (the viewer's resolved profile). The edge cloud WHIP-publish uses
-// this to route the cloud path to the 4G re-encode profile while the LAN
-// paths keep the per-viewer passthrough profile. (Saison 19-44)
-func (c Config) CloudPublishProfileOr(fallback string) string {
-	if c.CloudStreamProfile != "" {
-		return c.CloudStreamProfile
-	}
-	return fallback
 }
 
 // CloudStreamInProcessConfigured reports whether the cloud role should
