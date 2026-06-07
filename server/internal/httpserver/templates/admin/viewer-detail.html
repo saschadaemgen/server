@@ -660,7 +660,8 @@
         {{end}}
         <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
         <dt>Türen</dt><dd>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} zugeordnet (siehe Tür-Zuordnung){{else}}keine zugeordnet{{end}}</dd>
-        <dt>Stream-Profil</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
+        <dt>Stream-Profil (LAN)</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
+        <dt>Cloud-Profil</dt><dd data-bind="read-cloud-stream">{{if .Page.CloudStreamProfile}}{{.Page.CloudStreamProfile}}{{else}}wie LAN-Profil{{end}}</dd>
         <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
         <dt>Uhr-Anzeige</dt><dd>{{if eq .Page.ClockLayout "horizontal"}}Horizontal{{else}}Vertikal{{end}}</dd>
       </dl>
@@ -675,9 +676,15 @@
           <input type="text" name="name" value="{{.Page.Name}}" required maxlength="64">
         </label>
         <label>
-          Stream-Profil
+          Stream-Profil (LAN)
           <select name="stream_profile" data-current="{{.Page.StreamProfile}}">
             <option value="">Convention-Fallback</option>
+          </select>
+        </label>
+        <label>
+          Cloud-Profil
+          <select name="cloud_stream_profile" data-current="{{.Page.CloudStreamProfile}}">
+            <option value="">wie LAN-Profil</option>
           </select>
         </label>
         <label>
@@ -1197,6 +1204,7 @@
         ]).then(function (results) {
           // streamRow + userRow serialisieren mit Go-Defaults (PascalCase).
           populateSelect(editForm.elements['stream_profile'],    results[0].profiles || [], 'Name', 'Name');
+          populateSelect(editForm.elements['cloud_stream_profile'], results[0].profiles || [], 'Name', 'Name');
           populateSelect(editForm.elements['linked_ua_user_id'], results[1].users    || [], 'ID',   'DisplayName');
         });
       }
@@ -1220,6 +1228,7 @@
         var body = {
           name:              editForm.elements['name'].value,
           stream_profile:    editForm.elements['stream_profile'].value,
+          cloud_stream_profile: editForm.elements['cloud_stream_profile'].value,
           linked_ua_user_id: editForm.elements['linked_ua_user_id'].value,
         };
         fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/stammdaten', {

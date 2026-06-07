@@ -39,6 +39,7 @@ type adminViewerDetailData struct {
 	HasDeviceToken           bool
 	PairedIntercomMAC     string
 	StreamProfile         string
+	CloudStreamProfile     string
 	LinkedUAUserID        string
 	IdleViewMode          string
 	AutoScreensaverSeconds int
@@ -91,6 +92,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		HasDeviceToken:            info.HasDeviceToken,
 		PairedIntercomMAC:      info.PairedIntercomMAC,
 		StreamProfile:          info.StreamProfile,
+		CloudStreamProfile:     info.CloudStreamProfile,
 		LinkedUAUserID:         info.LinkedUAUserID,
 		IdleViewMode:           info.ResolveIdleViewMode(),
 		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),

@@ -31,10 +31,11 @@ import (
 // trimmed. An empty-string value clears the field (NULL in the
 // DB); to leave a field untouched, omit it entirely.
 type adminViewerStammdatenRequest struct {
-	Name              *string `json:"name,omitempty"`
-	PairedIntercomMAC *string `json:"paired_intercom_mac,omitempty"`
-	StreamProfile     *string `json:"stream_profile,omitempty"`
-	LinkedUAUserID    *string `json:"linked_ua_user_id,omitempty"`
+	Name               *string `json:"name,omitempty"`
+	PairedIntercomMAC  *string `json:"paired_intercom_mac,omitempty"`
+	StreamProfile      *string `json:"stream_profile,omitempty"`
+	CloudStreamProfile *string `json:"cloud_stream_profile,omitempty"`
+	LinkedUAUserID     *string `json:"linked_ua_user_id,omitempty"`
 }
 
 // handleAdminViewerStammdaten sets name + paired intercom +
@@ -106,6 +107,17 @@ func (s *Server) handleAdminViewerStammdaten(w http.ResponseWriter, r *http.Requ
 		if profile != info.StreamProfile {
 			if err := s.viewerMgr.SetStreamProfile(r.Context(), mac, profile); err != nil {
 				s.respondStammdatenErr(w, mac, "stream_profile", err)
+				return
+			}
+			changed = true
+		}
+	}
+
+	if body.CloudStreamProfile != nil {
+		profile := strings.TrimSpace(*body.CloudStreamProfile)
+		if profile != info.CloudStreamProfile {
+			if err := s.viewerMgr.SetCloudStreamProfile(r.Context(), mac, profile); err != nil {
+				s.respondStammdatenErr(w, mac, "cloud_stream_profile", err)
 				return
 			}
 			changed = true
@@ -708,6 +720,7 @@ func adminViewerJSON(info *viewermanager.ViewerInfo) map[string]any {
 		"type":                      info.Type,
 		"paired_intercom_mac":       info.PairedIntercomMAC,
 		"stream_profile":            info.StreamProfile,
+		"cloud_stream_profile":     info.CloudStreamProfile,
 		"linked_ua_user_id":         info.LinkedUAUserID,
 		"idle_view_mode":            info.ResolveIdleViewMode(),
 		"auto_screensaver_seconds":  info.ResolveAutoScreensaverSeconds(),
