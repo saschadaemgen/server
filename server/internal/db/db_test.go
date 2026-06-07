@@ -39,8 +39,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 23 {
-		t.Errorf("schema_version = %d, want 23", version)
+	if version != 24 {
+		t.Errorf("schema_version = %d, want 24", version)
 	}
 	for _, table := range []string{
 		"viewers", "viewer_sessions", "admin_sessions",
@@ -67,6 +67,21 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 		if err == nil {
 			t.Errorf("table %s still present after migration 006", gone)
 		}
+	}
+}
+
+// TestMigration024_CloudStreamProfileColumn verifies the Saison 19-47
+// per-viewer cloud_stream_profile column exists after the migrations. It
+// is the cloud-path sibling of stream_profile (LAN); a bare SELECT errors
+// if the ALTER did not run (empty table -> no rows, no error = pass).
+func TestMigration024_CloudStreamProfileColumn(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	if _, err := d.Exec(`SELECT cloud_stream_profile FROM viewers`); err != nil {
+		t.Errorf("cloud_stream_profile column missing: %v", err)
 	}
 }
 
