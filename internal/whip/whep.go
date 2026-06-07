@@ -13,7 +13,6 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"carvilon.local/stream/internal/icedebug"
-	"carvilon.local/stream/internal/rtppacer"
 	"carvilon.local/stream/internal/streamhub"
 )
 
@@ -42,26 +41,15 @@ const (
 	// repair stream (102/106 are the H264 codecs in newH264MediaEngine; 120
 	// is free).
 	flexFECPayloadType webrtc.PayloadType = 120
-	// flexFECMediaPackets / flexFECRepairPackets: ~50% FEC overhead (5 repair
-	// per 10 media). RAISED from the initial 10:2 (~20%) after the cloud/4G
-	// field test: with 10:2 FlexFEC flowed and 960x1280 arrived, but residual
-	// loss stayed (lost 0->50, freeze 0->13) - 20% did not cover the periodic
-	// short-GOP keyframe bursts. pion FlexFEC is 1D, so burst coverage scales
-	// with NumFECPackets PER GROUP; this is an iterative knob. Next step if
-	// still short: a SMALLER group at high rate (e.g. 8:4 / 6:4) covers longer
-	// bursts relative to the group size.
+	// flexFECMediaPackets / flexFECRepairPackets: ~20% FEC overhead (2 repair
+	// per 10 media). Weg A (native ~6 Mbit passthrough): RTX is the primary loss
+	// carrier; 50% FEC (10:5) on 6 Mbit would add ~3 Mbit (~9 Mbit on the 4G
+	// downlink), wasteful. But not zero - at the native ~5s GOP every small loss
+	// RTX misses costs a ~5s still, so a light 10:2 is proactive insurance for
+	// d<=2 while RTX carries the rest (UniFi shape: RTX primary, FEC light).
 	flexFECMediaPackets  = 10
-	flexFECRepairPackets = 5
+	flexFECRepairPackets = 2
 )
-
-// egressPacerTargetBitrate is the leaky-bucket pacing rate (bits/sec) for the
-// WHEP egress, ~3x the 800k re-encode media rate. High enough that steady
-// P-frames pass via accrued burst tokens, low enough that a keyframe is metered
-// over ~1-2 frame intervals - spreading our packets so a fixed-duration 4G loss
-// window catches fewer of them (d<=5, covered proactively by FlexFEC 10:5).
-// Tunable knob; lower (~1.6M, 2x) spreads more but adds latency. See
-// internal/rtppacer for the placement/RTX trade-off.
-const egressPacerTargetBitrate = 2_400_000
 
 // Sentinel errors mapped to HTTP status by the WHEP handler.
 var (
@@ -158,23 +146,14 @@ func AcceptSubscriber(
 	// loss-free (measured), so every packet reaches the egress send-cache and
 	// can be retransmitted on the same SSRC.
 	ir := &interceptor.Registry{}
-	// S4 step 4: egress send-pacing, added FIRST so it is INNERMOST in pion's
-	// chain (track -> responder -> FlexFEC -> pacer -> transport): it paces the
-	// FINAL media + FEC packets. On real 4G the residual hard bursts lose d=6
-	// at once, one over the FlexFEC 10:5 budget; thinning our in-flight density
-	// pulls a fixed-duration loss window back to d<=5, which FEC then covers
-	// proactively. The pacer only re-times (never alters bytes/order), so
-	// FlexFEC's repair packets stay valid even though it now sits below the
-	// pacer. RTX retransmits are lightly paced too (accepted compromise; see
-	// rtppacer). Tunable knob; ~3x the 800k media rate.
-	ir.Add(rtppacer.NewFactory(egressPacerTargetBitrate, logger))
-	// S4 step 2: FlexFEC-03 FEC. Registered before the NACK responder - pion
-	// requires the FEC interceptor before any RTP-MODIFYING interceptor (so its
-	// repair packets are not altered); the pacer above is non-modifying. The
-	// egress sequence numbers are clean and monotone (the edge publishes via
-	// TrackLocalStaticSample, the cloud forwards them verbatim), which is the
-	// well-formed input FlexFEC needs. Coexists with the NACK responder below;
-	// a peer that does not offer flexfec-03 just gets no FEC.
+	// S4 step 2: FlexFEC-03 FEC. Registered FIRST - pion requires the FEC
+	// interceptor before any RTP-modifying interceptor (so its repair packets
+	// are not altered). The egress sequence numbers are clean and monotone (the
+	// edge publishes via TrackLocalStaticSample, the cloud forwards them
+	// verbatim), which is the well-formed input FlexFEC needs. Coexists with the
+	// NACK responder below; a peer that does not offer flexfec-03 just gets no
+	// FEC. (Weg A: the egress send-pacer was removed - M21 showed no difference,
+	// and its 2.4M rate would throttle the native ~6 Mbit passthrough.)
 	if err := webrtc.ConfigureFlexFEC03(flexFECPayloadType, me, ir,
 		flexfec.NumMediaPackets(flexFECMediaPackets),
 		flexfec.NumFECPackets(flexFECRepairPackets),
