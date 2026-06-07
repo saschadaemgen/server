@@ -327,7 +327,7 @@ func (s *Server) handleAdminStreamDelete(w http.ResponseWriter, r *http.Request)
 func parseStreamForm(r *http.Request, name string) (streams.Profile, string) {
 	codec := strings.TrimSpace(r.PostForm.Get("codec"))
 	if !validStreamCodec(codec) {
-		return streams.Profile{}, "Ungueltiger Codec (mjpeg / h264_cbp / h264_passthrough)."
+		return streams.Profile{}, "Ungueltiger Codec (mjpeg / h264_cbp / h264_passthrough / h264_reencode_shortgop)."
 	}
 	usage := strings.TrimSpace(r.PostForm.Get("usage"))
 	if !validStreamUsage(usage) {
@@ -400,7 +400,7 @@ func (s *Server) streamsConfiguredOr503(w http.ResponseWriter) bool {
 
 func validStreamCodec(c string) bool {
 	switch c {
-	case "mjpeg", "h264_cbp", "h264_passthrough":
+	case "mjpeg", "h264_cbp", "h264_passthrough", "h264_reencode_shortgop":
 		return true
 	}
 	return false
