@@ -143,10 +143,17 @@ func buildWHIPClient(
 		if err != nil {
 			return nil, nil, err
 		}
-		// TrackForStream rejects non-h264_passthrough profiles (e.g. an
-		// ESP MJPEG viewer) with an error; the whipclient worker logs it
-		// and tears down - no panic, the local flow is untouched.
-		return srv.TrackForStream(info.ResolveStreamProfile())
+		// Saison 19-44: the CLOUD publish uses CARVILON_CLOUD_STREAM_PROFILE
+		// when set (the 4G re-encode profile, h264_reencode_shortgop), else
+		// the viewer's normal profile (today's passthrough). GetViewerInfo
+		// still validates the viewer + supplies the fallback. The LAN paths
+		// (/offer, edge_whep_url) are a DIFFERENT code path and keep
+		// ResolveStreamProfile -> passthrough High (the red line).
+		profile := cfg.CloudPublishProfileOr(info.ResolveStreamProfile())
+		// TrackForStream rejects unsupported codecs (e.g. an ESP MJPEG
+		// viewer) with an error; the whipclient worker logs it and tears
+		// down - no panic, the local flow is untouched.
+		return srv.TrackForStream(profile)
 	}
 	return whipclient.New(whipclient.Config{
 		TrackSource: trackSource,
