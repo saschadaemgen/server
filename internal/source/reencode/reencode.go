@@ -28,12 +28,27 @@
 //
 // # Edge encode
 //
-// On the Raspberry Pi the encode uses the hardware encoder h264_v4l2m2m
-// with software multi-core DECODE (-threads 4). The keyframe cadence is
-// driven by -g (frame interval) and NOT by -force_key_frames, because the
-// v4l2m2m encoder ignores -force_key_frames (confirmed on the RPi). The
-// output is raw Annex-B on stdout, parsed back into access units by the
-// same [h264esp.AUSplitter] the CBP path uses.
+// The encode is libx264 (software) with software multi-core DECODE
+// (-threads 4). It was h264_v4l2m2m (RPi HW) until the cloud/4G field test
+// showed the real lever is a tight VBV window (-maxrate/-bufsize), which the
+// v4l2m2m wrapper does not expose (only -b:v; confirmed on the RPi:
+// `ffmpeg -h encoder=h264_v4l2m2m` lists only buffer counts). VBV presses the
+// periodic IDR into a small budget (a smaller, blockier keyframe instead of a
+// big packet burst) and keeps the bitrate even, which is what a lossy radio
+// leg needs.
+//
+// We keep PERIODIC IDRs (-g), NOT intra-refresh: a WebRTC receiver repairs
+// loss by sending a PLI and WAITING for an IDR; an intra-refresh stream emits
+// no IDR, so the decoder drops everything and renders a black screen (GDR is
+// H.266-only, not in the H.264 WebRTC path). SPS/PPS ride in-band before
+// every IDR (dump_extra=freq=keyframe), as before.
+//
+// The output is raw Annex-B on stdout, parsed back into access units by the
+// same [h264esp.AUSplitter] the CBP path uses. That splitter requires ONE VCL
+// NAL per access unit, so -tune zerolatency's implicit sliced-threads=1 is
+// overridden back to single-slice (sliced-threads=0:slices=1), exactly as the
+// CBP path does (S6-04) - otherwise each slice would surface as a bogus
+// separate frame.
 //
 // Lifecycle posture mirrors the other ffmpeg subprocess wrappers
 // ([internal/h264esp.Encoder], [internal/mjpeg.Encoder]): Start spawns
@@ -67,15 +82,21 @@ import (
 const (
 	// DefaultGOP is the keyframe interval in frames. ~20..25 keeps the
 	// freeze-on-loss window under a second at the camera's medium fps while
-	// not exploding the bitrate. v4l2m2m honours -g (NOT -force_key_frames).
+	// not exploding the bitrate. Periodic IDRs (NOT intra-refresh) so WebRTC
+	// PLI repair works.
 	DefaultGOP = 25
-	// DefaultBitrateKbps is the v4l2m2m target bitrate. v4l2m2m is
-	// bitrate-driven (no libx264-style CRF), so rate control is a kbit/s
-	// budget. LOWERED to 800 kbit/s after the cloud/4G field test: smaller
-	// frames mean smaller per-frame packet bursts (gentler on a lossy radio
-	// leg) and leave headroom for the raised ~50% FlexFEC overhead on the
-	// egress. Priority is killing the freeze; iterative knob, 600-1000k band.
+	// DefaultBitrateKbps is the libx264 VBV target bitrate (kbit/s). 800 kbit/s
+	// after the cloud/4G field test: smaller frames mean smaller per-frame
+	// packet bursts (gentler on a lossy radio leg) and leave headroom for the
+	// raised ~50% FlexFEC overhead on the egress. -b:v and -maxrate are both
+	// set to this. Iterative knob, 600-1000k band.
 	DefaultBitrateKbps = 800
+	// DefaultBufsizeKbps is the libx264 VBV buffer (kbit). This is THE lever
+	// the switch from v4l2m2m bought: a tight VBV window spreads the periodic
+	// IDR over the budget instead of one big burst. ~400 kbit ~= 0.5s at the
+	// 800k target; SMALLER = smoother on the wire but a blockier IDR. Start
+	// 400, tune down if the wire still bursts.
+	DefaultBufsizeKbps = 400
 )
 
 const (
@@ -119,9 +140,13 @@ type Options struct {
 	// GOP is the keyframe interval in frames. 0 -> [DefaultGOP].
 	GOP int
 
-	// BitrateKbps is the v4l2m2m target bitrate in kbit/s. 0 ->
-	// [DefaultBitrateKbps].
+	// BitrateKbps is the libx264 VBV target bitrate in kbit/s (-b:v and
+	// -maxrate). 0 -> [DefaultBitrateKbps].
 	BitrateKbps int
+
+	// BufsizeKbps is the libx264 VBV buffer in kbit (-bufsize) - the lever
+	// that spreads the IDR burst. 0 -> [DefaultBufsizeKbps].
+	BufsizeKbps int
 
 	// Logger receives diagnostic output. nil -> the default logger.
 	Logger *log.Logger
@@ -138,6 +163,7 @@ type Source struct {
 	ffmpegPath  string
 	gop         int
 	bitrateKbps int
+	bufsizeKbps int
 	logger      *log.Logger
 	now         func() time.Time
 
@@ -176,6 +202,9 @@ func NewSource(opts Options) (*Source, error) {
 	if opts.BitrateKbps <= 0 {
 		opts.BitrateKbps = DefaultBitrateKbps
 	}
+	if opts.BufsizeKbps <= 0 {
+		opts.BufsizeKbps = DefaultBufsizeKbps
+	}
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
 	}
@@ -187,6 +216,7 @@ func NewSource(opts Options) (*Source, error) {
 		ffmpegPath:  opts.FFmpegPath,
 		gop:         opts.GOP,
 		bitrateKbps: opts.BitrateKbps,
+		bufsizeKbps: opts.BufsizeKbps,
 		logger:      opts.Logger,
 		now:         opts.now,
 		framesCh:    make(chan source.AccessUnit, framesBuffer),
@@ -212,7 +242,7 @@ func (s *Source) Start(ctx context.Context) error {
 	}
 	s.sub = sub
 
-	args := buildFFmpegArgs(s.gop, s.bitrateKbps)
+	args := buildFFmpegArgs(s.gop, s.bitrateKbps, s.bufsizeKbps)
 	s.cmd = exec.CommandContext(s.ctx, s.ffmpegPath, args...)
 
 	if s.stdin, err = s.cmd.StdinPipe(); err != nil {
@@ -232,8 +262,8 @@ func (s *Source) Start(ctx context.Context) error {
 		return fmt.Errorf("reencode: ffmpeg start (%s): %w", s.ffmpegPath, err)
 	}
 	s.startTime = s.now()
-	s.logger.Printf("reencode: ffmpeg started (pid=%d, h264_v4l2m2m, -g %d, %d kbit/s)",
-		s.cmd.Process.Pid, s.gop, s.bitrateKbps)
+	s.logger.Printf("reencode: ffmpeg started (pid=%d, libx264 VBV, -g %d, %d kbit/s, bufsize %d kbit)",
+		s.cmd.Process.Pid, s.gop, s.bitrateKbps, s.bufsizeKbps)
 
 	s.wg.Add(3)
 	go s.runStdin()
@@ -406,8 +436,9 @@ func (s *Source) Close() error {
 
 // buildFFmpegArgs assembles the full ffmpeg argv for the short-GOP edge
 // re-encode. Pure (no I/O) so it is unit-testable — the test pins the
-// approved decisions (v4l2m2m, -g, -bf 0, NOT -force_key_frames, NOT
-// libx264, video-only, SW-threaded decode).
+// approved decisions (libx264, VBV -maxrate/-bufsize, single-slice, -g, -bf 0,
+// NOT intra-refresh, NOT -force_key_frames, NOT v4l2m2m, video-only,
+// SW-threaded decode).
 //
 // Input side mirrors internal/h264esp (the proven stdin-H264 handling):
 //
@@ -415,34 +446,39 @@ func (s *Source) Close() error {
 //   - NO -flags +low_delay: it disables ffmpeg multi-core frame threading
 //     and starves the decode (S2-16/D-0002, Canary). Deliberately absent.
 //   - -use_wallclock_as_timestamps 1: the -f h264 demuxer otherwise fakes
-//     PTS at 25 fps; we want the real cadence to reach the encoder.
-//   - -threads 4: software multi-core DECODE of the medium input (the HW
-//     encoder does not use CPU threads).
+//     PTS at 25 fps; we want the real cadence to reach the encoder. With
+//     libx264 VBV the input cadence matters a touch more than it did on
+//     v4l2m2m (it feeds the rate model); a suspect if the wire looks jittery,
+//     but runStdout re-stamps output PTS so the leverage is low (B4).
+//   - -threads 4: software multi-core DECODE of the medium input.
 //
-// Output side:
+// Output side (Stufe C: libx264 SW with a tight VBV window):
 //
 //   - -an: VIDEO-ONLY (the 4G path ignores audio entirely).
-//   - -c:v h264_v4l2m2m: RPi hardware encoder (Plan A).
-//   - NO -profile:v (FIX-STREAM-S4): this v4l2m2m has no settable profile
-//     values, so -profile:v errors out. The encoder defaults to High, which
-//     is exactly the profile the camera and the passthrough cloud path
-//     already deliver and Android already decodes (Master M12) — the freeze
-//     was packet loss, never the profile. We change the GOP, not the profile.
-//   - -b:v <kbit>k: v4l2m2m is bitrate-driven (no CRF).
-//   - -g <gop>: the SHORT keyframe interval — the entire point. v4l2m2m
-//     honours -g; it ignores -force_key_frames (RPi-confirmed), which is
-//     why the GOP is frame-interval driven here.
-//   - -bf 0: no B-frames (lowest latency; CBP forbids them anyway).
+//   - -c:v libx264 -preset ultrafast -tune zerolatency: low CPU + low latency.
+//   - -x264-params sliced-threads=0:slices=1: -tune zerolatency implicitly
+//     turns on sliced-threads=1 (multi-slice per frame); [h264esp.AUSplitter]
+//     needs ONE VCL NAL per access unit, so force single-slice or each slice
+//     surfaces as a bogus separate frame (S6-04, same fix as the CBP path).
+//   - -b:v / -maxrate <kbit>k + -bufsize <kbit>k: the VBV window. THIS is the
+//     lever the switch away from v4l2m2m bought (the v4l2m2m wrapper exposes
+//     no VBV): it presses the periodic IDR into a small budget — a smaller,
+//     blockier keyframe instead of a big packet burst — and keeps the bitrate
+//     even, which is what a lossy radio leg needs.
+//   - -g <gop>: PERIODIC IDRs (NOT intra-refresh). A WebRTC receiver repairs
+//     loss by PLI + waiting for an IDR; intra-refresh emits none -> black
+//     screen (GDR is H.266-only). Periodic IDRs keep PLI working.
+//   - -bf 0: no B-frames (lowest latency).
 //   - -bsf:v dump_extra=freq=keyframe: repeat SPS+PPS in-band before every
 //     IDR so a (re)joining viewer decodes from the first keyframe it sees.
 //   - -f h264: raw Annex-B byte stream to stdout (NO container), parsed by
 //     [h264esp.AUSplitter].
 //
-// NOTE (RPi-verify): single-slice-per-frame output is assumed by the AU
-// splitter. v4l2m2m emits one slice per frame by default; confirm on the
-// Pi. Pixel-format negotiation (yuv420p vs nv12) is left to ffmpeg's
-// default; revisit if the Pi build rejects the decoded format.
-func buildFFmpegArgs(gop, bitrateKbps int) []string {
+// NO -profile:v: libx264's default profile (High for this content) is what the
+// camera + passthrough already deliver and Android decodes; -profile:v
+// high/main is a fallback only if a subscriber balks.
+func buildFFmpegArgs(gop, bitrateKbps, bufsizeKbps int) []string {
+	rate := strconv.Itoa(bitrateKbps) + "k"
 	return []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -453,14 +489,14 @@ func buildFFmpegArgs(gop, bitrateKbps int) []string {
 		"-f", "h264",
 		"-i", "pipe:0",
 		"-an",
-		"-c:v", "h264_v4l2m2m",
-		// NO -profile:v: this v4l2m2m exposes no settable profile values
-		// (`ffmpeg -h encoder=h264_v4l2m2m | grep profile` is empty), so any
-		// -profile:v errors with "Undefined constant". The encoder defaults
-		// to High, which is exactly what the camera and the passthrough cloud
-		// path already deliver and Android already decodes (Master M12). We
-		// change only the GOP, never the profile. See FIX-STREAM-S4.
-		"-b:v", strconv.Itoa(bitrateKbps) + "k",
+		"-c:v", "libx264",
+		"-preset", "ultrafast",
+		"-tune", "zerolatency",
+		// S6-04: undo zerolatency's sliced-threads=1; one VCL NAL per AU.
+		"-x264-params", "sliced-threads=0:slices=1",
+		"-b:v", rate,
+		"-maxrate", rate,
+		"-bufsize", strconv.Itoa(bufsizeKbps) + "k",
 		"-g", strconv.Itoa(gop),
 		"-bf", "0",
 		"-bsf:v", "dump_extra=freq=keyframe",

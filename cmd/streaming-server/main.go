@@ -314,6 +314,7 @@ func runEdge() {
 				FFmpegPath:  ffmpegPath,
 				GOP:         reencode.DefaultGOP,
 				BitrateKbps: reencode.DefaultBitrateKbps,
+				BufsizeKbps: reencode.DefaultBufsizeKbps,
 				Logger:      logger,
 			})
 		}
