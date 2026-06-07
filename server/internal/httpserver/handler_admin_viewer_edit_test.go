@@ -84,6 +84,37 @@ func TestAdminViewerStammdaten_PartialPairedIntercom(t *testing.T) {
 	}
 }
 
+// TestAdminViewerStammdaten_SetsCloudStreamProfile: the Cloud-Profil select
+// posts cloud_stream_profile; it is stored + resolved without touching the
+// LAN profile (stream_profile). (Saison 19-47, the two-field model.)
+func TestAdminViewerStammdaten_SetsCloudStreamProfile(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	before, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	lanBefore := before.StreamProfile
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/stammdaten", map[string]any{
+		"cloud_stream_profile": "intercom_med",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	if info.CloudStreamProfile != "intercom_med" {
+		t.Errorf("cloud_stream_profile = %q, want intercom_med", info.CloudStreamProfile)
+	}
+	if got := info.ResolveCloudStreamProfile(); got != "intercom_med" {
+		t.Errorf("ResolveCloudStreamProfile = %q, want intercom_med", got)
+	}
+	// LAN profile untouched by the cloud-only update.
+	if info.StreamProfile != lanBefore {
+		t.Errorf("stream_profile changed to %q, want unchanged %q", info.StreamProfile, lanBefore)
+	}
+}
+
 func TestAdminViewerStammdaten_RejectsEmptyName(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
