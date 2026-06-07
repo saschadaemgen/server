@@ -47,10 +47,14 @@ func TestMieterSettingsJSON_ReturnsViewerSettings(t *testing.T) {
 	if body["path_mode"] != "auto" {
 		t.Errorf("path_mode = %v, want auto (default)", body["path_mode"])
 	}
+	// resolution_mode defaults to "medium" (Saison 19-42).
+	if body["resolution_mode"] != "medium" {
+		t.Errorf("resolution_mode = %v, want medium (default)", body["resolution_mode"])
+	}
 	// Exactly the app fields must be present.
 	for _, k := range []string{
 		"idle_view_mode", "auto_screensaver_seconds", "clock_layout",
-		"language", "history_capture_enabled", "unit_name", "path_mode",
+		"language", "history_capture_enabled", "unit_name", "path_mode", "resolution_mode",
 	} {
 		if _, ok := body[k]; !ok {
 			t.Errorf("missing app field %q", k)

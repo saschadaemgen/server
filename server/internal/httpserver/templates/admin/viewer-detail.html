@@ -784,6 +784,16 @@
         <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}> Nur Cloud</label>
       </fieldset>
 
+      <!-- Saison 19-42: Auflösungs-Wahl. Admin-gesetzt; Default mittel
+           (ressourcenschonend für Cloud/Android), hoch im LAN/per Wahl. carvilon
+           wählt nur die Stufe; das Ziehen ist Stream-/App-Seite. -->
+      <fieldset class="settings-field">
+        <legend>Auflösung</legend>
+        <label><input type="radio" name="resolution_mode" value="high"   {{if eq .Page.ResolutionMode "high"}}checked{{end}}> Hoch (1200×1600)</label>
+        <label><input type="radio" name="resolution_mode" value="medium" {{if eq .Page.ResolutionMode "medium"}}checked{{end}}> Mittel (960×1280)</label>
+        <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
+      </fieldset>
+
       {{if eq .Page.Type "esp"}}
         <fieldset class="settings-field">
           <legend>Bildschirm aus nach (ESP)</legend>
@@ -826,6 +836,7 @@
         <label><input type="checkbox" data-vis-key="clock_layout"             {{if index .Page.SettingVisibility "clock_layout"}}checked{{end}}> Uhr-Anzeige</label>
         <label><input type="checkbox" data-vis-key="language"                 {{if index .Page.SettingVisibility "language"}}checked{{end}}> Sprache</label>
         <label><input type="checkbox" data-vis-key="history_capture_enabled"  {{if index .Page.SettingVisibility "history_capture_enabled"}}checked{{end}}> Verlauf-Erfassung</label>
+        <label><input type="checkbox" data-vis-key="resolution_mode"          {{if index .Page.SettingVisibility "resolution_mode"}}checked{{end}}> Auflösung</label>
       </fieldset>
     </section>
 
@@ -1332,7 +1343,7 @@
         var brightnessTimer = null;
         function saveSetting(name, value) {
           var body = {};
-          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'path_mode') {
+          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'path_mode' || name === 'resolution_mode') {
             body[name] = String(value);
           } else if (name === 'history_capture') {
             body[name] = (value === '1' || value === 'true' || value === true);

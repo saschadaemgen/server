@@ -52,6 +52,7 @@ type adminViewerDetailData struct {
 	Language          string
 	ClockLayout       string
 	PathMode          string // WEG-Schalter (Saison 19-39): auto|local|cloud
+	ResolutionMode    string // Auflösungs-Wahl (Saison 19-42): high|medium|low
 	// SettingVisibility is a COMPLETE map (every tenantVisibleSettingKeys
 	// entry -> effective visible, default true) for the "dem Mieter
 	// anzeigen" toggles. (Saison 19-39)
@@ -101,6 +102,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 		Language:               info.ResolveLanguage(),
 		ClockLayout:            info.ResolveClockLayout(),
 		PathMode:               info.ResolvePathMode(),
+		ResolutionMode:         info.ResolveResolutionMode(),
 	}
 	switch info.Type {
 	case viewermanager.TypeESP:

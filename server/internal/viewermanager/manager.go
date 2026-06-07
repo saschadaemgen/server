@@ -180,6 +180,10 @@ type ViewerInfo struct {
 	// Saison 19-39): "auto" (default) / "local" / "cloud". Read-only
 	// here; the app honours it when choosing the edge-vs-cloud endpoint.
 	PathMode string
+	// ResolutionMode is the per-viewer source-resolution choice (Saison
+	// 19-42): "high" / "medium" (default) / "low". carvilon only reports
+	// the choice; the stream pulls it + the app uses it at stream-start.
+	ResolutionMode string
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -274,6 +278,18 @@ const (
 // PathModeAllowed is the strict allow-list for SetPathMode.
 var PathModeAllowed = []string{PathModeAuto, PathModeLocal, PathModeCloud}
 
+// ResolutionMode values (Saison 19-42). "medium" is the default - the
+// resource-friendly choice for the cloud/Android path (shorter GOP, fewer
+// resources); "high" rides the LAN/switch, "low" is the third step.
+const (
+	ResolutionModeHigh   = "high"
+	ResolutionModeMedium = "medium"
+	ResolutionModeLow    = "low"
+)
+
+// ResolutionModeAllowed is the strict allow-list for SetResolutionMode.
+var ResolutionModeAllowed = []string{ResolutionModeHigh, ResolutionModeMedium, ResolutionModeLow}
+
 // ResolveBrightnessIdle returns the persisted idle-brightness or
 // DefaultBrightnessIdle when the column is NULL. ESP-only
 // concept; web viewers ignore it.
@@ -348,6 +364,23 @@ func (v *ViewerInfo) ResolvePathMode() string {
 		return PathModeCloud
 	default:
 		return PathModeAuto
+	}
+}
+
+// ResolveResolutionMode returns the viewer's source-resolution choice
+// (Saison 19-42). NULL/empty/unknown falls back to "medium". carvilon
+// only reports it; the stream pulls the step + the app uses it.
+func (v *ViewerInfo) ResolveResolutionMode() string {
+	if v == nil {
+		return ResolutionModeMedium
+	}
+	switch v.ResolutionMode {
+	case ResolutionModeHigh:
+		return ResolutionModeHigh
+	case ResolutionModeLow:
+		return ResolutionModeLow
+	default:
+		return ResolutionModeMedium
 	}
 }
 
@@ -734,7 +767,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -761,7 +794,7 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode); err != nil {
 			return nil, "", fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -876,13 +909,13 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode)
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -938,7 +971,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium')
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("viewermanager: list: %w", err)
@@ -964,7 +997,7 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode); err != nil {
 			return nil, fmt.Errorf("viewermanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -1353,6 +1386,28 @@ func (m *Manager) SetPathMode(ctx context.Context, mac, value string) error {
 		return fmt.Errorf("viewermanager: path_mode %q not in %v", trimmed, PathModeAllowed)
 	}
 	return m.setColumnExec(ctx, "set path mode", mac, "path_mode", trimmed)
+}
+
+// SetResolutionMode persists the per-viewer source-resolution choice
+// (Saison 19-42). Strictly checked against ResolutionModeAllowed; anything
+// else is an error. Empty normalises to "medium". NOT NULL DEFAULT
+// 'medium', so the value is always written non-null.
+func (m *Manager) SetResolutionMode(ctx context.Context, mac, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		trimmed = ResolutionModeMedium
+	}
+	allowed := false
+	for _, v := range ResolutionModeAllowed {
+		if v == trimmed {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("viewermanager: resolution_mode %q not in %v", trimmed, ResolutionModeAllowed)
+	}
+	return m.setColumnExec(ctx, "set resolution mode", mac, "resolution_mode", trimmed)
 }
 
 // ListViewerSettingVisibility returns the EXPLICIT per-setting

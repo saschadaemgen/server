@@ -82,7 +82,11 @@ type mieterSettingsJSON struct {
 	// "auto" | "local" | "cloud". The app honours it when choosing the
 	// edge-vs-cloud endpoint; v1 is admin-set.
 	PathMode string `json:"path_mode"`
-	UnitName string `json:"unit_name"`
+	// ResolutionMode is the source-resolution choice (Saison 19-42):
+	// "high" | "medium" | "low". The stream pulls it + the app uses it at
+	// stream-start; v1 is admin-set (weg-abhaengige LAN=high later).
+	ResolutionMode string `json:"resolution_mode"`
+	UnitName       string `json:"unit_name"`
 	// Visibility maps setting_key -> whether the tenant may see/change the
 	// control (Saison 19-39). EXPLICIT rows only; a missing key = visible
 	// (default). omitempty -> the key is absent when there are no
@@ -128,6 +132,7 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 		Language:               info.ResolveLanguage(),
 		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
 		PathMode:               info.ResolvePathMode(),
+		ResolutionMode:         info.ResolveResolutionMode(),
 		UnitName:               info.Name,
 		Visibility:             vis,
 	})

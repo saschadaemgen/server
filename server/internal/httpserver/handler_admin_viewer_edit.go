@@ -304,6 +304,7 @@ var tenantVisibleSettingKeys = []string{
 	"clock_layout",
 	"language",
 	"history_capture_enabled",
+	"resolution_mode",
 }
 
 // handleAdminViewerVisibility upserts one per-setting tenant-visibility
@@ -359,6 +360,7 @@ type adminViewerSettingsRequest struct {
 	BrightnessIdle         *int    `json:"brightness_idle,omitempty"`
 	Language               *string `json:"language,omitempty"`
 	PathMode               *string `json:"path_mode,omitempty"`
+	ResolutionMode         *string `json:"resolution_mode,omitempty"`
 }
 
 // handleAdminViewerSettings is the auto-save sink for every
@@ -465,6 +467,23 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		applied["path_mode"] = v
+	}
+
+	// Saison 19-42: source-resolution choice. Applies to all viewer types
+	// (not ESP-gated). Validated against the allow-list -> 400 on bad input.
+	if body.ResolutionMode != nil {
+		v := *body.ResolutionMode
+		if !slices.Contains(viewermanager.ResolutionModeAllowed, v) {
+			http.Error(w,
+				fmt.Sprintf("resolution_mode muss einer von %v sein", viewermanager.ResolutionModeAllowed),
+				http.StatusBadRequest)
+			return
+		}
+		if err := s.viewerMgr.SetResolutionMode(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "resolution_mode", err)
+			return
+		}
+		applied["resolution_mode"] = v
 	}
 
 	// ESP-only fields. type='web' -> 400 with a clear message.
