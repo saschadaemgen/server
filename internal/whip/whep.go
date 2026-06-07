@@ -13,6 +13,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"carvilon.local/stream/internal/icedebug"
+	"carvilon.local/stream/internal/rtppacer"
 	"carvilon.local/stream/internal/streamhub"
 )
 
@@ -52,6 +53,15 @@ const (
 	flexFECMediaPackets  = 10
 	flexFECRepairPackets = 5
 )
+
+// egressPacerTargetBitrate is the leaky-bucket pacing rate (bits/sec) for the
+// WHEP egress, ~3x the 800k re-encode media rate. High enough that steady
+// P-frames pass via accrued burst tokens, low enough that a keyframe is metered
+// over ~1-2 frame intervals - spreading our packets so a fixed-duration 4G loss
+// window catches fewer of them (d<=5, covered proactively by FlexFEC 10:5).
+// Tunable knob; lower (~1.6M, 2x) spreads more but adds latency. See
+// internal/rtppacer for the placement/RTX trade-off.
+const egressPacerTargetBitrate = 2_400_000
 
 // Sentinel errors mapped to HTTP status by the WHEP handler.
 var (
@@ -148,13 +158,23 @@ func AcceptSubscriber(
 	// loss-free (measured), so every packet reaches the egress send-cache and
 	// can be retransmitted on the same SSRC.
 	ir := &interceptor.Registry{}
-	// S4 step 2: FlexFEC-03 FEC. Registered FIRST - pion requires the FEC
-	// interceptor before any RTP-modifying interceptor (so its repair packets
-	// are not altered). The egress sequence numbers are clean and monotone
-	// (the edge publishes via TrackLocalStaticSample, the cloud forwards them
-	// verbatim), which is the well-formed input FlexFEC needs. Coexists with
-	// the NACK responder below; a peer that does not offer flexfec-03 just
-	// gets no FEC.
+	// S4 step 4: egress send-pacing, added FIRST so it is INNERMOST in pion's
+	// chain (track -> responder -> FlexFEC -> pacer -> transport): it paces the
+	// FINAL media + FEC packets. On real 4G the residual hard bursts lose d=6
+	// at once, one over the FlexFEC 10:5 budget; thinning our in-flight density
+	// pulls a fixed-duration loss window back to d<=5, which FEC then covers
+	// proactively. The pacer only re-times (never alters bytes/order), so
+	// FlexFEC's repair packets stay valid even though it now sits below the
+	// pacer. RTX retransmits are lightly paced too (accepted compromise; see
+	// rtppacer). Tunable knob; ~3x the 800k media rate.
+	ir.Add(rtppacer.NewFactory(egressPacerTargetBitrate, logger))
+	// S4 step 2: FlexFEC-03 FEC. Registered before the NACK responder - pion
+	// requires the FEC interceptor before any RTP-MODIFYING interceptor (so its
+	// repair packets are not altered); the pacer above is non-modifying. The
+	// egress sequence numbers are clean and monotone (the edge publishes via
+	// TrackLocalStaticSample, the cloud forwards them verbatim), which is the
+	// well-formed input FlexFEC needs. Coexists with the NACK responder below;
+	// a peer that does not offer flexfec-03 just gets no FEC.
 	if err := webrtc.ConfigureFlexFEC03(flexFECPayloadType, me, ir,
 		flexfec.NumMediaPackets(flexFECMediaPackets),
 		flexfec.NumFECPackets(flexFECRepairPackets),
