@@ -123,7 +123,12 @@ func AcceptSubscriber(
 	// so we deliberately do NOT gate here. Real spec arrives with the
 	// SDP/ICE season.
 
-	me, err := newH264MediaEngine()
+	// EGRESS engine: H.264 + rtx (RFC 4588). Registering rtx is what lets the
+	// answer negotiate the rtx the phone already offers, so the NACK responder
+	// below retransmits over a SEPARATE RTX SSRC (replay-safe) instead of the
+	// same SSRC (which the receiver's replay guard drops). See
+	// newH264MediaEngineWithRTX for the full wiring befund.
+	me, err := newH264MediaEngineWithRTX()
 	if err != nil {
 		return "", "", fmt.Errorf("whip: media engine: %w", err)
 	}

@@ -276,6 +276,29 @@ func TestWHEP_FlexFEC_NegotiatedWhenOffered(t *testing.T) {
 	}
 }
 
+// TestWHEP_RTX_NegotiatedFromDefaultOffer proves the egress now ACCEPTS the
+// rtx a standard receiver offers by default (whepSubscribe uses pion's default
+// codecs, which include rtx) - the S4 RTX fix. The answer must advertise rtx
+// AND the a=ssrc-group:FID media+rtx pairing, which is what tells the phone
+// the retransmission SSRC. Without the egress rtx registration the answer
+// dropped rtx (covered implicitly by the pre-fix behaviour).
+func TestWHEP_RTX_NegotiatedFromDefaultOffer(t *testing.T) {
+	base, key := newTestServer(t)
+	const sid = "test-mac"
+	startConnectedPublisher(t, base, sid, key)
+
+	res := whepSubscribe(t, base, sid)
+	if res.status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", res.status, res.answerSDP)
+	}
+	if !strings.Contains(res.answerSDP, "rtx/90000") {
+		t.Errorf("egress answer does not advertise rtx: %q", res.answerSDP)
+	}
+	if !strings.Contains(res.answerSDP, "a=ssrc-group:FID") {
+		t.Errorf("egress answer missing a=ssrc-group:FID (media+rtx pair): %q", res.answerSDP)
+	}
+}
+
 func TestWHEP_TrackNotReady(t *testing.T) {
 	old := trackReadyTimeout
 	trackReadyTimeout = 200 * time.Millisecond
