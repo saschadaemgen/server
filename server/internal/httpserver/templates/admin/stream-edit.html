@@ -99,9 +99,10 @@
               <option value="mjpeg"            {{if eq .Page.Profile.Codec "mjpeg"}}selected{{end}}>mjpeg</option>
               <option value="h264_cbp"         {{if eq .Page.Profile.Codec "h264_cbp"}}selected{{end}}>h264_cbp</option>
               <option value="h264_passthrough" {{if eq .Page.Profile.Codec "h264_passthrough"}}selected{{end}}>h264_passthrough</option>
+              <option value="h264_reencode_shortgop" {{if eq .Page.Profile.Codec "h264_reencode_shortgop"}}selected{{end}}>h264_reencode_shortgop</option>
             </select>
           </div>
-          <span class="field-hint">h264_passthrough = WebRTC ohne Re-Encodierung. mjpeg + h264_cbp ziehen die Encode-Parameter unten heran.</span>
+          <span class="field-hint">h264_passthrough = WebRTC ohne Re-Encodierung. mjpeg + h264_cbp ziehen die Encode-Parameter unten heran. h264_reencode_shortgop = Cloud/4G Re-Encode (kurze GOP, Mittel).</span>
         </div>
 
         <div class="field" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3);">
