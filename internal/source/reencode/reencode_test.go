@@ -37,39 +37,22 @@ func hasSubstr(args []string, sub string) bool {
 	return false
 }
 
-// TestBuildFFmpegArgs_ApprovedDecisions pins the Stufe-C decisions into the
-// argv so a later careless edit cannot silently undo them. The hard negatives
-// matter most: NO intra-refresh (WebRTC needs IDRs - intra-refresh = black
-// screen), NO -force_key_frames, NO low_delay (D-0002 Canary), and NOT back to
-// v4l2m2m (which has no VBV).
+// TestBuildFFmpegArgs_ApprovedDecisions pins the BAU-FREIGABE Plan A
+// decisions into the argv so a later careless edit cannot silently undo
+// them. The hard negatives matter most: v4l2m2m ignores -force_key_frames
+// (RPi-confirmed), so the GOP MUST be -g driven; and low_delay must never
+// return (D-0002 Canary).
 func TestBuildFFmpegArgs_ApprovedDecisions(t *testing.T) {
-	args := buildFFmpegArgs(20, 1500, 600)
+	args := buildFFmpegArgs(20, 1500)
 
-	if !hasPair(args, "-c:v", "libx264") {
-		t.Errorf("missing -c:v libx264; got %v", args)
+	if !hasPair(args, "-c:v", "h264_v4l2m2m") {
+		t.Errorf("missing -c:v h264_v4l2m2m; got %v", args)
 	}
-	if !hasPair(args, "-preset", "ultrafast") {
-		t.Errorf("missing -preset ultrafast; got %v", args)
-	}
-	if !hasPair(args, "-tune", "zerolatency") {
-		t.Errorf("missing -tune zerolatency; got %v", args)
-	}
-	// S6-04: single-slice (else h264esp.AUSplitter mis-frames each slice).
-	if !hasPair(args, "-x264-params", "sliced-threads=0:slices=1") {
-		t.Errorf("missing -x264-params sliced-threads=0:slices=1; got %v", args)
+	if !hasPair(args, "-g", "20") {
+		t.Errorf("missing -g 20; got %v", args)
 	}
 	if !hasPair(args, "-b:v", "1500k") {
 		t.Errorf("missing -b:v 1500k; got %v", args)
-	}
-	// VBV window - the Stufe-C lever.
-	if !hasPair(args, "-maxrate", "1500k") {
-		t.Errorf("missing -maxrate 1500k; got %v", args)
-	}
-	if !hasPair(args, "-bufsize", "600k") {
-		t.Errorf("missing -bufsize 600k; got %v", args)
-	}
-	if !hasPair(args, "-g", "20") {
-		t.Errorf("missing -g 20 (periodic IDRs); got %v", args)
 	}
 	if !hasPair(args, "-bf", "0") {
 		t.Errorf("missing -bf 0; got %v", args)
@@ -88,30 +71,27 @@ func TestBuildFFmpegArgs_ApprovedDecisions(t *testing.T) {
 	}
 
 	// HARD NEGATIVES:
-	if hasSubstr(args, "intra-refresh") {
-		t.Errorf("intra-refresh present; WebRTC needs IDRs, intra-refresh = black screen: %v", args)
-	}
 	if hasArg(args, "-force_key_frames") {
-		t.Errorf("-force_key_frames present; GOP must be -g driven: %v", args)
+		t.Errorf("-force_key_frames present; v4l2m2m ignores it, GOP must be -g driven: %v", args)
 	}
-	if hasArg(args, "h264_v4l2m2m") {
-		t.Errorf("h264_v4l2m2m present; Stufe C uses libx264 for the VBV window: %v", args)
+	if hasArg(args, "libx264") {
+		t.Errorf("libx264 present; the edge re-encode must use h264_v4l2m2m: %v", args)
 	}
 	if hasSubstr(args, "low_delay") {
 		t.Errorf("low_delay present; forbidden (D-0002 Canary): %v", args)
 	}
-	// No -profile:v: libx264 default profile is fine (matches camera +
-	// passthrough, Android decodes); a forced profile is a fallback only.
-	if hasArg(args, "-profile:v") {
-		t.Errorf("-profile:v present; libx264 default is intended: %v", args)
+	// FIX-STREAM-S4: this v4l2m2m has no settable profile (-profile:v errors).
+	// The encoder defaults to High, matching camera + passthrough. Must NOT
+	// pass any -profile:v.
+	if hasArg(args, "-profile:v") || hasSubstr(args, "constrained_baseline") {
+		t.Errorf("-profile:v present; v4l2m2m here has no settable profile, must default to High: %v", args)
 	}
 }
 
-func TestBuildFFmpegArgs_VBVThreaded(t *testing.T) {
-	a := buildFFmpegArgs(25, 2500, 400)
-	if !hasPair(a, "-g", "25") || !hasPair(a, "-b:v", "2500k") ||
-		!hasPair(a, "-maxrate", "2500k") || !hasPair(a, "-bufsize", "400k") {
-		t.Errorf("gop/bitrate/VBV not threaded through: %v", a)
+func TestBuildFFmpegArgs_GOPAndBitrateThreaded(t *testing.T) {
+	a := buildFFmpegArgs(25, 2500)
+	if !hasPair(a, "-g", "25") || !hasPair(a, "-b:v", "2500k") {
+		t.Errorf("gop/bitrate not threaded through: %v", a)
 	}
 }
 
