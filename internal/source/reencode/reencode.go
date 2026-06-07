@@ -71,9 +71,11 @@ const (
 	DefaultGOP = 25
 	// DefaultBitrateKbps is the v4l2m2m target bitrate. v4l2m2m is
 	// bitrate-driven (no libx264-style CRF), so rate control is a kbit/s
-	// budget. 1500 kbit/s is a deliberately LEAN start for a tight 4G uplink
-	// (FIX-STREAM-S4); raise it on the Pi if the link has headroom.
-	DefaultBitrateKbps = 1500
+	// budget. LOWERED to 800 kbit/s after the cloud/4G field test: smaller
+	// frames mean smaller per-frame packet bursts (gentler on a lossy radio
+	// leg) and leave headroom for the raised ~50% FlexFEC overhead on the
+	// egress. Priority is killing the freeze; iterative knob, 600-1000k band.
+	DefaultBitrateKbps = 800
 )
 
 const (
