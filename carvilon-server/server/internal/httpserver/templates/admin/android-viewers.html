@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - Android-Viewer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Android-Viewer</h1>
+        <p class="page-subtitle">Native Android-App pro Wohnung. Mehrere Geraete pro Wohnung moeglich (Geraete-Name unterscheidet sie).</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" type="button" data-action="open-create">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Neues Geraet
+        </button>
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    <div class="app-card">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>Geraet</th>
+            <th>Wohnung</th>
+            <th>Verknuepfter Mieter</th>
+            <th>Verknuepfte Klingel</th>
+            <th>Token</th>
+            <th style="text-align:right;">Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Page.Viewers}}
+            <tr id="row-{{macID .MAC}}">
+              <td>
+                <a href="/a/viewers/{{.MAC}}" style="color:inherit; text-decoration:none;" title="Detail-Seite"><strong>{{if .DeviceLabel}}{{.DeviceLabel}}{{else}}{{.Name}}{{end}}</strong></a>
+                {{if .DeviceLabel}}
+                  <div style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">{{.Name}}</div>
+                {{end}}
+                <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
+              </td>
+              <td>{{.Name}}</td>
+              <td>
+                {{if .LinkedUserName}}
+                  <a href="/a/users/{{.LinkedUserID}}">{{.LinkedUserName}}</a>
+                {{else if .LinkedUserID}}
+                  <code style="color: var(--color-text-tertiary);">{{.LinkedUserID}}</code>
+                {{else}}
+                  <span style="color: var(--color-text-tertiary);">-</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .PairedIntercomMAC}}
+                  <code style="font-size: var(--fs-sm);">{{.PairedIntercomMAC}}</code>
+                {{else}}
+                  <span style="color: var(--color-text-tertiary);">-</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .HasToken}}
+                  <span class="status-pill is-ok"><span class="status-dot"></span>gesetzt</span>
+                {{else}}
+                  <span class="status-pill"><span class="status-dot"></span>fehlt</span>
+                {{end}}
+              </td>
+              <td style="text-align:right; white-space:nowrap;">
+                <button class="btn btn-primary btn-sm" type="button" data-action="unlock-door" data-mac="{{.MAC}}" data-name="{{if .DeviceLabel}}{{.DeviceLabel}}{{else}}{{.Name}}{{end}}" title="Tür öffnen">Tür öffnen</button>
+                <button class="btn btn-secondary btn-sm" type="button"
+                        data-action="regen-token"
+                        data-mac="{{.MAC}}"
+                        data-label="{{if .DeviceLabel}}{{.DeviceLabel}}{{else}}{{.Name}}{{end}}">
+                  Token erneuern
+                </button>
+                <form method="post" action="/a/android-viewers/{{.MAC}}/delete"
+                      style="display:inline; margin:0;"
+                      onsubmit="return confirm('Geraet endgueltig loeschen? Der Token wird sofort ungueltig.');">
+                  <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
+                </form>
+              </td>
+            </tr>
+          {{else}}
+            <tr><td colspan="6" style="text-align:center; color: var(--color-text-tertiary);">Noch kein Android-Geraet angelegt.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Create-Modal. Mehrere Geraete pro Wohnung sind erlaubt;
+         der Wohnungs-Name (name) und der Geraete-Name
+         (device_label) unterscheiden sich, der Operator vergibt
+         beides. -->
+    <div class="modal-scrim" data-modal="create-android" role="dialog" aria-modal="true" aria-labelledby="create-android-title">
+      <div class="modal-glass">
+        <form data-android-create>
+          <header class="modal-header">
+            <div>
+              <h2 id="create-android-title" class="modal-title">Android-Geraet anlegen</h2>
+              <p class="modal-sub">Generiert eine MAC, einen Service-Port und ein neues Bearer-Token. Der Klartext-Token wird EINMALIG angezeigt.</p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
+            <div class="field">
+              <label class="field-label" for="new-android-name">Wohnungs-Name</label>
+              <input class="input" id="new-android-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG" autofocus/>
+              <span class="field-hint">Pro Wohnung eindeutig (case-insensitive). Mehrere Geraete derselben Wohnung verwenden trotzdem den selben Wohnungs-Namen plus einen eigenen Geraete-Namen.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-android-label">Geraete-Name</label>
+              <input class="input" id="new-android-label" name="device_label" type="text" maxlength="64" placeholder="z.B. Papas Handy"/>
+              <span class="field-hint">Hilft dem Operator mehrere Geraete derselben Wohnung zu unterscheiden. Optional.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-android-link">Verknuepfen mit Benutzer (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --">
+                <select id="new-android-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-android-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --">
+                <select id="new-android-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">UA-Intercom, gegen die das Geraet die Standby-"Tuer auf"-Aktion ausfuehren darf.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-android-stream">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_android) --">
+                <select id="new-android-stream" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_android) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default <code>intercom_android</code>.</span>
+            </div>
+          </div>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Anlegen</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <!-- One-Shot-Token-Reveal-Modal nach Create + Regenerate.
+         Der Klartext wird HIER und nur HIER angezeigt, danach
+         hat der Server nur noch den Hash. -->
+    <div class="modal-scrim" data-modal="android-token" role="dialog" aria-modal="true" aria-labelledby="android-token-title">
+      <div class="modal-glass">
+        <header class="modal-header">
+          <div>
+            <h2 id="android-token-title" class="modal-title">Bearer-Token</h2>
+            <p class="modal-sub" data-android-token-sub></p>
+          </div>
+          <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
+          <div class="banner banner-amber" role="status" style="margin:0;">
+            Der Token wird nur EINMAL angezeigt. Bitte sofort in die Android-App uebertragen.
+          </div>
+          <div class="field">
+            <label class="field-label" for="android-token-value">Token</label>
+            <div style="display:flex; gap:var(--space-2); align-items:stretch;">
+              <input type="text" id="android-token-value" class="input" readonly style="flex:1; user-select:all; font-family: var(--font-mono);"/>
+              <button class="btn btn-secondary" type="button" data-action="copy-token">Kopieren</button>
+            </div>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button class="btn btn-primary" type="button" data-action="close-modal">Verstanden</button>
+        </footer>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+  <script>
+    // Page-local glue: open/close modals + adopt POST + regen POST.
+    // Mirrors the ESP-Viewer adopt pattern but skips the discovery
+    // flow (no pending list, no /esp/discover-Polling) - admin
+    // creates Android devices directly.
+    (function () {
+      'use strict';
+
+      function openModal(name) {
+        var m = document.querySelector('[data-modal="' + name + '"]');
+        if (m) m.classList.add('is-open');
+      }
+      function closeModals() {
+        document.querySelectorAll('.modal-scrim.is-open').forEach(function (m) {
+          m.classList.remove('is-open');
+        });
+      }
+      function showToken(macOrLabel, token) {
+        document.querySelector('[data-android-token-sub]').textContent =
+          macOrLabel + ' - Klartext-Token unten:';
+        document.querySelector('#android-token-value').value = token;
+        openModal('android-token');
+      }
+
+      document.addEventListener('click', function (e) {
+        var openBtn = e.target.closest('[data-action="open-create"]');
+        if (openBtn) {
+          var form = document.querySelector('[data-android-create]');
+          if (form) form.reset();
+          openModal('create-android');
+          return;
+        }
+        var closeBtn = e.target.closest('[data-action="close-modal"]');
+        if (closeBtn) { closeModals(); return; }
+        var regen = e.target.closest('[data-action="regen-token"]');
+        if (regen) {
+          var mac = regen.getAttribute('data-mac');
+          var label = regen.getAttribute('data-label') || mac;
+          if (!confirm('Token fuer "' + label + '" erneuern? Der alte Token wird sofort ungueltig.')) return;
+          fetch('/a/android-viewers/' + mac + '/regenerate-token', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' },
+          }).then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+            return r.json();
+          }).then(function (data) {
+            showToken(label, data.token);
+          }).catch(function (err) {
+            alert('Token erneuern fehlgeschlagen: ' + err.message);
+          });
+          return;
+        }
+        var copy = e.target.closest('[data-action="copy-token"]');
+        if (copy) {
+          var inp = document.querySelector('#android-token-value');
+          if (inp && navigator.clipboard) {
+            navigator.clipboard.writeText(inp.value).then(function () {
+              copy.textContent = 'Kopiert';
+              setTimeout(function () { copy.textContent = 'Kopieren'; }, 1500);
+            });
+          }
+          return;
+        }
+        // Backdrop click closes modals.
+        var scrim = e.target.closest('.modal-scrim');
+        if (scrim && e.target === scrim) closeModals();
+      });
+
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('[data-android-create]');
+        if (!form) return;
+        e.preventDefault();
+        var body = {
+          name:                form.elements['name'].value,
+          device_label:        form.elements['device_label'].value,
+          linked_ua_user_id:   form.elements['linked_ua_user_id'].value,
+          paired_intercom_mac: form.elements['paired_intercom_mac'].value,
+          stream_profile:      form.elements['stream_profile'].value,
+        };
+        fetch('/a/android-viewers/adopt', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept':       'application/json',
+          },
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function (data) {
+          closeModals();
+          showToken(body.device_label || body.name || data.mac, data.token);
+          // Reload after the operator closes the token modal so
+          // the list shows the new row. We poll for the token
+          // modal to lose .is-open and then refresh.
+          var tokenModal = document.querySelector('[data-modal="android-token"]');
+          var poll = setInterval(function () {
+            if (!tokenModal.classList.contains('is-open')) {
+              clearInterval(poll);
+              location.reload();
+            }
+          }, 200);
+        }).catch(function (err) {
+          alert('Anlegen fehlgeschlagen: ' + err.message);
+        });
+      });
+
+      // Esc closes modals.
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeModals();
+      });
+    })();
+  </script>
+  <script>
+    // Saison 19-32: per-row "Tür öffnen" with a mandatory confirm.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="unlock-door"]');
+      if (!btn) return;
+      var mac = btn.getAttribute('data-mac');
+      var name = btn.getAttribute('data-name') || 'diesem Mieter';
+      if (!window.confirm('Tür von ' + name + ' wirklich öffnen?')) return;
+      btn.disabled = true;
+      fetch('/a/viewers/' + encodeURIComponent(mac) + '/unlock', {
+        method: 'POST', headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok && res.j && res.j.ok) { window.alert('Tür geöffnet.'); }
+          else { window.alert('Öffnen fehlgeschlagen: ' + ((res.j && res.j.error) || 'Fehler')); }
+        })
+        .catch(function () { window.alert('Öffnen fehlgeschlagen (Netzwerk).'); })
+        .then(function () { btn.disabled = false; });
+    });
+  </script>
+</body>
+</html>

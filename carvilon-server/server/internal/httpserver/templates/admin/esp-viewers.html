@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - ESP-Viewer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">ESP-Viewer</h1>
+        <p class="page-subtitle">Adoptierte ESP32-Hardware-Viewer als Klingel-Empfaenger.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-secondary" type="button" onclick="location.reload()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 10a8 8 0 0 1 13.7-5.7L20 6"/>
+            <path d="M20 4v4h-4"/>
+            <path d="M20 14a8 8 0 0 1-13.7 5.7L4 18"/>
+            <path d="M4 20v-4h4"/>
+          </svg>
+          Aktualisieren
+        </button>
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    <!-- Pending-Liste -->
+    <section class="app-card" id="esp-pending" data-pending-empty="{{if not .Page.Pending}}1{{else}}0{{end}}">
+      <div class="app-card-head">
+        <h2 class="app-card-title">Geraete warten auf Adoption (<span data-pending-count>{{len .Page.Pending}}</span>)</h2>
+        <span class="badge">Auto-Refresh</span>
+      </div>
+      {{if .Page.Pending}}
+        <table class="app-table" data-pending-table>
+          <thead>
+            <tr><th>MAC</th><th>Modell</th><th>Firmware</th><th>Entdeckt</th><th>Letzter Poll</th><th style="text-align:right;">Aktion</th></tr>
+          </thead>
+          <tbody>
+            {{range .Page.Pending}}
+              <tr>
+                <td><code>{{.MAC}}</code></td>
+                <td>{{if .Model}}{{.Model}}{{else}}<em>-</em>{{end}}</td>
+                <td>{{if .FwVersion}}{{.FwVersion}}{{else}}<em>-</em>{{end}}</td>
+                <td>{{.DiscoveredAt}}</td>
+                <td>{{.LastPollAt}}</td>
+                <td style="text-align:right; white-space:nowrap;">
+                  {{if .Rejected}}
+                    <span class="status-pill is-danger"><span class="status-dot"></span>Abgelehnt</span>
+                  {{else}}
+                    <button class="btn btn-primary btn-sm" type="button" data-action="open-adopt" data-mac="{{.MAC}}" data-model="{{.Model}}">Adoptieren</button>
+                    <form method="post" action="/a/esp-viewers/{{.MAC}}/reject" style="display:inline; margin:0;">
+                      <button class="btn btn-secondary btn-sm" type="submit">Ablehnen</button>
+                    </form>
+                  {{end}}
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{else}}
+        <div class="app-card-body" data-pending-empty-state style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>Noch kein Geraet wartet auf Adoption.</p>
+          <p style="font-size: var(--fs-sm);">Sobald ein ESP-Viewer am Netz haengt und carvilon gefunden hat, taucht er hier auf.</p>
+        </div>
+      {{end}}
+    </section>
+
+    <!-- Adoptierte ESP-Viewer -->
+    <section class="app-card" style="margin-top: var(--space-6);" data-adopted-empty="{{if not .Page.Adopted}}1{{else}}0{{end}}">
+      <div class="app-card-head">
+        <h2 class="app-card-title">Adoptiert (<span data-adopted-count>{{len .Page.Adopted}}</span>)</h2>
+      </div>
+      {{if .Page.Adopted}}
+        <table class="app-table" data-adopted-table>
+          <thead>
+            <tr><th>Name</th><th>MAC</th><th>Modell</th><th>Firmware</th><th>Token</th><th>Verknuepft mit</th><th style="text-align:right;">Aktionen</th></tr>
+          </thead>
+          <tbody>
+            {{range .Page.Adopted}}
+              <tr>
+                <td><a href="/a/viewers/{{.MAC}}" style="color:inherit; text-decoration:none;" title="Detail-Seite"><strong>{{.Name}}</strong></a></td>
+                <td><code>{{.MAC}}</code></td>
+                <td>{{if .Model}}{{.Model}}{{else}}<em>-</em>{{end}}</td>
+                <td>{{if .FwVersion}}{{.FwVersion}}{{else}}<em>-</em>{{end}}</td>
+                <td>
+                  {{if .HasToken}}
+                    <span class="status-pill is-ok"><span class="status-dot"></span>gesetzt</span>
+                  {{else}}
+                    <span class="status-pill"><span class="status-dot"></span>fehlt</span>
+                  {{end}}
+                </td>
+                <td>
+                  {{if .LinkedUserName}}
+                    <a href="/a/users/{{.LinkedUserID}}">{{.LinkedUserName}}</a>
+                  {{else}}
+                    <span style="color: var(--color-text-tertiary);">-</span>
+                  {{end}}
+                </td>
+                <td style="text-align:right; white-space:nowrap;">
+                  <button class="btn btn-primary btn-sm" type="button" data-action="unlock-door" data-mac="{{.MAC}}" data-name="{{.Name}}" title="Tür öffnen">Tür öffnen</button>
+                  <button class="btn btn-secondary btn-sm" type="button" data-action="regen-token" data-mac="{{.MAC}}">Token erneuern</button>
+                  <form method="post" action="/a/esp-viewers/{{.MAC}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('ESP-Viewer endgueltig loeschen?');">
+                    <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
+                  </form>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{else}}
+        <div class="app-card-body" data-adopted-empty-state style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>Noch kein ESP-Viewer adoptiert.</p>
+          <p style="font-size: var(--fs-sm);">Geraet einstecken und ans WLAN bringen, dann erscheint es oben in der Pending-Liste.</p>
+        </div>
+      {{end}}
+    </section>
+
+    <!-- Adopt-Modal -->
+    <div class="modal-scrim" data-modal="adopt-esp" role="dialog" aria-modal="true" aria-labelledby="adopt-esp-title">
+      <div class="modal-glass">
+        <form data-adopt-form>
+          <header class="modal-header">
+            <div>
+              <h2 id="adopt-esp-title" class="modal-title">ESP-Viewer adoptieren</h2>
+              <p class="modal-sub">Der Server erzeugt beim Klick auf Adoptieren einen Bearer-Token. Den vollen Klartext bekommt nur das ESP - hier siehst du nur einen Token-Preview zur Pruefung.</p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
+            <div class="field">
+              <label class="field-label">MAC-Adresse</label>
+              <div class="input" data-adopt-mac style="user-select:all; font-family:var(--font-mono);">-</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Modell</label>
+              <div class="input" data-adopt-model>-</div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="adopt-name">Wohnungs-Name</label>
+              <input class="input" id="adopt-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG"/>
+            </div>
+            <div class="field">
+              <label class="field-label" for="adopt-link">Verknuepfen mit Benutzer (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --">
+                <select id="adopt-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="adopt-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --">
+                <select id="adopt-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="adopt-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_esp) --">
+                <select id="adopt-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_esp) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
+            </div>
+          </div>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Adoptieren</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+  <script>
+    (function () {
+      // ---- Adopt-Modal Open ----
+      // User-Dropdown laeuft jetzt
+      // ueber das gemeinsame Custom-Dropdown-Modul aus _nav.html;
+      // dieses laed die Optionen via fetch beim ersten Open des
+      // Dropdowns selbst.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-adopt"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = document.querySelector('[data-modal="adopt-esp"]');
+        if (!modal) return;
+        modal.dataset.mac = btn.getAttribute('data-mac') || '';
+        var macEl = modal.querySelector('[data-adopt-mac]');
+        var modelEl = modal.querySelector('[data-adopt-model]');
+        if (macEl) macEl.textContent = btn.getAttribute('data-mac') || '-';
+        if (modelEl) modelEl.textContent = btn.getAttribute('data-model') || '-';
+        var nameEl = modal.querySelector('#adopt-name');
+        if (nameEl) { nameEl.value = ''; setTimeout(function () { nameEl.focus(); }, 50); }
+        modal.classList.add('is-open');
+      });
+
+      // ---- Modal-Close ----
+      document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-action="close-modal"]')) {
+          var m = e.target.closest('.modal-scrim');
+          if (m) m.classList.remove('is-open');
+        }
+      });
+
+      // ---- Adopt-Submit ----
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('form[data-adopt-form]');
+        if (!form) return;
+        e.preventDefault();
+        var modal = form.closest('[data-modal="adopt-esp"]');
+        var mac = modal ? modal.dataset.mac : '';
+        var name = form.querySelector('#adopt-name').value;
+        var linked = form.querySelector('#adopt-link').value;
+        var pairedSel = form.querySelector('#adopt-paired');
+        var paired = pairedSel ? pairedSel.value : '';
+        var streamSel = form.querySelector('#adopt-stream-profile');
+        var streamProfile = streamSel ? streamSel.value : '';
+        fetch('/a/esp-viewers/adopt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            mac: mac,
+            name: name,
+            linked_ua_user_id: linked,
+            paired_intercom_mac: paired,
+            stream_profile: streamProfile
+          }),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+            return r.json();
+          })
+          .then(function (j) {
+            if (modal) modal.classList.remove('is-open');
+            alert('Adoptiert: ' + j.name + '\nToken-Preview: ' + j.token_preview + '\n\nDas ESP holt sich den vollen Token beim naechsten Status-Poll.');
+            location.reload();
+          })
+          .catch(function (err) {
+            alert('Adoption fehlgeschlagen: ' + err.message);
+          });
+      });
+
+      // ---- Token-Regenerate ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="regen-token"]');
+        if (!btn) return;
+        e.preventDefault();
+        if (!confirm('Alten Token verwerfen und neuen erzeugen? Das ESP muss den neuen Token beim naechsten Poll abholen.')) return;
+        var mac = btn.getAttribute('data-mac') || '';
+        fetch('/a/esp-viewers/' + encodeURIComponent(mac) + '/regenerate-token', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+            return r.json();
+          })
+          .then(function (j) {
+            alert('Neuer Token-Preview: ' + j.token_preview);
+            location.reload();
+          })
+          .catch(function (err) {
+            alert('Token-Erneuerung fehlgeschlagen: ' + err.message);
+          });
+      });
+
+      // ---- Auto-Refresh alle 5 Sekunden ----
+      // Wenn ein Modal offen ist, ueberspringen wir den Refresh,
+      // damit der Admin nicht beim Tippen abgelenkt wird.
+      setInterval(function () {
+        if (document.querySelector('.modal-scrim.is-open')) return;
+        fetch('/a/esp-viewers.json', {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            if (!j) return;
+            var pendingCount = (j.pending || []).length;
+            var adoptedCount = (j.adopted || []).length;
+            // Bei Aenderung der Anzahl: full-page-Reload (einfacher
+            // als die Tabellen via JS zu rerendern; Admin merkt das
+            // kaum bei 5-Sekunden-Tick).
+            var pc = document.querySelector('[data-pending-count]');
+            var ac = document.querySelector('[data-adopted-count]');
+            var oldPending = pc ? parseInt(pc.textContent, 10) : 0;
+            var oldAdopted = ac ? parseInt(ac.textContent, 10) : 0;
+            if (pendingCount !== oldPending || adoptedCount !== oldAdopted) {
+              location.reload();
+            }
+          })
+          .catch(function () { /* silent retry */ });
+      }, 5000);
+    })();
+  </script>
+  <script>
+    // Saison 19-32: per-row "Tür öffnen" with a mandatory confirm.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="unlock-door"]');
+      if (!btn) return;
+      var mac = btn.getAttribute('data-mac');
+      var name = btn.getAttribute('data-name') || 'diesem Mieter';
+      if (!window.confirm('Tür von ' + name + ' wirklich öffnen?')) return;
+      btn.disabled = true;
+      fetch('/a/viewers/' + encodeURIComponent(mac) + '/unlock', {
+        method: 'POST', headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok && res.j && res.j.ok) { window.alert('Tür geöffnet.'); }
+          else { window.alert('Öffnen fehlgeschlagen: ' + ((res.j && res.j.error) || 'Fehler')); }
+        })
+        .catch(function () { window.alert('Öffnen fehlgeschlagen (Netzwerk).'); })
+        .then(function () { btn.disabled = false; });
+    });
+  </script>
+</body>
+</html>

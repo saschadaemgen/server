@@ -1,0 +1,9 @@
+go 1.26.1
+
+use (
+	./license-server
+	./mock
+	./server
+	./shared
+	../streaming-server
+)

@@ -1,0 +1,907 @@
+{{define "admin-nav"}}
+<style>
+  /* dunkles Theme fuer Select-
+     Dropdowns. Browser-default ist meist weiss, das bricht die
+     Library-Aesthetik. Hier global (in jeder Admin-Seite via
+     admin-nav-Partial eingebunden) ohne die Library-Files
+     anzufassen. */
+  select.input,
+  select.field-select,
+  .admin-shell select {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-hairline-strong);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%;
+    background-size: 6px 6px;
+    background-repeat: no-repeat;
+    padding-right: 32px;
+  }
+  select.input option,
+  select.field-select option,
+  .admin-shell select option {
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+  }
+
+  /* Custom-Dropdown.
+     Native <select> ist auf manchen OS (Safari macOS, Firefox
+     Linux) nicht zuverlaessig dunkel zwingbar. Wir nutzen
+     Progressive-Enhancement: das echte <select> bleibt hidden
+     fuer Form-Submit + Server-Defaults; ein eigener div-basierter
+     Trigger + Panel rendert dariber. */
+
+  .dropdown { position: relative; width: 100%; }
+  .dropdown > select[data-dropdown-target] {
+    /* strikte visually-hidden-
+       Konvention. Vorher: nur clip + 1x1px, das hat in Modals
+       trotzdem als heller Balken durchgeschimmert (Chromium auf
+       Windows). Jetzt: clip + clip-path + Margin-Negativ +
+       overflow:hidden + white-space:nowrap. Plus pointer-events:
+       none damit keine versehentlichen Klicks ankommen. Der
+       Select bleibt Form-relevant fuer Submission. */
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+    pointer-events: none !important;
+    appearance: none !important;
+    opacity: 0 !important;
+  }
+  .dropdown-trigger {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 10px var(--space-3);
+    background-color: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-hairline-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: var(--fw-medium) var(--fs-base) / 1.4 var(--font-sans);
+    text-align: left;
+  }
+  .dropdown-trigger:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .dropdown-trigger[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .dropdown-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dropdown-label.is-placeholder { color: var(--color-text-tertiary); }
+  .dropdown-caret { flex: none; opacity: 0.7; }
+
+  .dropdown-panel {
+    /* das Panel wird beim Oeffnen
+       via JS in document.body verschoben (Portal-Pattern) und
+       inline mit position:fixed + top|bottom/left/width gesetzt.
+       Die Defaults hier sind nur fuer den geschlossenen Zustand
+       relevant (display:none). Z-Index liegt UEBER dem Modal
+       (--z-modal=300). Die overflow:hidden des Modal-Glass kann
+       das Panel nicht mehr clippen, weil es im Body liegt.
+
+       Saison 15-28: vorher stand hier
+         top: calc(100% + 4px);
+       als CSS-Default. Beim Open setzt positionPanel
+       position:fixed und JE NACH Flip-Richtung entweder top
+       oder bottom; den jeweils ungenutzten Anchor inline auf
+       '' zu setzen liess das CSS-Default einspringen. Bei
+       position:fixed wird das 100% in calc(100% + 4px) zu
+       viewport.height (Containing Block = Viewport), also
+       wanderte top auf vh+4 (offscreen). Zusammen mit dem
+       gesetzten bottom-Anchor klemmte der Browser die computed
+       height auf 0 und das Panel wurde unsichtbar. Lasst hier
+       jetzt keinen top-Default mehr stehen und setzt den
+       ungenutzten Anchor inline auf 'auto' (siehe positionPanel
+       unten).
+
+       konkrete Farben statt
+       var(--color-surface-1), weil das eine 4%-Alpha-translucente
+       Weiss-Fuellung ist. Inside .modal-glass (bg rgba(22,22,26,
+       0.94)) sah das dunkel aus; portaliert auf body schimmert
+       der ganze Hintergrund durch. Daher fest #0e1014 (das ist
+       --color-bg-elev aus tokens.css) plus !important, damit
+       spaetere Library-Updates nicht zurueckholen. */
+    position: absolute;
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow: hidden;
+    background-color: #0e1014 !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.80) !important;
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    opacity: 1 !important;
+  }
+  .dropdown-panel.is-open { display: flex; }
+  .dropdown-panel .dropdown-search {
+    margin: 8px;
+    padding: 8px 10px;
+    background-color: #14161c !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    border-radius: 6px !important;
+    font-size: 14px;
+    outline: none;
+  }
+  .dropdown-panel .dropdown-search:focus-visible {
+    outline: 2px solid #3d7bff;
+  }
+  .dropdown-panel .dropdown-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    background-color: #0e1014 !important;
+    /* dunkle Scrollbar. Firefox
+       nutzt scrollbar-width + scrollbar-color, Chromium und
+       Edge die ::-webkit-scrollbar-Pseudoelemente. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar {
+    width: 8px;
+    background-color: #14161c;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-track {
+    background-color: #14161c;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.20);
+    border-radius: 4px;
+  }
+  .dropdown-panel .dropdown-list::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.30);
+  }
+  .dropdown-panel .dropdown-option {
+    padding: 10px 12px;
+    cursor: pointer;
+    color: #ffffff !important;
+    background-color: transparent !important;
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+    font-size: 14px;
+  }
+  .dropdown-panel .dropdown-option:hover,
+  .dropdown-panel .dropdown-option.is-active {
+    background-color: #14161c !important;
+  }
+  .dropdown-panel .dropdown-option[aria-selected="true"] {
+    background-color: #3d7bff !important;
+    color: #ffffff !important;
+  }
+  .dropdown-panel .dropdown-empty,
+  .dropdown-panel .dropdown-loading {
+    padding: 12px;
+    color: rgba(255, 255, 255, 0.62) !important;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* kleiner Icon-Knopf fuer
+     Tabellen-Spalten ("Link kopieren" etc.). Bewusst neutral
+     gehalten damit er nicht mit den primary/secondary Buttons
+     der Library konkurriert. */
+  .icon-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+    padding: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .icon-btn:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+  .icon-btn:focus-visible {
+    outline: 2px solid #3d7bff;
+    outline-offset: 2px;
+  }
+  .icon-btn.is-success {
+    background-color: #10b981;
+    border-color: #10b981;
+    color: #ffffff;
+  }
+</style>
+<nav class="admin-nav" aria-label="Hauptnavigation">
+  <a class="admin-nav-brand" href="/a/" aria-label="CARVILON Intercom Administration">
+    <span class="carvilon-brand sz-sm" aria-hidden="true">
+      <span class="name">CARVILON</span>
+      <span class="sub-wrap">
+        <!-- subtitle ratio bumped to 0.95 for the
+             longer 23-char "INTERCOM ADMINISTRATION" so the
+             letter-spacing JS does not have to compress it
+             into negative tracking. -->
+        <span class="sub" data-target-ratio="0.95">INTERCOM ADMINISTRATION</span>
+      </span>
+    </span>
+  </a>
+  <div class="admin-nav-links" role="navigation">
+    <a class="admin-nav-link{{if eq .ActiveNav "dashboard"}} is-active{{end}}" href="/a/">Dashboard</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "web-viewers"}} is-active{{end}}" href="/a/web-viewers">Web-Viewer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "esp-viewers"}} is-active{{end}}" href="/a/esp-viewers">ESP-Viewer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "android-viewers"}} is-active{{end}}" href="/a/android-viewers">Android-Viewer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "esp-pager"}} is-active{{end}}" href="/a/esp-pager">ESP-Pager</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "streams"}} is-active{{end}}" href="/a/streams">Streams</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "turn"}} is-active{{end}}" href="/a/turn">TURN</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users">Benutzer</a>
+    <a class="admin-nav-link{{if eq .ActiveNav "settings"}} is-active{{end}}" href="/a/settings">Einstellungen</a>
+  </div>
+  <div class="admin-nav-actions">
+    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
+      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
+      <span class="admin-nav-user-name">{{.User.Name}}</span>
+    </div>
+    <form method="post" action="/a/logout" style="margin:0;">
+      <button class="btn-icon btn-ghost" type="submit" title="Abmelden" aria-label="Abmelden">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 5H5v14h10"/>
+          <path d="M15 9l4 3-4 3M9 12h10"/>
+        </svg>
+      </button>
+    </form>
+  </div>
+</nav>
+<!-- CARVILON brand width-sync runtime,
+     measured and applied to every .carvilon-brand on the page. -->
+<script src="/static/carvilon-brand.js" defer></script>
+<script>
+  // Custom-Dropdown-Component.
+  //
+  // Markup-Vertrag:
+  //   <div class="dropdown" data-dropdown
+  //        data-dropdown-source="inline" or "fetch:/a/users.json"
+  //        data-dropdown-label-key="DisplayName"           (fuer fetch)
+  //        data-dropdown-value-key="ID"                    (fuer fetch)
+  //        data-dropdown-extra-key="Email"                 (optional)
+  //        data-dropdown-placeholder="-- keine Auswahl --"
+  //        data-dropdown-value="<vorausgewaehlter wert>">
+  //     <select name="linked_ua_user_id" data-dropdown-target>
+  //       <option value="">-- keine Auswahl --</option>
+  //       <!-- bei inline: alle weiteren options -->
+  //     </select>
+  //   </div>
+  //
+  // Das hidden <select> bleibt fuer Form-Submit; der Custom-Trigger
+  // legt sich darueber. fetch-Modus laed beim ersten Open.
+  (function () {
+    window.carvilon = window.carvilon || {};
+    if (window.carvilon.dropdownInit) return; // doppelt-Init verhindern
+
+    var openInstance = null;
+    // closeOpen muss den vollen
+    // Teardown machen, sonst bleibt das Panel als Waise im body
+    // wenn Modal mit X/Esc/Backdrop geschlossen wird. Vorher
+    // setzte closeOpen nur die is-open-Klasse am Container, das
+    // portalierte Panel hing weiter sichtbar im body mit
+    // position:fixed + z-index:9999 + display:flex.
+    function closeOpen() {
+      if (!openInstance) return;
+      close(openInstance);
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    }
+
+    function render(el) {
+      var sel = el.querySelector('select[data-dropdown-target]');
+      if (!sel) return null;
+      var placeholder = el.getAttribute('data-dropdown-placeholder') || '-- bitte waehlen --';
+      var current = el.getAttribute('data-dropdown-value') || sel.value || '';
+
+      var trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'dropdown-trigger';
+      trigger.setAttribute('role', 'combobox');
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+
+      var label = document.createElement('span');
+      label.className = 'dropdown-label is-placeholder';
+      label.textContent = placeholder;
+      trigger.appendChild(label);
+
+      var caret = document.createElement('span');
+      caret.className = 'dropdown-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '▾';
+      trigger.appendChild(caret);
+
+      var panel = document.createElement('div');
+      panel.className = 'dropdown-panel';
+
+      var search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'dropdown-search';
+      search.placeholder = 'Suchen...';
+      search.setAttribute('aria-label', 'Liste filtern');
+      search.style.display = 'none'; // nur bei >10 Optionen sichtbar
+
+      var list = document.createElement('ul');
+      list.className = 'dropdown-list';
+      list.setAttribute('role', 'listbox');
+
+      panel.appendChild(search);
+      panel.appendChild(list);
+
+      el.appendChild(trigger);
+      el.appendChild(panel);
+
+      var instance = {
+        el: el, sel: sel, trigger: trigger, label: label,
+        panel: panel, search: search, list: list,
+        options: [], filtered: [], active: 0,
+        loaded: false, loading: false, placeholder: placeholder,
+      };
+      bindEvents(instance);
+      // Optionen sofort populieren (inline) oder beim ersten Open (fetch)
+      if ((el.getAttribute('data-dropdown-source') || 'inline') === 'inline') {
+        instance.options = optionsFromSelect(sel);
+        instance.loaded = true;
+        applyValue(instance, current);
+      } else {
+        applyValue(instance, current);
+      }
+      return instance;
+    }
+
+    function optionsFromSelect(sel) {
+      var opts = [];
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        opts.push({ value: o.value, label: o.textContent, extra: '' });
+      }
+      return opts;
+    }
+
+    function applyValue(inst, value) {
+      var found = null;
+      for (var i = 0; i < inst.options.length; i++) {
+        if (inst.options[i].value === value) { found = inst.options[i]; break; }
+      }
+      inst.sel.value = value;
+      if (found) {
+        inst.label.textContent = found.label;
+        inst.label.classList.toggle('is-placeholder', value === '');
+      } else if (value === '') {
+        inst.label.textContent = inst.placeholder;
+        inst.label.classList.add('is-placeholder');
+      }
+    }
+
+    function fetchOptions(inst) {
+      var source = inst.el.getAttribute('data-dropdown-source') || 'inline';
+      if (source === 'inline' || inst.loaded || inst.loading) return Promise.resolve();
+      var url = source.replace(/^fetch:/, '');
+      var labelKey = inst.el.getAttribute('data-dropdown-label-key') || 'label';
+      var valueKey = inst.el.getAttribute('data-dropdown-value-key') || 'value';
+      var extraKey = inst.el.getAttribute('data-dropdown-extra-key') || '';
+      var rootKey  = inst.el.getAttribute('data-dropdown-root-key') || '';
+      inst.loading = true;
+      inst.list.innerHTML = '<li class="dropdown-loading">Laedt...</li>';
+      return fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          inst.loading = false;
+          inst.loaded = true;
+          var arr = j;
+          if (rootKey && j && j[rootKey] !== undefined) arr = j[rootKey];
+          if (!arr || !arr.length) {
+            inst.options = [];
+            return;
+          }
+          // Placeholder-Option aus dem hidden select uebernehmen.
+          var placeholder = inst.options.length ? inst.options.slice(0, 1) : [];
+          if (!placeholder.length && inst.sel.options.length) {
+            placeholder = [{ value: inst.sel.options[0].value, label: inst.sel.options[0].textContent, extra: '' }];
+          }
+          var rest = arr.map(function (raw) {
+            var lab = raw[labelKey];
+            var extra = extraKey ? raw[extraKey] : '';
+            return { value: String(raw[valueKey] || ''), label: lab, extra: extra };
+          });
+          inst.options = placeholder.concat(rest);
+          // hidden select syncen
+          while (inst.sel.options.length > placeholder.length) {
+            inst.sel.remove(placeholder.length);
+          }
+          rest.forEach(function (o) {
+            var opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label + (o.extra ? ' (' + o.extra + ')' : '');
+            inst.sel.appendChild(opt);
+          });
+          applyValue(inst, inst.el.getAttribute('data-dropdown-value') || inst.sel.value || '');
+        })
+        .catch(function () { inst.loading = false; });
+    }
+
+    function renderList(inst) {
+      var q = inst.search.value.toLowerCase().trim();
+      inst.filtered = inst.options.filter(function (o) {
+        if (!q) return true;
+        return (o.label + ' ' + (o.extra || '')).toLowerCase().indexOf(q) >= 0;
+      });
+      inst.search.style.display = inst.options.length > 10 ? '' : 'none';
+      if (!inst.filtered.length) {
+        inst.list.innerHTML = '<li class="dropdown-empty">Keine Treffer</li>';
+        return;
+      }
+      var html = '';
+      inst.filtered.forEach(function (o, idx) {
+        var isSelected = o.value === inst.sel.value;
+        var isActive = idx === inst.active;
+        html += '<li class="dropdown-option' + (isActive ? ' is-active' : '') + '"'
+          + ' role="option"'
+          + ' aria-selected="' + (isSelected ? 'true' : 'false') + '"'
+          + ' data-value="' + escapeHtml(o.value) + '">'
+          + escapeHtml(o.label)
+          + (o.extra ? ' <span style="opacity:0.7;">(' + escapeHtml(o.extra) + ')</span>' : '')
+          + '</li>';
+      });
+      inst.list.innerHTML = html;
+    }
+
+    // Portal-Pattern.
+    // Beim Open verschieben wir das Panel in document.body und
+    // positionieren es per getBoundingClientRect(). Das entkommt
+    // dem overflow:hidden des Modal-Glass-Containers und stellt
+    // sicher dass der Panel ueber jedem Modal-Footer-Knopf liegt.
+    // Beim Close legen wir das Panel zurueck in den Container und
+    // raeumen die Inline-Styles.
+    var PANEL_MAX_HEIGHT = 280;
+    var PANEL_GAP = 4;
+
+    function positionPanel(inst) {
+      var rect = inst.trigger.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var spaceBelow = vh - rect.bottom;
+      var spaceAbove = rect.top;
+      var flipUp = spaceBelow < PANEL_MAX_HEIGHT && spaceAbove > spaceBelow;
+      var panel = inst.panel;
+      panel.style.position = 'fixed';
+      panel.style.left = rect.left + 'px';
+      panel.style.width = rect.width + 'px';
+      panel.style.zIndex = '9999';
+      // Saison 15-28: 'auto' statt '' fuer den jeweils
+      // ungenutzten Anchor. Inline-empty wuerde das CSS-Default
+      // wieder einspringen lassen; bei position:fixed kollidiert
+      // das mit dem gesetzten Anchor und klemmt die computed
+      // height auf 0 (Panel unsichtbar). 'auto' ueberschreibt
+      // das Default explizit, damit der Browser nur den
+      // tatsaechlich gesetzten Anchor + die content-driven Hoehe
+      // nutzt.
+      if (flipUp) {
+        panel.style.top = 'auto';
+        panel.style.bottom = (vh - rect.top + PANEL_GAP) + 'px';
+        panel.style.maxHeight = Math.max(120, Math.min(PANEL_MAX_HEIGHT, spaceAbove - 8)) + 'px';
+      } else {
+        panel.style.bottom = 'auto';
+        panel.style.top = (rect.bottom + PANEL_GAP) + 'px';
+        panel.style.maxHeight = Math.max(120, Math.min(PANEL_MAX_HEIGHT, spaceBelow - 8)) + 'px';
+      }
+    }
+
+    function open(inst) {
+      if (inst.trigger.getAttribute('aria-disabled') === 'true') return;
+      closeOpen();
+      openInstance = inst;
+      inst.el.classList.add('is-open');
+      inst.trigger.setAttribute('aria-expanded', 'true');
+      inst.search.value = '';
+      inst.active = 0;
+      // Owner-ID-Tracking. Falls
+      // ein Modal-Close-Pfad das Panel direkt ueber dem body
+      // sucht (Fallback), kann er via data-dropdown-owner den
+      // urspruenglichen Container wiederfinden und das Panel
+      // sauber zurueckraeumen.
+      if (!inst.el.id) {
+        inst.el.id = 'dd-' + Math.random().toString(36).slice(2, 10);
+      }
+      inst.panel.dataset.dropdownOwner = inst.el.id;
+      // Portal: Panel an document.body anhaengen falls noch im Container.
+      if (inst.panel.parentNode !== document.body) {
+        document.body.appendChild(inst.panel);
+      }
+      positionPanel(inst);
+      inst.panel.classList.add('is-open');
+      Promise.resolve(fetchOptions(inst)).then(function () {
+        renderList(inst);
+        // Re-Position nachdem die Liste echt gerendert ist
+        // (max-height haengt von spaceBelow/Above ab).
+        if (openInstance === inst) positionPanel(inst);
+        if (inst.options.length > 10) inst.search.focus();
+      });
+    }
+
+    function close(inst) {
+      inst.el.classList.remove('is-open');
+      inst.panel.classList.remove('is-open');
+      // Inline-Styles vom Portal-Mode zuruecksetzen.
+      inst.panel.removeAttribute('style');
+      // Panel zurueck in den Container, damit MutationObserver
+      // und CSS-Defaults wieder normal greifen.
+      if (inst.panel.parentNode !== inst.el) {
+        inst.el.appendChild(inst.panel);
+      }
+      inst.trigger.setAttribute('aria-expanded', 'false');
+      if (openInstance === inst) openInstance = null;
+    }
+
+    function select(inst, value, label) {
+      applyValue(inst, value);
+      inst.sel.dispatchEvent(new Event('change', { bubbles: true }));
+      close(inst);
+      inst.trigger.focus();
+    }
+
+    function bindEvents(inst) {
+      inst.trigger.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (inst.el.classList.contains('is-open')) close(inst); else open(inst);
+      });
+      inst.trigger.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open(inst);
+        }
+      });
+      inst.search.addEventListener('input', function () {
+        inst.active = 0;
+        renderList(inst);
+      });
+      inst.list.addEventListener('click', function (e) {
+        var li = e.target.closest('.dropdown-option');
+        if (!li) return;
+        select(inst, li.getAttribute('data-value'), li.textContent);
+      });
+      // Keydown auf der Panel-Seite
+      // damit die Pfeiltasten auch dann greifen wenn der Fokus auf
+      // dem Search-Input liegt (der ist im Portal-Mode ein Sibling
+      // von body, nicht mehr ein Nachfahre von inst.el).
+      inst.panel.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); close(inst); inst.trigger.focus(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (inst.filtered.length === 0) return;
+          inst.active = Math.min(inst.active + 1, inst.filtered.length - 1);
+          renderList(inst);
+          scrollActiveIntoView(inst);
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (inst.filtered.length === 0) return;
+          inst.active = Math.max(inst.active - 1, 0);
+          renderList(inst);
+          scrollActiveIntoView(inst);
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var opt = inst.filtered[inst.active];
+          if (opt) select(inst, opt.value, opt.label);
+        }
+      });
+    }
+
+    function scrollActiveIntoView(inst) {
+      var li = inst.list.querySelector('.dropdown-option.is-active');
+      if (li && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' });
+    }
+
+    // Globaler Klick-Outside-Handler.
+    // Panel lebt im Portal-Mode als
+    // Sibling von body, daher muss die Innen-Check beides
+    // beruecksichtigen (Container UND Panel).
+    //
+    // mousedown statt click, plus
+    // Capture-Phase. Im Live-Test feuerte der bubble-click-Handler
+    // nicht zuverlaessig, weil die design-library ihren eigenen
+    // click-Handler hat (interactions.js) und Option-Klicks bei
+    // uns auch select() aufrufen. mousedown in capture feuert vor
+    // allen anderen Handlern und ist immun gegen spaeteres
+    // preventDefault/stopPropagation.
+    document.addEventListener('mousedown', function (e) {
+      if (!openInstance) return;
+      if (openInstance.el.contains(e.target)) return;
+      if (openInstance.panel.contains(e.target)) return;
+      closeOpen();
+    }, true);
+
+    // Scroll und Resize wuerden die
+    // Panel-Position einfrieren (top/left aus getBoundingClientRect
+    // wandern nicht mit). Wir schliessen daher lieber. capture:true
+    // beim scroll damit auch Scrolls in beliebigen Containern
+    // greifen, nicht nur window.
+    //
+    // das hat aber zu frueh
+    // geschlossen wenn der Mieter in der Optionen-Liste selbst
+    // scrollte. Filter: Scrolls innerhalb des Panels ignorieren.
+    function closeOnScroll(e) {
+      if (!openInstance) return;
+      if (openInstance.panel.contains(e.target)) return;
+      closeOpen();
+    }
+    function closeOnResize() {
+      if (openInstance) closeOpen();
+    }
+    window.addEventListener('scroll', closeOnScroll, true);
+    window.addEventListener('resize', closeOnResize);
+
+    // Esc schliesst auch dann zuverlaessig wenn der Fokus
+    // ausserhalb des Panels gelandet ist (z.B. nach Maus-Klick
+    // ohne Auswahl).
+    document.addEventListener('keydown', function (e) {
+      if (!openInstance) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        var trigger = openInstance.trigger;
+        closeOpen();
+        if (trigger) trigger.focus();
+      }
+    });
+
+    // Modal-Close fegt Waisen mit.
+    // Wenn ein [data-modal] seine is-open-Klasse verliert (X-Knopf,
+    // Esc, Backdrop-Klick, Library-API closeModal), schliessen wir
+    // jedes verbliebene offene Panel via closeOpen, und greifen
+    // zusaetzlich nach im body uebriggebliebenen Panels die der
+    // sauberen Pfad verpasst haben sollte (Belt-und-Hosentraeger).
+    function sweepOrphanPanels() {
+      var orphans = document.body.querySelectorAll(':scope > .dropdown-panel');
+      for (var i = 0; i < orphans.length; i++) {
+        var panel = orphans[i];
+        var ownerID = panel.dataset.dropdownOwner;
+        panel.classList.remove('is-open');
+        panel.removeAttribute('style');
+        if (ownerID) {
+          var owner = document.getElementById(ownerID);
+          if (owner) owner.appendChild(panel);
+        }
+      }
+    }
+
+    var modalCloseObserver = new MutationObserver(function (records) {
+      var sawClose = false;
+      for (var i = 0; i < records.length; i++) {
+        var r = records[i];
+        if (r.type !== 'attributes' || r.attributeName !== 'class') continue;
+        var el = r.target;
+        if (!el || !el.matches || !el.matches('[data-modal]')) continue;
+        if (!el.classList.contains('is-open')) {
+          sawClose = true;
+        }
+      }
+      if (!sawClose) return;
+      if (openInstance) closeOpen();
+      sweepOrphanPanels();
+    });
+    function observeModal(m) {
+      modalCloseObserver.observe(m, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    }
+    document.querySelectorAll('[data-modal]').forEach(observeModal);
+    // Modals die spaeter ins DOM kommen (htmx etc.) auch beobachten.
+    var modalInsertObserver = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType !== 1) continue;
+          if (n.matches && n.matches('[data-modal]')) observeModal(n);
+          if (n.querySelectorAll) {
+            n.querySelectorAll('[data-modal]').forEach(observeModal);
+          }
+        }
+      }
+    });
+    modalInsertObserver.observe(document.body, { childList: true, subtree: true });
+
+    function initAll(root) {
+      var nodes = (root || document).querySelectorAll('[data-dropdown]');
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].dataset.dropdownInited === '1') continue;
+        nodes[i].dataset.dropdownInited = '1';
+        render(nodes[i]);
+      }
+    }
+
+    window.carvilon.dropdownInit = initAll;
+    window.carvilon.dropdownRender = render;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { initAll(document); });
+    } else {
+      initAll(document);
+    }
+    // Re-Init nach dynamischem DOM-Insert via MutationObserver.
+    var mo = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          if (added[j].nodeType !== 1) continue;
+          if (added[j].matches && added[j].matches('[data-dropdown]')) {
+            if (added[j].dataset.dropdownInited !== '1') {
+              added[j].dataset.dropdownInited = '1';
+              render(added[j]);
+            }
+          }
+          if (added[j].querySelectorAll) initAll(added[j]);
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  })();
+
+  // globaler Passwort-Show-Toggle.
+  // Vorher hingen die toggle-pw-Handler in der page-local IIFE
+  // von web-viewers.html. Im Live-Test feuerten sie nicht
+  // zuverlaessig (vermutlich Race mit interactions.js
+  // window.carvilon-Overwrite). Globale Event-Delegation auf
+  // document mit closest() ist robust gegen DOM-Reihenfolge
+  // und Modal-Reopen.
+  //
+  // drei Target-Strategien plus
+  // stopPropagation, damit das Toggle auch dann findet wenn
+  // data-target nicht aufloest (z.B. weil Modal-Inject noch
+  // im Gange ist) und nicht durch andere Handler kaputtgemacht
+  // wird. data-pw="1"-Marker hilft Strategie 3 das Input wieder
+  // zu finden wenn type schon auf "text" steht.
+  (function () {
+    if (window.__carvilonPwToggleBound) return;
+    window.__carvilonPwToggleBound = true;
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="toggle-pw"]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var input = null;
+
+      // Strategie 1: data-target Selector.
+      var sel = btn.getAttribute('data-target');
+      if (sel) {
+        try { input = document.querySelector(sel); } catch (_) {}
+      }
+
+      // Strategie 2: vorheriger Input-Sibling.
+      if (!input) {
+        var el = btn.previousElementSibling;
+        while (el && el.tagName !== 'INPUT') {
+          el = el.previousElementSibling;
+        }
+        input = el;
+      }
+
+      // Strategie 3: erstes Passwort-/markiertes-Text-Input im
+      // selben Parent-Container.
+      if (!input && btn.parentElement) {
+        input = btn.parentElement.querySelector(
+          'input[type="password"], input[type="text"][data-pw="1"]'
+        );
+      }
+
+      if (!input) {
+        if (window.console) console.warn('toggle-pw: no input resolved for', btn);
+        return;
+      }
+
+      if (input.type === 'password') {
+        input.type = 'text';
+        input.dataset.pw = '1';
+        btn.textContent = 'Verbergen';
+      } else {
+        input.type = 'password';
+        delete input.dataset.pw;
+        btn.textContent = 'Zeigen';
+      }
+    });
+  })();
+
+  // globaler Copy-Link-Handler.
+  // Bedient sowohl die Tabellen-Icon-Knoepfe (data-url) als auch
+  // den "Kopieren"-Knopf im Edit-Modal (data-target auf das
+  // URL-Input-Feld). Zwei-Sekunden-Erfolgs-Feedback via
+  // is-success-Klasse.
+  (function () {
+    if (window.__carvilonCopyLinkBound) return;
+    window.__carvilonCopyLinkBound = true;
+
+    function copyText(t) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(t);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          document.body.removeChild(ta);
+        }
+      });
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="copy-link"]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var text = btn.getAttribute('data-url') || '';
+      if (!text) {
+        var sel = btn.getAttribute('data-target');
+        if (sel) {
+          var el = document.querySelector(sel);
+          if (el) text = el.value || el.textContent || '';
+        }
+      }
+      if (!text) return;
+
+      copyText(text).then(function () {
+        var origTitle = btn.title;
+        var origText = btn.textContent;
+        btn.classList.add('is-success');
+        if (btn.matches('.btn, .btn-primary, .btn-secondary')) {
+          btn.textContent = 'Kopiert!';
+        } else {
+          btn.title = 'Kopiert!';
+        }
+        setTimeout(function () {
+          btn.classList.remove('is-success');
+          btn.title = origTitle;
+          if (btn.textContent !== origText) btn.textContent = origText;
+        }, 2000);
+      }).catch(function () {
+        if (window.console) console.warn('copy-link: clipboard write failed');
+      });
+    });
+  })();
+</script>
+{{end}}

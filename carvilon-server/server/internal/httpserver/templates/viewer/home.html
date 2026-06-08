@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>carvilon - {{.UnitName}}</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    @media (min-width: 640px) {
+      .stage {
+        width: min(520px, 80vw);
+        height: min(1040px, 92vh);
+        border-radius: 44px;
+      }
+    }
+    @media (min-width: 1024px) {
+      .stage {
+        width: min(600px, 42vw);
+        height: min(1100px, 92vh);
+      }
+    }
+    @media (max-width: 639px) {
+      .stage-room { background: var(--color-bg); }
+      .stage {
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+
+    /* Idle-screen layout. idle-
+       container lebt INNERHALB des .stream-Slots aus
+       intercom-idle.html. Keine fixed/viewport-Regeln, nichts auf
+       body oder html. Vier .mode-layer-Geschwister sind absolut
+       gestapelt; ihre Position kommt aus den Modifier-Klassen:
+         .below   - geparkt unter dem Slot (translateY 100%)
+         .above   - geparkt ueber dem Slot (translateY -100%)
+         .active  - sichtbar (translateY 0)
+         .hidden  - visibility hidden + pointer-events none, damit
+                    geparkte Layer keine Klicks abfangen
+       Bei jedem Mode-Wechsel transitionieren BEIDE Layer parallel
+       (der Source verlaesst, der Target kommt rein) - das ergibt
+       die Push-Animation. Der Bildschirmschoner ist konzeptionell
+       das Zuhause "oben"; andere Modi sind unterhalb geparkt. */
+    #idle-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .mode-layer {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 400ms cubic-bezier(0.22, 1, 0.36, 1);
+      background: var(--color-bg-stream-slot, #0a0e16);
+      will-change: transform;
+    }
+    .mode-layer.below  { transform: translateY(100%); }
+    .mode-layer.above  { transform: translateY(-100%); }
+    .mode-layer.active { transform: translateY(0); }
+    .mode-layer.hidden {
+      visibility: hidden;
+      pointer-events: none;
+    }
+    /* Screensaver clock.
+       data-layout="vertical" (pixel-style default):
+          Stunden ueber Minuten, kein Trennzeichen, gross + eng
+       data-layout="horizontal" (klassisches Layout):
+          Stunden + Minuten nebeneinander, ":" via Pseudo-Element,
+          kleinere Schrift + lockeres letter-spacing
+       Gemeinsam: Manrope-200, tnum-Ziffern (gleichbreit),
+       color-inherit aus dem Slot-Hintergrund. */
+    .screensaver-clock {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Manrope', 'SF Pro Display', system-ui, sans-serif;
+      font-weight: 200;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+      color: var(--color-text, #f0f4ff);
+    }
+    .screensaver-clock-hours,
+    .screensaver-clock-minutes {
+      display: block;
+    }
+
+    /* Vertical (pixel-style default). */
+    .screensaver-clock[data-layout="vertical"] {
+      flex-direction: column;
+      font-size: 144px;
+      letter-spacing: -0.02em;
+      line-height: 0.85;
+    }
+
+    /* Horizontal (klassisches HH:MM). */
+    .screensaver-clock[data-layout="horizontal"] {
+      flex-direction: row;
+      font-size: 96px;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+    .screensaver-clock[data-layout="horizontal"] .screensaver-clock-hours::after {
+      content: ":";
+      margin: 0 0.06em;
+      /* Doppelpunkt erbt font-weight 200 + color */
+    }
+
+    @media (max-width: 480px) {
+      .screensaver-clock[data-layout="vertical"] {
+        font-size: 112px;
+      }
+      .screensaver-clock[data-layout="horizontal"] {
+        font-size: 72px;
+      }
+    }
+    .screensaver-date {
+      margin-top: 12px;
+      font-size: clamp(13px, 2.4vw, 18px);
+      color: var(--color-text-secondary, #94a3b8);
+      text-transform: capitalize;
+    }
+    .screensaver-weather {
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: clamp(15px, 2.4vw, 20px);
+      color: var(--color-text-secondary, #cbd5e1);
+    }
+    /* Sub-1d: weather icon container. The SVG is
+       injected by idle.js (Lucide-shaped, stroke=currentColor)
+       so we just shape the slot. The pre-fix CSS-mask approach
+       relied on undefined --icon-* tokens and rendered as a
+       solid grey square. */
+    .screensaver-weather-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      color: var(--color-text-secondary, #cbd5e1);
+      opacity: 0.85;
+    }
+    .screensaver-weather-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* unread-doorbell badge. Hidden via
+       [hidden] attribute when count=0; idle.js toggles it on
+       SSE unread_count events and initial fetch. The subtle
+       pulse animation hints "es liegt etwas vor" without
+       being distracting. */
+    .screensaver-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4em;
+      padding: 0.4em 0.8em;
+      margin-top: 0.8em;
+      background: rgba(255, 255, 255, 0.06);
+      border: 0.5px solid rgba(255, 255, 255, 0.10);
+      border-radius: 999px;
+      font-size: 14px;
+      color: var(--color-text-secondary, #cbd5e1);
+      animation: screensaver-badge-pulse 2.4s ease-in-out infinite alternate;
+    }
+    .screensaver-badge[hidden] { display: none; }
+    .screensaver-badge-count {
+      font-weight: 500;
+      color: var(--color-text, #f0f4ff);
+      font-variant-numeric: tabular-nums;
+    }
+    .screensaver-badge-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1em;
+      height: 1em;
+    }
+    .screensaver-badge-icon svg {
+      width: 100%;
+      height: 100%;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      fill: none;
+    }
+    @keyframes screensaver-badge-pulse {
+      from { opacity: 0.7; }
+      to   { opacity: 1.0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .screensaver-badge { animation: none; }
+    }
+
+    /* history-button radar pulse
+       + count badge. Scoped to .history-btn so the design-
+       library default .action-badge (a generic 8x8 dot) stays
+       available for any other action button that might need it
+       later.
+       Alert color is the design-library accent blue (same token
+       the Schluessel button uses via .action.is-primary) - red
+       reads as alarm; blue matches the action-bar accent and
+       keeps the visual language consistent. */
+
+    .history-btn { position: relative; }
+
+    .history-btn .pulse-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--color-accent-glow);
+      opacity: 0;
+      pointer-events: none;
+      display: none;
+    }
+    .history-btn.has-unread .pulse-ring {
+      display: block;
+      animation: history-btn-pulse 1.6s ease-out infinite;
+    }
+    .history-btn.has-unread .pulse-ring-2 {
+      animation-delay: 0.8s;
+    }
+    @keyframes history-btn-pulse {
+      0%   { transform: scale(1);    opacity: 0.7; }
+      100% { transform: scale(1.4);  opacity: 0;   }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .history-btn.has-unread .pulse-ring {
+        animation: none;
+        opacity: 0.45;
+      }
+    }
+
+    .history-btn.has-unread svg { color: var(--color-accent); }
+
+    /* Count badge: oben rechts, white-on-accent mit kleinem
+       Stanz-Border in der slot-Hintergrundfarbe damit es vom
+       Button optisch abgesetzt wirkt. */
+    .history-btn .action-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: var(--color-accent);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      border: 2px solid var(--color-bg-stream-slot, #0a0e16);
+      box-shadow: none;
+    }
+    .history-btn .action-badge[hidden] { display: none; }
+    .screensaver-temp { font-weight: 500; }
+    .screensaver-desc {
+      font-size: 0.92em;
+      color: var(--color-text-tertiary, #94a3b8);
+    }
+    .mieter-stream-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    /* WebRTC video sibling. Same dimensions as
+       the MJPEG <img>. Visibility is driven by
+       data-stream-mode on the wrapping mode-layer (or ringing
+       overlay):
+         data-stream-mode="webrtc"      -> video shown, img hidden
+         data-stream-mode="mjpeg"       -> img shown,   video hidden
+         data-stream-mode="connecting"  -> video hidden until
+                                            ontrack lands;
+                                            img shown (warm-up)
+         data-stream-mode="idle" (or unset) -> img shown
+                                            (default fallback)
+       The MJPEG <img> stays for ESP-style consumers and as the
+       graceful fallback when /webviewer/offer returns 503.        */
+    .mieter-stream-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: var(--color-bg-stream-slot, #0a0e16);
+    }
+    [data-stream-slot]:not([data-stream-mode="webrtc"]) .mieter-stream-video {
+      display: none;
+    }
+    [data-stream-slot="ringing"]:not([data-stream-mode="webrtc"]) video.ring-stream {
+      display: none;
+    }
+    [data-stream-slot][data-stream-mode="webrtc"] .mieter-stream-img,
+    [data-stream-slot][data-stream-mode="webrtc"] img.ring-stream {
+      display: none;
+    }
+
+    /* Inline settings + history shared chrome (saison 14-03). */
+    .mode-layer[data-mode="settings"],
+    .mode-layer[data-mode="history"] {
+      justify-content: flex-start;
+      align-items: stretch;
+      padding: 16px 20px 20px;
+      gap: 0;
+      color: var(--color-text, #f0f4ff);
+      cursor: default;
+    }
+    .mode-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .mode-header h2 {
+      margin: 0;
+      font-size: clamp(16px, 2.6vw, 20px);
+      font-weight: 600;
+    }
+    .mode-close {
+      background: transparent;
+      border: 0;
+      color: var(--color-text-secondary, #cbd5e1);
+      font-size: 24px;
+      line-height: 1;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      border-radius: 8px;
+    }
+    .mode-close:hover { background: rgba(255,255,255,0.06); }
+
+    /* the form is the flex shell now; the
+       inner .mode-settings-scroll owns the scroll so the
+       footer stays pinned even when more fieldsets land in a
+       later sub-saison. */
+    .mode-settings {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      height: 100%;
+      overflow: hidden;
+    }
+    .mode-settings-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .mode-field {
+      border: 0;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .mode-field legend {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-secondary, #cbd5e1);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mode-field label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .mode-field label:hover { background: rgba(255,255,255,0.04); }
+    .mode-field input[type="radio"] { accent-color: var(--color-accent, #5b9dff); }
+
+    /* Sub-2a + CARVILON wordmark
+       + version + hairline divider inside the inline settings
+       mode-layer. Sits at the bottom because the parent .mode-
+       settings is a flex-column whose middle child
+       (.mode-settings-scroll) takes flex:1 and consumes the
+       extra space. The earlier auto-save hint paragraph above
+       the footer is gone - the toast already informs of the
+       save. */
+    .mode-settings-footer {
+      padding-top: 12px;
+      padding-bottom: 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .mode-settings-footer-divider {
+      width: 70%;
+      height: 0.5px;
+      background: rgba(255, 255, 255, 0.12);
+      margin-bottom: 6px;
+    }
+    .mode-settings-version {
+      font-size: 9px;
+      color: var(--color-text-tertiary, #94a3b8);
+      letter-spacing: 0.08em;
+    }
+
+    /* Toast slot: floats over whichever mode is active, scoped
+       to the idle-container so it travels with the device frame
+       and never appears outside the slot. */
+    .mode-toast {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translate(-50%, -8px);
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.92);
+      color: var(--color-text, #f0f4ff);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      font-size: 13px;
+      letter-spacing: 0.01em;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease, transform 200ms ease;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    .mode-toast.is-visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .mode-toast.kind-error {
+      background: rgba(127, 29, 29, 0.92);
+      border-color: rgba(239, 68, 68, 0.40);
+    }
+
+    /* Help-icon (?) bubble: hover for desktop, click for mobile. */
+    .mode-help {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      color: var(--color-text-secondary, #cbd5e1);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: help;
+      position: relative;
+    }
+    .mode-help::after {
+      content: attr(data-help);
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 6px;
+      width: max-content;
+      max-width: 240px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #0b1220;
+      color: var(--color-text, #f0f4ff);
+      border: 1px solid rgba(255,255,255,0.12);
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px);
+      transition: opacity 150ms ease, transform 150ms ease;
+      z-index: 5;
+    }
+    .mode-help:hover::after,
+    .mode-help.is-open::after,
+    .mode-help:focus::after {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .mode-history {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow: auto;
+    }
+    .mode-history-empty {
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 14px;
+      padding: 8px 0;
+    }
+    .mode-history-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      font-size: 14px;
+    }
+    .mode-history-row.is-unread {
+      background: rgba(91,157,255,0.10);
+      border-color: rgba(91,157,255,0.30);
+    }
+    .mode-history-when {
+      color: var(--color-text-secondary, #94a3b8);
+      font-size: 12px;
+    }
+    .mode-history-badge {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      letter-spacing: 0.04em;
+    }
+
+    /* Header-Buttons im Verlauf-Modus
+       (Filter + Edit + Schliessen). */
+    .mode-header-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .history-header-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text-secondary, #cbd5e1);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .history-header-btn:hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--color-text, #f0f4ff);
+    }
+    .history-header-btn.is-active {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      border-color: var(--color-accent, #5b9dff);
+    }
+
+    /* Hinweis-Banner wenn capture deaktiviert. */
+    .mode-history-capture-off {
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      background: rgba(250,204,21,0.10);
+      border: 1px solid rgba(250,204,21,0.25);
+      color: #facc15;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .mode-history-capture-off[hidden] { display: none; }
+
+    /* Mehr-Laden-Button im Verlauf-Modus. */
+    .mode-history-load-more {
+      margin-top: 8px;
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      align-self: center;
+    }
+    .mode-history-load-more:hover { background: rgba(255,255,255,0.08); }
+    .mode-history-load-more[hidden] { display: none; }
+
+    /* Per-Item Loeschen-Button (X) - rechts
+       neben dem When-Text, sichtbar nur im Edit-Mode. Edit-Mode
+       gibt der Mode-Layer eine .is-edit-mode Klasse; das Selektor-
+       Pattern hidden-by-default zieht den Knopf in den Layout-Fluss
+       sobald Edit-Mode aktiv ist. */
+    .mode-history-row .history-delete-btn {
+      display: none;
+      background: rgba(239,68,68,0.15);
+      border: 1px solid rgba(239,68,68,0.30);
+      color: #ef4444;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+    }
+    .mode-history-row .history-delete-btn:hover {
+      background: rgba(239,68,68,0.25);
+    }
+    [data-mode="history"].is-edit-mode .mode-history-row .history-delete-btn {
+      display: inline-flex;
+    }
+
+    /* Filter-Modal innerhalb des history-mode-
+       layers. Slidet von unten ein, ueberlagert die Liste. */
+    .mode-history-filter-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      padding: 24px;
+    }
+    .mode-history-filter-modal[hidden] { display: none; }
+    .mode-history-filter-modal .modal-glass {
+      background: #0b1220;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 20px;
+      width: min(360px, 90vw);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.50);
+    }
+    .mode-history-filter-modal h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .mode-history-filter-modal label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--color-text-secondary, #cbd5e1);
+    }
+    .mode-history-filter-modal input[type="date"] {
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      font: inherit;
+    }
+    .mode-history-filter-modal .filter-quick-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .mode-history-filter-modal .filter-quick-row button {
+      flex: 1 1 0;
+      min-width: 70px;
+      padding: 6px 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    .mode-history-filter-modal .filter-quick-row button:hover {
+      background: rgba(91,157,255,0.15);
+    }
+    .mode-history-filter-modal .filter-quick-row button.is-active {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+      border-color: var(--color-accent, #5b9dff);
+    }
+    .mode-history-filter-modal .filter-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .mode-history-filter-modal .btn-primary,
+    .mode-history-filter-modal .btn-secondary {
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      border: 1px solid transparent;
+    }
+    .mode-history-filter-modal .btn-secondary {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.10);
+      color: var(--color-text, #f0f4ff);
+    }
+    .mode-history-filter-modal .btn-primary {
+      background: var(--color-accent, #5b9dff);
+      color: #0b1220;
+    }
+
+    /* Reset-Button im Settings-Mode. */
+    .mode-reset-btn {
+      align-self: flex-start;
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid rgba(239,68,68,0.40);
+      color: #ef4444;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+    }
+    .mode-reset-btn:hover { background: rgba(239,68,68,0.10); }
+    .mode-reset-btn.is-pending {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+    }
+    .mode-field-hint {
+      color: var(--color-text-tertiary, #94a3b8);
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 4px;
+    }
+
+    /* Dark scrollbar for the inline modes that can overflow
+       (settings form, history list). The
+       default browser scrollbar is light and clashes with the
+       pro-tool aesthetic of the rest of the slot. Firefox uses
+       the standard scrollbar-* properties; Chromium / Safari need
+       the ::-webkit-scrollbar pseudo-elements. Both are scoped to
+       the affected containers so the body / topbar default
+       scrollbar (if a future layout ever needs it) stays alone. */
+    .mode-layer,
+    .mode-settings,
+    .mode-settings-scroll,
+    .mode-history {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+    }
+    .mode-layer::-webkit-scrollbar,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar,
+    .mode-history::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .mode-layer::-webkit-scrollbar-track,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-track,
+    .mode-history::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .mode-layer::-webkit-scrollbar-thumb,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-thumb,
+    .mode-history::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+    }
+    .mode-layer::-webkit-scrollbar-thumb:hover,
+    .mode-settings::-webkit-scrollbar,
+    .mode-settings-scroll::-webkit-scrollbar-thumb:hover,
+    .mode-history::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+  </style>
+</head>
+<body class="stage-room">
+
+  <div class="stage">
+    {{template "intercom-idle.html" .}}
+    {{template "intercom-ringing.html" .}}
+  </div>
+
+  <!-- WebRTC client loads BEFORE interactions.js
+       and idle.js so window.carvilonWebRTC is already on the
+       page when those modules wire their lifecycle hooks. -->
+  <script src="/static/webrtc-stream.js"></script>
+  <script src="/static/interactions.js"></script>
+  <script src="/static/idle.js"></script>
+  <script src="/static/carvilon-brand.js" defer></script>
+  <script>
+    // Doorbell-lifecycle wire-up.
+    //
+    // An earlier scheme with module-scoped variables and several
+    // specific click listeners reliably fired doorbell_start
+    // (overlay visible) but left the two disabled buttons
+    // disabled. The robuster Ansatz:
+    //
+    //   1. doorbell_start: alle .ring-btn Buttons enablen UND
+    //      die Anruf-Identifier direkt auf die Buttons stempeln
+    //      (data-event-id, data-intercom-mac).
+    //   2. EIN delegierter click-Handler liest die Identifier
+    //      aus dataset, ruft das passende Endpoint auf.
+    //   3. doorbell_cancel: alle .ring-btn wieder disabled +
+    //      Identifier gewischt.
+    //
+    // Vorteil: keine Modul-Variablen zu warten, keine Race
+    // zwischen Listener-Registrierung und SSE-Event, jeder Button
+    // hat seinen Kontext aus eigener Hand.
+    (function () {
+      var ringEl = document.querySelector('.ringing');
+
+      function ringButtons() {
+        return document.querySelectorAll('.ring-btn');
+      }
+
+      function enableRingButtons(eventID, intercomMAC) {
+        ringButtons().forEach(function (btn) {
+          btn.classList.remove('is-disabled');
+          btn.removeAttribute('disabled');
+          btn.dataset.eventId = eventID || '';
+          btn.dataset.intercomMac = intercomMAC || '';
+        });
+      }
+
+      function disableRingButtons() {
+        ringButtons().forEach(function (btn) {
+          btn.classList.add('is-disabled');
+          btn.setAttribute('disabled', 'disabled');
+          delete btn.dataset.eventId;
+          delete btn.dataset.intercomMac;
+        });
+      }
+
+      function closeRing() {
+        if (window.carvilon && carvilon.closeOverlay) {
+          carvilon.closeOverlay('ringing');
+        } else {
+          var el = document.querySelector('.ringing');
+          if (el) el.classList.remove('is-open');
+        }
+        disableRingButtons();
+      }
+
+      // Explicit EventSource instead of the
+      // carvilon.connectSSE wrapper. A DevTools capture showed
+      // multiple parallel eventsource connections in the network
+      // tab; a single explicit EventSource + addEventListener
+      // calls keep the lifecycle observable (one row in the
+      // network tab) and reconnect loops immediately visible.
+      var es = new EventSource('/webviewer/events');
+      es.addEventListener('doorbell_start', function (e) {
+        var data = {};
+        try { data = JSON.parse(e.data) || {}; } catch (_) {}
+        // writeSSEEvent in handler_events.go wraps the
+        // doorbellhub.Event in an envelope of
+        // {door, ts, raw: <hub event>}; cancel_token and
+        // device_id therefore live under data.raw.*.
+        var raw = data.raw || {};
+        var eventID = raw.cancel_token || raw.request_id || '';
+        var intercomMAC = raw.device_id || data.door || '';
+        if (window.console) console.log('[carvilon] doorbell_start', { eventID: eventID, intercomMAC: intercomMAC });
+        // Sub-1b: a doorbell ring counts as user
+        // activity and resets the auto-screensaver timer so the
+        // mieter does not get slid back to the screensaver while
+        // talking to the visitor.
+        if (window.carvilonIdle && window.carvilonIdle.resetAutoTimer) {
+          window.carvilonIdle.resetAutoTimer();
+        }
+        // bump the unread-doorbell badge so
+        // the count is visible immediately on the screensaver.
+        // The authoritative count arrives shortly after via the
+        // unread_count SSE event (commit 6); this local bump is
+        // belt-and-braces for the gap.
+        if (window.carvilonIdle && window.carvilonIdle.bumpUnread) {
+          window.carvilonIdle.bumpUnread();
+        }
+        enableRingButtons(eventID, intercomMAC);
+        if (window.carvilon && carvilon.openOverlay) {
+          carvilon.openOverlay('ringing');
+        } else if (ringEl) {
+          ringEl.classList.add('is-open');
+        }
+      });
+      es.addEventListener('doorbell_cancel', function () {
+        if (window.console) console.log('[carvilon] doorbell_cancel');
+        closeRing();
+      });
+      es.addEventListener('history_update', function () {
+        location.reload();
+      });
+      // authoritative unread-doorbell count
+      // pushed from the server (after a new doorbell row lands
+      // and after the async mark-read completes).
+      es.addEventListener('unread_count', function (e) {
+        var data = {};
+        try { data = JSON.parse(e.data) || {}; } catch (_) {}
+        var n = (typeof data.count === 'number') ? data.count : 0;
+        if (window.carvilonIdle && window.carvilonIdle.updateUnreadBadge) {
+          window.carvilonIdle.updateUnreadBadge(n);
+        }
+      });
+      // config.changed signalisiert eine server-
+      // seitige Settings-Mutation auf diesem viewer_mac (Mieter-
+      // POST, Admin-Edit, ESP-POST). Wir holen die Seite frisch
+      // statt einzelne DOM-Stellen zu patchen - Settings beruehren
+      // mehrere Stellen (Idle-Default-Mode, Auto-Screensaver-Timer,
+      // pet-Daten im Topbar...), Reload ist robust und billig.
+      // Eine kleine Verzoegerung (180ms) sammelt nahe Multi-Field-
+      // Aenderungen in einen einzigen Reload statt N kaskadierender.
+      //
+      // Skip-Echo. Wenn der Mieter
+      // gerade selbst eine Settings-Aenderung gespeichert hat,
+      // ist der Wert lokal schon im UI. Ein Reload waehrend er
+      // im Settings-Modus steht reisst ihn aus dem Mode raus -
+      // genau der Echo-Race aus dem Live-Test. Skip-Window:
+      // wenn lastOwnSaveAt juenger als 1000ms ist, ignorieren
+      // wir den config.changed; Cross-Device-Sync bleibt intakt
+      // weil Fremd-Trigger ausserhalb des Fensters liegen.
+      var configReloadTimer = null;
+      var CONFIG_ECHO_SKIP_MS = 1000;
+      es.addEventListener('config.changed', function () {
+        var lastSaveAt = (window.carvilonIdle && window.carvilonIdle.lastOwnSaveAt) || 0;
+        var elapsed = Date.now() - lastSaveAt;
+        if (elapsed < CONFIG_ECHO_SKIP_MS) {
+          if (window.console) console.log('[carvilon] config.changed skipped (own echo, ' + elapsed + 'ms)');
+          return;
+        }
+        if (window.console) console.log('[carvilon] config.changed');
+        if (configReloadTimer) clearTimeout(configReloadTimer);
+        configReloadTimer = setTimeout(function () {
+          location.reload();
+        }, 180);
+      });
+      es.addEventListener('error', function () {
+        if (window.console) console.warn('[carvilon] sse error (browser will reconnect)');
+      });
+
+      function jsonPost(url, body) {
+        return fetch(url, {
+          method: 'POST',
+          headers: body ? { 'Content-Type': 'application/json', 'Accept': 'application/json' } : { 'Accept': 'application/json' },
+          credentials: 'same-origin',
+          body: body ? JSON.stringify(body) : null
+        });
+      }
+
+      // Single delegated click-handler for all .ring-btn. Reads
+      // the action + identifiers from the button's dataset so the
+      // handler doesn't need shared module state.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.ring-btn');
+        if (!btn || btn.disabled || btn.classList.contains('is-disabled')) return;
+        var action = btn.dataset.action;
+        var eventID = btn.dataset.eventId || '';
+        var intercomMAC = btn.dataset.intercomMac || '';
+        if (window.console) console.log('[carvilon] ring-btn click', { action: action, eventID: eventID, intercomMAC: intercomMAC });
+
+        if (action === 'ignore-call') {
+          if (eventID) {
+            jsonPost('/webviewer/reject', { event_id: eventID }).catch(function () {});
+          }
+          // Library schliesst das Overlay schon parallel; doppelt
+          // schliessen ist idempotent. closeRing raeumt Buttons.
+          closeRing();
+          return;
+        }
+
+        if (action === 'unlock-door') {
+          if (!intercomMAC) return;
+          e.preventDefault();
+          jsonPost('/webviewer/doors/' + encodeURIComponent(intercomMAC) + '/unlock', null)
+            .catch(function () {});
+          return;
+        }
+
+        if (action === 'accept-call') {
+          if (!eventID) return;
+          e.preventDefault();
+          jsonPost('/webviewer/answer', { event_id: eventID })
+            .then(function (r) {
+              if (r.status === 409) {
+                // schon woanders angenommen.
+                closeRing();
+                return null;
+              }
+              return r.json().catch(function () { return null; });
+            })
+            .catch(function () {});
+          // Overlay schliesst sich erst wenn der cancel-Push
+          // (answered_elsewhere) auf dem SSE-Kanal eintrifft;
+          // bis dahin Buttons sperren damit kein Doppel-Klick
+          // entsteht.
+          disableRingButtons();
+          return;
+        }
+      });
+    })();
+
+    // Standby-Unlock vom idle-screen-Schluessel-
+    // Knopf. design-library/intercom-idle.html liefert
+    // <button class="action is-primary" data-action="unlock-door">
+    // ohne .ring-btn-Klasse (das ist der Bell-Overlay-Knopf).
+    // Dieser Standby-Knopf hat keine intercom-mac im Kontext und
+    // POSTet auf /webviewer/doors/standby/unlock; der Server liest
+    // viewer.paired_intercom_mac und resolved Tuer via UA-API.
+    (function () {
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="unlock-door"]');
+        if (!btn) return;
+        // Bell-Overlay-Variante (.ring-btn) hat ihren eigenen
+        // Handler oben, der ueber dataset.intercomMac aufloest.
+        if (btn.classList.contains('ring-btn')) return;
+        e.preventDefault();
+        if (window.console) console.log('[carvilon] standby unlock');
+        fetch('/webviewer/doors/standby/unlock', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        }).catch(function () {});
+      });
+    })();
+  </script>
+
+</body>
+</html>

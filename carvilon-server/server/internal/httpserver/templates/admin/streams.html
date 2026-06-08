@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - Stream-Dashboard</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="/static/streams-dashboard.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Stream-Dashboard</h1>
+        <p class="page-subtitle">Live-Uebersicht der Stream-Profile vom Stream-Server. Zeile anklicken fuer Konsumenten-Detail; Anlegen / Bearbeiten / Loeschen wirkt auf <code>/api/profiles</code>.</p>
+      </div>
+      {{if .Page.Configured}}
+        <div class="page-actions">
+          <a class="btn btn-primary" href="/a/streams/new">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Neues Profil
+          </a>
+        </div>
+      {{end}}
+    </header>
+
+    {{if not .Page.Configured}}
+      <div class="app-card">
+        <div class="app-card-body" style="padding: var(--space-5); text-align: center;">
+          <h2 class="app-card-title">Stream-Backend nicht konfiguriert</h2>
+          <p style="color: var(--color-text-tertiary); margin-top: var(--space-3);">
+            Setze die Umgebungsvariable <code>CARVILON_STREAM_BACKEND_URL</code> auf die Basis-URL des Stream-Servers
+            (typischerweise <code>http://127.0.0.1:8555</code>) und starte den Server neu.
+          </p>
+        </div>
+      </div>
+    {{else}}
+      <div id="sd-root" class="sd-root" data-poll="/a/streams/stats.json">
+        {{if .Page.Error}}<div class="sd-banner">Stream-Server nicht erreichbar: {{.Page.Error}}</div>{{end}}
+
+        <div class="sd-bar">
+          <span class="sd-title">Profile</span>
+          {{if .Page.BackendURL}}<span style="font-family:var(--sd-mono);font-size:11px;color:var(--sd-faint)">{{.Page.BackendURL}}</span>{{end}}
+          <span class="sd-spacer"></span>
+          <div class="sd-seg">
+            <button class="on" data-iv="2">2s</button>
+            <button data-iv="5">5s</button>
+            <button data-iv="10">10s</button>
+          </div>
+          <div class="sd-livepill"><span class="sd-ldot"></span><span id="sd-livetxt">live</span></div>
+        </div>
+
+        <!-- Ebene 1: Gesamt -->
+        <div class="sd-summary"></div>
+
+        <!-- Ebene 2 + 3: Tabelle -->
+        <div class="sd-panel">
+          <div class="sd-panel-h">
+            <h3>Profile</h3>
+            <span class="sd-count">0</span>
+            <span class="sd-hint">Zeile anklicken fuer Details</span>
+          </div>
+          <div class="sd-thead">
+            <span>Profil</span><span>Status</span><span class="r">Konsumenten</span><span class="r">Quelle</span>
+            <span class="r">Ausgang</span><span class="r">Egress</span><span class="r">Health</span><span></span>
+          </div>
+          <div class="sd-rows"></div>
+        </div>
+      </div>
+
+      <script id="sd-data" type="application/json">{{.Page.DataJSON}}</script>
+      <script src="/static/streams-dashboard.js"></script>
+    {{end}}
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

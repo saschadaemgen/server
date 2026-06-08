@@ -1,0 +1,108 @@
+// Weather endpoints shared by mieter and admin.
+//
+//	GET /webviewer/weather   tenant pull (session cookie auth);
+//	                         consumed by idle.js every 15 minutes
+//	                         to refresh the screensaver block.
+//	GET /a/weather           admin pull (admin session); useful
+//	                         from /a/settings to verify the
+//	                         saved station_lat/lon are correct.
+//
+// Both routes share a single handler. Auth differs (each route
+// is wrapped in its own middleware in server.go); the response
+// shape is identical. ErrUnavailable from the weather package
+// maps to 503 with an empty JSON object so the browser knows to
+// hide the weather block without throwing.
+package httpserver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"carvilon.local/server/internal/viewermanager"
+	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/weather"
+)
+
+// stationCoords reads the operator's site coordinates from
+// platform_config. The migration seeds them to Recklinghausen
+// (51.6144, 7.1959) so the screensaver works on a fresh install
+// without admin interaction. Parse errors fall back to those
+// defaults so a typo in /a/settings cannot brick the page.
+const (
+	defaultStationLat = 51.6144
+	defaultStationLon = 7.1959
+)
+
+// resolveTenantLanguage figures out the UI language for the
+// calling surface so weather descriptions can be localised per
+// viewer. The Mieter web viewer hands us a viewer MAC via the
+// session context, the /esp/ tree via the bearer context; the
+// admin /a/weather surface has no tenant association and gets
+// the default (German) fallback. Errors from the lookup degrade
+// to the default - the screensaver should never break just
+// because the language column had a hiccup.
+func (s *Server) resolveTenantLanguage(ctx context.Context) string {
+	if s.viewerMgr == nil {
+		return viewermanager.DefaultLanguage
+	}
+	mac := ViewerMACFromContext(ctx)
+	if mac == "" {
+		mac = DeviceMACFromContext(ctx)
+	}
+	if mac == "" {
+		return viewermanager.DefaultLanguage
+	}
+	info, err := s.viewerMgr.GetViewerInfo(ctx, mac)
+	if err != nil {
+		return viewermanager.DefaultLanguage
+	}
+	return info.ResolveLanguage()
+}
+
+func (s *Server) stationCoords(r *http.Request) (lat, lon float64) {
+	lat, lon = defaultStationLat, defaultStationLon
+	if s.platformCfg == nil {
+		return
+	}
+	if v, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLat); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			lat = f
+		}
+	}
+	if v, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLon); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			lon = f
+		}
+	}
+	return
+}
+
+func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if s.weather == nil {
+		// Backend not configured (shouldn't happen in normal boot,
+		// but stay defensive so the page degrades cleanly).
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+		return
+	}
+	lat, lon := s.stationCoords(r)
+	lang := s.resolveTenantLanguage(r.Context())
+	snap, err := s.weather.Get(r.Context(), lat, lon, lang)
+	if err != nil {
+		if errors.Is(err, weather.ErrUnavailable) {
+			s.log.Debug("weather unavailable", "lat", lat, "lon", lon, "err", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+			return
+		}
+		s.log.Warn("weather fetch failed", "lat", lat, "lon", lon, "err", err)
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(snap)
+}

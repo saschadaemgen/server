@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - TURN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    .td-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+    .td-kv { background: var(--color-surface-1); border:1px solid var(--color-hairline); border-radius: var(--radius-sm); padding: var(--space-3); }
+    .td-kv .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-tertiary); }
+    .td-kv .v { font-size: 18px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .td-fresh { display:flex; align-items:center; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); margin-bottom: var(--space-4); border:1px solid var(--color-hairline); }
+    .td-fresh.ok { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.40); }
+    .td-fresh.stale { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.40); }
+    .td-dot { width:8px; height:8px; border-radius:50%; background: var(--color-text-tertiary); flex:none; }
+    .td-fresh.ok .td-dot { background:#10b981; }
+    .td-fresh.stale .td-dot { background:#ef4444; }
+    .td-allocline { font-size: 14px; margin-bottom: var(--space-3); color: var(--color-text); }
+    .td-allocline b { font-size: 20px; font-variant-numeric: tabular-nums; }
+    table.td-table { width:100%; border-collapse: collapse; font-size: 13px; }
+    table.td-table th, table.td-table td { text-align:left; padding: 8px 10px; border-bottom: 1px solid var(--color-hairline); }
+    table.td-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-tertiary); font-weight: var(--fw-medium); }
+    table.td-table td.num, table.td-table th.num { text-align:right; font-variant-numeric: tabular-nums; }
+    .td-mono { font-family: var(--font-mono, ui-monospace, monospace); }
+    .td-empty { color: var(--color-text-tertiary); padding: var(--space-4); text-align:center; font-style: italic; }
+    .td-pill { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; border:1px solid var(--color-hairline); }
+  </style>
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">ICE / STUN / TURN</h1>
+        <p class="page-subtitle">Status und Verlauf des Cloud-TURN-Relays. Die Daten kommen ueber den Side-Channel von der VPS; der Relay laeuft dort, diese Seite zeigt den zuletzt gemeldeten Stand.</p>
+      </div>
+    </header>
+
+    <div id="td-root" data-poll="/a/turn/stats.json">
+      <div class="td-fresh" id="td-fresh"><span class="td-dot"></span><span id="td-fresh-txt">...</span></div>
+
+      <div class="app-card" style="margin-bottom: var(--space-4);">
+        <div class="app-card-body">
+          <h2 class="app-card-title">Konfiguration</h2>
+          <div class="td-grid" id="td-config"></div>
+        </div>
+      </div>
+
+      <div class="app-card" style="margin-bottom: var(--space-4);">
+        <div class="app-card-body">
+          <h2 class="app-card-title">Live-Stats</h2>
+          <div id="td-clients"></div>
+        </div>
+      </div>
+
+      <div class="app-card" style="margin-bottom: var(--space-4);">
+        <div class="app-card-body">
+          <h2 class="app-card-title">TURN-Verlauf</h2>
+          <div id="td-events"></div>
+        </div>
+      </div>
+
+      <div class="app-card">
+        <div class="app-card-body">
+          <h2 class="app-card-title">ICE-Verlauf</h2>
+          <div id="td-ice"></div>
+        </div>
+      </div>
+
+      <p style="color: var(--color-text-tertiary); font-size: 12px; margin-top: var(--space-3);" id="td-note"></p>
+    </div>
+
+    <script id="td-data" type="application/json">{{.Page.DataJSON}}</script>
+    <script src="/static/turn-dashboard.js"></script>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

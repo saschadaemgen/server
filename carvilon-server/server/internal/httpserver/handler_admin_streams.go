@@ -1,0 +1,437 @@
+// Admin CRUD against the stream-server profile registry.
+//
+// Read side renders /api/profiles for operator visibility, write
+// side (S15-25) wires Edit / Create / Delete against the new
+// snake_case PUT/DELETE endpoints. The per-viewer profile pick
+// happens in the web-/ESP-viewer edit modal (fed by
+// /a/streams.json).
+//
+// Routes (registered in server.go):
+//
+//	GET    /a/streams                 list-view (HTML)
+//	GET    /a/streams.json            list payload as JSON (used
+//	                                   by the viewer-edit modal
+//	                                   stream-profile dropdown)
+//	GET    /a/streams/new             create-form
+//	GET    /a/streams/{name}          edit-form
+//	POST   /a/streams                 create  (-> Client.Put)
+//	POST   /a/streams/{name}          save    (-> Client.Put)
+//	POST   /a/streams/{name}/delete   delete  (-> Client.Delete)
+package httpserver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"html/template"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"carvilon.local/server/internal/streams"
+)
+
+// adminStreamsData is the payload for templates/admin/streams.html.
+type adminStreamsData struct {
+	User       adminUser
+	Configured bool   // false = no stream-backend URL set
+	BackendURL string // for the "API: <url>" hint line
+	Profiles   []streamRow
+	Flash      string
+	FlashType  string
+}
+
+// streamRow is one row in the admin profile list. Fields mirror
+// the stream-server's /api/profiles entry shape (the 11-field
+// snake_case schema on streams.Profile) plus the live consumer
+// count from /stream/stats, joined by profile name. Consumers is
+// always written, even when the stats endpoint is unreachable -
+// the fall-back is an honest zero, not "n/a".
+type streamRow struct {
+	Name          string
+	Codec         string
+	Usage         string
+	Width         int
+	Height        int
+	FPS           int
+	EncodeQuality int
+	CameraID      string
+	Description   string
+	Quality       string
+	Encryption    string
+	Consumers     int
+}
+
+// adminStreamEditData backs templates/admin/stream-edit.html.
+// IsNew == true switches the template to the create variant
+// (writable Name field, POST target /a/streams). PostError carries
+// the stream-server's plain-text rejection so the operator sees
+// exactly why a save was refused.
+type adminStreamEditData struct {
+	User      adminUser
+	IsNew     bool
+	Profile   streamRow
+	PostError string
+}
+
+// streamBackendBaseURL is a soft accessor for the operator-facing
+// "API: <url>" hint. The StreamBackend interface intentionally
+// has no BaseURL method (the seam exposes URLs only via
+// MJPEGURL/WebRTCSignalURL); the admin UI just wants a display
+// string for the banner. We type-assert against the concrete
+// Client; the future commercial backend can grow the same
+// accessor when it lands. Unknown backends return "".
+type baseURLer interface{ BaseURL() string }
+
+func (s *Server) handleAdminStreamsList(w http.ResponseWriter, r *http.Request) {
+	username := AdminUserFromContext(r.Context())
+	d := s.buildStreamsDashboard(r.Context())
+	raw, err := json.Marshal(d)
+	if err != nil {
+		s.log.Warn("admin streams dashboard marshal", "err", err)
+		raw = []byte(`{"configured":false}`)
+	}
+	s.renderAdminPage(w, "streams", streamsPageData{
+		User:       adminUser{Name: username, Initials: initialsOf(username)},
+		Configured: d.Configured,
+		BackendURL: d.BackendURL,
+		Error:      d.Error,
+		DataJSON:   template.JS(raw),
+	})
+}
+
+// handleAdminStreamsListJSON feeds the viewer-edit modal dropdown.
+// Same data as the HTML list but as JSON; the page-render cost is
+// modest, but the dropdown polls on open and we keep that path
+// header-only.
+func (s *Server) handleAdminStreamsListJSON(w http.ResponseWriter, r *http.Request) {
+	data := s.buildStreamsData(r)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	out := map[string]any{
+		"configured": data.Configured,
+		"profiles":   data.Profiles,
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) buildStreamsData(r *http.Request) adminStreamsData {
+	username := AdminUserFromContext(r.Context())
+	data := adminStreamsData{
+		User: adminUser{Name: username, Initials: initialsOf(username)},
+	}
+	if !s.streams.Configured() {
+		return data
+	}
+	data.Configured = true
+	if u, ok := s.streams.(baseURLer); ok {
+		data.BackendURL = u.BaseURL()
+	}
+	profiles, err := s.streams.List(r.Context())
+	if err != nil {
+		s.log.Warn("admin streams list", "err", err)
+		data.Flash = "Stream-Backend nicht erreichbar: " + err.Error()
+		data.FlashType = "red"
+		return data
+	}
+	// Per-profile consumer counts come from the live /stream/stats
+	// document (s.streamStats), NOT from the StreamBackend's
+	// List/Consumers - the in-process wrapper's Consumers is the coarse
+	// per-camera-hub count, which is the same for profiles sharing a
+	// camera (the S17-13 "2 everywhere" bug). /stream/stats reports the
+	// true per-profile number. Soft signal: if it is unreachable the
+	// list still renders with consumers at zero (no crash).
+	stats := s.fetchStreamStats(r.Context())
+	for _, p := range profiles {
+		row := profileToRow(p)
+		if st, ok := stats.Profiles[p.Name]; ok {
+			row.Consumers = st.Clients
+		}
+		data.Profiles = append(data.Profiles, row)
+	}
+	return data
+}
+
+// fetchStreamStats returns the live GET /stream/stats snapshot, or a
+// zero snapshot (logged) when the stats source is unconfigured or
+// unreachable. The admin streams views degrade gracefully - zero
+// consumers, no crash - rather than failing the page.
+func (s *Server) fetchStreamStats(ctx context.Context) streams.StreamStats {
+	if s.streamStats == nil {
+		return streams.StreamStats{}
+	}
+	snap, err := s.streamStats.FullStats(ctx)
+	if err != nil {
+		s.log.Warn("admin streams stats", "err", err)
+		return streams.StreamStats{}
+	}
+	return snap
+}
+
+// profileToRow flattens a streams.Profile to the row the list +
+// edit templates render. Consumers stays zero here; the list
+// builder joins the live count from /stream/stats per name.
+func profileToRow(p streams.Profile) streamRow {
+	return streamRow{
+		Name:          p.Name,
+		Codec:         p.Codec,
+		Usage:         p.Usage,
+		Width:         p.Width,
+		Height:        p.Height,
+		FPS:           p.FPS,
+		EncodeQuality: p.EncodeQuality,
+		CameraID:      p.CameraID,
+		Description:   p.Description,
+		Quality:       p.Quality,
+		Encryption:    p.Encryption,
+	}
+}
+
+// handleAdminStreamNew renders the create-form (an empty edit
+// template with IsNew == true). Defaults that map to the most
+// common shape: codec mjpeg, usage esp. Encryption is left empty
+// so the stream-server's source-side default takes over - it is
+// not a per-profile knob on the consumer side (see the read-only
+// row in stream-edit.html for the rationale).
+func (s *Server) handleAdminStreamNew(w http.ResponseWriter, r *http.Request) {
+	if !s.streamsConfiguredOr503(w) {
+		return
+	}
+	username := AdminUserFromContext(r.Context())
+	s.renderAdminPage(w, "stream-edit", adminStreamEditData{
+		User:  adminUser{Name: username, Initials: initialsOf(username)},
+		IsNew: true,
+		Profile: streamRow{
+			Codec: "mjpeg",
+			Usage: "esp",
+		},
+	})
+}
+
+// handleAdminStreamEdit renders the edit-form pre-filled from
+// GET /api/profiles/{name}. A missing profile becomes a 404 with
+// a hint-banner instead of a generic error.
+func (s *Server) handleAdminStreamEdit(w http.ResponseWriter, r *http.Request) {
+	if !s.streamsConfiguredOr503(w) {
+		return
+	}
+	name := r.PathValue("name")
+	p, err := s.streams.Get(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, streams.ErrProfileNotFound) {
+			http.Error(w, "Profil nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("admin streams get", "err", err, "name", name)
+		http.Error(w, "Stream-Backend nicht erreichbar: "+err.Error(),
+			http.StatusBadGateway)
+		return
+	}
+	username := AdminUserFromContext(r.Context())
+	s.renderAdminPage(w, "stream-edit", adminStreamEditData{
+		User:    adminUser{Name: username, Initials: initialsOf(username)},
+		IsNew:   false,
+		Profile: profileToRow(p),
+	})
+}
+
+// handleAdminStreamSave persists an existing profile. Name comes
+// from the path, the rest from the form. On validation failure
+// the form is re-rendered with the stream-server's rejection
+// message so the operator can fix and retry.
+func (s *Server) handleAdminStreamSave(w http.ResponseWriter, r *http.Request) {
+	if !s.streamsConfiguredOr503(w) {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		http.Error(w, "Profil-Name fehlt.", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Formular kaputt.", http.StatusBadRequest)
+		return
+	}
+	spec, formErr := parseStreamForm(r, name)
+	if formErr != "" {
+		s.rerenderStreamEdit(w, r, false, spec, formErr)
+		return
+	}
+	if err := s.streams.Put(r.Context(), spec); err != nil {
+		s.log.Warn("admin streams put", "err", err, "name", name)
+		s.rerenderStreamEdit(w, r, false, spec, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/a/streams", http.StatusSeeOther)
+}
+
+// handleAdminStreamCreate persists a brand-new profile. Name
+// comes from the form (the path is just /a/streams). The same
+// PUT /api/profiles/{name} call serves both create and replace -
+// the stream-server treats unknown names as upsert.
+func (s *Server) handleAdminStreamCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.streamsConfiguredOr503(w) {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Formular kaputt.", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.PostForm.Get("name"))
+	spec, formErr := parseStreamForm(r, name)
+	if formErr == "" && name == "" {
+		formErr = "Profil-Name darf nicht leer sein."
+	}
+	if formErr != "" {
+		s.rerenderStreamEdit(w, r, true, spec, formErr)
+		return
+	}
+	if err := s.streams.Put(r.Context(), spec); err != nil {
+		s.log.Warn("admin streams put (new)", "err", err, "name", name)
+		s.rerenderStreamEdit(w, r, true, spec, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/a/streams", http.StatusSeeOther)
+}
+
+// handleAdminStreamDelete removes a profile via Client.Delete.
+// 404 from the backend is treated as "already gone" and still
+// redirects to the list without a flash.
+func (s *Server) handleAdminStreamDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.streamsConfiguredOr503(w) {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		http.Error(w, "Profil-Name fehlt.", http.StatusBadRequest)
+		return
+	}
+	if err := s.streams.Delete(r.Context(), name); err != nil &&
+		!errors.Is(err, streams.ErrProfileNotFound) {
+		s.log.Warn("admin streams delete", "err", err, "name", name)
+		http.Error(w, "Loeschen fehlgeschlagen: "+err.Error(),
+			http.StatusBadGateway)
+		return
+	}
+	http.Redirect(w, r, "/a/streams", http.StatusSeeOther)
+}
+
+// parseStreamForm pulls the 11-field profile envelope out of the
+// posted form. The returned spec is sent verbatim to Client.Put;
+// the second return value carries a German operator-facing
+// reason when input was rejected locally (allow-list violations
+// on usage / codec / encryption, malformed numbers).
+//
+// Numbers default to zero on empty input; the stream-server
+// tolerates 0 for the non-MJPEG profiles. Trimming runs on every
+// string field so trailing whitespace does not slip in.
+func parseStreamForm(r *http.Request, name string) (streams.Profile, string) {
+	codec := strings.TrimSpace(r.PostForm.Get("codec"))
+	if !validStreamCodec(codec) {
+		return streams.Profile{}, "Ungueltiger Codec (mjpeg / h264_cbp / h264_passthrough / h264_reencode_shortgop)."
+	}
+	usage := strings.TrimSpace(r.PostForm.Get("usage"))
+	if !validStreamUsage(usage) {
+		return streams.Profile{}, "Ungueltige Nutzung (esp / browser)."
+	}
+	// encryption is no longer an operator-facing knob (S15-29);
+	// the stream-edit form ships the current value as a hidden
+	// input so the value round-trips on save. Empty is allowed
+	// here so the stream-server's source-side default kicks in
+	// on a fresh profile create; non-empty must still hit the
+	// allow-list so a tampered form cannot smuggle garbage.
+	encryption := strings.TrimSpace(r.PostForm.Get("encryption"))
+	if encryption != "" && !validStreamEncryption(encryption) {
+		return streams.Profile{}, "Ungueltiger Verschluesselungs-Modus (tls / srtp)."
+	}
+	width, ok := parseStreamInt(r.PostForm.Get("width"))
+	if !ok {
+		return streams.Profile{}, "Width muss eine Zahl sein."
+	}
+	height, ok := parseStreamInt(r.PostForm.Get("height"))
+	if !ok {
+		return streams.Profile{}, "Height muss eine Zahl sein."
+	}
+	fps, ok := parseStreamInt(r.PostForm.Get("fps"))
+	if !ok {
+		return streams.Profile{}, "FPS muss eine Zahl sein."
+	}
+	encQ, ok := parseStreamInt(r.PostForm.Get("encode_quality"))
+	if !ok {
+		return streams.Profile{}, "Encode-Quality muss eine Zahl sein."
+	}
+	return streams.Profile{
+		Name:          name,
+		CameraID:      strings.TrimSpace(r.PostForm.Get("camera_id")),
+		Quality:       strings.TrimSpace(r.PostForm.Get("quality")),
+		Usage:         usage,
+		Description:   strings.TrimSpace(r.PostForm.Get("description")),
+		Codec:         codec,
+		Width:         width,
+		Height:        height,
+		FPS:           fps,
+		EncodeQuality: encQ,
+		Encryption:    encryption,
+	}, ""
+}
+
+// rerenderStreamEdit shows the edit form with the just-typed
+// values + a German error banner. isNew preserves the create-
+// vs-save distinction across the redraw.
+func (s *Server) rerenderStreamEdit(w http.ResponseWriter, r *http.Request, isNew bool, spec streams.Profile, errMsg string) {
+	username := AdminUserFromContext(r.Context())
+	s.renderAdminPage(w, "stream-edit", adminStreamEditData{
+		User:      adminUser{Name: username, Initials: initialsOf(username)},
+		IsNew:     isNew,
+		Profile:   profileToRow(spec),
+		PostError: errMsg,
+	})
+}
+
+// streamsConfiguredOr503 fails closed when no backend is wired
+// so the write handlers do not produce confusing
+// ErrNotConfigured banners pretending the save worked.
+func (s *Server) streamsConfiguredOr503(w http.ResponseWriter) bool {
+	if s.streams.Configured() {
+		return true
+	}
+	http.Error(w, "Stream-Backend nicht konfiguriert.", http.StatusServiceUnavailable)
+	return false
+}
+
+func validStreamCodec(c string) bool {
+	switch c {
+	case "mjpeg", "h264_cbp", "h264_passthrough", "h264_reencode_shortgop":
+		return true
+	}
+	return false
+}
+
+func validStreamUsage(u string) bool {
+	switch u {
+	case "esp", "browser":
+		return true
+	}
+	return false
+}
+
+func validStreamEncryption(e string) bool {
+	switch e {
+	case "tls", "srtp":
+		return true
+	}
+	return false
+}
+
+// parseStreamInt reads a form-field integer. Empty is allowed and
+// becomes zero; anything else must parse cleanly.
+func parseStreamInt(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - Benutzer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main" style="max-width: 880px;">
+    {{if not .Page.Configured}}
+      <header class="page-header">
+        <div class="page-title-stack">
+          <h1 class="page-title">Benutzer</h1>
+        </div>
+      </header>
+      <section class="app-card">
+        <div class="app-card-body" style="padding: var(--space-6);">
+          <h2 class="app-card-title">UA-Access noch nicht konfiguriert</h2>
+          <p style="color: var(--color-text-secondary);">Bitte zuerst unter <a href="/a/settings">Einstellungen</a> die Controller-URL und das API-Token eintragen.</p>
+        </div>
+      </section>
+    {{else if .Page.NotFoundFlash}}
+      <header class="page-header">
+        <div class="page-title-stack">
+          <h1 class="page-title">Benutzer</h1>
+        </div>
+      </header>
+      <div class="banner banner-amber" role="status">{{.Page.NotFoundFlash}}</div>
+      <p style="margin-top:var(--space-4);"><a href="/a/users">Zurueck zur Liste</a></p>
+    {{else}}
+      <header class="page-header">
+        <div class="page-title-stack">
+          <h1 class="page-title" style="display:flex; gap:var(--space-3); align-items:center;">
+            <span class="app-table-mark">{{.Page.Profile.Initials}}</span>
+            {{.Page.Profile.DisplayName}}
+          </h1>
+          <p class="page-subtitle">
+            {{if eq .Page.Profile.Status "active"}}
+              <span class="status-pill is-ok"><span class="status-dot"></span>Aktiv</span>
+            {{else if eq .Page.Profile.Status "deactivated"}}
+              <span class="status-pill is-danger"><span class="status-dot"></span>Inaktiv</span>
+            {{else}}
+              <span class="status-pill"><span class="status-dot"></span>{{.Page.Profile.StatusLabel}}</span>
+            {{end}}
+            <code style="margin-left:var(--space-2); color:var(--color-text-tertiary);">{{.Page.Profile.ID}}</code>
+          </p>
+        </div>
+        <div class="page-actions">
+          <a class="btn btn-secondary" href="/a/users">Zurueck</a>
+          {{if eq .Page.Profile.Status "active"}}
+            <form method="post" action="/a/users/{{.Page.Profile.ID}}/deactivate" style="display:inline; margin:0;">
+              <button class="btn btn-secondary" type="submit">Deaktivieren</button>
+            </form>
+          {{else}}
+            <form method="post" action="/a/users/{{.Page.Profile.ID}}/activate" style="display:inline; margin:0;">
+              <button class="btn btn-secondary" type="submit">Aktivieren</button>
+            </form>
+          {{end}}
+          <form method="post" action="/a/users/{{.Page.Profile.ID}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Benutzer endgueltig in UniFi Access loeschen?');">
+            <button class="btn btn-secondary" type="submit">Loeschen</button>
+          </form>
+        </div>
+      </header>
+
+      {{if .Page.Flash}}
+        <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+      {{end}}
+
+      <section class="set-section">
+        <div class="set-section-title">Stammdaten</div>
+        <form class="set-card" method="post" action="/a/users/{{.Page.Profile.ID}}/update">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Vorname</span>
+            </div>
+            <input class="input" name="first_name" type="text" value="{{.Page.Profile.DisplayName}}" style="max-width:320px;" placeholder="Vorname"/>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Email</span>
+            </div>
+            <input class="input" name="email" type="email" value="{{.Page.Profile.Email}}" style="max-width:320px;"/>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Personal-Nr.</span>
+            </div>
+            <input class="input" name="employee_number" type="text" value="{{.Page.Profile.EmployeeNumber}}" style="max-width:320px;"/>
+          </div>
+          <div class="set-row">
+            <div class="set-row-main"></div>
+            <button class="btn btn-primary" type="submit">Speichern</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="set-section" style="margin-top:var(--space-6);">
+        <div class="set-section-title">Authentifizierung</div>
+        <div class="set-card">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">NFC-Karten</span>
+              <span class="set-row-sub">Verwaltung der NFC-Karten erfolgt direkt im UA-Portal.</span>
+            </div>
+            {{if .Page.Profile.HasNFC}}
+              <span class="status-pill is-ok"><span class="status-dot"></span>Hinterlegt</span>
+            {{else}}
+              <span class="status-pill"><span class="status-dot"></span>Keine</span>
+            {{end}}
+          </div>
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">PIN-Code</span>
+              <span class="set-row-sub">Wird in UA generiert und uebertragen.</span>
+            </div>
+            {{if .Page.Profile.HasPIN}}
+              <span class="status-pill is-ok"><span class="status-dot"></span>Hinterlegt</span>
+            {{else}}
+              <span class="status-pill"><span class="status-dot"></span>Keiner</span>
+            {{end}}
+          </div>
+        </div>
+      </section>
+
+      <section class="set-section" style="margin-top:var(--space-6);">
+        <div class="set-section-title">Verknuepfte Web-Viewer</div>
+        <div class="set-card">
+          {{if .Page.LinkedViewers}}
+            <table class="app-table">
+              <thead><tr><th>Wohnung</th><th>Username</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {{range .Page.LinkedViewers}}
+                  <tr>
+                    <td>{{.Name}} <div style="color:var(--color-text-tertiary); font-family:var(--font-mono); font-size:var(--fs-sm);">{{.MAC}}</div></td>
+                    <td><code>{{.Username}}</code></td>
+                    <td>
+                      {{if .Online}}
+                        <span class="status-pill is-ok"><span class="status-dot"></span>Online</span>
+                      {{else}}
+                        <span class="status-pill"><span class="status-dot"></span>Offline</span>
+                      {{end}}
+                    </td>
+                    <td style="text-align:right;">
+                      <a class="btn btn-secondary btn-sm" href="/a/web-viewers">Zum Viewer</a>
+                    </td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          {{else}}
+            <div style="padding: var(--space-4); color: var(--color-text-tertiary);">
+              Noch kein Web-Viewer mit diesem Benutzer verknuepft. Beim Anlegen eines neuen Web-Viewers kann die Verknuepfung im Modal gesetzt werden.
+            </div>
+          {{end}}
+        </div>
+      </section>
+    {{end}}
+  </main>
+
+  <style>
+    .banner-amber {
+      background: rgba(245, 158, 11, 0.15);
+      color: rgb(245, 158, 11);
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+    }
+  </style>
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

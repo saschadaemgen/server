@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - ESP-Pager</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main" style="max-width: 720px;">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">{{.Page.Title}}</h1>
+        <p class="page-subtitle">{{.Page.Lead}}</p>
+      </div>
+    </header>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2 class="app-card-title">{{.Page.CardHead}}</h2>
+        <span class="badge">{{.Page.NextBrief}}</span>
+      </div>
+      <div class="app-card-body">
+        <p>{{.Page.CardBody}}</p>
+        <ul style="color: var(--color-text-secondary);">
+          <li>Pager-Geraete adoptieren wie ESP-Viewer</li>
+          <li>Welche Klingeln gehen an welchen Pager</li>
+          <li>Batterie-Status, Standort, Quittierungen</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

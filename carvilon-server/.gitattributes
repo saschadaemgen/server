@@ -1,0 +1,53 @@
+# carvilon repo line-ending convention.
+#
+# Default: every text file stored as LF in the index, autoconverted
+# on checkout per the user's core.autocrlf setting. The explicit
+# entries below pin specific file types to LF so a Windows editor
+# never silently introduces CRLF drift in source code, templates,
+# or shell scripts (which would otherwise break under Linux).
+# PowerShell scripts stay CRLF because some Windows PowerShell
+# hosts choke on bare LF in .ps1 files.
+
+* text=auto eol=lf
+
+# Go and friends
+*.go        text eol=lf
+*.mod       text eol=lf
+*.sum       text eol=lf
+*.work      text eol=lf
+
+# Templates and frontend
+*.html      text eol=lf
+*.css       text eol=lf
+*.js        text eol=lf
+*.svg       text eol=lf
+
+# Data and config
+*.json      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.sql       text eol=lf
+
+# Docs and shell
+*.md        text eol=lf
+*.sh        text eol=lf
+*.txt       text eol=lf
+
+# Windows-only scripts keep CRLF
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# Binaries
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.pcap      binary
+*.pcapng    binary

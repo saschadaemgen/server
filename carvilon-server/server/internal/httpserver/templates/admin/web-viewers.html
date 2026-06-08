@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - Web-Viewer</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Web-Viewer</h1>
+        <p class="page-subtitle">Browser-basierte Klingel-Empfaenger pro Wohnung. Username + Passwort.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" type="button" data-action="open-create">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Web-Viewer anlegen
+        </button>
+      </div>
+    </header>
+
+    {{if .Page.Flash}}
+      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
+    {{end}}
+
+    <div class="app-card">
+      <table class="app-table">
+        <thead>
+          <tr>
+            <th>Wohnungs-Name</th>
+            <th>Verknuepft mit</th>
+            <th>Status</th>
+            <th>Passwort gesetzt</th>
+            <th style="text-align:center;">Link</th>
+            <th style="text-align:right;">Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Page.Viewers}}
+            <tr id="row-{{macID .MAC}}">
+              <td>
+                <a href="/a/viewers/{{.MAC}}" style="color:inherit; text-decoration:none;" title="Detail-Seite">
+                  <strong>{{.Name}}</strong>
+                </a>
+                <div style="color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--fs-sm);">{{.MAC}}</div>
+              </td>
+              <td>
+                {{if .LinkedUserName}}
+                  <a href="/a/users/{{.LinkedUserID}}">{{.LinkedUserName}}</a>
+                {{else if .LinkedUserID}}
+                  <code style="color: var(--color-text-tertiary);">{{.LinkedUserID}}</code>
+                {{else}}
+                  <span style="color: var(--color-text-tertiary);">-</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .LockedNow}}
+                  <span class="status-pill is-danger"><span class="status-dot"></span>Gesperrt</span>
+                {{else if .OnlineNow}}
+                  <span class="status-pill is-ok"><span class="status-dot"></span>Online</span>
+                {{else}}
+                  <span class="status-pill"><span class="status-dot"></span>Offline</span>
+                {{end}}
+              </td>
+              <td>
+                {{if .HasPassword}}{{.PasswordSetAt}}{{else}}<em>noch nicht gesetzt</em>{{end}}
+              </td>
+              <td style="text-align:center;">
+                <button class="icon-btn" type="button"
+                        data-action="copy-link"
+                        data-url="{{.LoginURL}}"
+                        title="Login-Link kopieren"
+                        aria-label="Login-Link kopieren">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                  </svg>
+                </button>
+              </td>
+              <td style="text-align:right; white-space:nowrap;">
+                <button class="btn btn-primary btn-sm" type="button" data-action="unlock-door" data-mac="{{.MAC}}" data-name="{{.Name}}" title="Tür öffnen">Tür öffnen</button>
+                <button class="btn btn-secondary btn-sm" type="button"
+                        data-action="open-edit"
+                        data-mac="{{.MAC}}"
+                        data-name="{{.Name}}"
+                        data-link="{{.LinkedUserID}}"
+                        data-paired="{{.PairedIntercomMAC}}"
+                        data-stream-profile="{{.StreamProfile}}">Bearbeiten</button>
+                {{if .LockedNow}}
+                  <form method="post" action="/a/web-viewers/{{.MAC}}/unlock" style="display:inline; margin:0;">
+                    <button class="btn btn-secondary btn-sm" type="submit">Sperre aufheben</button>
+                  </form>
+                {{end}}
+                <form method="post" action="/a/web-viewers/{{.MAC}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Viewer endgueltig loeschen? Sessions werden invalidiert.');">
+                  <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
+                </form>
+              </td>
+            </tr>
+          {{else}}
+            <tr><td colspan="6" style="text-align:center; color: var(--color-text-tertiary);">Noch keine Web-Viewer angelegt.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Anlegen-Modal. hat die Maske
+         radikal vereinfacht: Wohnungs-Name + optional Passwort +
+         optional Verknuepfung. MAC wird intern erzeugt. -->
+    <div class="modal-scrim" data-modal="create-viewer" role="dialog" aria-modal="true" aria-labelledby="create-viewer-title">
+      <div class="modal-glass">
+        <form method="post" action="/a/web-viewers" data-credentials-form>
+          <header class="modal-header">
+            <div>
+              <h2 id="create-viewer-title" class="modal-title">Web-Viewer anlegen</h2>
+              <p class="modal-sub">Wohnungs-Name + optional Passwort. Der Mieter loggt sich mit dem Wohnungs-Namen ein.</p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
+            <div class="field">
+              <label class="field-label" for="new-name">Wohnungs-Name</label>
+              <input class="input" id="new-name" name="name" type="text" required maxlength="64" placeholder="z.B. Familie Mueller 2OG" autofocus/>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-pw">Passwort (optional)</label>
+              <div class="field-with-toggle">
+                <input class="input" id="new-pw" name="password" type="password" autocomplete="new-password" placeholder="leer = wird automatisch generiert"/>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="toggle-pw" data-target="#new-pw">Zeigen</button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-link">Verknuepfen mit Benutzer (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --">
+                <select id="new-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+              <span class="field-hint">UA-User; laedt beim Oeffnen des Dropdowns.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --">
+                <select id="new-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">UA-Intercoms; Tuer wird automatisch ueber die UA-API aufgeloest.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="new-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_web) --">
+                <select id="new-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_web) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
+            </div>
+          </div>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Anlegen</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <!-- Bearbeiten-Modal. einheitlicher
+         Edit-Pfad fuer Name, Passwort und Verknuepfung. Passwort leer
+         lassen = nicht aendern; "Neu generieren"-Knopf befuellt das
+         Feld ohne zu speichern. Speichern-Klick schickt alles in
+         einem Request. -->
+    <div class="modal-scrim" data-modal="edit-viewer" role="dialog" aria-modal="true" aria-labelledby="edit-viewer-title">
+      <div class="modal-glass">
+        <form data-edit-form>
+          <header class="modal-header">
+            <div>
+              <h2 id="edit-viewer-title" class="modal-title">Web-Viewer bearbeiten</h2>
+              <p class="modal-sub" data-edit-sub>MAC: <code data-edit-mac></code></p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">
+            <div class="field">
+              <label class="field-label" for="edit-name">Wohnungs-Name</label>
+              <input class="input" id="edit-name" name="name" type="text" required maxlength="64"/>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-pw">Neues Passwort (leer = nicht aendern)</label>
+              <div class="field-with-toggle">
+                <input class="input" id="edit-pw" name="password" type="password" autocomplete="new-password" placeholder="leer = Passwort bleibt"/>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="toggle-pw" data-target="#edit-pw">Zeigen</button>
+                <button class="btn btn-secondary btn-sm" type="button" data-action="generate-pw" data-target="#edit-pw">Neu generieren</button>
+              </div>
+              <span class="field-hint">Aenderung invalidiert alle bestehenden Sessions. Wird nur EINMAL angezeigt, sobald gespeichert ist.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-link">Verknuepfen mit Benutzer (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/users.json?size=200"
+                   data-dropdown-root-key="users"
+                   data-dropdown-label-key="DisplayName"
+                   data-dropdown-value-key="ID"
+                   data-dropdown-extra-key="Email"
+                   data-dropdown-placeholder="-- keine Verknuepfung --"
+                   data-edit-link-dropdown>
+                <select id="edit-link" name="linked_ua_user_id" data-dropdown-target>
+                  <option value="">-- keine Verknuepfung --</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-paired">Verknuepfte Klingel (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/intercoms.json"
+                   data-dropdown-root-key="intercoms"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="MAC"
+                   data-dropdown-extra-key="DeviceType"
+                   data-dropdown-placeholder="-- keine Klingel --"
+                   data-edit-paired-dropdown>
+                <select id="edit-paired" name="paired_intercom_mac" data-dropdown-target>
+                  <option value="">-- keine Klingel --</option>
+                </select>
+              </div>
+              <span class="field-hint">Wird vom Standby-"Tuer auf"-Knopf benutzt; Tuer kommt automatisch aus der UA-API.</span>
+            </div>
+            <div class="field">
+              <label class="field-label" for="edit-stream-profile">Stream-Profil (optional)</label>
+              <div class="dropdown" data-dropdown
+                   data-dropdown-source="fetch:/a/streams.json"
+                   data-dropdown-root-key="profiles"
+                   data-dropdown-label-key="Name"
+                   data-dropdown-value-key="Name"
+                   data-dropdown-placeholder="-- Konvention (intercom_web) --"
+                   data-edit-stream-profile-dropdown>
+                <select id="edit-stream-profile" name="stream_profile" data-dropdown-target>
+                  <option value="">-- Konvention (intercom_web) --</option>
+                </select>
+              </div>
+              <span class="field-hint">Leer = Convention-Default. Profile pflegt der Admin unter /a/streams.</span>
+            </div>
+
+            <hr style="border:none; border-top:1px solid rgba(255,255,255,0.10); margin:8px 0;" />
+
+            <div class="field">
+              <label class="field-label" for="edit-login-url">Login-Link fuer den Mieter</label>
+              <div style="display:flex; gap:var(--space-2); align-items:stretch;">
+                <input type="text" id="edit-login-url" class="input" readonly style="flex:1; user-select:all;"/>
+                <button class="btn btn-secondary" type="button" data-action="copy-link" data-target="#edit-login-url">Kopieren</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">QR-Code zum Scannen</label>
+              <div id="edit-qr-code" style="display:flex; justify-content:center; background:#ffffff; padding:12px; border-radius:8px; min-height:80px;"></div>
+            </div>
+          </div>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit">Speichern</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <style>
+    /* Orange Warn-Banner fuer "Passwort wird nur einmal gezeigt".
+       Library hat nur red/green; orange ist eigene Variante. */
+    .banner-orange {
+      background: rgba(249, 115, 22, 0.15);
+      color: rgb(249, 115, 22);
+      border: 1px solid rgba(249, 115, 22, 0.45);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      font-weight: var(--fw-medium);
+    }
+    /* Copy-Button-Layout: Feld + Button nebeneinander. */
+    .field-with-copy, .field-with-toggle {
+      display: flex;
+      gap: var(--space-2);
+      align-items: stretch;
+    }
+    .field-with-copy .input, .field-with-toggle .input {
+      flex: 1;
+    }
+    .field-with-copy .copy-btn,
+    .field-with-toggle button {
+      flex: none;
+      padding: 0 var(--space-3);
+      min-width: 96px;
+    }
+    .copy-btn.is-copied {
+      background: rgba(34, 197, 94, 0.18);
+      color: rgb(34, 197, 94);
+      border-color: rgba(34, 197, 94, 0.45);
+    }
+  </style>
+  <script src="/static/interactions.js"></script>
+  <script>
+    (function () {
+      // ---- Anlegen-Modal ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-create"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = document.querySelector('[data-modal="create-viewer"]');
+        if (modal) modal.classList.add('is-open');
+      });
+
+      // ---- The show/hide password field lives globally in
+      //      _nav.html; no page-local handler here. ----
+
+      // ---- Bearbeiten-Modal Open ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="open-edit"]');
+        if (!btn) return;
+        e.preventDefault();
+        var mac = btn.getAttribute('data-mac');
+        var name = btn.getAttribute('data-name') || '';
+        var link = btn.getAttribute('data-link') || '';
+        var paired = btn.getAttribute('data-paired') || '';
+        var streamProfile = btn.getAttribute('data-stream-profile') || '';
+        var modal = document.querySelector('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        modal.setAttribute('data-mac', mac);
+        var macSlot = modal.querySelector('[data-edit-mac]');
+        if (macSlot) macSlot.textContent = mac;
+        var nameInput = modal.querySelector('#edit-name');
+        if (nameInput) nameInput.value = name;
+        var pwInput = modal.querySelector('#edit-pw');
+        if (pwInput) {
+          pwInput.value = '';
+          pwInput.type = 'password';
+        }
+        var pwToggle = modal.querySelector('[data-action="toggle-pw"][data-target="#edit-pw"]');
+        if (pwToggle) pwToggle.textContent = 'Zeigen';
+        // Custom-Dropdown: ueber data-dropdown-value vorbefuellen.
+        var dd = modal.querySelector('[data-edit-link-dropdown]');
+        if (dd) {
+          dd.setAttribute('data-dropdown-value', link);
+          var sel = dd.querySelector('select[data-dropdown-target]');
+          if (sel) sel.value = link;
+          // Wenn der Dropdown-Cache schon geladen ist, applyValue
+          // sofort triggern; das Custom-Dropdown-JS exportiert
+          // dafuer keinen Public-Hook, also setzen wir das Label
+          // konservativ via change-Event.
+          if (sel) sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        var dp = modal.querySelector('[data-edit-paired-dropdown]');
+        if (dp) {
+          dp.setAttribute('data-dropdown-value', paired);
+          var psel = dp.querySelector('select[data-dropdown-target]');
+          if (psel) {
+            psel.value = paired;
+            psel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        var ds = modal.querySelector('[data-edit-stream-profile-dropdown]');
+        if (ds) {
+          ds.setAttribute('data-dropdown-value', streamProfile);
+          var ssel = ds.querySelector('select[data-dropdown-target]');
+          if (ssel) {
+            ssel.value = streamProfile;
+            ssel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        // Login-Link + QR lazy nachladen.
+        var urlInput = modal.querySelector('#edit-login-url');
+        var qrSlot = modal.querySelector('#edit-qr-code');
+        if (urlInput) urlInput.value = '';
+        if (qrSlot) qrSlot.innerHTML = '';
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/login-info', {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            if (!j) return;
+            if (urlInput) urlInput.value = j.login_url || '';
+            if (qrSlot) qrSlot.innerHTML = j.qr_svg || '';
+          })
+          .catch(function (err) {
+            if (window.console) console.warn('login-info load failed', err);
+          });
+        modal.classList.add('is-open');
+      });
+
+      // ---- Neu-Generieren-Knopf ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="generate-pw"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = btn.closest('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Kein Viewer gewaehlt.');
+          return;
+        }
+        var sel = btn.getAttribute('data-target');
+        var input = document.querySelector(sel);
+        if (!input) return;
+        btn.disabled = true;
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/generate-pw', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            input.value = j.password || '';
+            input.type = 'text';
+            var pwToggle = modal.querySelector('[data-action="toggle-pw"][data-target="' + sel + '"]');
+            if (pwToggle) pwToggle.textContent = 'Verbergen';
+          })
+          .catch(function (err) {
+            alert('Generierung fehlgeschlagen: ' + err.message);
+          })
+          .finally(function () { btn.disabled = false; });
+      });
+
+      // ---- Bearbeiten-Modal Save ----
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('form[data-edit-form]');
+        if (!form) return;
+        e.preventDefault();
+        var modal = form.closest('[data-modal="edit-viewer"]');
+        if (!modal) return;
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Kein Viewer gewaehlt.');
+          return;
+        }
+        var data = new FormData(form);
+        var pw = data.get('password') || '';
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/edit', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: new URLSearchParams(data),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+            }
+            return r.json();
+          })
+          .then(function (j) {
+            modal.classList.remove('is-open');
+            if (pw) {
+              // PW geaendert: Credentials-Modal mit neuem PW zeigen.
+              var existing = document.querySelector('[data-modal="credentials"]');
+              if (existing) existing.remove();
+              var div = document.createElement('div');
+              div.innerHTML = renderCredentials(j);
+              document.body.appendChild(div.firstElementChild);
+            } else {
+              location.reload();
+            }
+          })
+          .catch(function (err) {
+            alert('Speichern fehlgeschlagen: ' + (err.message || err));
+          });
+      });
+
+      // ---- Modal-Close (X + Cancel) ----
+      document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-action="close-modal"]')) {
+          var m = e.target.closest('.modal-scrim');
+          if (m) m.classList.remove('is-open');
+        }
+      });
+
+      // ---- Copy-Button mit visuellem Feedback ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-copy-target]');
+        if (!btn) return;
+        e.preventDefault();
+        var sel = btn.getAttribute('data-copy-target');
+        var src = document.querySelector(sel);
+        if (!src) return;
+        var text = src.textContent || '';
+        var done = function () {
+          var label = btn.querySelector('[data-copy-label]');
+          var orig = label ? label.textContent : '';
+          btn.classList.add('is-copied');
+          if (label) label.textContent = 'Kopiert';
+          setTimeout(function () {
+            btn.classList.remove('is-copied');
+            if (label) label.textContent = orig;
+          }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(done);
+        } else {
+          // Fallback: textarea selektieren
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (err) {}
+          ta.remove();
+          done();
+        }
+      });
+
+      // ---- Credentials-Submit-Pfad ----
+      document.addEventListener('submit', function (e) {
+        var form = e.target.closest('form[data-credentials-form]');
+        if (!form) return;
+        e.preventDefault();
+        var data = new FormData(form);
+        fetch(form.action, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: new URLSearchParams(data),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            document.querySelectorAll('.modal-scrim.is-open').forEach(function (m) {
+              m.classList.remove('is-open');
+            });
+            var existing = document.querySelector('[data-modal="credentials"]');
+            if (existing) existing.remove();
+            var div = document.createElement('div');
+            div.innerHTML = renderCredentials(j);
+            document.body.appendChild(div.firstElementChild);
+          })
+          .catch(function (err) {
+            alert('Fehler: ' + err.message);
+          });
+      });
+
+      // ---- Passwort Bearbeiten-Flow im Credentials-Modal ----
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="edit-password"]');
+        if (!btn) return;
+        e.preventDefault();
+        var modal = btn.closest('[data-modal="credentials"]');
+        if (!modal) return;
+        var pwField = modal.querySelector('[data-pw-field]');
+        var current = pwField ? pwField.textContent : '';
+        var html = ''
+          + '<input class="input" data-pw-input type="text" value="' + escape(current) + '"'
+          +   ' style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);"/>'
+          + '<button class="btn btn-primary btn-sm" type="button" data-action="save-password">Speichern</button>'
+          + '<button class="btn btn-secondary btn-sm" type="button" data-action="cancel-password-edit">Abbrechen</button>';
+        var wrap = btn.closest('.field-with-copy');
+        if (!wrap) return;
+        wrap.dataset.previousHtml = wrap.innerHTML;
+        wrap.innerHTML = html;
+        var input = wrap.querySelector('[data-pw-input]');
+        if (input) { input.focus(); input.select(); }
+      });
+
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="cancel-password-edit"]');
+        if (!btn) return;
+        e.preventDefault();
+        var wrap = btn.closest('.field-with-copy');
+        if (!wrap || !wrap.dataset.previousHtml) return;
+        wrap.innerHTML = wrap.dataset.previousHtml;
+        delete wrap.dataset.previousHtml;
+      });
+
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="save-password"]');
+        if (!btn) return;
+        e.preventDefault();
+        var wrap = btn.closest('.field-with-copy');
+        var modal = btn.closest('[data-modal="credentials"]');
+        if (!wrap || !modal) return;
+        var input = wrap.querySelector('[data-pw-input]');
+        if (!input || !input.value) {
+          alert('Passwort darf nicht leer sein.');
+          return;
+        }
+        var mac = modal.getAttribute('data-mac');
+        if (!mac) {
+          alert('Modal hat keine MAC.');
+          return;
+        }
+        fetch('/a/web-viewers/' + encodeURIComponent(mac) + '/set-password', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: input.value }),
+          credentials: 'same-origin'
+        })
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            wrap.innerHTML = ''
+              + '<div class="input" data-pw-field id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + escape(j.password) + '</div>'
+              + '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-password"><span data-copy-label>Kopieren</span></button>'
+              + '<button class="btn btn-secondary btn-sm" type="button" data-action="edit-password">Bearbeiten</button>';
+            delete wrap.dataset.previousHtml;
+            btn.classList.add('is-copied');
+            setTimeout(function () { btn.classList.remove('is-copied'); }, 1500);
+          })
+          .catch(function (err) {
+            alert('Speichern fehlgeschlagen: ' + err.message);
+          });
+      });
+
+      function renderCredentials(j) {
+        // Struktur strikt nach Library-Konvention:
+        //   modal-scrim > modal-glass > modal-header / modal-body / modal-footer
+        // Die library-interactions.js prueft modal-glass als Inner-
+        // Container, sonst schliesst sie bei JEDEM Klick im Modal.
+        //
+        // Username-Spalte fliegt raus
+        // (Name ist der Login). Passwort hat einen "Bearbeiten"-
+        // Knopf, MAC steht auf dem Wrapper damit der Save-Pfad sie
+        // findet.
+        var mac = escape(j.mac || '');
+        var name = escape(j.name);
+        var password = escape(j.password);
+        var loginURL = escape(j.login_url);
+        var qrSVG = j.qr_svg || '';
+        return ''
+          + '<div class="modal-scrim is-open" data-modal="credentials" data-mac="' + mac + '" role="dialog" aria-modal="true">'
+          +   '<div class="modal-glass">'
+          +     '<header class="modal-header">'
+          +       '<div>'
+          +         '<h2 class="modal-title">Zugangsdaten fuer ' + name + '</h2>'
+          +         '<p class="modal-sub">Anmelde-Name: <code>' + name + '</code></p>'
+          +       '</div>'
+          +       '<button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">'
+          +         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+          +       '</button>'
+          +     '</header>'
+          +     '<div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-4);">'
+          +       '<div class="banner banner-orange" role="status">'
+          +         'Achtung: Passwort wird nur EINMAL angezeigt. Bitte sofort sicher weitergeben oder notieren.'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Anmelde-Name</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" id="cred-name" style="user-select:all;">' + name + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-name">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Passwort</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" data-pw-field id="cred-password" style="user-select:all; font-family:var(--font-mono); font-size:var(--fs-lg);">' + password + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-password">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +           '<button class="btn btn-secondary btn-sm" type="button" data-action="edit-password">Bearbeiten</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="field">'
+          +         '<label class="field-label">Login-Link</label>'
+          +         '<div class="field-with-copy">'
+          +           '<div class="input" id="cred-url" style="user-select:all; word-break:break-all;">' + loginURL + '</div>'
+          +           '<button class="btn btn-secondary btn-sm copy-btn" type="button" data-copy-target="#cred-url">'
+          +             '<span data-copy-label>Kopieren</span>'
+          +           '</button>'
+          +         '</div>'
+          +       '</div>'
+
+          +       '<div class="qr-box" style="display:flex; justify-content:center;">' + qrSVG + '</div>'
+          +       '<p class="field-hint" style="text-align:center;">Mieter scannt den QR-Code und gibt dann Wohnungs-Namen und Passwort vom Zettel ein.</p>'
+          +     '</div>'
+          +     '<footer class="modal-footer">'
+          +       '<button class="btn btn-primary" type="button" data-action="close-modal" onclick="location.reload()">Schliessen</button>'
+          +     '</footer>'
+          +   '</div>'
+          + '</div>';
+      }
+      function escape(s) {
+        return String(s || '').replace(/[&<>\"']/g, function (c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+      }
+    })();
+  </script>
+  <script>
+    // Saison 19-32: per-row "Tür öffnen" with a mandatory confirm.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-action="unlock-door"]');
+      if (!btn) return;
+      var mac = btn.getAttribute('data-mac');
+      var name = btn.getAttribute('data-name') || 'diesem Mieter';
+      if (!window.confirm('Tür von ' + name + ' wirklich öffnen?')) return;
+      btn.disabled = true;
+      fetch('/a/viewers/' + encodeURIComponent(mac) + '/unlock', {
+        method: 'POST', headers: { 'Accept': 'application/json' },
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok && res.j && res.j.ok) { window.alert('Tür geöffnet.'); }
+          else { window.alert('Öffnen fehlgeschlagen: ' + ((res.j && res.j.error) || 'Fehler')); }
+        })
+        .catch(function () { window.alert('Öffnen fehlgeschlagen (Netzwerk).'); })
+        .then(function () { btn.disabled = false; });
+    });
+  </script>
+</body>
+</html>

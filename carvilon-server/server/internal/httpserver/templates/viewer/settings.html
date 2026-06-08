@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>carvilon - Einstellungen</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    .mieter-settings {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: var(--space-5) var(--space-4);
+      color: var(--color-text);
+    }
+    .mieter-settings h1 {
+      font-size: var(--fs-xl);
+      margin: 0 0 var(--space-2) 0;
+    }
+    .mieter-settings .sub {
+      color: var(--color-text-tertiary);
+      margin-bottom: var(--space-5);
+    }
+    .mieter-card {
+      background: var(--color-surface-1);
+      border: 1px solid var(--color-hairline);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+    .mieter-card-title {
+      font-weight: var(--fw-medium);
+      margin: 0 0 var(--space-3) 0;
+    }
+    .radio-stack { display: flex; flex-direction: column; gap: var(--space-3); }
+    .radio-stack label {
+      display: flex; align-items: flex-start; gap: var(--space-3);
+      padding: var(--space-3);
+      border: 1px solid var(--color-hairline);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+    .radio-stack label:hover { border-color: var(--color-hairline-strong); }
+    .radio-stack label input[type=radio] { margin-top: 4px; }
+    .radio-stack .label-main { font-weight: var(--fw-medium); }
+    .radio-stack .label-sub {
+      font-size: var(--fs-sm);
+      color: var(--color-text-tertiary);
+      margin-top: 2px;
+    }
+    .actions {
+      display: flex; gap: var(--space-3);
+      justify-content: space-between; align-items: center;
+      margin-top: var(--space-4);
+    }
+    .info-row { display: flex; justify-content: space-between; padding: var(--space-2) 0; }
+    .info-row .k { color: var(--color-text-tertiary); }
+
+    /* Sub-2a: CARVILON brand + version footer. */
+    .settings-footer {
+      margin-top: var(--space-6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .settings-version {
+      font-size: 10px;
+      color: var(--color-text-tertiary, #94a3b8);
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+
+  <main class="mieter-settings" role="main">
+    <h1>Einstellungen</h1>
+    <p class="sub">Wohnung: <strong>{{.UnitName}}</strong></p>
+
+    <form method="post" action="/webviewer/settings" class="mieter-card">
+      <h2 class="mieter-card-title">Idle-Ansicht</h2>
+      <div class="radio-stack">
+        <label>
+          <input type="radio" name="idle_view_mode" value="screensaver"
+                 {{if eq .IdleViewMode "screensaver"}}checked{{end}}/>
+          <span>
+            <span class="label-main">Bildschirmschoner</span>
+            <span class="label-sub">Uhrzeit, Datum und Wetter. Stromsparend.</span>
+          </span>
+        </label>
+        <label>
+          <input type="radio" name="idle_view_mode" value="livestream"
+                 {{if eq .IdleViewMode "livestream"}}checked{{end}}/>
+          <span>
+            <span class="label-main">Live-Ansicht direkt</span>
+            <span class="label-sub">Permanenter Kamera-Stream der Eingangstuer.</span>
+          </span>
+        </label>
+      </div>
+      <div class="actions">
+        <a class="btn btn-secondary" href="/webviewer/">Abbrechen</a>
+        <button class="btn btn-primary" type="submit">Speichern</button>
+      </div>
+    </form>
+
+    <div class="mieter-card">
+      <h2 class="mieter-card-title">Info</h2>
+      <div class="info-row"><span class="k">Verbundene Wohnung</span><span>{{.UnitName}}</span></div>
+      <div class="info-row"><span class="k">Aktueller Idle-Modus</span><span>{{.IdleViewMode}}</span></div>
+    </div>
+
+    <form method="post" action="/webviewer/logout" class="mieter-card" style="text-align:center;">
+      <button class="btn btn-secondary" type="submit">Abmelden</button>
+    </form>
+
+    <footer class="settings-footer" aria-label="CARVILON Intercom Web Viewer">
+      <span class="carvilon-brand sz-sm" aria-hidden="true">
+        <span class="name">CARVILON</span>
+        <span class="sub-wrap">
+          <span class="sub" data-target-ratio="0.85">INTERCOM WEB VIEWER</span>
+        </span>
+      </span>
+      <!-- TODO: pull from a Go build var (ldflags -X) instead
+           of a hardcoded string. -->
+      <span class="settings-version">Version 1.0</span>
+    </footer>
+  </main>
+
+  <script src="/static/carvilon-brand.js" defer></script>
+
+</body>
+</html>

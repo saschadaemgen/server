@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - Dashboard</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    /* Filter-Aktiv-Indikator am
+       Filter-Button. .filter-btn-is-active hebt den Button mit
+       Akzent-Farbe hervor; .filter-btn-count rendert das
+       Badge mit der Anzahl ausgewaehlter Viewer. */
+    #dashboard-filter-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #dashboard-filter-btn.filter-btn-is-active {
+      color: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+    .filter-btn-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      margin-left: 4px;
+      border-radius: 999px;
+      background: var(--color-accent);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    /* Filter-dropdown visibility.
+       The earlier markup carried inline style="display:flex"
+       together with the hidden attribute. Inline style beats
+       the user-agent rule [hidden]{display:none}; the dropdown
+       was always visible regardless of dropdown.hidden.
+       All styles now live in the style block and visibility is
+       toggled via an .is-open class. */
+    .dashboard-filter {
+      margin-left: auto;
+      position: relative;
+    }
+    #dashboard-filter-dropdown {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 100%;
+      margin-top: 6px;
+      background: #0b1220;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 240px;
+      max-height: 320px;
+      overflow: auto;
+      z-index: 5;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      flex-direction: column;
+      gap: 6px;
+    }
+    #dashboard-filter-dropdown.is-open {
+      display: flex;
+    }
+    .filter-dropdown-mass-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .filter-dropdown-mass-row .btn {
+      flex: 1;
+    }
+    .filter-dropdown-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 4px 0;
+      cursor: pointer;
+    }
+    #dashboard-filter-apply {
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body class="admin-shell">
+
+  {{template "admin-nav" .}}
+
+  <main class="page" role="main">
+    <header class="page-header">
+      <div class="page-title-stack">
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Live-Stand der Plattform.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-secondary" type="button" onclick="location.reload()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 10a8 8 0 0 1 13.7-5.7L20 6"/>
+            <path d="M20 4v4h-4"/>
+            <path d="M20 14a8 8 0 0 1-13.7 5.7L4 18"/>
+            <path d="M4 20v-4h4"/>
+          </svg>
+          Aktualisieren
+        </button>
+      </div>
+    </header>
+
+    <div class="stat-grid">
+      <div class="stat-card is-accent">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Web-Viewer gesamt</span>
+        </div>
+        <div class="stat-card-value">{{.Page.WebViewersTotal}}</div>
+        <div class="stat-card-foot">
+          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.WebViewersRunning}} online</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Aktive Sessions</span>
+        </div>
+        <div class="stat-card-value">{{.Page.ActiveSessions}}</div>
+        <div class="stat-card-foot">
+          <span>Aktivitaet in 30 Min</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Klingel-Events heute</span>
+        </div>
+        <div class="stat-card-value">{{.Page.EventsToday}}</div>
+        <div class="stat-card-foot">
+          <span>seit 00:00 Uhr</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">Klingel-Events 7 Tage</span>
+        </div>
+        <div class="stat-card-value">{{.Page.Events7d}}</div>
+        <div class="stat-card-foot">
+          <span>rollendes Fenster</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">ESP-Viewer</span>
+        </div>
+        <div class="stat-card-value">{{.Page.ESPAdopted}}</div>
+        <div class="stat-card-foot" style="display:flex; flex-wrap:wrap; gap:var(--space-2);">
+          <span class="status-pill is-ok"><span class="status-dot"></span>{{.Page.ESPWithToken}} mit Token</span>
+          {{if .Page.ESPPending}}
+            <span class="status-pill"><span class="status-dot"></span>{{.Page.ESPPending}} pending</span>
+          {{end}}
+          {{if .Page.ESPLastDiscovery}}
+            <span style="color: var(--color-text-tertiary); font-size: var(--fs-sm);">letzte Discovery: {{.Page.ESPLastDiscovery}}</span>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-card-label">ESP-Pager</span>
+        </div>
+        <div class="stat-card-value" style="color: var(--color-text-tertiary);">-</div>
+        <div class="stat-card-foot">
+          <span style="color: var(--color-text-tertiary);">geplant fuer kommende Saison</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="app-card" style="margin-top: var(--space-6);">
+      <div class="app-card-head" style="display:flex; align-items:center; gap: var(--space-3);">
+        <h2 class="app-card-title">Letzte Klingel-Ereignisse</h2>
+        <span class="badge">letzte 20</span>
+        {{if .Page.AnyFilter}}<span class="badge" style="background: rgba(91,157,255,0.15); color: var(--color-accent);">Filter aktiv</span>{{end}}
+        <!-- Filter-Dropdown. JS-only, ohne
+             JS funktioniert die Page weiter (alle Eintraege).
+             Schliess-Logik (Apply + Outside + ESC) plus
+             Aktiv-Indikator (.is-active + Count-Badge wenn nicht
+             alle Viewer ausgewaehlt sind). -->
+        <div class="dashboard-filter">
+          <button type="button" id="dashboard-filter-btn"
+                  class="btn btn-secondary{{if .Page.AnyFilter}} filter-btn-is-active{{end}}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"/><path d="M6 12h12"/><path d="M10 18h4"/>
+            </svg>
+            Wohnung filtern
+            {{if .Page.AnyFilter}}<span class="filter-btn-count">{{len .Page.SelectedMACs}}</span>{{end}}
+          </button>
+          <div id="dashboard-filter-dropdown">
+            <div class="filter-dropdown-mass-row">
+              <button type="button" id="dashboard-filter-all-on" class="btn btn-secondary">Alle an</button>
+              <button type="button" id="dashboard-filter-all-off" class="btn btn-secondary">Alle aus</button>
+            </div>
+            {{range .Page.AllViewers}}
+              <label class="filter-dropdown-option">
+                <input type="checkbox" name="dashboard-viewer-mac" value="{{.MAC}}"{{if .Selected}} checked{{end}}>
+                {{.Name}}
+              </label>
+            {{end}}
+            <button type="button" id="dashboard-filter-apply" class="btn btn-primary">Anwenden</button>
+          </div>
+        </div>
+      </div>
+      {{if .Page.RecentEventsEmpty}}
+        <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>{{if .Page.AnyFilter}}Keine Klingel-Events fuer die ausgewaehlten Wohnungen.{{else}}Noch keine Klingel-Events. Sobald jemand an einem Intercom klingelt, taucht der Eintrag hier auf.{{end}}</p>
+        </div>
+      {{else}}
+        <table class="app-table">
+          <thead><tr><th>Zeit</th><th>Wohnung</th><th>Tür</th><th>Status</th></tr></thead>
+          <tbody>
+            {{range .Page.RecentEvents}}
+              <tr>
+                <td>{{.When}}</td>
+                <td>
+                  <a href="/a/viewers/{{.ViewerMAC}}" style="color:inherit; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    <span class="app-table-mark">{{.UnitMark}}</span>
+                    {{.UnitName}}
+                  </a>
+                </td>
+                <td>{{.DoorName}}</td>
+                <td>{{.Status}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
+    </section>
+
+    <script>
+      // Dashboard filter dropdown.
+      //
+      // The visibility toggle runs via the .is-open class instead
+      // of the hidden attribute. An earlier markup carried inline
+      // style with display:flex - that specificity winner
+      // overrode the user-agent rule [hidden]{display:none},
+      // which is why the dropdown was never hidden.
+      //
+      // Verhalten:
+      //   - Klick Filter-Button: Dropdown auf/zu
+      //   - Klick "Anwenden": Filter anwenden + Dropdown zu + Navigation
+      //   - Klick "Alle an" / "Alle aus": nur Checkboxes togglen,
+      //     Dropdown bleibt offen damit Admin weiter klicken kann
+      //   - Klick ausserhalb des Dropdowns + nicht auf Button: zu
+      //   - ESC-Taste: zu
+      (function () {
+        var btn = document.getElementById('dashboard-filter-btn');
+        var dropdown = document.getElementById('dashboard-filter-dropdown');
+        if (!btn || !dropdown) return;
+
+        function isOpen()        { return dropdown.classList.contains('is-open'); }
+        function openDropdown()  { dropdown.classList.add('is-open'); }
+        function closeDropdown() { dropdown.classList.remove('is-open'); }
+        function toggleDropdown() { if (isOpen()) closeDropdown(); else openDropdown(); }
+
+        btn.addEventListener('click', function (e) {
+          // stopPropagation verhindert dass der document-listener
+          // direkt nach dem Oeffnen wieder schliesst.
+          e.stopPropagation();
+          toggleDropdown();
+        });
+
+        // Outside-Click. dropdown.contains(target) deckt auch
+        // verschachtelte Klick-Targets ab (Checkboxes, Buttons).
+        document.addEventListener('click', function (e) {
+          if (!isOpen()) return;
+          if (dropdown.contains(e.target) || btn.contains(e.target)) return;
+          closeDropdown();
+        });
+
+        // ESC schliesst. Nur reagieren wenn Dropdown offen, damit
+        // andere ESC-Use-Cases (zukuenftige Modals) ungestoert sind.
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && isOpen()) {
+            closeDropdown();
+          }
+        });
+
+        // Mass-Toggle Buttons sollen das Dropdown OFFEN lassen
+        // (Admin koennte gleich nach "Alle aus" einzelne Mieter
+        // wieder anklicken wollen). Keine closeDropdown-Calls.
+        document.getElementById('dashboard-filter-all-on').addEventListener('click', function () {
+          dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').forEach(function (cb) {
+            cb.checked = true;
+          });
+        });
+        document.getElementById('dashboard-filter-all-off').addEventListener('click', function () {
+          dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').forEach(function (cb) {
+            cb.checked = false;
+          });
+        });
+
+        document.getElementById('dashboard-filter-apply').addEventListener('click', function () {
+          var macs = [];
+          dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]:checked').forEach(function (cb) {
+            macs.push(cb.value);
+          });
+          var params = new URLSearchParams();
+          var total = dropdown.querySelectorAll('input[name="dashboard-viewer-mac"]').length;
+          if (macs.length > 0 && macs.length < total) {
+            params.set('viewer_macs', macs.join(','));
+          }
+          closeDropdown();
+          var qs = params.toString();
+          location.href = '/a/' + (qs ? '?' + qs : '');
+        });
+      })();
+    </script>
+
+    <section class="app-card" style="margin-top: var(--space-6);">
+      <div class="app-card-head">
+        <h2 class="app-card-title">Letzte Anmeldungen</h2>
+        <span class="badge">letzte 10</span>
+      </div>
+      {{if .Page.RecentAuditEmpty}}
+        <div class="app-card-body" style="text-align:center; color: var(--color-text-tertiary); padding: var(--space-6) var(--space-4);">
+          <p>Noch keine Anmeldungen.</p>
+        </div>
+      {{else}}
+        <table class="app-table">
+          <thead><tr><th>Zeit</th><th>Bereich</th><th>User</th><th>IP</th><th>Resultat</th></tr></thead>
+          <tbody>
+            {{range .Page.RecentAudit}}
+              <tr>
+                <td>{{.When}}</td>
+                <td>{{.Realm}}</td>
+                <td>{{.User}}</td>
+                <td>{{.IP}}</td>
+                <td>{{.Outcome}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
+    </section>
+  </main>
+
+  <script src="/static/interactions.js"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!--
+  carvilon · admin-login.html
+  Hausverwalter login. Centered card on a soft gradient stage.
+
+    <body class="login-stage">
+      {{template "admin-login" .}}
+    </body>
+
+  Required server data:
+    .Error          — string, last login error (or empty)
+    .CSRFToken      — string, CSRF nonce
+-->
+
+<main class="login-card" role="main">
+
+  <header class="login-brand">
+    <div class="login-brand-mark" aria-hidden="true">u</div>
+    <div class="login-brand-name">carvilon</div>
+    <div class="login-brand-sub">Hausverwaltung · Klingelanlagen</div>
+  </header>
+
+  <form class="login-form" method="post" action="/a/login">
+    <input type="hidden" name="_csrf" value="{{.CSRFToken}}"/>
+
+    {{if .Error}}
+      <div class="badge badge-danger" role="alert" style="align-self: stretch; justify-content: center; padding: 8px;">
+        {{.Error}}
+      </div>
+    {{end}}
+
+    <div class="field">
+      <label class="field-label" for="login-email">Benutzername</label>
+      <input class="input" type="text" id="login-email" name="username" autocomplete="username" required placeholder="admin"/>
+    </div>
+
+    <div class="field">
+      <label class="field-label" for="login-password">Passwort</label>
+      <input class="input" type="password" id="login-password" name="password" autocomplete="current-password" required/>
+      <a class="field-hint" href="/a/forgot" style="align-self: flex-end;">Passwort vergessen?</a>
+    </div>
+
+    <button class="btn btn-primary btn-lg" type="submit" style="margin-top: var(--space-2);">
+      Anmelden
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14"/>
+        <path d="M13 6l6 6-6 6"/>
+      </svg>
+    </button>
+
+    <div class="login-divider">
+      <span class="login-divider-label">oder</span>
+    </div>
+
+    <button class="btn btn-secondary" type="button" data-action="request-magic-link">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 14a4 4 0 0 0 5.7 0l4-4a4 4 0 0 0-5.7-5.7l-1 1"/>
+        <path d="M14 10a4 4 0 0 0-5.7 0l-4 4a4 4 0 0 0 5.7 5.7l1-1"/>
+      </svg>
+      Magic Link per E-Mail
+    </button>
+
+  </form>
+
+  <p class="login-footer">
+    Probleme beim Anmelden? <a href="mailto:support@carvilon.app">support@carvilon.app</a>
+  </p>
+
+</main>

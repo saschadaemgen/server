@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>carvilon - Anmeldung</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <style>
+    /* Banner-Variante orange fuer Lockout-Hinweis (Library hat
+       nur red und green; orange = Warnung statt Fehler). */
+    .banner-orange {
+      background: rgba(249, 115, 22, 0.15);
+      color: rgb(249, 115, 22);
+      border: 1px solid rgba(249, 115, 22, 0.45);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+    }
+  </style>
+</head>
+<body class="login-stage">
+  <main class="login-card" role="main">
+    <div class="login-brand" aria-label="CARVILON Intercom Web Viewer">
+      <span class="carvilon-brand sz-md" aria-hidden="true">
+        <span class="name">CARVILON</span>
+        <span class="sub-wrap">
+          <span class="sub" data-target-ratio="0.85">INTERCOM WEB VIEWER</span>
+        </span>
+      </span>
+    </div>
+    <h1 class="login-title">Anmeldung</h1>
+    <p class="login-subtitle">Bitte gib die Zugangsdaten ein, die der Hausverwalter dir gegeben hat.</p>
+
+    {{if .Locked}}
+      <div class="banner banner-orange" role="status" style="margin-bottom: var(--space-3);">
+        Konto vorruebergehend gesperrt durch zu viele Fehlversuche.
+        Bitte spaeter erneut versuchen oder die Hausverwaltung kontaktieren.
+      </div>
+    {{else if .ErrorMessage}}
+      <div class="banner banner-red" role="status" style="margin-bottom: var(--space-3);">
+        {{.ErrorMessage}}
+      </div>
+    {{end}}
+
+    <form method="post" action="/login" autocomplete="on">
+      <div class="field">
+        <label class="field-label" for="username">Wohnungs-Name</label>
+        <input class="input" id="username" name="username" type="text" autocomplete="username" required value="{{.Username}}" placeholder="z.B. Familie Mueller 2OG"/>
+      </div>
+      <div class="field" style="margin-top:var(--space-3);">
+        <label class="field-label" for="password">Passwort</label>
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required/>
+      </div>
+      <button class="btn btn-primary btn-lg" type="submit" style="width:100%; margin-top:var(--space-4);">Anmelden</button>
+    </form>
+
+    <p class="login-footer-note">Probleme beim Anmelden? Bitte beim Hausverwalter melden.</p>
+  </main>
+  <script src="/static/carvilon-brand.js" defer></script>
+</body>
+</html>
