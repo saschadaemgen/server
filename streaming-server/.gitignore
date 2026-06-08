@@ -1,0 +1,32 @@
+# Secrets / local config
+.env
+.env.local
+*.env
+secrets.yaml
+secrets.yml
+
+# Built binaries
+/streaming-server
+/streaming-server.exe
+/bin/
+/dist/
+/carvilon-stream-rpi
+/carvilon-stream-rpi.exe
+
+# Go build / test artifacts
+*.test
+*.out
+coverage.txt
+
+# Runtime state (SQLite DB + WAL/SHM, see internal/store)
+/state/
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

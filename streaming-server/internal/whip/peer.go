@@ -1,0 +1,171 @@
+package whip
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"time"
+
+	"github.com/pion/webrtc/v4"
+
+	"carvilon.local/stream/internal/icedebug"
+	"carvilon.local/stream/internal/streamhub"
+)
+
+// gatherTimeout bounds the wait for ICE candidate gathering before the
+// SDP answer is returned. With host-only candidates on a public-IP VPS
+// gathering is near-instant; the timeout only guards a stuck stack.
+const gatherTimeout = 5 * time.Second
+
+// AcceptPublisher takes a WHIP SDP offer and builds a PeerConnection
+// that receives RTP from the publisher and forwards it into a
+// [webrtc.TrackLocalStaticRTP] stored in the hub. It returns the SDP
+// answer to send back and the generated session id (used in the WHIP
+// Location header).
+//
+// The logger is threaded in (the briefing's contract omitted it, but
+// the OnTrack/pump and ICE-state callbacks must log async failures —
+// there is no other channel to surface them). On any setup error the
+// PeerConnection is closed before returning. A duplicate publish for an
+// already-active streamID returns [streamhub.ErrConflict] unchanged so
+// the HTTP layer can map it to 409.
+func AcceptPublisher(
+	ctx context.Context,
+	hub *streamhub.Hub,
+	logger *log.Logger,
+	streamID string,
+	sdpOffer string,
+	iceServers []webrtc.ICEServer,
+) (sdpAnswer string, sessionID string, err error) {
+	me, err := newH264MediaEngine()
+	if err != nil {
+		return "", "", fmt.Errorf("whip: media engine: %w", err)
+	}
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(me))
+
+	// S3 TURN: iceServers is the relay list the server minted (TURN URLs +
+	// fresh ephemeral creds) when TURN is on; nil -> host candidates only
+	// (the pre-TURN behaviour on a public-IP VPS).
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: iceServers})
+	if err != nil {
+		return "", "", fmt.Errorf("whip: new peer connection: %w", err)
+	}
+
+	sessionID, err = randomSessionID()
+	if err != nil {
+		_ = pc.Close()
+		return "", "", fmt.Errorf("whip: session id: %w", err)
+	}
+
+	sess := streamhub.NewSession(streamID, pc, func() { _ = pc.Close() })
+
+	// OnTrack: wrap the incoming remote RTP in a local fan-out track,
+	// publish it on the session (SetTrack closes the ready-channel so
+	// WHEP subscribers stop waiting), and pump packets across until the
+	// remote ends. The session pointer is captured directly (it is the
+	// same object the hub stores after Add below).
+	pc.OnTrack(func(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		local, terr := webrtc.NewTrackLocalStaticRTP(remote.Codec().RTPCodecCapability, "video", streamID)
+		if terr != nil {
+			logger.Printf("whip: sid=%s new local track: %v", streamID, terr)
+			return
+		}
+		sess.SetTrack(local)
+		logger.Printf("whip: sid=%s track started codec=%s", streamID, remote.Codec().MimeType)
+		go pumpRTP(remote, local, logger, streamID)
+	})
+
+	// S3 ICE befund: opt-in masked candidate + state logging
+	// (CARVILON_ICE_DEBUG). Purely additive; no-op when the flag is off.
+	icedebug.AttachCandidateLogging(pc, logger, "whip sid="+streamID)
+	iceTracker := icedebug.NewStateTracker(logger, "whip sid="+streamID)
+
+	// Auto-cleanup on connection death — the hub removes itself, no
+	// session leak. OnClose (pc.Close) runs exactly once via Remove.
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		logger.Printf("whip: sid=%s ICE state=%s", streamID, state)
+		iceTracker.Log(state)
+		switch state {
+		case webrtc.ICEConnectionStateFailed,
+			webrtc.ICEConnectionStateDisconnected,
+			webrtc.ICEConnectionStateClosed:
+			hub.Remove(streamID)
+		}
+	})
+
+	// SDP negotiation.
+	if err := pc.SetRemoteDescription(webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP:  sdpOffer,
+	}); err != nil {
+		_ = pc.Close()
+		return "", "", fmt.Errorf("whip: set remote description: %w", err)
+	}
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		_ = pc.Close()
+		return "", "", fmt.Errorf("whip: create answer: %w", err)
+	}
+	// Capture the gathering promise BEFORE SetLocalDescription (which
+	// starts gathering), then wait so the returned answer carries all
+	// host candidates (non-trickle WHIP).
+	gatherComplete := webrtc.GatheringCompletePromise(pc)
+	if err := pc.SetLocalDescription(answer); err != nil {
+		_ = pc.Close()
+		return "", "", fmt.Errorf("whip: set local description: %w", err)
+	}
+	select {
+	case <-gatherComplete:
+	case <-ctx.Done():
+		_ = pc.Close()
+		return "", "", fmt.Errorf("whip: ICE gathering: %w", ctx.Err())
+	case <-time.After(gatherTimeout):
+		_ = pc.Close()
+		return "", "", errors.New("whip: ICE gathering timed out")
+	}
+
+	// Register only after a clean answer, so a conflicting late publish
+	// can never tear down the already-healthy publisher.
+	if err := hub.Add(sess); err != nil {
+		_ = pc.Close()
+		return "", "", err // ErrConflict bubbles up to a 409
+	}
+
+	return pc.LocalDescription().SDP, sessionID, nil
+}
+
+// pumpRTP forwards RTP packets from the publisher's remote track into
+// the local fan-out track until either side ends. Read/write errors end
+// the loop quietly (they're the normal teardown signal); anything
+// surprising is logged.
+func pumpRTP(remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP, logger *log.Logger, streamID string) {
+	for {
+		pkt, _, err := remote.ReadRTP()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				logger.Printf("whip: sid=%s rtp read ended: %v", streamID, err)
+			}
+			return
+		}
+		if err := local.WriteRTP(pkt); err != nil {
+			if !errors.Is(err, io.ErrClosedPipe) {
+				logger.Printf("whip: sid=%s rtp write ended: %v", streamID, err)
+			}
+			return
+		}
+	}
+}
+
+// randomSessionID returns 16 hex characters (8 random bytes) for the
+// WHIP Location header path component.
+func randomSessionID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
