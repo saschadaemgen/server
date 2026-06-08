@@ -30,3 +30,11 @@ coverage.txt
 .DS_Store
 Thumbs.db
 *.swp
+
+# Internal docs carrying real LAN / anlage topology - never tracked, matching
+# carvilon-server hygiene (S20 doc-hygiene alignment). The files stay on disk
+# (the local cockpit reads them at these paths); they are only untracked.
+CLAUDE.md
+docs/
+seasons/
+.claude/
