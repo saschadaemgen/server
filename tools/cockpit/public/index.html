@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CARVILON Cockpit</title>
+    <link rel="stylesheet" href="/vendor/xyflow.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Inhalt = Datendateien (eine Quelle der Wahrheit), VOR der App geladen.
+         Bearbeiten + Seite neu laden genügt — kein Rebuild. -->
+    <script src="/content/system-map.js"></script>
+    <script src="/content/manifest.js"></script>
+    <script src="/content/todos.js"></script>
+  </head>
+  <body>
+    <div id="root" class="boot">Cockpit lädt …</div>
+    <script type="module" src="/app/main.js"></script>
+  </body>
+</html>
