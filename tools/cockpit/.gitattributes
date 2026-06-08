@@ -1,0 +1,2 @@
+# Keep shell scripts LF so they run under bash regardless of core.autocrlf.
+*.sh text eol=lf
