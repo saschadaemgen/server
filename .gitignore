@@ -1,0 +1,17 @@
+# Root-level build artifacts. Each module subdirectory keeps its own
+# .gitignore (carvilon-server/, streaming-server/) which still applies.
+/bin/
+*.exe
+
+# Go workspace checksum file (regenerated locally from the module cache)
+go.work.sum
+
+# Claude Code local config
+.claude/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
