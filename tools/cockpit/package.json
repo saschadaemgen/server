@@ -1,0 +1,19 @@
+{
+  "name": "carvilon-cockpit-vendor",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "One-time vendoring of the cockpit shell's third-party ESM libraries. This is NOT required to run the cockpit: the produced public/vendor/*.js are committed and the cockpit runs with `go run ./serve.go` alone. Run `npm ci && npm run vendor` only to regenerate the vendored libs (e.g. to bump a version).",
+  "scripts": {
+    "vendor": "node scripts/build-vendor.mjs"
+  },
+  "devDependencies": {
+    "@dagrejs/dagre": "1.1.4",
+    "@xyflow/react": "12.11.0",
+    "esbuild": "^0.24.0",
+    "htm": "^3.1.1",
+    "marked": "^14.1.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}

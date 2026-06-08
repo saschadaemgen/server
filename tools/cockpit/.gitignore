@@ -1,0 +1,6 @@
+# The vendoring toolchain is only needed to REGENERATE public/vendor/*.js.
+# The vendored files themselves ARE committed (they are the shell's libs).
+node_modules/
+
+# Local-only list of real sensitive values for the pre-push grep. NEVER commit.
+scripts/secret-patterns.txt
