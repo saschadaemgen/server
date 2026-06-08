@@ -25,9 +25,9 @@ go.work             Workspace file tying all of the above modules together.
 `streaming-server` is a *dumb media layer* (cameras and profiles, no tenants /
 users / auth). All authorization lives in `carvilon-server`. The streaming code
 is compiled **in-process** into the edge binary only under the `carvilon_stream`
-build tag; the public build never imports `carvilon.local/stream` (verified via
-`go list -deps`). The license boundary runs along the module boundary, not the
-process boundary.
+build tag; a build without that tag does not link `carvilon.local/stream`. That
+build-tag seam is an architectural boundary (retained as a separate decision),
+not a licensing one - the whole product is proprietary (see License below).
 
 ## Build
 
@@ -39,13 +39,14 @@ go build -tags carvilon_stream -ldflags="-s -w" -trimpath `
 Remove-Item Env:GOOS; Remove-Item Env:GOARCH
 ```
 
-Public build: drop `-tags carvilon_stream`.
+Plain build (without the in-process stream): drop `-tags carvilon_stream`.
 
-## Licensing (intended split)
+## License
 
-- `carvilon-server/` — platform core, AGPL.
-- `streaming-server/` — MIT.
+Copyright (c) 2026 Sascha Daemgen IT and More Systems.
+All rights reserved. Proprietary and confidential.
 
-Each module is the authority for its own terms; see the license / NOTICE files
-inside each subdirectory. (`carvilon-server/NOTICE.md` lists third-party
-notices.)
+CARVILON is a commercial, proprietary product. No part of this repository is
+released under an open-source license, and there is no public source release.
+(`carvilon-server/NOTICE.md` documents the third-party components the product
+bundles or remote-loads, with their respective upstream licenses.)
