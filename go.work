@@ -1,0 +1,9 @@
+go 1.26.1
+
+use (
+	./carvilon-server/license-server
+	./carvilon-server/mock
+	./carvilon-server/server
+	./carvilon-server/shared
+	./streaming-server
+)
