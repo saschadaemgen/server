@@ -460,6 +460,10 @@ func (s *Server) routes() {
 	// (assign the door, not the bell). Source = ListDoors (works),
 	// supersedes /a/intercoms.json for the assignment dropdowns.
 	s.mux.Handle("GET /a/doors.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminDoorsJSON)))
+	// Saison 20-E1: Protect camera list for the (upcoming, E5) per-viewer
+	// camera multi-select UI. Mirrors /a/doors.json. Source =
+	// streams.ListCameras; empty when no stream backend is configured.
+	s.mux.Handle("GET /a/cameras.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminCamerasJSON)))
 
 	// ESP discovery. Public endpoints without an auth header -
 	// the bearer token only arrives after a successful admin
