@@ -44,6 +44,7 @@ import (
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
@@ -101,6 +102,11 @@ type Deps struct {
 	// TURNSnapshots caches the latest cloud-pushed live snapshot for
 	// the /a/turn live-stats panel. Nil -> no live stats.
 	TURNSnapshots *turnstore.SnapshotHolder
+	// StreamSnapshots caches the latest cloud-pushed cloud-viewer snapshot
+	// (per-stream WHEP consumer counts) for the admin dashboard. Nil -> no
+	// cloud-viewer stats. (S20; injected in step 1, consumed by the
+	// dashboard handler in step 2.)
+	StreamSnapshots *streamstore.SnapshotHolder
 	// EventsHeartbeat overrides the SSE keepalive interval.
 	// Zero falls back to defaultEventsHeartbeat (30s); tests
 	// inject something shorter.
@@ -151,6 +157,7 @@ type Server struct {
 	history         doorhistory.Store
 	turnStore       *turnstore.Store
 	turnSnapshots   *turnstore.SnapshotHolder
+	streamSnapshots *streamstore.SnapshotHolder
 	eventsHeartbeat time.Duration
 	eventBus        *eventbus.Bus
 	calls           *doorbellcalls.Service
@@ -229,6 +236,7 @@ func New(deps Deps) (*Server, error) {
 		history:         deps.History,
 		turnStore:       deps.TURNStore,
 		turnSnapshots:   deps.TURNSnapshots,
+		streamSnapshots: deps.StreamSnapshots,
 		eventsHeartbeat: deps.EventsHeartbeat,
 		eventBus:        deps.EventBus,
 		calls:           deps.DoorbellCalls,

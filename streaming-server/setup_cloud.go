@@ -167,6 +167,14 @@ type CloudServer interface {
 	// concurrently with the relay's own goroutines.
 	TURNStats() TURNStats
 
+	// StreamStats returns the live WHEP-subscriber (consumer) count per
+	// stream on the fan-out, the egress mirror of TURNStats. The cloud's
+	// periodic ticker polls it and pushes the snapshot to the edge. Only
+	// streams with at least one consumer appear; an empty slice means
+	// "cloud up, no viewers". Safe to call concurrently with the WHEP
+	// goroutines. (S20)
+	StreamStats() []StreamStat
+
 	// WHEPPublicBaseURL returns the public WHEP base URL the edge should
 	// advertise to remote subscribers - scheme+host+port, NO path, NO
 	// streamID, e.g. "https://whep.carvilon.com:8446" (the edge appends
@@ -206,6 +214,14 @@ func (c *cloudServer) TURNStats() TURNStats {
 		stats.Clients = c.clients.snapshot()
 	}
 	return stats
+}
+
+// StreamStats answers from the WHIP/WHEP server's live consumer counter
+// (incremented per attached WHEP subscriber, decremented on teardown). It is
+// always available - unlike TURN it has no soft gate - so a configured cloud
+// always reports its egress consumers, even when TURN is off. (S20)
+func (c *cloudServer) StreamStats() []StreamStat {
+	return streamStatsFromCounts(c.whip.ConsumerCounts())
 }
 
 // SetupCloudInProcess builds the in-process WHIP-ingress + WHEP-egress

@@ -18,6 +18,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 )
 
@@ -606,6 +607,13 @@ func (s *Server) SendTURNEvent(ctx context.Context, ev turnstore.Event) int {
 // edge (cloud -> edge), driven by the cloud's periodic ticker.
 func (s *Server) SendTURNStats(ctx context.Context, snap turnstore.Snapshot) int {
 	return s.broadcast(ctx, Envelope{Type: TypeTURNStats, TURNStats: &snap})
+}
+
+// SendStreamStats broadcasts a live cloud-viewer snapshot (per-stream WHEP
+// consumer counts) to every connected edge (cloud -> edge), driven by the
+// cloud's periodic ticker next to SendTURNStats. (S20)
+func (s *Server) SendStreamStats(ctx context.Context, snap streamstore.Snapshot) int {
+	return s.broadcast(ctx, Envelope{Type: TypeStreamStats, StreamStats: &snap})
 }
 
 // broadcast writes env to every connected edge and returns how many it

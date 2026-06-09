@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -93,6 +94,14 @@ var (
 // Subscriber teardown (ICE failure) closes ONLY this subscriber
 // PeerConnection — it never touches the publisher's hub entry, so the
 // publisher and all other subscribers keep running.
+//
+// onAttach (nil-safe) runs exactly once when the subscriber is successfully
+// attached, BEFORE this returns; onDetach (nil-safe) then runs exactly once
+// when this subscriber's egress PeerConnection tears down. They are the S20
+// consumer-count inc/dec pair: co-locating the increment here (not in the
+// caller after the return) guarantees the decrement can never precede it and
+// leak the count, and the teardown latch below makes onDetach fire exactly
+// once across the several Failed/Disconnected/Closed transitions.
 func AcceptSubscriber(
 	ctx context.Context,
 	hub *streamhub.Hub,
@@ -100,6 +109,8 @@ func AcceptSubscriber(
 	streamID string,
 	sdpOffer string,
 	iceServers []webrtc.ICEServer,
+	onAttach func(),
+	onDetach func(),
 ) (sdpAnswer string, sessionID string, err error) {
 	sess, ok := hub.Get(streamID)
 	if !ok {
@@ -198,6 +209,38 @@ func AcceptSubscriber(
 	icedebug.AttachCandidateLogging(pc, logger, "whep sid="+streamID)
 	iceTracker := icedebug.NewStateTracker(logger, "whep sid="+streamID)
 
+	// S20 consumer accounting latch. The increment (onAttach) runs once at the
+	// attach boundary below; the decrement (onDetach) must run exactly once,
+	// and ONLY for a subscriber that actually attached. The teardown callback
+	// below fires on EVERY Failed/Disconnected/Closed transition, and the
+	// early-failure pc.Close() paths above also drive it, so a naive decrement
+	// would run several times or run for a never-attached PC. fireDetach is the
+	// guard: it decrements once, and only if armed. Invariant: a subscriber's
+	// ICE connection cannot fail before its SDP answer is delivered (handleWHEP
+	// sends it only after this returns), so no teardown precedes arm().
+	var (
+		latchMu     sync.Mutex
+		armed       bool
+		detachFired bool
+	)
+	arm := func() {
+		if onAttach != nil {
+			onAttach() // increment now, before this function returns
+		}
+		latchMu.Lock()
+		armed = true
+		latchMu.Unlock()
+	}
+	fireDetach := func() {
+		latchMu.Lock()
+		run := armed && !detachFired
+		detachFired = true
+		latchMu.Unlock()
+		if run && onDetach != nil {
+			onDetach() // decrement exactly once
+		}
+	}
+
 	// Subscriber-only teardown: close THIS PeerConnection, never the
 	// hub's publisher entry. The publisher and other subscribers are
 	// unaffected.
@@ -209,6 +252,7 @@ func AcceptSubscriber(
 			webrtc.ICEConnectionStateDisconnected,
 			webrtc.ICEConnectionStateClosed:
 			_ = pc.Close()
+			fireDetach() // S20: guarded one-shot consumer decrement
 		}
 	})
 
@@ -241,6 +285,10 @@ func AcceptSubscriber(
 		return "", "", errors.New("whip: ICE gathering timed out")
 	}
 
+	// S20: count this subscriber now (before returning), so its paired teardown
+	// decrement can never precede the increment. fireDetach (the ICE teardown
+	// path above) undoes it exactly once when the egress PeerConnection closes.
+	arm()
 	logger.Printf("whep: sid=%s session=%s subscriber attached", streamID, sessionID)
 	return pc.LocalDescription().SDP, sessionID, nil
 }

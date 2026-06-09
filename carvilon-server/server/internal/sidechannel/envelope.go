@@ -14,6 +14,7 @@ package sidechannel
 
 import (
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 )
 
@@ -121,6 +122,12 @@ type Envelope struct {
 	// static config view. The edge shows it with a "Stand vor Xs"
 	// freshness based on the receive time, not GeneratedAt.
 	TURNStats *turnstore.Snapshot `json:"turn_stats,omitempty"`
+
+	// StreamStats carries a periodic live cloud-viewer snapshot on a
+	// stream_stats frame (cloud -> edge): the per-stream WHEP-subscriber
+	// (consumer) counts. The egress mirror of TURNStats; the edge shows it
+	// with the same receive-time "Stand vor Xs" freshness. (S20)
+	StreamStats *streamstore.Snapshot `json:"stream_stats,omitempty"`
 }
 
 // Message types.
@@ -183,6 +190,10 @@ const (
 	// TypeTURNStats (cloud -> edge): a periodic live snapshot for the
 	// admin live-stats panel (carries TURNStats).
 	TypeTURNStats = "turn_stats"
+	// TypeStreamStats (cloud -> edge): a periodic live cloud-viewer snapshot
+	// for the admin dashboard (carries StreamStats), the egress mirror of
+	// turn_stats. (S20)
+	TypeStreamStats = "stream_stats"
 )
 
 // stop_publish reasons.

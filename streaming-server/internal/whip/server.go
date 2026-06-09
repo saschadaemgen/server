@@ -115,6 +115,15 @@ type Server struct {
 	// avoids N frames for N simultaneous cold subscribers.
 	inflightMu sync.Mutex
 	inflight   map[string]struct{}
+
+	// consumersMu guards consumers, the live WHEP-subscriber count per
+	// streamID behind the S20 cloud stream-stats telemetry (the egress mirror
+	// of the TURN relay's allocation count). Incremented when a subscriber
+	// attaches, decremented exactly once when its egress PeerConnection tears
+	// down; pion fires the teardown from its own goroutines, so all access is
+	// under this lock. Only streams with >=1 consumer keep a key.
+	consumersMu sync.Mutex
+	consumers   map[string]int
 }
 
 // New validates the config and builds the (not-yet-listening) server.
@@ -149,6 +158,7 @@ func New(cfg Config) (*Server, error) {
 		iceServers:     cfg.ICEServers,
 		requestPublish: cfg.RequestPublish,
 		inflight:       make(map[string]struct{}),
+		consumers:      make(map[string]int),
 	}
 	if len(s.egressKey) == 0 {
 		// Fail closed: without an egress key the WHEP egress rejects every
@@ -425,12 +435,21 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body), iceServers)
+	// S20 consumer accounting: increment when a subscriber attaches, decrement
+	// exactly once when its egress PeerConnection tears down. The two closures
+	// are a matched pair handed to AcceptSubscriber, which calls onAttach at
+	// the attach boundary (so the increment cannot run after a teardown and
+	// leak the count) and arms a one-shot onDetach on the teardown path. This
+	// is the egress mirror of the TURN allocation count; only successfully
+	// attached subscribers are counted.
+	onAttach := func() { s.incConsumer(streamID) }
+	onDetach := func() { s.decConsumer(streamID) }
+	sdpAnswer, sessionID, err := AcceptSubscriber(r.Context(), s.hub, s.logger, streamID, string(body), iceServers, onAttach, onDetach)
 	// Cold-start trigger (S3): no publisher yet AND the Master wired the
 	// soft-gated RequestPublish callback -> ask the edge to publish, wait
 	// for it to dock, then attach. nil callback -> unchanged (404 below).
 	if errors.Is(err, ErrNoPublisher) && s.requestPublish != nil {
-		sdpAnswer, sessionID, err = s.coldSubscribe(r.Context(), streamID, string(body), iceServers)
+		sdpAnswer, sessionID, err = s.coldSubscribe(r.Context(), streamID, string(body), iceServers, onAttach, onDetach)
 	}
 	if err != nil {
 		switch {
@@ -466,7 +485,7 @@ func (s *Server) handleWHEP(w http.ResponseWriter, r *http.Request) {
 // attaches the subscriber normally. Single-flight per streamID: simultaneous
 // cold subscribers trigger at most one request_publish; the followers just
 // wait for the same publisher. Caller guarantees s.requestPublish != nil.
-func (s *Server) coldSubscribe(ctx context.Context, streamID, sdpOffer string, iceServers []webrtc.ICEServer) (string, string, error) {
+func (s *Server) coldSubscribe(ctx context.Context, streamID, sdpOffer string, iceServers []webrtc.ICEServer, onAttach, onDetach func()) (string, string, error) {
 	lead, done := s.beginTrigger(streamID)
 	if lead {
 		defer done()
@@ -489,7 +508,7 @@ func (s *Server) coldSubscribe(ctx context.Context, streamID, sdpOffer string, i
 	if !waitForPublisherSession(waitCtx, s.hub, streamID) {
 		return "", "", errColdPublishTimeout
 	}
-	return AcceptSubscriber(ctx, s.hub, s.logger, streamID, sdpOffer, iceServers)
+	return AcceptSubscriber(ctx, s.hub, s.logger, streamID, sdpOffer, iceServers, onAttach, onDetach)
 }
 
 // beginTrigger returns lead=true to exactly one caller per streamID while a
@@ -508,6 +527,50 @@ func (s *Server) beginTrigger(streamID string) (lead bool, done func()) {
 		delete(s.inflight, streamID)
 		s.inflightMu.Unlock()
 	}
+}
+
+// incConsumer records one newly attached WHEP subscriber for streamID. The
+// log line is the S20 verification signal: the count climbs to 1 when a
+// remote viewer connects.
+func (s *Server) incConsumer(streamID string) {
+	s.consumersMu.Lock()
+	s.consumers[streamID]++
+	n := s.consumers[streamID]
+	s.consumersMu.Unlock()
+	s.logger.Printf("whep consumers: sid=%s count=%d (subscriber attached)", streamID, n)
+}
+
+// decConsumer records one WHEP subscriber teardown for streamID. It never goes
+// below zero and drops the key at zero so an idle stream reports no entry (not
+// a sticky 0). Called at most once per counted subscriber (AcceptSubscriber's
+// one-shot teardown latch), so the count cannot leak upward - the briefing's
+// HAUPTRISIKO. The log line is the S20 verification signal: the count falls
+// back to 0 when the viewer disconnects.
+func (s *Server) decConsumer(streamID string) {
+	s.consumersMu.Lock()
+	if s.consumers[streamID] > 0 {
+		s.consumers[streamID]--
+	}
+	n := s.consumers[streamID]
+	if n == 0 {
+		delete(s.consumers, streamID)
+	}
+	s.consumersMu.Unlock()
+	s.logger.Printf("whep consumers: sid=%s count=%d (subscriber left)", streamID, n)
+}
+
+// ConsumerCounts returns a point-in-time copy of the live WHEP-subscriber
+// count per streamID (only streams with >=1 consumer appear). The cloud stream
+// layer polls it for the StreamStats snapshot it pushes to the edge, exactly
+// as it polls TURNStats. Safe for concurrent use.
+func (s *Server) ConsumerCounts() map[string]int {
+	s.consumersMu.Lock()
+	defer s.consumersMu.Unlock()
+	out := make(map[string]int, len(s.consumers))
+	for id, n := range s.consumers {
+		out[id] = n
+	}
+	return out
 }
 
 // isSDP reports whether the Content-Type names application/sdp,

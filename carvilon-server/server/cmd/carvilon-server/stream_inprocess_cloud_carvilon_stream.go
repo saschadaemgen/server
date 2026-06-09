@@ -24,6 +24,7 @@ import (
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 )
 
@@ -192,6 +193,11 @@ func init() {
 					return
 				case <-ticker.C:
 					sc.SendTURNStats(ctx, buildTURNSnapshot(srv.TURNStats(), cfg))
+					// S20: egress consumer counts, pushed on the SAME tick right
+					// next to the TURN snapshot - same side-channel, no new port,
+					// no new secret. An empty snapshot (no streams) still arrives,
+					// so the edge can tell "cloud up, 0 viewers" from "cloud down".
+					sc.SendStreamStats(ctx, buildStreamSnapshot(srv.StreamStats()))
 				}
 			}
 		}()
@@ -277,6 +283,23 @@ func buildTURNSnapshot(st stream.TURNStats, cfg config.Config) turnstore.Snapsho
 		default:
 			snap.CertMode = "shared"
 		}
+	}
+	return snap
+}
+
+// buildStreamSnapshot assembles the live cloud-viewer snapshot the cloud
+// pushes to the edge: the per-stream WHEP-subscriber (consumer) counts, the
+// egress mirror of buildTURNSnapshot. GeneratedAt stamps the VPS send time;
+// the edge shows it with a "Stand vor Xs" based on its OWN receive time, so a
+// fresh snapshot with no streams ("cloud up, 0 viewers") stays distinguishable
+// from a stale one ("cloud unreachable"). Only stdlib types cross the seam.
+func buildStreamSnapshot(stats []stream.StreamStat) streamstore.Snapshot {
+	snap := streamstore.Snapshot{GeneratedAt: time.Now()}
+	for _, st := range stats {
+		snap.Streams = append(snap.Streams, streamstore.Stat{
+			StreamID:  st.StreamID,
+			Consumers: st.Consumers,
+		})
 	}
 	return snap
 }

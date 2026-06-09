@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 )
 
@@ -93,6 +94,13 @@ type ClientOptions struct {
 	// preserve frame order. A nil callback ignores the frame.
 	OnTURNEvent func(turnstore.Event)
 	OnTURNStats func(turnstore.Snapshot)
+
+	// OnStreamStats, when set, receives the cloud-forwarded live cloud-viewer
+	// snapshot (stream_stats frame): the per-stream WHEP consumer counts. The
+	// edge wiring points it at the streamstore snapshot holder. Expected to be
+	// non-blocking (a quick mutex), so it runs inline on the read loop and
+	// preserves frame order. A nil callback ignores the frame. (S20)
+	OnStreamStats func(streamstore.Snapshot)
 
 	// OnBundleRequest, when set, answers a cloud bundle_request (Saison
 	// 19-11): given the raw viewer Bearer it resolves the viewer MAC and mints
@@ -407,6 +415,12 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 				// (quick mutex), so run it inline.
 				if c.opts.OnTURNStats != nil && env.TURNStats != nil {
 					c.opts.OnTURNStats(*env.TURNStats)
+				}
+			case TypeStreamStats:
+				// Periodic live cloud-viewer snapshot; the callback just
+				// stores it (quick mutex), so run it inline. (S20)
+				if c.opts.OnStreamStats != nil && env.StreamStats != nil {
+					c.opts.OnStreamStats(*env.StreamStats)
 				}
 			default:
 				c.log.Warn("sidechannel unknown message type", "type", env.Type)

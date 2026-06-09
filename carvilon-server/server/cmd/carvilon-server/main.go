@@ -40,6 +40,7 @@ import (
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
@@ -130,6 +131,11 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	turnStore := turnstore.NewStore(database.DB)
 	turnWriter := turnstore.NewWriter(turnStore, log.With("component", "turnstore"), turnstore.Options{})
 	turnSnapshots := turnstore.NewSnapshotHolder()
+	// S20: cache the latest cloud-pushed cloud-viewer snapshot (per-stream
+	// WHEP consumer counts) for the admin dashboard, the egress mirror of
+	// turnSnapshots. Stamped with the edge receive time on arrival; no
+	// SQLite history (a consumer count is a live gauge, not an event log).
+	streamSnapshots := streamstore.NewSnapshotHolder()
 	go turnWriter.Run(ctx)
 
 	viewerMgr := viewermanager.New(database, log, viewermanager.Options{
@@ -279,27 +285,28 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	}
 
 	srv, err := httpserver.New(httpserver.Deps{
-		Config:         cfg,
-		Sessions:       sessionSvc,
-		AdminSessions:  adminSessionSvc,
-		ViewerManager:  viewerMgr,
-		Admin:          adminSvc,
-		PlatformConfig: platformCfg,
-		Audit:          auditSvc,
-		ViewerLimiter:  viewerLimiter,
-		AdminLimiter:   adminLimiter,
-		UA:             uaClient,
-		UserStore:      userStore,
-		Hub:            hub,
-		History:        historyStore,
-		TURNStore:      turnStore,
-		TURNSnapshots:  turnSnapshots,
-		EventBus:       eventBus,
-		DoorbellCalls:  callsSvc,
-		Streams:        streamBackend,
-		Weather:        weatherClient,
-		EgressIssuer:   egressIssuer,
-		Log:            log,
+		Config:          cfg,
+		Sessions:        sessionSvc,
+		AdminSessions:   adminSessionSvc,
+		ViewerManager:   viewerMgr,
+		Admin:           adminSvc,
+		PlatformConfig:  platformCfg,
+		Audit:           auditSvc,
+		ViewerLimiter:   viewerLimiter,
+		AdminLimiter:    adminLimiter,
+		UA:              uaClient,
+		UserStore:       userStore,
+		Hub:             hub,
+		History:         historyStore,
+		TURNStore:       turnStore,
+		TURNSnapshots:   turnSnapshots,
+		StreamSnapshots: streamSnapshots,
+		EventBus:        eventBus,
+		DoorbellCalls:   callsSvc,
+		Streams:         streamBackend,
+		Weather:         weatherClient,
+		EgressIssuer:    egressIssuer,
+		Log:             log,
 	})
 	if err != nil {
 		log.Error("httpserver init failed", "err", err)
@@ -333,7 +340,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// only when fully configured; runs in its own goroutine and its
 	// failures only trigger reconnects - it never blocks or delays
 	// the edge (Grundregel: LAN works without the cloud).
-	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, egressIssuer, srv, inProcStreamPublisher, turnWriter, turnSnapshots)
+	scClient := startSidechannelClient(ctx, log, cfg, viewerMgr, egressIssuer, srv, inProcStreamPublisher, turnWriter, turnSnapshots, streamSnapshots)
 	if scClient != nil {
 		// Wire the cloud link as the ICE source for GET /webviewer/stream-start
 		// (Saison 19). Set before ListenAndServe below, so the serving
@@ -479,7 +486,7 @@ func startInterimRequestPublishHook(ctx context.Context, log *slog.Logger, cfg c
 // It returns the running *sidechannel.Client so the caller can wire it as the
 // httpserver's ICE source (the stream-start bundle), or nil when the link is
 // unconfigured or failed to init - in which case stream-start 503s.
-func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, egressIssuer *egresstoken.Issuer, srv *httpserver.Server, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder) *sidechannel.Client {
+func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Config, viewerMgr *viewermanager.Manager, egressIssuer *egresstoken.Issuer, srv *httpserver.Server, publisher streampublish.StreamPublisher, turnWriter *turnstore.Writer, turnSnapshots *turnstore.SnapshotHolder, streamSnapshots *streamstore.SnapshotHolder) *sidechannel.Client {
 	if !cfg.SidechannelClientConfigured() {
 		log.Info("sidechannel client not configured; running LAN-only (cloud link is additive)")
 		return nil
@@ -527,6 +534,9 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		// for the /a/turn admin page.
 		OnTURNEvent: turnWriter.SubmitEvent,
 		OnTURNStats: func(s turnstore.Snapshot) { turnSnapshots.Set(s, time.Now()) },
+		// S20: cache the cloud-viewer snapshot stamped with the edge receive
+		// time for the admin dashboard (egress mirror of OnTURNStats).
+		OnStreamStats: func(s streamstore.Snapshot) { streamSnapshots.Set(s, time.Now()) },
 		// Saison 19-11: answer cloud bundle_request (the remote stream-start
 		// relay). resolveViewer maps the Bearer to a viewer MAC; the egress
 		// issuer mints the sid-bound token. These are the two edge-only parts;

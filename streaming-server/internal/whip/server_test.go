@@ -114,6 +114,14 @@ var testEgressKey = bytes.Repeat([]byte{0xCD}, 32)
 // must present a valid egress token (whepSubscribe does).
 func newTestServer(t *testing.T) (baseURL string, key []byte) {
 	t.Helper()
+	base, key, _ := newTestServerH(t)
+	return base, key
+}
+
+// newTestServerH is newTestServer that also returns the *Server handle, so a
+// test can inspect server-side state (e.g. ConsumerCounts, S20).
+func newTestServerH(t *testing.T) (baseURL string, key []byte, srv *Server) {
+	t.Helper()
 	certFile, keyFile := writeSelfSignedCert(t)
 	key = bytes.Repeat([]byte{0xAB}, 32)
 
@@ -138,7 +146,7 @@ func newTestServer(t *testing.T) (baseURL string, key []byte) {
 	t.Cleanup(cancel)
 	go func() { _ = srv.serve(ctx, ln) }()
 
-	return "https://" + ln.Addr().String(), key
+	return "https://" + ln.Addr().String(), key, srv
 }
 
 // newTestServerWithTrigger is newTestServer plus a wired RequestPublish
