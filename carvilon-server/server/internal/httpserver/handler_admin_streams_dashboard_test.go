@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/streamstore"
 )
 
 // TestBuildStreamsDashboard_PerProfileConsumers proves the consumer
@@ -173,5 +175,106 @@ func TestDeviceKind(t *testing.T) {
 		if got := deviceKind(c.addr); got != c.want {
 			t.Errorf("deviceKind(%q) = %q, want %q", c.addr, got, c.want)
 		}
+	}
+}
+
+// TestCloudConsumerView covers the pure fold (S20 step 2): a FRESH snapshot
+// splits per cloud-profile and totals everything (incl. MACs that no longer
+// resolve); a STALE snapshot presents no numbers ("veraltet", not a fresh 0);
+// a fresh-but-empty snapshot is an honest zero (cloud up, 0 viewers).
+func TestCloudConsumerView(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	resolve := func(mac string) (string, bool) {
+		switch mac {
+		case "aa", "bb":
+			return "intercom_web", true
+		case "cc":
+			return "intercom_android", true
+		}
+		return "", false // unknown MAC (e.g. viewer deleted mid-call)
+	}
+	snap := streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: "aa", Consumers: 1},
+		{StreamID: "bb", Consumers: 2},
+		{StreamID: "cc", Consumers: 1},
+		{StreamID: "zz", Consumers: 5}, // unresolved -> total only, no row
+	}}
+
+	cs, per := cloudConsumerView(snap, now.Add(-5*time.Second), now, resolve)
+	if !cs.Present || cs.Stale {
+		t.Fatalf("fresh: present/stale = %v/%v, want true/false", cs.Present, cs.Stale)
+	}
+	if cs.Total != 9 {
+		t.Errorf("Total = %d, want 9 (1+2+1+5)", cs.Total)
+	}
+	if per["intercom_web"] != 3 || per["intercom_android"] != 1 {
+		t.Errorf("per-profile = %v, want web=3 android=1", per)
+	}
+	if _, ok := per["zz"]; ok {
+		t.Errorf("unresolved MAC must not appear as a profile key: %v", per)
+	}
+
+	cs2, per2 := cloudConsumerView(snap, now.Add(-60*time.Second), now, resolve)
+	if !cs2.Present || !cs2.Stale {
+		t.Errorf("stale: present/stale = %v/%v, want true/true", cs2.Present, cs2.Stale)
+	}
+	if cs2.Total != 0 || len(per2) != 0 {
+		t.Errorf("stale must yield no numbers: Total=%d per=%v", cs2.Total, per2)
+	}
+
+	cs3, per3 := cloudConsumerView(streamstore.Snapshot{}, now, now, resolve)
+	if !cs3.Present || cs3.Stale || cs3.Total != 0 || len(per3) != 0 {
+		t.Errorf("fresh-empty: %+v per=%v", cs3, per3)
+	}
+}
+
+// TestBuildStreamsDashboard_CloudConsumers proves the dashboard wiring: a fresh
+// holder yields a present, non-stale cloud block with the honest Total; a stale
+// holder reads present+stale with no numbers; no holder reads not-present. The
+// viewer manager is nil here (per-profile mapping is covered by
+// TestCloudConsumerView), proving buildStreamsDashboard is nil-safe on both
+// the holder and the manager.
+func TestBuildStreamsDashboard_CloudConsumers(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/profiles":
+			_, _ = w.Write([]byte(`[{"name":"intercom_web","codec":"h264_passthrough","fps":0}]`))
+		case "/stream/stats":
+			_, _ = w.Write([]byte(`{"generated_at":"2026-06-09T10:00:00Z","global":{"clients":1},"profiles":{"intercom_web":{"profile":"intercom_web","clients":1}},"clients":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+	c, _ := streams.New(backend.URL)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	holder := streamstore.NewSnapshotHolder()
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: "aa", Consumers: 2}, {StreamID: "bb", Consumers: 1},
+	}}, time.Now())
+	s := &Server{streams: c, streamStats: c, streamSnapshots: holder, log: log}
+	d := s.buildStreamsDashboard(context.Background())
+	if !d.Cloud.Present || d.Cloud.Stale {
+		t.Fatalf("fresh cloud: %+v", d.Cloud)
+	}
+	if d.Cloud.Total != 3 {
+		t.Errorf("cloud total = %d, want 3", d.Cloud.Total)
+	}
+
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{{StreamID: "aa", Consumers: 2}}},
+		time.Now().Add(-2*streamstore.DefaultStaleAfter))
+	d = s.buildStreamsDashboard(context.Background())
+	if !d.Cloud.Present || !d.Cloud.Stale {
+		t.Errorf("stale cloud: present/stale = %v/%v, want true/true", d.Cloud.Present, d.Cloud.Stale)
+	}
+	if d.Cloud.Total != 0 {
+		t.Errorf("stale cloud total = %d, want 0", d.Cloud.Total)
+	}
+
+	s2 := &Server{streams: c, streamStats: c, log: log}
+	if d2 := s2.buildStreamsDashboard(context.Background()); d2.Cloud.Present {
+		t.Errorf("no holder: cloud present = true, want false")
 	}
 }

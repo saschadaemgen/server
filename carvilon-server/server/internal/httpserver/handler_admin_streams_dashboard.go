@@ -17,8 +17,10 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"carvilon.local/server/internal/streams"
+	"carvilon.local/server/internal/streamstore"
 )
 
 // streamsPageData is the render payload for templates/admin/streams.html.
@@ -43,8 +45,23 @@ type streamDashboard struct {
 	GeneratedAt string              `json:"generated_at,omitempty"`
 	Error       string              `json:"error,omitempty"`
 	Global      streams.GlobalStats `json:"global"`
+	Cloud       cloudConsumers      `json:"cloud"`
 	Profiles    []dashProfile       `json:"profiles"`
 	Clients     []dashClient        `json:"clients"`
+}
+
+// cloudConsumers is the dashboard-level cloud-viewer status (S20 step 2):
+// the live WHEP-subscriber counts the VPS pushes over the side-channel,
+// shown SEPARATELY from the LAN consumers. Present is false until the first
+// snapshot arrives; Stale flips when the side-channel goes quiet so an old
+// number is never presented as current (mirrors the /a/turn panel). Total is
+// the count across all streams; the per-profile split lands on
+// dashProfile.CloudClients.
+type cloudConsumers struct {
+	Present    bool `json:"present"`
+	Stale      bool `json:"stale"`
+	AgeSeconds int  `json:"age_seconds"`
+	Total      int  `json:"total"`
 }
 
 // dashProfile is one profile row: its persisted config (from
@@ -65,6 +82,7 @@ type dashProfile struct {
 
 	Active         bool    `json:"active"`
 	Clients        int     `json:"clients"`
+	CloudClients   int     `json:"cloud_clients"` // cloud (WHEP) consumers, kept SEPARATE from Clients (LAN). S20 step 2.
 	FramesSent     int64   `json:"frames_sent"`
 	FramesDropped  int64   `json:"frames_dropped"`
 	BytesSent      int64   `json:"bytes_sent"`
@@ -131,10 +149,68 @@ func (s *Server) buildStreamsDashboard(ctx context.Context) streamDashboard {
 		d.Profiles = append(d.Profiles, dp)
 	}
 
+	// Cloud-viewer counts (S20 step 2): the VPS counts WHEP subscribers per
+	// stream and pushes them over the side-channel; the edge caches the latest
+	// snapshot in s.streamSnapshots. Shown SEPARATELY from the LAN clients,
+	// with a receive-time freshness so a quiet link reads "veraltet" rather
+	// than presenting an old number (or a misleading fresh 0).
+	if s.streamSnapshots != nil {
+		if snap, recv, present := s.streamSnapshots.Get(); present {
+			cloud, perProfile := cloudConsumerView(snap, recv, time.Now(), s.resolveCloudProfile(ctx))
+			d.Cloud = cloud
+			for i := range d.Profiles {
+				d.Profiles[i].CloudClients = perProfile[d.Profiles[i].Name]
+			}
+		}
+	}
+
 	for _, c := range stats.Clients {
 		d.Clients = append(d.Clients, dashClient{ClientStats: c, Kind: deviceKind(c.RemoteAddr)})
 	}
 	return d
+}
+
+// cloudConsumerView folds a cloud-viewer snapshot into the dashboard-level
+// status plus a per-cloud-profile consumer count. Pure (no clock, no DB): the
+// caller passes now and a MAC->cloud-profile resolver, so it is unit-testable
+// without a viewer store. A STALE snapshot yields a zero Total and an empty
+// map - the dashboard then shows "veraltet" rather than presenting an old
+// number (or a misleading fresh 0), per the step-2 briefing. The honest Total
+// counts every stream's consumers even when a MAC no longer resolves to a
+// profile (a viewer deleted mid-call); such counts simply do not land on a row.
+func cloudConsumerView(snap streamstore.Snapshot, receivedAt, now time.Time, resolve func(mac string) (string, bool)) (cloudConsumers, map[string]int) {
+	age, stale := streamstore.Freshness(receivedAt, now, streamstore.DefaultStaleAfter)
+	cs := cloudConsumers{Present: true, Stale: stale, AgeSeconds: age}
+	perProfile := map[string]int{}
+	if stale {
+		return cs, perProfile
+	}
+	for _, st := range snap.Streams {
+		cs.Total += st.Consumers
+		if name, ok := resolve(st.StreamID); ok {
+			perProfile[name] += st.Consumers
+		}
+	}
+	return cs, perProfile
+}
+
+// resolveCloudProfile returns a MAC -> cloud-profile-name resolver backed by
+// the viewer manager - the SAME ResolveCloudStreamProfile the cloud WHIP
+// TrackSource uses, so a stream's consumers attach to the profile that stream
+// actually publishes. ok=false when the viewer manager is absent (the unit
+// harness) or the MAC is unknown, so the count still lands in the cloud Total
+// but not on a profile row.
+func (s *Server) resolveCloudProfile(ctx context.Context) func(string) (string, bool) {
+	return func(mac string) (string, bool) {
+		if s.viewerMgr == nil {
+			return "", false
+		}
+		info, err := s.viewerMgr.GetViewerInfo(ctx, mac)
+		if err != nil {
+			return "", false
+		}
+		return info.ResolveCloudStreamProfile(), true
+	}
 }
 
 // deviceKind classifies a client's remote address for the dashboard

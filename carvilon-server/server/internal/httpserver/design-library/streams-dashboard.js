@@ -77,7 +77,7 @@
     GHIST = seed(a.egress);
     var cards = [
       { k: "active", ic: I.stream, ac: "var(--sd-live)", label: "Aktive Streams", val: a.active, foot: "von " + a.total + " Profilen" },
-      { k: "consumers", ic: I.users, ac: "var(--sd-blue)", label: "Konsumenten", val: a.consumers, foot: "verbunden · live" },
+      { k: "consumers", ic: I.users, ac: "var(--sd-blue)", label: "LAN-Konsumenten", val: a.consumers, foot: "verbunden · LAN" },
       { k: "egress", ic: I.flow, ac: "var(--sd-violet)", label: "Egress gesamt", val: fmtMbit(a.egress), unit: "Mbit/s", spark: true, foot: "aggregiert" },
       { k: "frames", ic: I.film, ac: "var(--sd-amber)", label: "Frames gesendet", val: a.frames, foot: "seit Session-Start" },
       { k: "dropped", ic: I.shield, ac: "var(--sd-live)", label: "Verlorene Frames", val: a.dropped, health: true, foot: "alle Pfade" }
@@ -106,10 +106,12 @@
       }
       sm.appendChild(el);
     });
+    appendCloudCard(sm, d);
   }
   function updateSummary(d) {
     var a = aggregate(d);
     setLive("active", a.active); setLive("consumers", a.consumers); setLive("frames", a.frames);
+    refreshCloudCard(d);
     var egEl = $('.sd-cval[data-live="egress"] span', root); if (egEl) egEl.textContent = fmtMbit(a.egress);
     pushHist(GHIST, a.egress);
     var card = $('.sd-card[data-k="egress"]', root);
@@ -118,6 +120,41 @@
     if (dCard) { var v = $(".sd-cval", dCard); if (v) v.textContent = a.dropped; var foot = $(".sd-cfoot .sd-badge-ok", dCard); if (foot) foot.innerHTML = (a.dropped === 0 ? '<span class="sd-ldot" style="width:6px;height:6px"></span>Stabil' : "⚠ " + a.dropped + " verloren"); }
   }
   function setLive(k, v) { var el = $('.sd-cval[data-live="' + k + '"]', root); if (el) el.textContent = num(v); }
+
+  // ---- cloud viewers (S20 step 2) ----
+  // The VPS pushes per-stream WHEP-subscriber counts over the side-channel;
+  // carvilon serves them on d.cloud (present/stale/age_seconds/total) and per
+  // profile (p.cloud_clients). Rendered SEPARATELY from the LAN count; a stale
+  // snapshot shows "veraltet" instead of a misleading fresh number.
+  function cloudChip(p) {
+    var c = DASH.cloud || {};
+    if (!c.present) return "";
+    if (c.stale) return '<span class="sd-cloud stale" title="Cloud-Konsumenten veraltet">☁ –</span>';
+    return '<span class="sd-cloud" title="Cloud-Konsumenten">☁ ' + (p.cloud_clients || 0) + '</span>';
+  }
+  function cloudSummary(d) {
+    var c = d.cloud || {};
+    if (!c.present) return { val: "–", foot: "keine Cloud-Daten", muted: true };
+    var age = c.age_seconds | 0;
+    if (c.stale) return { val: "–", foot: "veraltet · vor " + age + "s", muted: true };
+    return { val: String(c.total | 0), foot: "Stand vor " + age + "s", muted: false };
+  }
+  function appendCloudCard(sm, d) {
+    var cv = cloudSummary(d), ac = "var(--sd-violet)";
+    var el = ce("div", "sd-card" + (cv.muted ? " sd-muted" : "")); el.dataset.k = "cloud";
+    var bar = ce("div", "sd-accent"); bar.style.background = ac; bar.style.boxShadow = "0 0 14px -2px " + ac; el.appendChild(bar);
+    var lab = ce("div", "sd-clabel"); lab.innerHTML = '<span style="color:' + ac + '">' + I.globe + "</span>Cloud-Konsumenten"; el.appendChild(lab);
+    var val = ce("div", "sd-cval"); val.dataset.live = "cloud"; val.textContent = cv.val; el.appendChild(val);
+    var f = ce("div", "sd-cfoot sd-cloudfoot"); f.textContent = cv.foot; el.appendChild(f);
+    sm.appendChild(el);
+  }
+  function refreshCloudCard(d) {
+    var el = $('.sd-card[data-k="cloud"]', root); if (!el) return;
+    var cv = cloudSummary(d);
+    el.classList.toggle("sd-muted", cv.muted);
+    var v = $('.sd-cval', el); if (v) v.textContent = cv.val;
+    var f = $('.sd-cloudfoot', el); if (f) f.textContent = cv.foot;
+  }
 
   // ---- rows ----
   function gaugeSVG(p) {
@@ -149,7 +186,7 @@
       '<div class="sd-pname"><span class="sd-cbadge ' + codecClass(p.codec) + '">' + esc(codecShort(p.codec)) + '</span>' +
       '<span style="min-width:0"><div class="nm">' + esc(p.name) + '</div><div class="meta">' + esc(p.description || p.usage || "") + '</div></span></div>' +
       '<div class="sd-status ' + (p.active ? "live" : "idle") + '"><span class="sd-sd"></span>' + (p.active ? "aktiv" : "idle") + '</div>' +
-      '<div class="r sd-consumers ' + (p.clients ? "" : "zero") + '">' + p.clients + '</div>' +
+      '<div class="r sd-consumers ' + (p.clients ? "" : "zero") + '"><span class="sd-lan">' + p.clients + '</span>' + cloudChip(p) + '</div>' +
       '<div class="r sd-col-src sd-metric ' + (p.active ? "" : "dim") + '">' + (p.active ? p.source_fps.toFixed(1) + '<span class="u">fps</span>' : "–") + '</div>' +
       '<div class="r sd-col-fps sd-gauge">' + (p.active ? '<div class="g-num">' + p.avg_fps.toFixed(1) + '<br><small>/ ' + gaugeTarget(p) + ' fps</small></div>' + gaugeSVG(p) : '<span class="sd-metric dim">–</span>') + '</div>' +
       '<div class="r sd-col-eg sd-egress">' + (p.active ? '<div class="ev">' + fmtMbit(p.avg_bitrate_kbps) + '<span class="u"> Mbit/s</span></div>' + miniSpark(h.eg, cc) : '<span class="sd-metric dim">–</span>') + '</div>' +

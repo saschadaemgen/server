@@ -63,7 +63,7 @@
 .sd-ldot{width:7px;height:7px;border-radius:50%;background:var(--sd-live);box-shadow:var(--sd-glow);animation:sd-pulse 2.4s ease-in-out infinite}
 
 /* summary cards */
-.sd-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.sd-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px}
 .sd-card{position:relative;background:linear-gradient(180deg,var(--sd-s2),var(--sd-s1));border:1px solid var(--sd-line);
   border-radius:13px;padding:14px 14px 12px;overflow:hidden;opacity:0;transform:translateY(10px);animation:sd-rise .55s cubic-bezier(.2,.7,.2,1) forwards}
 .sd-card .sd-accent{position:absolute;top:0;left:0;height:2px;width:36px;border-radius:2px 2px 0 0}
@@ -207,3 +207,12 @@
   .sd-rmain .sd-col-src,.sd-rmain .sd-col-fps,.sd-rmain .sd-col-eg,.sd-rmain .sd-col-h{display:none}
   .sd-dgrid{grid-template-columns:1fr}
 }
+
+/* S20 step 2: cloud (WHEP) consumers, shown next to the LAN count and as a
+   sixth summary card. Violet reads distinct from the blue LAN consumers; a
+   stale snapshot greys out so an old number is never presented as current. */
+.sd-consumers .sd-lan{font-variant-numeric:tabular-nums}
+.sd-consumers .sd-cloud{margin-left:8px;font-family:var(--sd-mono);font-size:12px;color:var(--sd-violet);font-variant-numeric:tabular-nums}
+.sd-consumers .sd-cloud.stale{color:var(--sd-faint)}
+.sd-card.sd-muted{opacity:.55}
+.sd-card.sd-muted .sd-cval{color:var(--sd-faint)}
