@@ -15,12 +15,14 @@
 package unifiapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -138,4 +140,171 @@ type protectCamera struct {
 	Name             string `json:"name"`
 	State            string `json:"state"` // "CONNECTED" / "DISCONNECTED" / ...
 	HasPackageCamera bool   `json:"hasPackageCamera"`
+}
+
+// --- RTSPS stream management (S20-E1) ---------------------------------------
+//
+// These methods manage the per-camera RTSPS pull URLs through the
+// Protect integration API. They are ADDITIVE: the live RTSPS pull in
+// internal/source/unifi keeps its own fetchRTSPSURL and is untouched
+// in E1. Consolidating the two call sites is a later cleanup decision.
+//
+// Every returned URL carries a per-session auth token. Treat the whole
+// RTSPSStreams value as a secret: never log it, never put it in
+// committed config. The error paths redact like ListCameras (a short
+// body preview only, never the request URL or headers).
+
+// RTSPSStreams holds the per-quality RTSPS pull URLs for one camera, as
+// reported by GET/POST .../rtsps-stream. An empty field means that
+// quality is not currently enabled on the camera.
+type RTSPSStreams struct {
+	High    string
+	Medium  string
+	Low     string
+	Package string
+}
+
+// validRTSPSQualities is the quality set the integration API accepts.
+// "package" is only valid on cameras that report HasPackageCam; the API
+// rejects it on others, surfaced here as a non-2xx error.
+var validRTSPSQualities = map[string]bool{
+	"high": true, "medium": true, "low": true, "package": true,
+}
+
+// rtspsEndpoint builds the per-camera rtsps-stream URL. The URL itself
+// is non-secret (the API key travels in the X-API-KEY header); the
+// per-session tokens live in the RESPONSE and must be treated as
+// secrets.
+func (c *Client) rtspsEndpoint(cameraID string) string {
+	return fmt.Sprintf("https://%s/proxy/protect/integration/v1/cameras/%s/rtsps-stream",
+		c.host, url.PathEscape(cameraID))
+}
+
+// responseError builds a redacted error for a non-2xx response. It
+// quotes up to 256 bytes of the body for diagnostics but NEVER the
+// request URL or headers (which carry the API key).
+func responseError(op string, resp *http.Response) error {
+	preview := make([]byte, 256)
+	n, _ := io.ReadFull(resp.Body, preview)
+	return fmt.Errorf("unifiapi: %s HTTP %d: %s", op, resp.StatusCode, preview[:n])
+}
+
+// rtspsFromMap maps the integration API's quality->URL object into the
+// typed RTSPSStreams. Unknown keys are ignored; absent qualities stay "".
+func rtspsFromMap(m map[string]string) RTSPSStreams {
+	return RTSPSStreams{
+		High:    m["high"],
+		Medium:  m["medium"],
+		Low:     m["low"],
+		Package: m["package"],
+	}
+}
+
+// GetRTSPSStream returns the RTSPS URLs currently enabled on the camera.
+//
+// Wire path: GET .../cameras/{id}/rtsps-stream with header X-API-KEY.
+// Qualities not enabled come back as empty fields.
+func (c *Client) GetRTSPSStream(ctx context.Context, cameraID string) (RTSPSStreams, error) {
+	if cameraID == "" {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: cameraID is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.rtspsEndpoint(cameraID), nil)
+	if err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: build request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: get rtsps-stream: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		return RTSPSStreams{}, responseError("get rtsps-stream", resp)
+	}
+	var raw map[string]string
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&raw); err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: decode rtsps-stream: %w", err)
+	}
+	return rtspsFromMap(raw), nil
+}
+
+// CreateRTSPSStream enables the given quality tiers on the camera and
+// returns the resulting URLs.
+//
+// Wire path: POST .../cameras/{id}/rtsps-stream with body
+// {"qualities":[...]} and header X-API-KEY. Allowed quality values:
+// high, medium, low, package. "package" only works on cameras with a
+// package cam; the API rejects it otherwise (surfaced as a non-2xx
+// error here).
+func (c *Client) CreateRTSPSStream(ctx context.Context, cameraID string, qualities []string) (RTSPSStreams, error) {
+	if cameraID == "" {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: cameraID is required")
+	}
+	if len(qualities) == 0 {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: at least one quality is required")
+	}
+	for _, q := range qualities {
+		if !validRTSPSQualities[q] {
+			return RTSPSStreams{}, fmt.Errorf("unifiapi: invalid quality %q (allowed: high, medium, low, package)", q)
+		}
+	}
+	reqBody, err := json.Marshal(map[string]any{"qualities": qualities})
+	if err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: build request body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.rtspsEndpoint(cameraID), bytes.NewReader(reqBody))
+	if err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: build request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: create rtsps-stream: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		return RTSPSStreams{}, responseError("create rtsps-stream", resp)
+	}
+	var raw map[string]string
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&raw); err != nil {
+		return RTSPSStreams{}, fmt.Errorf("unifiapi: decode rtsps-stream: %w", err)
+	}
+	return rtspsFromMap(raw), nil
+}
+
+// DeleteRTSPSStream disables the camera's RTSPS stream(s) via
+// DELETE .../cameras/{id}/rtsps-stream.
+//
+// Provided for the later RTSPS lifecycle (E1 only makes it available;
+// nothing calls it automatically yet).
+func (c *Client) DeleteRTSPSStream(ctx context.Context, cameraID string) error {
+	if cameraID == "" {
+		return fmt.Errorf("unifiapi: cameraID is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.rtspsEndpoint(cameraID), nil)
+	if err != nil {
+		return fmt.Errorf("unifiapi: build request: %w", err)
+	}
+	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("unifiapi: delete rtsps-stream: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		return responseError("delete rtsps-stream", resp)
+	}
+	// Drain so the connection can be reused.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	return nil
 }
