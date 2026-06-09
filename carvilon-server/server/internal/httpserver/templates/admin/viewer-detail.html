@@ -345,6 +345,15 @@
       font-size: 14px;
       color-scheme: dark;
     }
+    /* Ein expliziter background auf dem <select> schaltet Chromium in den
+       Author-Styled-Modus und deaktiviert das color-scheme:dark-Popup; die
+       Optionen fielen sonst auf das helle System-Popup zurueck (heller
+       Hintergrund, fast weisser Text -> erst beim Hover lesbar). Solider
+       dunkler Option-Hintergrund (kein translucentes --color-surface-*). */
+    .stammdaten-edit-form select option {
+      background-color: var(--color-bg-elev, #0e1014);
+      color: var(--color-text-primary, #f0f4ff);
+    }
     .stammdaten-edit-form input[type="text"]:focus,
     .stammdaten-edit-form select:focus {
       outline: none;
@@ -604,6 +613,12 @@
       font: inherit;
       font-size: 14px;
       color-scheme: dark;
+    }
+    /* Siehe Stammdaten-Select: solider dunkler Option-Hintergrund, sonst
+       fällt das Popup auf hell zurück (nur beim Hover lesbar). */
+    .door-add select option {
+      background-color: var(--color-bg-elev, #0e1014);
+      color: var(--color-text-primary, #f0f4ff);
     }
     .door-add select:focus { outline: none; border-color: var(--color-accent); }
   </style>
