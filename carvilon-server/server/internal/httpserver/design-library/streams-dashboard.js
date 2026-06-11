@@ -200,7 +200,10 @@
       '<span style="min-width:0"><div class="nm">' + esc(p.name) + '</div><div class="meta">' + esc(p.description || p.usage || "") + '</div></span></div>' +
       '<div class="sd-status ' + (p.active ? "live" : "idle") + '"><span class="sd-sd"></span>' + (p.active ? "aktiv" : "idle") + '</div>' +
       '<div class="r sd-consumers ' + (p.clients ? "" : "zero") + '"><span class="sd-lan">' + p.clients + '</span>' + cloudChip(p) + '</div>' +
-      '<div class="r sd-col-src sd-metric ' + (p.active ? "" : "dim") + '">' + (p.active ? p.source_fps.toFixed(1) + '<span class="u">fps</span>' : "–") + '</div>' +
+      // Source fps is only instrumented on the transcode paths (mjpeg /
+      // h264_cbp); WebRTC rows (LAN + WHIP uplink) have no measurement yet
+      // and must read "-", not a false 0.0.
+      '<div class="r sd-col-src sd-metric ' + (p.active ? "" : "dim") + '">' + (p.active && p.source_fps > 0 ? p.source_fps.toFixed(1) + '<span class="u">fps</span>' : "–") + '</div>' +
       '<div class="r sd-col-fps sd-gauge">' + (p.active ? '<div class="g-num">' + p.avg_fps.toFixed(1) + '<br><small>/ ' + gaugeTarget(p) + ' fps</small></div>' + gaugeSVG(p) : '<span class="sd-metric dim">–</span>') + '</div>' +
       '<div class="r sd-col-eg sd-egress">' + (p.active ? '<div class="ev">' + fmtMbit(p.avg_bitrate_kbps) + '<span class="u"> Mbit/s</span></div>' + miniSpark(h.eg, cc) : '<span class="sd-metric dim">–</span>') + '</div>' +
       '<div class="r sd-col-h sd-health">' + (p.active ? '<span class="sd-hpill ' + (p.frames_dropped ? "sd-h-warn" : "sd-h-ok") + '">' + (p.frames_dropped ? "⚠ " : "✓ ") + p.frames_dropped + ' Drops</span>' : '<span class="sd-hpill sd-h-idle">–</span>') + '</div>' +
@@ -216,7 +219,7 @@
     var cc = codecColor(p.codec), h = ensureHist(p);
     var left = '<div class="sd-dblock"><h5>' + I.gauge + ' Profil-Metriken</h5><div class="sd-mgrid">' +
       mcell("Ausgang fps", p.avg_fps.toFixed(2) + '<span class="u">/ ' + gaugeTarget(p) + '</span>') +
-      mcell("Quell-fps", p.source_fps.toFixed(2)) +
+      mcell("Quell-fps", p.source_fps > 0 ? p.source_fps.toFixed(2) : "–") +
       mcell("Bitrate", fmtMbit(p.avg_bitrate_kbps) + '<span class="u">Mbit/s</span>') +
       mcell("Frames gesendet", num(p.frames_sent)) +
       mcell("Frames verloren", p.frames_dropped, p.frames_dropped === 0) +
