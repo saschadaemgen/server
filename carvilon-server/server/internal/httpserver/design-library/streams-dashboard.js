@@ -137,7 +137,12 @@
     if (!c.present) return { val: "–", foot: "keine Cloud-Daten", muted: true };
     var age = c.age_seconds | 0;
     if (c.stale) return { val: "–", foot: "veraltet · vor " + age + "s", muted: true };
-    return { val: String(c.total | 0), foot: "Stand vor " + age + "s", muted: false };
+    // Unassigned = counted in the card but on no profile row (unresolvable
+    // MAC / missing profile). Shown so card vs. column sum never diverge
+    // silently; 0 keeps the foot exactly as before.
+    var un = c.unassigned | 0;
+    var foot = "Stand vor " + age + "s" + (un > 0 ? " · " + un + " unzugeordnet" : "");
+    return { val: String(c.total | 0), foot: foot, muted: false };
   }
   function appendCloudCard(sm, d) {
     var cv = cloudSummary(d), ac = "var(--sd-violet)";

@@ -56,12 +56,16 @@ type streamDashboard struct {
 // snapshot arrives; Stale flips when the side-channel goes quiet so an old
 // number is never presented as current (mirrors the /a/turn panel). Total is
 // the count across all streams; the per-profile split lands on
-// dashProfile.CloudClients.
+// dashProfile.CloudClients. Unassigned is the part of Total that landed on
+// NO profile row (MAC without a resolvable viewer, or a cloud profile that
+// is no longer in the profile list) - surfaced so the card and the column
+// sum can never diverge silently (S20 step-2 KORREKTUR).
 type cloudConsumers struct {
 	Present    bool `json:"present"`
 	Stale      bool `json:"stale"`
 	AgeSeconds int  `json:"age_seconds"`
 	Total      int  `json:"total"`
+	Unassigned int  `json:"unassigned"`
 }
 
 // dashProfile is one profile row: its persisted config (from
@@ -158,9 +162,16 @@ func (s *Server) buildStreamsDashboard(ctx context.Context) streamDashboard {
 		if snap, recv, present := s.streamSnapshots.Get(); present {
 			cloud, perProfile := cloudConsumerView(snap, recv, time.Now(), s.resolveCloudProfile(ctx))
 			d.Cloud = cloud
+			assigned := 0
 			for i := range d.Profiles {
 				d.Profiles[i].CloudClients = perProfile[d.Profiles[i].Name]
+				assigned += d.Profiles[i].CloudClients
 			}
+			// Whatever did not land on a row (unresolvable MAC, or a resolved
+			// profile name with no row) stays in the honest Total but is
+			// surfaced as Unassigned - the card and the column sum must never
+			// diverge silently (S20 step-2 KORREKTUR).
+			d.Cloud.Unassigned = d.Cloud.Total - assigned
 		}
 	}
 

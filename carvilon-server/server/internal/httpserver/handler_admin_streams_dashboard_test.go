@@ -16,6 +16,7 @@ import (
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
+	"carvilon.local/server/internal/viewermanager"
 )
 
 // TestBuildStreamsDashboard_PerProfileConsumers proves the consumer
@@ -279,6 +280,164 @@ func TestBuildStreamsDashboard_CloudConsumers(t *testing.T) {
 	if d2 := s2.buildStreamsDashboard(context.Background()); d2.Cloud.Present {
 		t.Errorf("no holder: cloud present = true, want false")
 	}
+}
+
+// cloudRowTestBackend is the stream-backend stub for the profile-row tests:
+// two configured profiles, no LAN clients. The cloud numbers come from the
+// snapshot holder, never from /stream/stats, so the stats document stays empty.
+func cloudRowTestBackend(t *testing.T) *streams.Client {
+	t.Helper()
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/profiles":
+			_, _ = w.Write([]byte(`[
+				{"name":"intercom_med","codec":"h264","fps":15},
+				{"name":"intercom_web","codec":"h264_passthrough","fps":0}
+			]`))
+		case "/stream/stats":
+			_, _ = w.Write([]byte(`{"generated_at":"2026-06-11T10:00:00Z","global":{"clients":0},"profiles":{},"clients":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(backend.Close)
+	c, err := streams.New(backend.URL)
+	if err != nil {
+		t.Fatalf("streams.New: %v", err)
+	}
+	return c
+}
+
+// TestBuildStreamsDashboard_CloudConsumerOnProfileRow is the S20 step-2
+// KORREKTUR autark test: a MAC-keyed cloud consumer stat must land on the
+// PROFILE ROW of the dashboard table. Unlike TestCloudConsumerView (fake
+// resolver) and TestBuildStreamsDashboard_CloudConsumers (nil manager), this
+// pins the previously untested hop end to end: the REAL httpserver.New wiring
+// (Deps.ViewerManager -> s.viewerMgr) and the REAL resolver chain the edge
+// publish uses (viewermanager.GetViewerInfo -> ResolveCloudStreamProfile),
+// against a real DB-backed viewer. Briefing scenario: sid=<mac>, count=1,
+// viewer cloud_stream_profile=intercom_med -> row intercom_med carries
+// Cloud=1, the card still Total=1. Two MACs on the SAME profile must sum.
+func TestBuildStreamsDashboard_CloudConsumerOnProfileRow(t *testing.T) {
+	env := newTestServer(t)
+	ctx := context.Background()
+
+	const mobiMAC = "0c:ea:14:20:00:01"
+	if err := env.viewerMgr.AddViewer(ctx, viewermanager.ViewerSpec{
+		MAC: mobiMAC, Name: "Mobi 4G", ServicePort: 8191, Type: viewermanager.TypeAndroid,
+	}); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := env.viewerMgr.SetCloudStreamProfile(ctx, mobiMAC, "intercom_med"); err != nil {
+		t.Fatalf("SetCloudStreamProfile: %v", err)
+	}
+
+	c := cloudRowTestBackend(t)
+	env.srv.streams, env.srv.streamStats = c, c
+	holder := streamstore.NewSnapshotHolder()
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: mobiMAC, Consumers: 1},
+	}}, time.Now())
+	env.srv.streamSnapshots = holder
+
+	rowCloud := func(d streamDashboard) map[string]int {
+		out := map[string]int{}
+		for _, p := range d.Profiles {
+			out[p.Name] = p.CloudClients
+		}
+		return out
+	}
+
+	d := env.srv.buildStreamsDashboard(ctx)
+	if !d.Cloud.Present || d.Cloud.Stale {
+		t.Fatalf("cloud block = %+v, want present and fresh", d.Cloud)
+	}
+	if d.Cloud.Total != 1 {
+		t.Errorf("card Total = %d, want 1 (card must stay correct)", d.Cloud.Total)
+	}
+	if d.Cloud.Unassigned != 0 {
+		t.Errorf("Unassigned = %d, want 0 (the count landed on its row)", d.Cloud.Unassigned)
+	}
+	rows := rowCloud(d)
+	if rows["intercom_med"] != 1 {
+		t.Errorf("row intercom_med Cloud = %d, want 1 (rows=%v)", rows["intercom_med"], rows)
+	}
+	if rows["intercom_web"] != 0 {
+		t.Errorf("row intercom_web Cloud = %d, want 0 (rows=%v)", rows["intercom_web"], rows)
+	}
+
+	// Second viewer with the SAME cloud profile: both MACs sum onto the row.
+	const otherMAC = "0c:ea:14:20:00:02"
+	if err := env.viewerMgr.AddViewer(ctx, viewermanager.ViewerSpec{
+		MAC: otherMAC, Name: "Mobi Zwei", ServicePort: 8192, Type: viewermanager.TypeAndroid,
+	}); err != nil {
+		t.Fatalf("AddViewer 2: %v", err)
+	}
+	if err := env.viewerMgr.SetCloudStreamProfile(ctx, otherMAC, "intercom_med"); err != nil {
+		t.Fatalf("SetCloudStreamProfile 2: %v", err)
+	}
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: mobiMAC, Consumers: 1}, {StreamID: otherMAC, Consumers: 1},
+	}}, time.Now())
+	d = env.srv.buildStreamsDashboard(ctx)
+	if rows = rowCloud(d); rows["intercom_med"] != 2 || d.Cloud.Total != 2 {
+		t.Errorf("two MACs on one profile: row intercom_med = %d, Total = %d, want 2/2 (rows=%v)",
+			rows["intercom_med"], d.Cloud.Total, rows)
+	}
+}
+
+// TestBuildStreamsDashboard_CloudConsumerUnknownMAC: a stat for a MAC with no
+// viewer must keep counting in the summary card (the card stays independently
+// correct) but must not land on any profile row - and must not panic. Instead
+// of silently diverging from the column sum it reads as Unassigned; the same
+// holds when the viewer EXISTS but its cloud profile has no row anymore.
+func TestBuildStreamsDashboard_CloudConsumerUnknownMAC(t *testing.T) {
+	env := newTestServer(t)
+	ctx := context.Background()
+
+	c := cloudRowTestBackend(t)
+	env.srv.streams, env.srv.streamStats = c, c
+	holder := streamstore.NewSnapshotHolder()
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: "0c:ea:14:99:99:99", Consumers: 1}, // no such viewer
+	}}, time.Now())
+	env.srv.streamSnapshots = holder
+
+	assertOffRows := func(d streamDashboard, when string) {
+		t.Helper()
+		if !d.Cloud.Present || d.Cloud.Stale {
+			t.Fatalf("%s: cloud block = %+v, want present and fresh", when, d.Cloud)
+		}
+		if d.Cloud.Total != 1 {
+			t.Errorf("%s: card Total = %d, want 1 (card counts independently)", when, d.Cloud.Total)
+		}
+		if d.Cloud.Unassigned != 1 {
+			t.Errorf("%s: Unassigned = %d, want 1 (no silent card/column divergence)", when, d.Cloud.Unassigned)
+		}
+		for _, p := range d.Profiles {
+			if p.CloudClients != 0 {
+				t.Errorf("%s: row %s Cloud = %d, want 0 (must not fill a row)", when, p.Name, p.CloudClients)
+			}
+		}
+	}
+	assertOffRows(env.srv.buildStreamsDashboard(ctx), "unknown MAC")
+
+	// Resolvable viewer whose cloud profile is gone from the profile list:
+	// resolves to a name with no row -> counted, but Unassigned, no row.
+	const ghostMAC = "0c:ea:14:99:99:98"
+	if err := env.viewerMgr.AddViewer(ctx, viewermanager.ViewerSpec{
+		MAC: ghostMAC, Name: "Mobi Geisterprofil", ServicePort: 8193, Type: viewermanager.TypeAndroid,
+	}); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := env.viewerMgr.SetCloudStreamProfile(ctx, ghostMAC, "ghost_profile"); err != nil {
+		t.Fatalf("SetCloudStreamProfile: %v", err)
+	}
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: ghostMAC, Consumers: 1},
+	}}, time.Now())
+	assertOffRows(env.srv.buildStreamsDashboard(ctx), "missing profile row")
 }
 
 // TestBuildStreamsDashboard_CloudCountFromSidechannelPayload is the S20
