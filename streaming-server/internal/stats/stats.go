@@ -49,6 +49,13 @@ type Client struct {
 	Codec       string
 	RemoteAddr  string
 	ConnectedAt time.Time
+	// Uplink marks an in-process publish bridge (the WHIP cloud push,
+	// S20) instead of a real viewer. Uplink senders carry full
+	// throughput counters — they ARE edge egress — but are counted
+	// separately (ProfileSnapshot.Uplinks / GlobalSnapshot.Uplinks),
+	// never in the Clients consumer counts, so a publish session can
+	// not masquerade as a LAN viewer.
+	Uplink bool
 
 	// Hot-path counters.
 	framesSent    atomic.Int64
@@ -101,6 +108,7 @@ type ClientSnapshot struct {
 	AvgFPS         float64 `json:"avg_fps"`
 	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
 	LastFrameAt    string  `json:"last_frame_at,omitempty"`
+	Uplink         bool    `json:"uplink,omitempty"` // publish bridge, not a viewer (S20)
 }
 
 // snapshot captures the Client's current counter values into the
@@ -129,6 +137,7 @@ func (c *Client) snapshot(now time.Time) ClientSnapshot {
 		AvgFPS:         float64(frames) / uptime,
 		AvgBitrateKbps: float64(bytes) * 8 / 1000 / uptime,
 		LastFrameAt:    lastFrame,
+		Uplink:         c.Uplink,
 	}
 }
 
@@ -145,9 +154,15 @@ func (c *Client) snapshot(now time.Time) ClientSnapshot {
 // at session start (= first subscriber arrives), so each measurement
 // run sees a clean window.
 type ProfileSnapshot struct {
-	Profile        string  `json:"profile"`
-	Codec          string  `json:"codec"`
+	Profile string `json:"profile"`
+	Codec   string `json:"codec"`
+	// Clients counts real viewers only. Uplinks counts in-process
+	// publish bridges (WHIP cloud push, S20). The throughput fields
+	// below aggregate over BOTH — they are the profile's total egress —
+	// so a publish-only profile still shows live output/bitrate/drops
+	// while its consumer count honestly stays 0.
 	Clients        int     `json:"clients"`
+	Uplinks        int     `json:"uplinks,omitempty"`
 	FramesSent     int64   `json:"frames_sent"`
 	FramesDropped  int64   `json:"frames_dropped"`
 	BytesSent      int64   `json:"bytes_sent"`
@@ -159,9 +174,11 @@ type ProfileSnapshot struct {
 
 // GlobalSnapshot is the server-wide aggregate. TranscoderCPUPercent
 // is filled in by the server from internal/proccpu — stats itself
-// doesn't sample CPU.
+// doesn't sample CPU. Clients counts real viewers only; Uplinks counts
+// publish bridges. Frames/bytes totals cover both (all edge egress).
 type GlobalSnapshot struct {
 	Clients              int     `json:"clients"`
+	Uplinks              int     `json:"uplinks,omitempty"`
 	FramesSentTotal      int64   `json:"frames_sent_total"`
 	BytesSentTotal       int64   `json:"bytes_sent_total"`
 	TranscoderCPUPercent float64 `json:"transcoder_cpu_percent,omitempty"`
@@ -218,6 +235,19 @@ func New() *Registry {
 // the hot-path counters on a cache line owned by the connection's
 // goroutine.
 func (r *Registry) Register(profileName, codec, remoteAddr string) *Client {
+	return r.register(profileName, codec, remoteAddr, false)
+}
+
+// RegisterUplink creates a Client marked as an in-process publish bridge
+// (the WHIP cloud push, S20). It carries the same throughput counters as
+// a viewer — the uplink IS edge egress — but Snapshot counts it under
+// Uplinks, never under the Clients consumer counts. label takes the
+// RemoteAddr slot (there is no peer address for an in-process bridge).
+func (r *Registry) RegisterUplink(profileName, codec, label string) *Client {
+	return r.register(profileName, codec, label, true)
+}
+
+func (r *Registry) register(profileName, codec, remoteAddr string, uplink bool) *Client {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextID++
@@ -227,6 +257,7 @@ func (r *Registry) Register(profileName, codec, remoteAddr string) *Client {
 		Codec:       codec,
 		RemoteAddr:  remoteAddr,
 		ConnectedAt: time.Now(),
+		Uplink:      uplink,
 	}
 	r.clients[c.ID] = c
 	return c
@@ -263,14 +294,23 @@ func (r *Registry) Snapshot() Snapshot {
 		return clientSnaps[i].ID < clientSnaps[j].ID
 	})
 
-	// Aggregate per profile + globally.
+	// Aggregate per profile + globally. Viewers and uplinks are counted
+	// apart (consumer counts must never include the publish bridge), but
+	// the throughput sums cover both — they are the profile's egress.
 	profiles := make(map[string]ProfileSnapshot)
 	var globalFrames, globalBytes int64
+	var globalClients, globalUplinks int
 	for _, cs := range clientSnaps {
 		ps := profiles[cs.Profile]
 		ps.Profile = cs.Profile
 		ps.Codec = cs.Codec
-		ps.Clients++
+		if cs.Uplink {
+			ps.Uplinks++
+			globalUplinks++
+		} else {
+			ps.Clients++
+			globalClients++
+		}
 		ps.FramesSent += cs.FramesSent
 		ps.FramesDropped += cs.FramesDropped
 		ps.BytesSent += cs.BytesSent
@@ -299,9 +339,9 @@ func (r *Registry) Snapshot() Snapshot {
 	}
 
 	// S6-04: enrich existing per-profile snapshots with source-side
-	// counters. We only attach to profiles that already have clients
-	// (and therefore an active encoder session) — a counter that
-	// outlived its session would otherwise show stale data.
+	// counters. We only attach to profiles that already have senders
+	// (viewers or uplinks, and therefore an active session) — a counter
+	// that outlived its session would otherwise show stale data.
 	r.profMu.Lock()
 	for name, pc := range r.profileCounters {
 		ps, ok := profiles[name]
@@ -322,7 +362,8 @@ func (r *Registry) Snapshot() Snapshot {
 	return Snapshot{
 		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
 		Global: GlobalSnapshot{
-			Clients:         len(clientSnaps),
+			Clients:         globalClients,
+			Uplinks:         globalUplinks,
 			FramesSentTotal: globalFrames,
 			BytesSentTotal:  globalBytes,
 		},

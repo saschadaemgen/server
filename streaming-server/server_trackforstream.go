@@ -8,6 +8,7 @@ import (
 
 	"carvilon.local/stream/internal/droplog"
 	"carvilon.local/stream/internal/profile"
+	"carvilon.local/stream/internal/stats"
 )
 
 // TrackForStream opens a fan-out subscriber for the named profile and
@@ -68,11 +69,25 @@ func (s *Server) TrackForStream(profileName string) (webrtc.TrackLocal, func(), 
 		Logger: s.logger,
 		Label:  fmt.Sprintf("stream: trackforstream %s/%d writesample", p.Name, sub.ID()),
 	}
-	// feedTrack's stats client is nil here: this is an in-process bridge,
-	// not an HTTP viewer, so it does not appear in /stream/stats. The
-	// counters are nil-safe (S6-15). The same idle-timeout watchdog
-	// applies, so a wedged upstream still tears the feed down.
-	go s.feedTrack(sub, track, drops, nil)
+	// S20: the publish bridge IS edge egress, so it registers in
+	// /stream/stats — as an UPLINK, never as a viewer (RegisterUplink
+	// keeps it out of every consumer count; the admin shows cloud
+	// viewers via the side-channel WHEP counts instead). The profile row
+	// thus lives while a publish session stands: output fps, bitrate and
+	// drops come from this sender. Unregister mirrors handleOffer: it
+	// runs when feedTrack returns — on stop() closing the subscription
+	// AND on the idle watchdog — so a dead publish can never linger as a
+	// ghost-active row.
+	var sc *stats.Client
+	if s.stats != nil {
+		sc = s.stats.RegisterUplink(p.Name, string(p.Codec), "whip-uplink")
+	}
+	go func() {
+		if s.stats != nil {
+			defer s.stats.Unregister(sc)
+		}
+		s.feedTrack(sub, track, drops, sc)
+	}()
 
 	var once sync.Once
 	stop := func() {

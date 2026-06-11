@@ -372,3 +372,85 @@ func TestRegister_ConcurrentSafe(t *testing.T) {
 		t.Errorf("Count = %d after Register+Unregister storm, want 0", r.Count())
 	}
 }
+
+// TestUplinkAccounting pins the S20 sender split: an uplink (the WHIP
+// publish bridge) carries full throughput counters — it IS edge egress —
+// but is counted under Uplinks, never under the Clients consumer counts,
+// neither per profile nor globally. Unregistering it removes the profile
+// entry entirely (the row reads idle again, no ghost).
+func TestUplinkAccounting(t *testing.T) {
+	r := New()
+	viewer := r.Register("intercom_web", "h264_passthrough", "192.168.1.50:1234")
+	up := r.RegisterUplink("intercom_med", "h264_reencode_shortgop", "whip-uplink")
+
+	viewer.RecordFrame(1000)
+	up.RecordFrame(2000)
+	up.RecordFrame(2000)
+	up.RecordDrop()
+
+	snap := r.Snapshot()
+	if snap.Global.Clients != 1 || snap.Global.Uplinks != 1 {
+		t.Errorf("global clients/uplinks = %d/%d, want 1/1", snap.Global.Clients, snap.Global.Uplinks)
+	}
+	if snap.Global.FramesSentTotal != 3 || snap.Global.BytesSentTotal != 5000 {
+		t.Errorf("global egress = %d frames / %d bytes, want 3/5000 (uplink included)",
+			snap.Global.FramesSentTotal, snap.Global.BytesSentTotal)
+	}
+
+	med, ok := snap.Profiles["intercom_med"]
+	if !ok {
+		t.Fatal("intercom_med missing from profiles (uplink must create the entry)")
+	}
+	if med.Clients != 0 || med.Uplinks != 1 {
+		t.Errorf("intercom_med clients/uplinks = %d/%d, want 0/1", med.Clients, med.Uplinks)
+	}
+	if med.FramesSent != 2 || med.FramesDropped != 1 || med.BytesSent != 4000 {
+		t.Errorf("intercom_med egress = %d frames / %d drops / %d bytes, want 2/1/4000",
+			med.FramesSent, med.FramesDropped, med.BytesSent)
+	}
+	if med.AvgFPS <= 0 || med.AvgBitrateKbps <= 0 {
+		t.Errorf("intercom_med averages must be live: fps=%v kbps=%v", med.AvgFPS, med.AvgBitrateKbps)
+	}
+	web := snap.Profiles["intercom_web"]
+	if web.Clients != 1 || web.Uplinks != 0 {
+		t.Errorf("intercom_web clients/uplinks = %d/%d, want 1/0", web.Clients, web.Uplinks)
+	}
+
+	var uplinkSeen bool
+	for _, cs := range snap.Clients {
+		if cs.Uplink {
+			uplinkSeen = true
+			if cs.Profile != "intercom_med" || cs.RemoteAddr != "whip-uplink" {
+				t.Errorf("uplink entry = %+v, want profile intercom_med / label whip-uplink", cs)
+			}
+		}
+	}
+	if !uplinkSeen {
+		t.Error("uplink entry missing from the clients list")
+	}
+
+	// Wire contract for the carvilon dashboard: "uplinks" on the profile,
+	// "uplink" on the entry — and both ABSENT for plain viewers (omitempty),
+	// so the existing JSON shape stays byte-stable without uplinks.
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"uplinks":1`, `"uplink":true`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("snapshot JSON missing %s: %s", want, raw)
+		}
+	}
+	if webRaw, _ := json.Marshal(snap.Profiles["intercom_web"]); strings.Contains(string(webRaw), "uplink") {
+		t.Errorf("viewer-only profile must not carry uplink fields: %s", webRaw)
+	}
+
+	r.Unregister(up)
+	snap = r.Snapshot()
+	if snap.Global.Uplinks != 0 {
+		t.Errorf("global uplinks after unregister = %d, want 0", snap.Global.Uplinks)
+	}
+	if _, ok := snap.Profiles["intercom_med"]; ok {
+		t.Error("intercom_med still present after uplink unregister (ghost row)")
+	}
+}
