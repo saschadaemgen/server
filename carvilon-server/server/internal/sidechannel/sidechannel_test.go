@@ -22,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"carvilon.local/server/internal/streampublish"
+	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/turnstore"
 )
 
@@ -475,6 +476,75 @@ func TestSidechannel_TURNTelemetryRoundtrip(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no turn_stats within 5s")
+	}
+}
+
+// TestSidechannel_StreamStatsRoundtrip proves the cloud -> edge
+// stream_stats frame carries the per-stream WHEP consumer counts intact
+// across the link (S20 step 2 fix harness): a snapshot sent with
+// Consumers=1 must arrive at the edge callback as 1, not 0, with the
+// StreamID (viewer MAC) preserved. The egress mirror of the TURN
+// telemetry roundtrip above.
+func TestSidechannel_StreamStatsRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv, url := startServer(t, ctx, p)
+
+	snaps := make(chan streamstore.Snapshot, 8)
+	cli, err := NewClient(ClientOptions{
+		URL:            url,
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		OnStreamStats:  func(s streamstore.Snapshot) { snaps <- s },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	waitFor(t, func() bool { return srv.ConnCount() >= 1 }, 5*time.Second)
+
+	sentAt := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	if sent := srv.SendStreamStats(ctx, streamstore.Snapshot{
+		GeneratedAt: sentAt,
+		Streams:     []streamstore.Stat{{StreamID: "0c:ea:14:00:00:01", Consumers: 1}},
+	}); sent < 1 {
+		t.Fatalf("SendStreamStats reached %d edges, want >= 1", sent)
+	}
+	select {
+	case s := <-snaps:
+		if len(s.Streams) != 1 {
+			t.Fatalf("stream_stats arrived with %d streams, want 1: %+v", len(s.Streams), s)
+		}
+		if s.Streams[0].StreamID != "0c:ea:14:00:00:01" || s.Streams[0].Consumers != 1 {
+			t.Errorf("stream_stats = %+v, want StreamID=0c:ea:14:00:00:01 Consumers=1", s.Streams[0])
+		}
+		if !s.GeneratedAt.Equal(sentAt) {
+			t.Errorf("GeneratedAt = %v, want %v", s.GeneratedAt, sentAt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no stream_stats within 5s")
+	}
+
+	// An EMPTY snapshot ("cloud up, 0 viewers") must also arrive - the edge
+	// distinguishes it from "cloud down" by freshness alone.
+	if sent := srv.SendStreamStats(ctx, streamstore.Snapshot{GeneratedAt: sentAt}); sent < 1 {
+		t.Fatalf("empty SendStreamStats reached %d edges, want >= 1", sent)
+	}
+	select {
+	case s := <-snaps:
+		if len(s.Streams) != 0 {
+			t.Errorf("empty stream_stats arrived with %d streams, want 0", len(s.Streams))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no empty stream_stats within 5s")
 	}
 }
 

@@ -3,6 +3,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"html/template"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
 )
@@ -276,5 +278,73 @@ func TestBuildStreamsDashboard_CloudConsumers(t *testing.T) {
 	s2 := &Server{streams: c, streamStats: c, log: log}
 	if d2 := s2.buildStreamsDashboard(context.Background()); d2.Cloud.Present {
 		t.Errorf("no holder: cloud present = true, want false")
+	}
+}
+
+// TestBuildStreamsDashboard_CloudCountFromSidechannelPayload is the S20
+// step-2 autark test: it carries a cloud consumer count of 1 from a SIMULATED
+// side-channel payload all the way into the dashboard struct - 1 must arrive
+// as 1, not 0. The payload is built exactly as the VPS builds it
+// (sidechannel.Server.SendStreamStats marshals Envelope{Type, StreamStats}),
+// decoded exactly as the edge client decodes it (wsjson = encoding/json into
+// a fresh Envelope, the client.go TypeStreamStats dispatch guard), stored
+// exactly as runEdge wires it (holder.Set with the edge receive time), then
+// folded by buildStreamsDashboard. Pins the wire format on top: the frame
+// must carry "stream_stats" with "consumers":1.
+func TestBuildStreamsDashboard_CloudCountFromSidechannelPayload(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/profiles":
+			_, _ = w.Write([]byte(`[{"name":"intercom_android","codec":"h264_passthrough","fps":0}]`))
+		case "/stream/stats":
+			_, _ = w.Write([]byte(`{"generated_at":"2026-06-11T10:00:00Z","global":{"clients":0},"profiles":{},"clients":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+	c, _ := streams.New(backend.URL)
+
+	// VPS side: the snapshot the cloud ticker builds from the whip counter
+	// (buildStreamSnapshot shape) framed the way SendStreamStats sends it.
+	wire, err := json.Marshal(sidechannel.Envelope{
+		Type: sidechannel.TypeStreamStats,
+		StreamStats: &streamstore.Snapshot{
+			GeneratedAt: time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
+			Streams:     []streamstore.Stat{{StreamID: "0c:ea:14:00:00:01", Consumers: 1}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	for _, want := range []string{`"type":"stream_stats"`, `"consumers":1`, `"stream_id":"0c:ea:14:00:00:01"`} {
+		if !strings.Contains(string(wire), want) {
+			t.Fatalf("wire frame missing %s: %s", want, wire)
+		}
+	}
+
+	// Edge side: decode + dispatch guard exactly as the client read loop does
+	// (client.go case TypeStreamStats), store exactly as runEdge wires
+	// OnStreamStats (holder.Set with the edge receive time).
+	var env sidechannel.Envelope
+	if err := json.Unmarshal(wire, &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if env.Type != sidechannel.TypeStreamStats || env.StreamStats == nil {
+		t.Fatalf("frame would not dispatch: type=%q streamStats=%v", env.Type, env.StreamStats)
+	}
+	holder := streamstore.NewSnapshotHolder()
+	holder.Set(*env.StreamStats, time.Now())
+
+	// Dashboard: the value must surface as 1, not 0.
+	s := &Server{streams: c, streamStats: c, streamSnapshots: holder,
+		log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	d := s.buildStreamsDashboard(context.Background())
+	if !d.Cloud.Present || d.Cloud.Stale {
+		t.Fatalf("cloud block = %+v, want present and fresh", d.Cloud)
+	}
+	if d.Cloud.Total != 1 {
+		t.Errorf("cloud total = %d, want 1 (the simulated VPS count must arrive intact)", d.Cloud.Total)
 	}
 }
