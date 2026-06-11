@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>carvilon - Android-Viewer</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
 </head>
 <body class="admin-shell">
 
@@ -209,7 +209,7 @@
     </div>
   </main>
 
-  <script src="/static/interactions.js"></script>
+  <script src="{{asset "/static/interactions.js"}}"></script>
   <script>
     // Page-local glue: open/close modals + adopt POST + regen POST.
     // Mirrors the ESP-Viewer adopt pattern but skips the discovery

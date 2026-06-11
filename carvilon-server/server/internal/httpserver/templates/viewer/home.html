@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>carvilon - {{.UnitName}}</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
   <style>
     @media (min-width: 640px) {
       .stage {
@@ -790,10 +790,10 @@
   <!-- WebRTC client loads BEFORE interactions.js
        and idle.js so window.carvilonWebRTC is already on the
        page when those modules wire their lifecycle hooks. -->
-  <script src="/static/webrtc-stream.js"></script>
-  <script src="/static/interactions.js"></script>
-  <script src="/static/idle.js"></script>
-  <script src="/static/carvilon-brand.js" defer></script>
+  <script src="{{asset "/static/webrtc-stream.js"}}"></script>
+  <script src="{{asset "/static/interactions.js"}}"></script>
+  <script src="{{asset "/static/idle.js"}}"></script>
+  <script src="{{asset "/static/carvilon-brand.js"}}" defer></script>
   <script>
     // Doorbell-lifecycle wire-up.
     //

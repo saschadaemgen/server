@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>carvilon - Anmeldung</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
   <style>
     /* Banner-Variante orange fuer Lockout-Hinweis (Library hat
        nur red und green; orange = Warnung statt Fehler). */
@@ -56,6 +56,6 @@
 
     <p class="login-footer-note">Probleme beim Anmelden? Bitte beim Hausverwalter melden.</p>
   </main>
-  <script src="/static/carvilon-brand.js" defer></script>
+  <script src="{{asset "/static/carvilon-brand.js"}}" defer></script>
 </body>
 </html>

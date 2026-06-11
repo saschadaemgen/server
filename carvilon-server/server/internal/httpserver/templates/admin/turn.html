@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>carvilon - TURN</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
   <style>
     .td-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
     .td-kv { background: var(--color-surface-1); border:1px solid var(--color-hairline); border-radius: var(--radius-sm); padding: var(--space-3); }
@@ -75,9 +75,9 @@
     </div>
 
     <script id="td-data" type="application/json">{{.Page.DataJSON}}</script>
-    <script src="/static/turn-dashboard.js"></script>
+    <script src="{{asset "/static/turn-dashboard.js"}}"></script>
   </main>
 
-  <script src="/static/interactions.js"></script>
+  <script src="{{asset "/static/interactions.js"}}"></script>
 </body>
 </html>

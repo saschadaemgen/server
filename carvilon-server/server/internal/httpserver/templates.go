@@ -70,6 +70,9 @@ var adminLibraryFor = map[string][]string{
 
 func newAdminTemplates() (*adminTemplates, error) {
 	funcMap := template.FuncMap{
+		// asset appends the process-start cache-busting token to
+		// a /static/ path; see assetURL in static.go.
+		"asset":    assetURL,
 		"macID":    macIDFromMAC,
 		"safeHTML": func(s string) template.HTML { return template.HTML(s) },
 	}

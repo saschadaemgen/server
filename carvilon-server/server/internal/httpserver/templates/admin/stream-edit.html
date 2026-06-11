@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>carvilon - {{if .Page.IsNew}}Neues Stream-Profil{{else}}Stream-Profil bearbeiten{{end}}</title>
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
 </head>
 <body class="admin-shell">
 
@@ -164,6 +164,6 @@
     </div>
   </main>
 
-  <script src="/static/interactions.js"></script>
+  <script src="{{asset "/static/interactions.js"}}"></script>
 </body>
 </html>
