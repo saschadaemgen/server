@@ -70,9 +70,14 @@ type Profile struct {
 // The JSON decoder ignores any field the stream-server adds beyond
 // this struct (no DisallowUnknownFields on the read side).
 type ProfileStats struct {
-	Profile        string  `json:"profile"`
-	Codec          string  `json:"codec"`
+	Profile string `json:"profile"`
+	Codec   string `json:"codec"`
+	// Clients counts real viewers; Uplinks counts in-process publish
+	// bridges (the WHIP cloud push, S20). The throughput fields cover
+	// both — they are the profile's total egress — so a publish-only
+	// profile carries live numbers while Clients stays honestly 0.
 	Clients        int     `json:"clients"`
+	Uplinks        int     `json:"uplinks"`
 	FramesSent     int64   `json:"frames_sent"`
 	FramesDropped  int64   `json:"frames_dropped"`
 	BytesSent      int64   `json:"bytes_sent"`
@@ -86,7 +91,8 @@ type ProfileStats struct {
 // (stats.GlobalSnapshot). TranscoderCPUPercent is present only when the
 // stream-server has a CPU sampler wired.
 type GlobalStats struct {
-	Clients              int     `json:"clients"`
+	Clients              int     `json:"clients"` // real viewers only (LAN consumers)
+	Uplinks              int     `json:"uplinks"` // WHIP publish bridges (S20)
 	FramesSentTotal      int64   `json:"frames_sent_total"`
 	BytesSentTotal       int64   `json:"bytes_sent_total"`
 	TranscoderCPUPercent float64 `json:"transcoder_cpu_percent"`
@@ -108,6 +114,10 @@ type ClientStats struct {
 	AvgFPS         float64 `json:"avg_fps"`
 	AvgBitrateKbps float64 `json:"avg_bitrate_kbps"`
 	LastFrameAt    string  `json:"last_frame_at"`
+	// Uplink marks the in-process WHIP publish bridge (S20). It is edge
+	// egress, not a consumer — the dashboard keeps it out of the
+	// consumer list and counts.
+	Uplink bool `json:"uplink"`
 }
 
 // StreamStats is the full GET /stream/stats document

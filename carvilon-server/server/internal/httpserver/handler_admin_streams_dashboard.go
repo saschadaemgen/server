@@ -87,6 +87,7 @@ type dashProfile struct {
 	Active         bool    `json:"active"`
 	Clients        int     `json:"clients"`
 	CloudClients   int     `json:"cloud_clients"` // cloud (WHEP) consumers, kept SEPARATE from Clients (LAN). S20 step 2.
+	Uplinks        int     `json:"uplinks"`       // WHIP publish bridges feeding the cloud; egress, not consumers. S20.
 	FramesSent     int64   `json:"frames_sent"`
 	FramesDropped  int64   `json:"frames_dropped"`
 	BytesSent      int64   `json:"bytes_sent"`
@@ -139,10 +140,15 @@ func (s *Server) buildStreamsDashboard(ctx context.Context) streamDashboard {
 			Height:      p.Height,
 			TargetFPS:   p.FPS,
 			Encryption:  p.Encryption,
-			Active:      st.Clients > 0,
+			// A profile is live while ANY sender stands: a real viewer
+			// OR the WHIP publish bridge (S20) - the cloud profile must
+			// read active with source/output/egress while the edge
+			// pushes, and fall back to idle when the session ends.
+			Active: st.Clients > 0 || st.Uplinks > 0,
 		}
 		if dp.Active {
 			dp.Clients = st.Clients
+			dp.Uplinks = st.Uplinks
 			dp.FramesSent = st.FramesSent
 			dp.FramesDropped = st.FramesDropped
 			dp.BytesSent = st.BytesSent
@@ -176,6 +182,13 @@ func (s *Server) buildStreamsDashboard(ctx context.Context) streamDashboard {
 	}
 
 	for _, c := range stats.Clients {
+		// The WHIP publish bridge is edge egress, not a consumer: it
+		// must never appear in the consumer list (the old "4G viewer =
+		// LAN consumer" confusion). Its numbers reach the row via the
+		// profile aggregates and dashProfile.Uplinks instead. (S20)
+		if c.Uplink {
+			continue
+		}
 		d.Clients = append(d.Clients, dashClient{ClientStats: c, Kind: deviceKind(c.RemoteAddr)})
 	}
 	return d

@@ -440,6 +440,186 @@ func TestBuildStreamsDashboard_CloudConsumerUnknownMAC(t *testing.T) {
 	assertOffRows(env.srv.buildStreamsDashboard(ctx), "missing profile row")
 }
 
+// TestBuildStreamsDashboard_PublishUplinkActivatesRow is the S20
+// publish-instrumentation autark test: while the edge holds a WHIP publish
+// session for a cloud viewer, that profile's row must live exactly like a
+// LAN-consumed one - active, output fps, egress bitrate, health - with the
+// consumer count honestly at 0 (the bridge is egress, not a viewer, and is
+// kept out of the consumer list). When the session ends the row falls back
+// to idle: no ghost-active.
+func TestBuildStreamsDashboard_PublishUplinkActivatesRow(t *testing.T) {
+	statsBody := `{
+		"generated_at":"2026-06-11T15:00:00Z",
+		"global":{"clients":0,"uplinks":1,"frames_sent_total":444},
+		"profiles":{"intercom_med":{"profile":"intercom_med","codec":"h264_reencode_shortgop",
+			"clients":0,"uplinks":1,"frames_sent":444,"frames_dropped":2,"bytes_sent":6750000,
+			"avg_fps":14.8,"avg_bitrate_kbps":1800}},
+		"clients":[{"id":7,"profile":"intercom_med","codec":"h264_reencode_shortgop",
+			"remote_addr":"whip-uplink","uptime_sec":30,"frames_sent":444,"avg_fps":14.8,
+			"avg_bitrate_kbps":1800,"uplink":true}]
+	}`
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/profiles":
+			_, _ = w.Write([]byte(`[{"name":"intercom_med","codec":"h264_reencode_shortgop","fps":15}]`))
+		case "/stream/stats":
+			_, _ = w.Write([]byte(statsBody))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+	c, _ := streams.New(backend.URL)
+	s := &Server{streams: c, streamStats: c, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	d := s.buildStreamsDashboard(context.Background())
+	if len(d.Profiles) != 1 {
+		t.Fatalf("want 1 profile row, got %d", len(d.Profiles))
+	}
+	row := d.Profiles[0]
+	if !row.Active {
+		t.Error("publish session standing -> row must be ACTIVE")
+	}
+	if row.Clients != 0 || row.Uplinks != 1 {
+		t.Errorf("row clients/uplinks = %d/%d, want 0/1 (bridge is not a consumer)", row.Clients, row.Uplinks)
+	}
+	if row.AvgFPS != 14.8 || row.AvgBitrateKbps != 1800 || row.FramesDropped != 2 {
+		t.Errorf("row stats not filled: fps=%v kbps=%v drops=%d", row.AvgFPS, row.AvgBitrateKbps, row.FramesDropped)
+	}
+	if d.Global.Clients != 0 {
+		t.Errorf("global clients = %d, want 0 (LAN card must not count the bridge)", d.Global.Clients)
+	}
+	if len(d.Clients) != 0 {
+		t.Errorf("consumer list = %+v, want empty (uplink filtered out)", d.Clients)
+	}
+
+	// Session over: the stream-server drops the profile from stats ->
+	// the row reads idle again with zeroed live numbers.
+	statsBody = `{"generated_at":"2026-06-11T15:01:00Z","global":{"clients":0},"profiles":{},"clients":[]}`
+	d = s.buildStreamsDashboard(context.Background())
+	row = d.Profiles[0]
+	if row.Active || row.Uplinks != 0 || row.AvgFPS != 0 {
+		t.Errorf("after session end: row = %+v, want idle with zero stats", row)
+	}
+}
+
+// TestBuildStreamsDashboard_MixedLANAndCloud is the briefing's
+// Mischbetrieb autark test: one LAN consumer on profile A (the ESP on
+// mjpeg_bal) plus one cloud viewer on profile B (the phone on intercom_med,
+// i.e. a WHIP uplink on the edge + a WHEP subscriber counted by the VPS).
+// Every dashboard number must hold at once: LAN card 1, cloud card 1, both
+// rows active with their numbers, the third (LAN twin) profile idle, the
+// bridge absent from the consumer list, and the per-row egress data
+// complete so the JS total equals ESP + WHIP uplink.
+func TestBuildStreamsDashboard_MixedLANAndCloud(t *testing.T) {
+	env := newTestServer(t)
+	ctx := context.Background()
+
+	const mobiMAC = "0c:ea:14:20:00:07"
+	if err := env.viewerMgr.AddViewer(ctx, viewermanager.ViewerSpec{
+		MAC: mobiMAC, Name: "Mobi Mischbetrieb", ServicePort: 8194, Type: viewermanager.TypeAndroid,
+	}); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := env.viewerMgr.SetCloudStreamProfile(ctx, mobiMAC, "intercom_med"); err != nil {
+		t.Fatalf("SetCloudStreamProfile: %v", err)
+	}
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/profiles":
+			_, _ = w.Write([]byte(`[
+				{"name":"mjpeg_bal","codec":"mjpeg","fps":12,"width":800,"height":1280},
+				{"name":"intercom_med","codec":"h264_reencode_shortgop","fps":15},
+				{"name":"intercom_android","codec":"h264_passthrough","fps":0}
+			]`))
+		case "/stream/stats":
+			_, _ = w.Write([]byte(`{
+				"generated_at":"2026-06-11T15:00:00Z",
+				"global":{"clients":1,"uplinks":1,"frames_sent_total":1000},
+				"profiles":{
+					"mjpeg_bal":{"profile":"mjpeg_bal","codec":"mjpeg","clients":1,
+						"frames_sent":700,"frames_dropped":0,"avg_fps":11.9,"source_fps":15.0,
+						"avg_bitrate_kbps":4730},
+					"intercom_med":{"profile":"intercom_med","codec":"h264_reencode_shortgop",
+						"clients":0,"uplinks":1,"frames_sent":300,"frames_dropped":0,
+						"avg_fps":14.8,"avg_bitrate_kbps":1800}
+				},
+				"clients":[
+					{"id":1,"profile":"mjpeg_bal","remote_addr":"192.168.1.28:50000","uptime_sec":60,
+						"avg_fps":11.9,"avg_bitrate_kbps":4730},
+					{"id":2,"profile":"intercom_med","remote_addr":"whip-uplink","uptime_sec":30,
+						"avg_fps":14.8,"avg_bitrate_kbps":1800,"uplink":true}
+				]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+	c, err := streams.New(backend.URL)
+	if err != nil {
+		t.Fatalf("streams.New: %v", err)
+	}
+	env.srv.streams, env.srv.streamStats = c, c
+	holder := streamstore.NewSnapshotHolder()
+	holder.Set(streamstore.Snapshot{Streams: []streamstore.Stat{
+		{StreamID: mobiMAC, Consumers: 1},
+	}}, time.Now())
+	env.srv.streamSnapshots = holder
+
+	d := env.srv.buildStreamsDashboard(ctx)
+
+	rows := map[string]dashProfile{}
+	for _, p := range d.Profiles {
+		rows[p.Name] = p
+	}
+	esp := rows["mjpeg_bal"]
+	if !esp.Active || esp.Clients != 1 || esp.Uplinks != 0 || esp.CloudClients != 0 {
+		t.Errorf("mjpeg_bal = active %v clients %d uplinks %d cloud %d, want active 1/0/0",
+			esp.Active, esp.Clients, esp.Uplinks, esp.CloudClients)
+	}
+	med := rows["intercom_med"]
+	if !med.Active || med.Clients != 0 || med.Uplinks != 1 || med.CloudClients != 1 {
+		t.Errorf("intercom_med = active %v clients %d uplinks %d cloud %d, want active 0/1/1",
+			med.Active, med.Clients, med.Uplinks, med.CloudClients)
+	}
+	if med.AvgFPS != 14.8 || med.AvgBitrateKbps != 1800 {
+		t.Errorf("intercom_med output/egress = %v fps / %v kbps, want 14.8/1800", med.AvgFPS, med.AvgBitrateKbps)
+	}
+	if android := rows["intercom_android"]; android.Active || android.Clients != 0 {
+		t.Errorf("intercom_android must stay idle (the phone is on the CLOUD path): %+v", android)
+	}
+
+	// Cards: LAN counts only the ESP, cloud counts only the VPS WHEP
+	// subscriber, nothing unassigned.
+	if d.Global.Clients != 1 {
+		t.Errorf("LAN card (global clients) = %d, want 1", d.Global.Clients)
+	}
+	if !d.Cloud.Present || d.Cloud.Total != 1 || d.Cloud.Unassigned != 0 {
+		t.Errorf("cloud card = %+v, want present total 1 unassigned 0", d.Cloud)
+	}
+
+	// Consumer list: exactly the ESP; the bridge never appears.
+	if len(d.Clients) != 1 || d.Clients[0].RemoteAddr != "192.168.1.28:50000" || d.Clients[0].Kind != "esp" {
+		t.Errorf("consumer list = %+v, want exactly the ESP entry", d.Clients)
+	}
+
+	// Egress-gesamt contract: the JS sums avg_bitrate_kbps*(clients+uplinks)
+	// over active rows - with this payload that is ESP + WHIP uplink.
+	var egress float64
+	for _, p := range d.Profiles {
+		if p.Active {
+			egress += p.AvgBitrateKbps * float64(p.Clients+p.Uplinks)
+		}
+	}
+	if egress != 4730+1800 {
+		t.Errorf("egress sum = %v, want %v (ESP + WHIP uplink)", egress, 4730+1800)
+	}
+}
+
 // TestBuildStreamsDashboard_CloudCountFromSidechannelPayload is the S20
 // step-2 autark test: it carries a cloud consumer count of 1 from a SIMULATED
 // side-channel payload all the way into the dashboard struct - 1 must arrive

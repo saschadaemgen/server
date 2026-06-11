@@ -68,7 +68,15 @@
   // ---- summary ----
   function aggregate(d) {
     var active = 0, consumers = d.global.clients || 0, egress = 0, frames = d.global.frames_sent_total || 0, dropped = 0;
-    d.profiles.forEach(function (p) { if (p.active) { active++; egress += p.avg_bitrate_kbps * p.clients; dropped += p.frames_dropped; } });
+    d.profiles.forEach(function (p) {
+      if (!p.active) return;
+      active++;
+      // avg_bitrate_kbps is the per-sender average; senders = LAN
+      // viewers + WHIP publish uplinks (S20), so total egress includes
+      // the cloud push. consumers stays d.global.clients - viewers only.
+      egress += p.avg_bitrate_kbps * (p.clients + (p.uplinks || 0));
+      dropped += p.frames_dropped;
+    });
     return { active: active, total: d.profiles.length, consumers: consumers, egress: egress, frames: frames, dropped: dropped };
   }
   function buildSummary(d) {
