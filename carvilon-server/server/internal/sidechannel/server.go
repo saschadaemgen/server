@@ -303,6 +303,21 @@ func (s *Server) RequestPublish(ctx context.Context, streamID string) int {
 	return sent
 }
 
+// RequestStop asks every connected edge to stop publishing streamID: the LAST
+// WHEP subscriber for that stream has left. It is the symmetric counterpart to
+// RequestPublish (cloud -> edge, broadcast; one edge today, per-stream routing
+// is future work) and returns how many edges it reached. Carries
+// Reason = no_subscribers so the edge logs why and echoes it back on the
+// stop_publish it sends in response. (S20)
+func (s *Server) RequestStop(ctx context.Context, streamID string) int {
+	if streamID == "" {
+		return 0
+	}
+	sent := s.broadcast(ctx, Envelope{Type: TypeRequestStop, StreamID: streamID, Reason: ReasonNoSubscribers})
+	s.log.Info("sidechannel request_stop sent", "stream_id", streamID, "edges", sent)
+	return sent
+}
+
 // replyICE answers an edge's request_ice: mint a fresh ICE set with the SAME
 // minter RequestPublish uses (the creds are sid-agnostic, so StreamID is only
 // passed through for the closure's own logging) and send an ice_servers frame

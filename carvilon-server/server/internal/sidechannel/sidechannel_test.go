@@ -418,6 +418,56 @@ func TestSidechannel_PublishControlRoundtrip(t *testing.T) {
 	waitFor(t, func() bool { return len(srv.ActiveStreams()) == 0 }, 3*time.Second)
 }
 
+// TestSidechannel_RequestStopRoundtrip proves the S20 cloud -> edge request_stop
+// frame reaches the edge's OnRequestStop callback with the stream id intact -
+// the wire half of "stop the publish bridge when the last cloud subscriber
+// leaves". An empty stream id is a no-op (never broadcast).
+func TestSidechannel_RequestStopRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p := genCerts(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const streamID = "0c:ea:14:00:00:01"
+	stops := make(chan string, 4)
+
+	srv, url := startServer(t, ctx, p)
+
+	cli, err := NewClient(ClientOptions{
+		URL:            url,
+		CACertPath:     p.caCrt,
+		ClientCert:     p.clientCrt,
+		ClientKey:      p.clientKey,
+		Log:            quietLogger(),
+		PingInterval:   50 * time.Millisecond,
+		InitialBackoff: 50 * time.Millisecond,
+		OnRequestStop:  func(id string) { stops <- id },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	go func() { _ = cli.Run(ctx) }()
+
+	waitFor(t, func() bool { return srv.ConnCount() >= 1 }, 5*time.Second)
+
+	if sent := srv.RequestStop(ctx, streamID); sent < 1 {
+		t.Fatalf("RequestStop reached %d edges, want >= 1", sent)
+	}
+	select {
+	case got := <-stops:
+		if got != streamID {
+			t.Errorf("request_stop stream_id = %q, want %q", got, streamID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no request_stop within 5s")
+	}
+
+	// An empty stream id is rejected before any broadcast.
+	if sent := srv.RequestStop(ctx, ""); sent != 0 {
+		t.Errorf("RequestStop(\"\") reached %d edges, want 0", sent)
+	}
+}
+
 // TestSidechannel_TURNTelemetryRoundtrip proves the cloud -> edge
 // turn_event / turn_stats frames carry their payloads (incl. the
 // nullable AuthOK and the config view) intact across the link.

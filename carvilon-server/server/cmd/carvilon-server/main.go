@@ -529,6 +529,11 @@ func startSidechannelClient(ctx context.Context, log *slog.Logger, cfg config.Co
 		ClientKey:        cfg.SidechannelClientKey,
 		Log:              log.With("component", "sidechannel-client"),
 		OnRequestPublish: edgePub.HandleRequestPublish,
+		// S20: the cloud reports the last WHEP subscriber for a stream left;
+		// stop the publish bridge so the profile row falls back to idle. This
+		// is the missing production caller of EdgePublisher.StopPublish - the
+		// symmetric counterpart to OnRequestPublish above.
+		OnRequestStop: func(streamID string) { edgePub.StopPublish(streamID, sidechannel.ReasonNoSubscribers) },
 		// Saison 18-10: persist cloud-forwarded TURN telemetry and cache
 		// the latest live snapshot (stamped with the edge receive time)
 		// for the /a/turn admin page.

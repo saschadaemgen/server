@@ -145,6 +145,12 @@ func init() {
 			// RequestPublishFunc exactly; the WHEP request ctx flows
 			// through, so a subscriber disconnect aborts the trigger.
 			OnRequestPublish: sc.RequestPublish,
+			// S20: when the LAST WHEP subscriber for a stream leaves, ask the
+			// edge (over the side-channel) to stop its publish bridge so the
+			// profile row falls back to idle. Fired in a goroutine so the WHEP
+			// teardown path (a pion goroutine) never blocks on the side-channel
+			// broadcast write. The symmetric counterpart to OnRequestPublish.
+			OnLastSubscriberGone: func(streamID string) { go sc.RequestStop(ctx, streamID) },
 		})
 		if err != nil {
 			return nil, err

@@ -63,6 +63,16 @@ type Config struct {
 	// returns the number of edges that received the request. nil -> 404 on a
 	// missing publisher (the pre-trigger behaviour). (S3 WHEP trigger)
 	RequestPublish func(ctx context.Context, streamID string) (edges int)
+	// RequestStop, when set, is the symmetric counterpart to RequestPublish:
+	// when the LAST WHEP subscriber for a stream tears down (the consumer
+	// count for streamID falls to 0), the egress calls this so the cloud can
+	// ask the edge to stop its publish bridge. Without it the edge keeps
+	// pushing camera frames forever (the feedTrack idle watchdog never fires
+	// while frames flow), pinning the profile "active" in the admin dashboard
+	// long after the last viewer left (the S20 cloud-row-never-clears bug).
+	// nil -> no stop signal (the pre-S20 behaviour). MUST be non-blocking:
+	// it is called from the WHEP teardown path (a pion goroutine). (S20)
+	RequestStop func(streamID string)
 
 	// WHEPPublicAddr, when non-empty, enables a SECOND TLS listener on that
 	// address serving ONLY the WHEP egress route (POST /whep/{streamID}) with
@@ -108,6 +118,10 @@ type Server struct {
 	// requestPublish is the cold-start WHEP trigger (S3). nil -> 404 on a
 	// missing publisher.
 	requestPublish func(ctx context.Context, streamID string) (edges int)
+	// requestStop is the last-subscriber-gone trigger (S20), the symmetric
+	// counterpart to requestPublish. nil -> no stop signal. Called from the
+	// WHEP teardown path; must be non-blocking.
+	requestStop func(streamID string)
 	// inflight is the per-streamID single-flight guard for the cold-start
 	// trigger: at most one request_publish is in flight per stream while
 	// simultaneous subscribers wait for the same publisher. A double
@@ -157,6 +171,7 @@ func New(cfg Config) (*Server, error) {
 		logger:         logger,
 		iceServers:     cfg.ICEServers,
 		requestPublish: cfg.RequestPublish,
+		requestStop:    cfg.RequestStop,
 		inflight:       make(map[string]struct{}),
 		consumers:      make(map[string]int),
 	}
@@ -548,8 +563,10 @@ func (s *Server) incConsumer(streamID string) {
 // back to 0 when the viewer disconnects.
 func (s *Server) decConsumer(streamID string) {
 	s.consumersMu.Lock()
+	decremented := false
 	if s.consumers[streamID] > 0 {
 		s.consumers[streamID]--
+		decremented = true
 	}
 	n := s.consumers[streamID]
 	if n == 0 {
@@ -557,6 +574,17 @@ func (s *Server) decConsumer(streamID string) {
 	}
 	s.consumersMu.Unlock()
 	s.logger.Printf("whep consumers: sid=%s count=%d (subscriber left)", streamID, n)
+
+	// S20: the last subscriber for this stream just left. Ask the cloud to
+	// stop the edge's publish bridge so the profile row falls back to idle
+	// instead of lingering "active" on a now-viewerless uplink (the feedTrack
+	// idle watchdog never fires while camera frames keep flowing). Only on a
+	// genuine 1->0 transition - never on an over-decrement floor hit - and
+	// fired OUTSIDE the lock; requestStop is documented non-blocking, so a
+	// side-channel write can never stall this WHEP teardown path.
+	if decremented && n == 0 && s.requestStop != nil {
+		s.requestStop(streamID)
+	}
 }
 
 // ConsumerCounts returns a point-in-time copy of the live WHEP-subscriber

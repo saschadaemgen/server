@@ -70,6 +70,74 @@ func TestConsumerCount_Methods(t *testing.T) {
 	}
 }
 
+// TestConsumerCount_RequestStopOnLastLeave is the S20 trigger half of the
+// cloud-row-never-clears fix: the RequestStop callback fires EXACTLY on the
+// genuine last-subscriber-leaves (1->0) transition, never while a viewer
+// remains, and never on an over-decrement floor hit. decConsumer calls it
+// synchronously (the goroutine decoupling lives in the cloud wiring), so the
+// assertions need no synchronisation.
+func TestConsumerCount_RequestStopOnLastLeave(t *testing.T) {
+	var stops []string
+	srv, err := New(Config{
+		CertFile:    "unused-no-listen",
+		KeyFile:     "unused-no-listen",
+		HMACKey:     bytes.Repeat([]byte{0xAB}, 32),
+		Hub:         streamhub.NewHub(),
+		Logger:      log.New(io.Discard, "", 0),
+		RequestStop: func(streamID string) { stops = append(stops, streamID) },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const a, b = "mac-a", "mac-b"
+
+	// Two subscribers on a, one leaves -> one still attached, no stop yet.
+	srv.incConsumer(a)
+	srv.incConsumer(a)
+	srv.decConsumer(a)
+	if len(stops) != 0 {
+		t.Fatalf("stop fired while %q still has a subscriber: %v", a, stops)
+	}
+
+	// The last subscriber on a leaves -> exactly one stop for a.
+	srv.decConsumer(a)
+	if len(stops) != 1 || stops[0] != a {
+		t.Fatalf("stops after last leave = %v, want [%s]", stops, a)
+	}
+
+	// Over-decrement (count already floored at 0) must NOT fire another stop.
+	srv.decConsumer(a)
+	if len(stops) != 1 {
+		t.Fatalf("over-decrement fired a spurious stop: %v", stops)
+	}
+
+	// A different stream is independent: its own last-leave fires its own stop.
+	srv.incConsumer(b)
+	srv.decConsumer(b)
+	if len(stops) != 2 || stops[1] != b {
+		t.Fatalf("stops = %v, want second entry %s", stops, b)
+	}
+}
+
+// TestConsumerCount_NoRequestStopCallbackSafe guards the nil-callback path:
+// without a RequestStop wired (the pre-S20 / public build), a last-subscriber
+// teardown is a plain no-op, never a panic.
+func TestConsumerCount_NoRequestStopCallbackSafe(t *testing.T) {
+	srv, err := New(Config{
+		CertFile: "unused-no-listen",
+		KeyFile:  "unused-no-listen",
+		HMACKey:  bytes.Repeat([]byte{0xAB}, 32),
+		Hub:      streamhub.NewHub(),
+		Logger:   log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	srv.incConsumer("mac-a")
+	srv.decConsumer("mac-a") // must not panic with a nil RequestStop
+}
+
 // TestWHEP_ConsumerCountIncrementsOnAttach drives real WHEP subscribes and
 // asserts the server's consumer count climbs per attached subscriber (S20).
 // The increment runs synchronously at the attach boundary inside

@@ -115,6 +115,19 @@ type CloudSetupOptions struct {
 	// sidechannel.Server.RequestPublish.
 	OnRequestPublish RequestPublishFunc
 
+	// OnLastSubscriberGone, when set, is the symmetric counterpart to
+	// OnRequestPublish: when the LAST WHEP subscriber for a stream tears down
+	// (the egress consumer count for streamID falls to 0), the egress calls
+	// this so the Master can ask the edge - over the side-channel - to stop
+	// its publish bridge. Without it the edge keeps pushing camera frames
+	// forever, pinning the profile "active" in the admin dashboard long after
+	// the last viewer left (the S20 cloud-row-never-clears bug). OPTIONAL:
+	// nil -> no stop signal (no break). The Master wires it to
+	// sidechannel.Server.RequestStop. Open-core: a pure stdlib signature, no
+	// side-channel or pion type crosses the seam. MUST be non-blocking - it is
+	// called from the WHEP teardown path (a pion goroutine).
+	OnLastSubscriberGone func(streamID string)
+
 	// --- Public WHEP egress (S19-07 Baustufe 2): a SEPARATE TLS listener with
 	// a publicly-trusted cert, so a remote browser / Android can subscribe
 	// over a browser-trusted endpoint. The :8444 WHIP/WHEP listener (private
@@ -279,8 +292,9 @@ func SetupCloudInProcess(opts CloudSetupOptions) (CloudServer, func() error, err
 		EgressHMACKey:      opts.EgressHMACKey, // empty -> WHEP egress fails closed (401)
 		Hub:                hub,
 		Logger:             logger,
-		ICEServers:         iceServers,            // nil when TURN is off -> empty ICEServers
-		RequestPublish:     opts.OnRequestPublish, // nil -> egress 404 on missing publisher (today's behaviour)
+		ICEServers:         iceServers,                // nil when TURN is off -> empty ICEServers
+		RequestPublish:     opts.OnRequestPublish,     // nil -> egress 404 on missing publisher (today's behaviour)
+		RequestStop:        opts.OnLastSubscriberGone, // nil -> no stop signal when the last subscriber leaves (S20)
 		WHEPPublicAddr:     opts.WHEPPublicAddr,
 		WHEPPublicCertFile: opts.WHEPPublicCertFile,
 		WHEPPublicKeyFile:  opts.WHEPPublicKeyFile,

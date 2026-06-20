@@ -149,6 +149,13 @@ const (
 	// TypeStopPublish (edge -> cloud): the edge stopped pushing
 	// StreamID (Reason says why).
 	TypeStopPublish = "stop_publish"
+	// TypeRequestStop (cloud -> edge): the LAST WHEP subscriber for StreamID
+	// left, so the cloud asks the edge to stop its publish bridge. The
+	// symmetric counterpart to request_publish: the anchor (a remote viewer)
+	// lives on the cloud side, so the cloud triggers both the start and the
+	// stop and the edge stays lazy. The edge answers by tearing the bridge
+	// down and sending a stop_publish back (Reason = no_subscribers). (S20)
+	TypeRequestStop = "request_stop"
 
 	// TypeRequestICE (edge -> cloud): the edge asks the cloud to mint a
 	// fresh set of subscriber ICE servers (the cloud holds the TURN shared

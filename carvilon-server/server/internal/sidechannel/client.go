@@ -86,6 +86,15 @@ type ClientOptions struct {
 	// host-only). A nil callback ignores the frame.
 	OnRequestPublish func(streamID string, iceServers []streampublish.ICEServer)
 
+	// OnRequestStop, when set, is invoked (in its own goroutine) when the cloud
+	// sends a request_stop frame: the last WHEP subscriber for streamID left.
+	// The edge wiring implements it as EdgePublisher.StopPublish - tear the
+	// publish bridge down and Send a stop_publish back - so the profile row
+	// falls back to idle instead of lingering "active" (the S20
+	// cloud-row-never-clears bug). The symmetric counterpart to
+	// OnRequestPublish. A nil callback ignores the frame.
+	OnRequestStop func(streamID string)
+
 	// OnTURNEvent / OnTURNStats, when set, receive the cloud-forwarded
 	// TURN telemetry (turn_event / turn_stats frames). The edge wiring
 	// points them at the turnstore writer (persist) and snapshot holder
@@ -340,6 +349,15 @@ func (c *Client) connectAndServe(ctx context.Context, onConnected func()) error 
 					// token, StreamPublisher) must never block the
 					// read loop.
 					go c.opts.OnRequestPublish(sid, ice)
+				}
+			case TypeRequestStop:
+				c.log.Info("sidechannel request_stop received", "stream_id", env.StreamID, "reason", env.Reason)
+				if c.opts.OnRequestStop != nil {
+					sid := env.StreamID
+					// Own goroutine, mirroring request_publish: the edge
+					// teardown (StopPublish -> Send stop_publish + tear the
+					// bridge down) must never block the read loop.
+					go c.opts.OnRequestStop(sid)
 				}
 			case TypeICEServers:
 				// Reply to an edge-initiated RequestICE; route it to the
