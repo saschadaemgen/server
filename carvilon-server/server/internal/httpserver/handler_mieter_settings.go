@@ -86,7 +86,15 @@ type mieterSettingsJSON struct {
 	// "high" | "medium" | "low". The stream pulls it + the app uses it at
 	// stream-start; v1 is admin-set (weg-abhaengige LAN=high later).
 	ResolutionMode string `json:"resolution_mode"`
-	UnitName       string `json:"unit_name"`
+	// KeepStreamInScreensaver / KeepStreamInScreenOff are the Saison 20
+	// "keep the stream open in the background" flags (same columns the ESP
+	// uses). The DEFAULT here is the APP default: true (= stay connected),
+	// the OPPOSITE of the ESP default - the resolver picks it by viewer
+	// type, so an unset Android viewer reports true. The app decides what to
+	// do with them; the server only stores + serves the flags.
+	KeepStreamInScreensaver bool   `json:"keep_stream_in_screensaver"`
+	KeepStreamInScreenOff   bool   `json:"keep_stream_in_screen_off"`
+	UnitName                string `json:"unit_name"`
 	// Visibility maps setting_key -> whether the tenant may see/change the
 	// control (Saison 19-39). EXPLICIT rows only; a missing key = visible
 	// (default). omitempty -> the key is absent when there are no
@@ -126,15 +134,17 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(mieterSettingsJSON{
-		IdleViewMode:           info.ResolveIdleViewMode(),
-		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
-		ClockLayout:            info.ResolveClockLayout(),
-		Language:               info.ResolveLanguage(),
-		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
-		PathMode:               info.ResolvePathMode(),
-		ResolutionMode:         info.ResolveResolutionMode(),
-		UnitName:               info.Name,
-		Visibility:             vis,
+		IdleViewMode:            info.ResolveIdleViewMode(),
+		AutoScreensaverSeconds:  info.ResolveAutoScreensaverSeconds(),
+		ClockLayout:             info.ResolveClockLayout(),
+		Language:                info.ResolveLanguage(),
+		HistoryCaptureEnabled:   info.ResolveHistoryCaptureEnabled(),
+		PathMode:                info.ResolvePathMode(),
+		ResolutionMode:          info.ResolveResolutionMode(),
+		KeepStreamInScreensaver: info.ResolveKeepStreamInScreensaver(),
+		KeepStreamInScreenOff:   info.ResolveKeepStreamInScreenOff(),
+		UnitName:                info.Name,
+		Visibility:              vis,
 	})
 }
 

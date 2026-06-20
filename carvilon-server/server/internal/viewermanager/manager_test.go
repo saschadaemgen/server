@@ -870,26 +870,52 @@ func TestSetClockLayout_UnknownViewer(t *testing.T) {
 
 // ---------- keep_stream_in_background (Saison 20) ----------
 
-func TestKeepStreamFlags_DefaultFalseWhenUnset(t *testing.T) {
+// TestKeepStreamFlags_DefaultByTypeWhenUnset: with the column unset (NULL,
+// Saison-20 migration 026) the default is VIEWER-TYPE dependent - an ESP keeps
+// the clean-close default (false), an Android viewer defaults to staying
+// connected (true). The ESP default is unchanged from Saison 20.
+func TestKeepStreamFlags_DefaultByTypeWhenUnset(t *testing.T) {
 	mgr, _ := newTestManager(t)
-	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
-	if err := mgr.AddViewer(context.Background(), spec); err != nil {
-		t.Fatalf("AddViewer: %v", err)
+
+	esp := espSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), esp); err != nil {
+		t.Fatalf("AddViewer esp: %v", err)
 	}
-	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
-	// DB default 0 + resolver default false: a fresh viewer keeps
-	// neither stream in the background.
-	if info.ResolveKeepStreamInScreensaver() {
-		t.Errorf("ResolveKeepStreamInScreensaver() = true, want false (default)")
+	espInfo, _ := mgr.GetViewerInfo(context.Background(), esp.MAC)
+	if espInfo.ResolveKeepStreamInScreensaver() || espInfo.ResolveKeepStreamInScreenOff() {
+		t.Errorf("ESP unset keep-stream = (%v,%v), want (false,false)",
+			espInfo.ResolveKeepStreamInScreensaver(), espInfo.ResolveKeepStreamInScreenOff())
 	}
-	if info.ResolveKeepStreamInScreenOff() {
-		t.Errorf("ResolveKeepStreamInScreenOff() = true, want false (default)")
+
+	android := androidSpec("0c:ea:14:43:43:43", 8081)
+	if err := mgr.AddViewer(context.Background(), android); err != nil {
+		t.Fatalf("AddViewer android: %v", err)
+	}
+	andInfo, _ := mgr.GetViewerInfo(context.Background(), android.MAC)
+	if !andInfo.ResolveKeepStreamInScreensaver() || !andInfo.ResolveKeepStreamInScreenOff() {
+		t.Errorf("Android unset keep-stream = (%v,%v), want (true,true) - the connected app default",
+			andInfo.ResolveKeepStreamInScreensaver(), andInfo.ResolveKeepStreamInScreenOff())
+	}
+
+	// Explicit values are honoured over the type default: turn the Android
+	// viewer OFF and it must report false, not the connected default.
+	if err := mgr.SetKeepStreamInScreensaver(context.Background(), android.MAC, false); err != nil {
+		t.Fatalf("SetKeepStreamInScreensaver(false): %v", err)
+	}
+	andInfo, _ = mgr.GetViewerInfo(context.Background(), android.MAC)
+	if andInfo.ResolveKeepStreamInScreensaver() {
+		t.Errorf("Android explicit false = true, want false (explicit wins over type default)")
+	}
+	if !andInfo.ResolveKeepStreamInScreenOff() {
+		t.Errorf("Android screen_off still unset = false, want true (type default intact)")
 	}
 }
 
 func TestSetKeepStreamInScreensaver_RoundTrip(t *testing.T) {
 	mgr, _ := newTestManager(t)
-	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	// ESP viewer so an UNSET sibling flag reads false (the ESP default),
+	// which is what makes the per-flag independence assertion observable.
+	spec := espSpec("0c:ea:14:42:42:42", 8080)
 	if err := mgr.AddViewer(context.Background(), spec); err != nil {
 		t.Fatalf("AddViewer: %v", err)
 	}
@@ -915,7 +941,9 @@ func TestSetKeepStreamInScreensaver_RoundTrip(t *testing.T) {
 
 func TestSetKeepStreamInScreenOff_RoundTrip(t *testing.T) {
 	mgr, _ := newTestManager(t)
-	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	// ESP viewer: an unset sibling reads false (ESP default), so the
+	// independence assertion below is meaningful.
+	spec := espSpec("0c:ea:14:42:42:42", 8080)
 	if err := mgr.AddViewer(context.Background(), spec); err != nil {
 		t.Fatalf("AddViewer: %v", err)
 	}

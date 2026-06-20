@@ -39,8 +39,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 25 {
-		t.Errorf("schema_version = %d, want 25", version)
+	if version != 26 {
+		t.Errorf("schema_version = %d, want 26", version)
 	}
 	for _, table := range []string{
 		"viewers", "viewer_sessions", "admin_sessions",

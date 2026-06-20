@@ -51,10 +51,20 @@ func TestMieterSettingsJSON_ReturnsViewerSettings(t *testing.T) {
 	if body["resolution_mode"] != "medium" {
 		t.Errorf("resolution_mode = %v, want medium (default)", body["resolution_mode"])
 	}
+	// keep-stream-in-background flags (Saison 20): present, and default to the
+	// connected app default (true) for a non-ESP viewer with the column unset
+	// - the OPPOSITE of the ESP default (false).
+	if body["keep_stream_in_screensaver"] != true {
+		t.Errorf("keep_stream_in_screensaver = %v, want true (app default)", body["keep_stream_in_screensaver"])
+	}
+	if body["keep_stream_in_screen_off"] != true {
+		t.Errorf("keep_stream_in_screen_off = %v, want true (app default)", body["keep_stream_in_screen_off"])
+	}
 	// Exactly the app fields must be present.
 	for _, k := range []string{
 		"idle_view_mode", "auto_screensaver_seconds", "clock_layout",
 		"language", "history_capture_enabled", "unit_name", "path_mode", "resolution_mode",
+		"keep_stream_in_screensaver", "keep_stream_in_screen_off",
 	} {
 		if _, ok := body[k]; !ok {
 			t.Errorf("missing app field %q", k)

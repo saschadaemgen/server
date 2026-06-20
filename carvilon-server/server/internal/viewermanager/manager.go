@@ -185,13 +185,14 @@ type ViewerInfo struct {
 	// 19-42): "high" / "medium" (default) / "low". carvilon only reports
 	// the choice; the stream pulls it + the app uses it at stream-start.
 	ResolutionMode string
-	// KeepStreamInScreensaver / KeepStreamInScreenOff are ESP-hardware
-	// flags (Saison 20): when true the ESP keeps the running stream open
-	// while it shows the screensaver / has the display switched off.
-	// Default false (= close the stream cleanly). carvilon only stores +
-	// serves them; the firmware evaluates them. Web viewers ignore them.
-	KeepStreamInScreensaver bool
-	KeepStreamInScreenOff   bool
+	// KeepStreamInScreensaver / KeepStreamInScreenOff are the Saison 20
+	// "keep the running stream open in the background" flags. nil = unset
+	// (NULL in the DB); ResolveKeepStream*() then applies a VIEWER-TYPE
+	// dependent default - false for ESP (close the stream cleanly), true for
+	// the Android app / web (stay connected). An explicit stored 0/1 always
+	// wins. carvilon only stores + serves them; the device evaluates them.
+	KeepStreamInScreensaver *bool
+	KeepStreamInScreenOff   *bool
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -393,25 +394,42 @@ func (v *ViewerInfo) ResolveResolutionMode() string {
 	}
 }
 
-// ResolveKeepStreamInScreensaver reports whether the ESP should keep
-// the stream open while the screensaver is showing (Saison 20). NULL /
-// unset resolves to false (= close the stream cleanly), the default a
-// fresh ESP expects.
+// ResolveKeepStreamInScreensaver reports whether the device should keep the
+// stream open while the screensaver is showing (Saison 20). When the flag is
+// unset (NULL) the default is VIEWER-TYPE dependent (see
+// keepStreamDefaultForType): ESP closes the stream cleanly (false), the
+// Android app / web viewer stay connected (true). An explicit stored 0/1
+// always wins.
 func (v *ViewerInfo) ResolveKeepStreamInScreensaver() bool {
 	if v == nil {
 		return false
 	}
-	return v.KeepStreamInScreensaver
+	if v.KeepStreamInScreensaver != nil {
+		return *v.KeepStreamInScreensaver
+	}
+	return keepStreamDefaultForType(v.Type)
 }
 
-// ResolveKeepStreamInScreenOff reports whether the ESP should keep the
-// stream open while the display is switched off (Saison 20). NULL /
-// unset resolves to false (= close the stream cleanly).
+// ResolveKeepStreamInScreenOff reports whether the device should keep the
+// stream open while the display is switched off (Saison 20). Same unset-
+// default rule as ResolveKeepStreamInScreensaver.
 func (v *ViewerInfo) ResolveKeepStreamInScreenOff() bool {
 	if v == nil {
 		return false
 	}
-	return v.KeepStreamInScreenOff
+	if v.KeepStreamInScreenOff != nil {
+		return *v.KeepStreamInScreenOff
+	}
+	return keepStreamDefaultForType(v.Type)
+}
+
+// keepStreamDefaultForType is the unset (NULL) default for the two
+// keep-stream-in-background flags - the single place the per-type policy
+// lives. The ESP firmware wants the clean close (false); every other viewer
+// type (Android app, web) defaults to staying connected (true). The ESP
+// default - and thus all existing ESP behaviour - is unchanged from Saison 20.
+func keepStreamDefaultForType(t string) bool {
+	return t != TypeESP
 }
 
 // ResolveStreamProfile picks the stream profile name for this
@@ -872,8 +890,14 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			v := capture.Int64 != 0
 			info.HistoryCaptureEnabled = &v
 		}
-		info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
-		info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
+		if keepScr.Valid {
+			v := keepScr.Int64 != 0
+			info.KeepStreamInScreensaver = &v
+		}
+		if keepOff.Valid {
+			v := keepOff.Int64 != 0
+			info.KeepStreamInScreenOff = &v
+		}
 		if normalize.ViewerName(info.Name) != target {
 			continue
 		}
@@ -1020,8 +1044,14 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		v := capture.Int64 != 0
 		info.HistoryCaptureEnabled = &v
 	}
-	info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
-	info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
+	if keepScr.Valid {
+		v := keepScr.Int64 != 0
+		info.KeepStreamInScreensaver = &v
+	}
+	if keepOff.Valid {
+		v := keepOff.Int64 != 0
+		info.KeepStreamInScreenOff = &v
+	}
 	return &info, nil
 }
 
@@ -1087,8 +1117,14 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			v := capture.Int64 != 0
 			info.HistoryCaptureEnabled = &v
 		}
-		info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
-		info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
+		if keepScr.Valid {
+			v := keepScr.Int64 != 0
+			info.KeepStreamInScreensaver = &v
+		}
+		if keepOff.Valid {
+			v := keepOff.Int64 != 0
+			info.KeepStreamInScreenOff = &v
+		}
 		info.ServicePort = uint16(port)
 		if hash.Valid {
 			info.HasPassword = true
