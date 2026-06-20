@@ -670,6 +670,27 @@ func (s *Server) handleOffer(w http.ResponseWriter, r *http.Request) {
 // range. Not exported — pkg-internal only.
 var webrtcIdleTimeout = 30 * time.Second
 
+// mjpegWriteTimeout is the active-liveness backstop for [streamMJPEG]: the
+// longest a single frame write may stall before the consumer is declared
+// wedged and the loop tears down. The MJPEG path has no signalling channel
+// like handleOffer's pc.OnConnectionStateChange, so a consumer that stops
+// reading WITHOUT closing the TCP connection (an ESP holding the socket open
+// with the screen off, or a yanked-cable half-open that never sends a FIN) is
+// otherwise invisible: frames pile into the kernel send buffer until it
+// fills, then writer.Write blocks forever and the deferred stats Unregister
+// never runs — pinning the profile "active" in /stream/stats (the S20
+// ESP-row-never-clears bug). A per-frame write deadline turns that wedge into
+// a write error so the loop returns and the row clears within this window.
+//
+// 10 s is far beyond any healthy transient (a 10-12 fps consumer accepts a
+// frame every ~80-100 ms = 100+ frames of slack) yet bounded enough that a
+// dead row disappears within a couple of dashboard poll cycles. A CLEAN
+// disconnect is still detected instantly via the request context / a failing
+// write; this backstop only covers the no-clean-close case.
+//
+// var (not const) so tests can shrink it. Not exported — pkg-internal only.
+var mjpegWriteTimeout = 10 * time.Second
+
 // feedTrack pumps access units from a subscriber into a pion sample
 // track. Per-viewer PTS tracking lives here — pion's WriteSample wants
 // a delta (Duration) per sample, not absolute timestamps.
@@ -794,27 +815,65 @@ func (s *Server) handleMJPEG(w http.ResponseWriter, r *http.Request) {
 		defer s.stats.Unregister(sc)
 	}
 
+	// S20: run the write loop with an active-liveness backstop. The
+	// ResponseController arms a per-frame write deadline so a consumer that
+	// wedges (stops reading without closing the connection) surfaces as a
+	// write error instead of blocking forever — see [mjpegWriteTimeout] and
+	// [streamMJPEG]. A ResponseWriter without deadline support (only a test
+	// recorder, never the real TCP server) degrades to the pre-S20 behaviour.
+	rc := http.NewResponseController(w)
+	streamMJPEG(r.Context(), w, rc.Flush, rc.SetWriteDeadline, sub.Frames(), sc)
+}
+
+// streamMJPEG is the testable core of [Server.handleMJPEG]: it pumps JPEG
+// frames from frames into w (framed by [mjpeg.Writer]), flushing each one,
+// until the context is cancelled, the frame channel closes, or a write/flush
+// fails.
+//
+// The S20 liveness backstop lives here: before every frame it arms a write
+// deadline (setDeadline, nil-safe), so a wedged consumer's blocked write or
+// flush returns an error within [mjpegWriteTimeout] and this function returns
+// — letting the caller's deferred stats Unregister clear the row. Because the
+// HTTP response buffers, the stalled socket write can surface from either
+// writer.Write OR the explicit flush; both are checked. An unsupported
+// ResponseWriter (only a test recorder) yields http.ErrNotSupported from
+// setDeadline / flush and is ignored — degrade to no backstop, never tear a
+// healthy stream down. sc is nil-safe (RecordFrame / RecordDrop on a nil
+// *stats.Client are no-ops).
+func streamMJPEG(ctx context.Context, w io.Writer, flush func() error, setDeadline func(time.Time) error, frames <-chan []byte, sc *stats.Client) {
 	writer := mjpeg.NewWriter(w)
-	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case frame, ok := <-sub.Frames():
+		case frame, ok := <-frames:
 			if !ok {
 				// Session ended (encoder died, server shutting down, …).
 				return
 			}
+			// Arm the per-frame write backstop. Best-effort: an unsupported
+			// ResponseWriter just means no backstop, never a stream failure.
+			if setDeadline != nil {
+				_ = setDeadline(time.Now().Add(mjpegWriteTimeout))
+			}
 			n, err := writer.Write(frame)
 			if err != nil {
-				// Client gone, or proxy upstream closed. Count the
-				// undelivered frame as a drop (so the snapshot shows
-				// where the stream stopped) and exit.
+				// Client gone, proxy upstream closed, OR the write stalled
+				// past mjpegWriteTimeout (wedged consumer). Count the
+				// undelivered frame as a drop (so the snapshot shows where the
+				// stream stopped) and exit -> the deferred Unregister runs.
 				sc.RecordDrop()
 				return
 			}
 			sc.RecordFrame(n)
-			flusher.Flush()
+			// Force the buffered frame onto the wire under the same deadline.
+			// A flush error (deadline exceeded on a wedged consumer, or a dead
+			// connection) tears the session down so the deferred Unregister
+			// runs even when the stall surfaces at flush rather than at Write.
+			// ErrNotSupported (a test recorder) degrades to no backstop.
+			if err := flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return
+			}
 		}
 	}
 }
