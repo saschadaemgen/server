@@ -223,6 +223,9 @@ func TestAdminViewerSettings_ESPOnlyFieldsBlockedOnWeb(t *testing.T) {
 		{"screen_off_after_sec": 60},
 		{"brightness_idle": 70},
 		{"language": "en"},
+		// keep_stream_* are intentionally NOT here: Saison 20 lifted the
+		// ESP-only lock so they may be set on every viewer type. Their
+		// web acceptance is covered by TestAdminViewerSettings_KeepStream*.
 	}
 	for _, body := range cases {
 		resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/settings", body)
@@ -239,9 +242,11 @@ func TestAdminViewerSettings_ESPViewerAcceptsESPFields(t *testing.T) {
 	adoptESPForTest(t, env, espTestMAC, "Wohnung ESP X")
 
 	resp := postAdminViewerJSON(t, env, "/a/viewers/"+espTestMAC+"/settings", map[string]any{
-		"screen_off_after_sec": 600,
-		"brightness_idle":      42,
-		"language":             "en",
+		"screen_off_after_sec":       600,
+		"brightness_idle":            42,
+		"language":                   "en",
+		"keep_stream_in_screensaver": true,
+		"keep_stream_in_screen_off":  true,
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -256,6 +261,64 @@ func TestAdminViewerSettings_ESPViewerAcceptsESPFields(t *testing.T) {
 	}
 	if info.ResolveLanguage() != "en" {
 		t.Errorf("language = %q", info.ResolveLanguage())
+	}
+	if !info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("keep_stream_in_screensaver not persisted")
+	}
+	if !info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("keep_stream_in_screen_off not persisted")
+	}
+}
+
+// TestAdminViewerSettings_KeepStreamAcceptedOnAndroid proves the Saison 20
+// ESP-lock lift: keep-stream flags POST cleanly to an Android viewer (no
+// 400) and the explicit value persists, overriding the Android NULL-default
+// (true) with an explicit false.
+func TestAdminViewerSettings_KeepStreamAcceptedOnAndroid(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	const androidMAC = "0c:ea:14:88:88:88"
+	seedAndroidViewer(t, env, androidMAC, 8201)
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+androidMAC+"/settings", map[string]any{
+		"keep_stream_in_screensaver": false,
+		"keep_stream_in_screen_off":  true,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s (Android must no longer 400)", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), androidMAC)
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("keep_stream_in_screensaver: explicit false should win over Android default true")
+	}
+	if !info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("keep_stream_in_screen_off not persisted on Android")
+	}
+}
+
+// TestAdminViewerSettings_KeepStreamAcceptedOnWeb proves the same lock lift
+// for web viewers: the server accepts the flags (no 400) even though the
+// admin UI only surfaces the toggles for stream devices.
+func TestAdminViewerSettings_KeepStreamAcceptedOnWeb(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/settings", map[string]any{
+		"keep_stream_in_screensaver": false,
+		"keep_stream_in_screen_off":  false,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s (web must no longer 400)", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), testViewerMAC)
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("keep_stream_in_screensaver: explicit false should win over web default true")
+	}
+	if info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("keep_stream_in_screen_off: explicit false should win over web default true")
 	}
 }
 
@@ -523,6 +586,12 @@ func TestAdminViewerDetail_ESPShowsTokenSection(t *testing.T) {
 	if !contains(markup, `name="language"`) {
 		t.Errorf("Sprach-Radios fehlen (ESP-Viewer)")
 	}
+	if !contains(markup, `name="keep_stream_in_screensaver"`) {
+		t.Errorf("Keep-Stream-Screensaver-Toggle fehlt (ESP-Viewer)")
+	}
+	if !contains(markup, `name="keep_stream_in_screen_off"`) {
+		t.Errorf("Keep-Stream-Screen-Off-Toggle fehlt (ESP-Viewer)")
+	}
 }
 
 func TestAdminViewerDetail_WebHidesESPSettings(t *testing.T) {
@@ -540,6 +609,8 @@ func TestAdminViewerDetail_WebHidesESPSettings(t *testing.T) {
 		`name="brightness_idle"`,
 		`name="screen_off_after_sec"`,
 		`name="language"`,
+		`name="keep_stream_in_screensaver"`,
+		`name="keep_stream_in_screen_off"`,
 	} {
 		if contains(markup, espField) {
 			t.Errorf("ESP-Settings-Field %q ist im Web-Viewer-Markup sichtbar", espField)
@@ -548,6 +619,71 @@ func TestAdminViewerDetail_WebHidesESPSettings(t *testing.T) {
 	// Web-Viewer hat NICHT screen_off als idle_view_mode Option.
 	if contains(markup, `value="screen_off"`) {
 		t.Errorf("idle_view_mode=screen_off Option im Web-Viewer sichtbar (sollte nur bei ESP)")
+	}
+}
+
+// TestAdminViewerDetail_ESPKeepStreamPrefill verifies the Saison 20
+// toggles render pre-filled from the stored value: a persisted
+// keep_stream_in_screensaver=true shows "Ein" checked, while the
+// untouched screen-off flag stays at its default "Aus".
+func TestAdminViewerDetail_ESPKeepStreamPrefill(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	adoptESPForTest(t, env, espTestMAC, "Wohnung ESP Keep")
+	if err := env.viewerMgr.SetKeepStreamInScreensaver(context.Background(), espTestMAC, true); err != nil {
+		t.Fatalf("SetKeepStreamInScreensaver: %v", err)
+	}
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + espTestMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, `name="keep_stream_in_screensaver" value="1" checked`) {
+		t.Errorf("keep_stream_in_screensaver should be pre-checked to Ein (value=1)")
+	}
+	if !contains(markup, `name="keep_stream_in_screen_off" value="0" checked`) {
+		t.Errorf("keep_stream_in_screen_off should default to Aus (value=0) and stay independent")
+	}
+}
+
+// TestAdminViewerDetail_AndroidShowsKeepStream verifies the Saison 20 toggles
+// render on an Android viewer (stream device) while the ESP-hardware-only
+// fields (brightness/screen-off/language) stay hidden. The screensaver flag
+// pre-fills "Ein" because the Android NULL-default resolves to true.
+func TestAdminViewerDetail_AndroidShowsKeepStream(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	const androidMAC = "0c:ea:14:99:99:99"
+	seedAndroidViewer(t, env, androidMAC, 8202)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + androidMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, `name="keep_stream_in_screensaver"`) {
+		t.Errorf("Keep-Stream-Screensaver-Toggle fehlt (Android-Viewer)")
+	}
+	if !contains(markup, `name="keep_stream_in_screen_off"`) {
+		t.Errorf("Keep-Stream-Screen-Off-Toggle fehlt (Android-Viewer)")
+	}
+	// Android NULL-default for keep-stream resolves to true -> "Ein" checked.
+	if !contains(markup, `name="keep_stream_in_screensaver" value="1" checked`) {
+		t.Errorf("Android keep_stream_in_screensaver should pre-fill Ein (default true)")
+	}
+	// ESP-hardware-only fields must NOT leak onto Android.
+	for _, espOnly := range []string{
+		`name="brightness_idle"`,
+		`name="screen_off_after_sec"`,
+		`name="language"`,
+	} {
+		if contains(markup, espOnly) {
+			t.Errorf("ESP-only field %q is visible on Android viewer", espOnly)
+		}
 	}
 }
 
@@ -572,4 +708,3 @@ func TestAdminViewerRegenerateToken_InvalidatesOldToken(t *testing.T) {
 		t.Errorf("old token still resolves to viewer; rotation failed")
 	}
 }
-

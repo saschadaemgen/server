@@ -816,6 +816,26 @@
         <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
       </fieldset>
 
+      <!-- Saison 20: Stream im Hintergrund halten. Gilt fuer alle Viewer
+           mit Stream (ESP + Android); der Wert ist eine Admin-Vorgabe und
+           schlaegt ueber config.changed sofort in der App durch. Ein
+           expliziter Wert gewinnt ueber den Typ-Default (ESP: aus,
+           Android: an). Web hat kein Display-Zustands-Konzept -> nicht
+           gezeigt. -->
+      {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
+        <fieldset class="settings-field">
+          <legend>Stream im Bildschirmschoner halten</legend>
+          <label><input type="radio" name="keep_stream_in_screensaver" value="1" {{if .Page.KeepStreamInScreensaver}}checked{{end}}> Ein</label>
+          <label><input type="radio" name="keep_stream_in_screensaver" value="0" {{if not .Page.KeepStreamInScreensaver}}checked{{end}}> Aus</label>
+        </fieldset>
+
+        <fieldset class="settings-field">
+          <legend>Stream bei Display-aus halten</legend>
+          <label><input type="radio" name="keep_stream_in_screen_off" value="1" {{if .Page.KeepStreamInScreenOff}}checked{{end}}> Ein</label>
+          <label><input type="radio" name="keep_stream_in_screen_off" value="0" {{if not .Page.KeepStreamInScreenOff}}checked{{end}}> Aus</label>
+        </fieldset>
+      {{end}}
+
       {{if eq .Page.Type "esp"}}
         <fieldset class="settings-field">
           <legend>Bildschirm aus nach (ESP)</legend>
@@ -1369,7 +1389,7 @@
           var body = {};
           if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'path_mode' || name === 'resolution_mode') {
             body[name] = String(value);
-          } else if (name === 'history_capture') {
+          } else if (name === 'history_capture' || name === 'keep_stream_in_screensaver' || name === 'keep_stream_in_screen_off') {
             body[name] = (value === '1' || value === 'true' || value === true);
           } else {
             body[name] = parseInt(value, 10);

@@ -30,22 +30,22 @@ import (
 // the history table is fetched by the browser via
 // /a/viewers/{mac}/history.json.
 type adminViewerDetailData struct {
-	User                  adminUser
-	MAC                   string
-	Name                  string
-	Type                  string // "web" | "esp"
-	Running               bool
-	HasPassword           bool
-	HasDeviceToken           bool
-	PairedIntercomMAC     string
-	StreamProfile         string
+	User                   adminUser
+	MAC                    string
+	Name                   string
+	Type                   string // "web" | "esp"
+	Running                bool
+	HasPassword            bool
+	HasDeviceToken         bool
+	PairedIntercomMAC      string
+	StreamProfile          string
 	CloudStreamProfile     string
-	LinkedUAUserID        string
-	IdleViewMode          string
+	LinkedUAUserID         string
+	IdleViewMode           string
 	AutoScreensaverSeconds int
-	HistoryCaptureEnabled bool
-	ESPModel              string
-	ESPFwVersion          string
+	HistoryCaptureEnabled  bool
+	ESPModel               string
+	ESPFwVersion           string
 	// ESP-specific settings for the settings auto-save form.
 	// Only meaningful when Type == "esp".
 	ScreenOffAfterSec int
@@ -54,6 +54,11 @@ type adminViewerDetailData struct {
 	ClockLayout       string
 	PathMode          string // WEG-Schalter (Saison 19-39): auto|local|cloud
 	ResolutionMode    string // Auflösungs-Wahl (Saison 19-42): high|medium|low
+	// Keep-stream-in-background flags (Saison 20). ESP-hardware only;
+	// the admin toggle mirrors the value the ESP also writes via
+	// POST /esp/settings (last-write-wins, same DB column).
+	KeepStreamInScreensaver bool
+	KeepStreamInScreenOff   bool
 	// SettingVisibility is a COMPLETE map (every tenantVisibleSettingKeys
 	// entry -> effective visible, default true) for the "dem Mieter
 	// anzeigen" toggles. (Saison 19-39)
@@ -83,28 +88,30 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	}
 	username := AdminUserFromContext(r.Context())
 	data := adminViewerDetailData{
-		User:                   adminUser{Name: username, Initials: initialsOf(username)},
-		MAC:                    info.MAC,
-		Name:                   info.Name,
-		Type:                   info.Type,
-		Running:                info.Running,
-		HasPassword:            info.HasPassword,
-		HasDeviceToken:            info.HasDeviceToken,
-		PairedIntercomMAC:      info.PairedIntercomMAC,
-		StreamProfile:          info.StreamProfile,
-		CloudStreamProfile:     info.CloudStreamProfile,
-		LinkedUAUserID:         info.LinkedUAUserID,
-		IdleViewMode:           info.ResolveIdleViewMode(),
-		AutoScreensaverSeconds: info.ResolveAutoScreensaverSeconds(),
-		HistoryCaptureEnabled:  info.ResolveHistoryCaptureEnabled(),
-		ESPModel:               info.ESPModel,
-		ESPFwVersion:           info.ESPFwVersion,
-		ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
-		BrightnessIdle:         info.ResolveBrightnessIdle(),
-		Language:               info.ResolveLanguage(),
-		ClockLayout:            info.ResolveClockLayout(),
-		PathMode:               info.ResolvePathMode(),
-		ResolutionMode:         info.ResolveResolutionMode(),
+		User:                    adminUser{Name: username, Initials: initialsOf(username)},
+		MAC:                     info.MAC,
+		Name:                    info.Name,
+		Type:                    info.Type,
+		Running:                 info.Running,
+		HasPassword:             info.HasPassword,
+		HasDeviceToken:          info.HasDeviceToken,
+		PairedIntercomMAC:       info.PairedIntercomMAC,
+		StreamProfile:           info.StreamProfile,
+		CloudStreamProfile:      info.CloudStreamProfile,
+		LinkedUAUserID:          info.LinkedUAUserID,
+		IdleViewMode:            info.ResolveIdleViewMode(),
+		AutoScreensaverSeconds:  info.ResolveAutoScreensaverSeconds(),
+		HistoryCaptureEnabled:   info.ResolveHistoryCaptureEnabled(),
+		ESPModel:                info.ESPModel,
+		ESPFwVersion:            info.ESPFwVersion,
+		ScreenOffAfterSec:       info.ResolveScreenOffAfterSec(),
+		BrightnessIdle:          info.ResolveBrightnessIdle(),
+		Language:                info.ResolveLanguage(),
+		ClockLayout:             info.ResolveClockLayout(),
+		PathMode:                info.ResolvePathMode(),
+		ResolutionMode:          info.ResolveResolutionMode(),
+		KeepStreamInScreensaver: info.ResolveKeepStreamInScreensaver(),
+		KeepStreamInScreenOff:   info.ResolveKeepStreamInScreenOff(),
 	}
 	switch info.Type {
 	case viewermanager.TypeESP:

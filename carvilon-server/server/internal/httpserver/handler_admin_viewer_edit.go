@@ -373,6 +373,13 @@ type adminViewerSettingsRequest struct {
 	Language               *string `json:"language,omitempty"`
 	PathMode               *string `json:"path_mode,omitempty"`
 	ResolutionMode         *string `json:"resolution_mode,omitempty"`
+	// Saison 20: keep-stream-in-background flags. NOT ESP-only any more -
+	// columns + resolver carry every viewer type, so the admin may set
+	// them on ESP, Android and web viewers alike (an explicit value is
+	// policy and wins over the per-type NULL default). Same DB columns
+	// the ESP writes via POST /esp/settings. Keys verbatim.
+	KeepStreamInScreensaver *bool `json:"keep_stream_in_screensaver,omitempty"`
+	KeepStreamInScreenOff   *bool `json:"keep_stream_in_screen_off,omitempty"`
 }
 
 // handleAdminViewerSettings is the auto-save sink for every
@@ -554,6 +561,26 @@ func (s *Server) handleAdminViewerSettings(w http.ResponseWriter, r *http.Reques
 		applied["language"] = v
 	}
 
+	// Saison 20: keep-stream-in-background flags. Applies to ALL viewer
+	// types (ESP / Android / web) - not ESP-gated. An admin-set value is
+	// authoritative policy: it writes an explicit 0/1 that beats the
+	// per-type NULL default in ResolveKeepStream*. The device evaluates
+	// the resolved value; carvilon only stores + serves it.
+	if body.KeepStreamInScreensaver != nil {
+		if err := s.viewerMgr.SetKeepStreamInScreensaver(r.Context(), mac, *body.KeepStreamInScreensaver); err != nil {
+			s.respondSettingsErr(w, mac, "keep_stream_in_screensaver", err)
+			return
+		}
+		applied["keep_stream_in_screensaver"] = *body.KeepStreamInScreensaver
+	}
+	if body.KeepStreamInScreenOff != nil {
+		if err := s.viewerMgr.SetKeepStreamInScreenOff(r.Context(), mac, *body.KeepStreamInScreenOff); err != nil {
+			s.respondSettingsErr(w, mac, "keep_stream_in_screen_off", err)
+			return
+		}
+		applied["keep_stream_in_screen_off"] = *body.KeepStreamInScreenOff
+	}
+
 	if len(applied) > 0 && s.hub != nil {
 		s.hub.BroadcastConfigChanged(r.Context(), mac)
 	}
@@ -624,9 +651,9 @@ func (s *Server) handleAdminViewerPassword(w http.ResponseWriter, r *http.Reques
 // again. The contract is one-shot reveal: token visible once in
 // clear, never re-shown.
 type adminViewerTokenResponse struct {
-	OK        bool   `json:"ok"`
-	NewToken  string `json:"new_token"`
-	MAC       string `json:"mac"`
+	OK       bool   `json:"ok"`
+	NewToken string `json:"new_token"`
+	MAC      string `json:"mac"`
 }
 
 // handleAdminViewerRegenerateToken creates a fresh bearer token
@@ -715,22 +742,24 @@ func adminViewerJSON(info *viewermanager.ViewerInfo) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"mac":                       info.MAC,
-		"name":                      info.Name,
-		"type":                      info.Type,
-		"paired_intercom_mac":       info.PairedIntercomMAC,
-		"stream_profile":            info.StreamProfile,
-		"cloud_stream_profile":     info.CloudStreamProfile,
-		"linked_ua_user_id":         info.LinkedUAUserID,
-		"idle_view_mode":            info.ResolveIdleViewMode(),
-		"auto_screensaver_seconds":  info.ResolveAutoScreensaverSeconds(),
-		"screen_off_after_sec":      info.ResolveScreenOffAfterSec(),
-		"brightness_idle":           info.ResolveBrightnessIdle(),
-		"language":                  info.ResolveLanguage(),
-		"history_capture_enabled":   info.ResolveHistoryCaptureEnabled(),
-		"clock_layout":              info.ResolveClockLayout(),
-		"has_password":              info.HasPassword,
-		"has_esp_token":             info.HasDeviceToken,
+		"mac":                        info.MAC,
+		"name":                       info.Name,
+		"type":                       info.Type,
+		"paired_intercom_mac":        info.PairedIntercomMAC,
+		"stream_profile":             info.StreamProfile,
+		"cloud_stream_profile":       info.CloudStreamProfile,
+		"linked_ua_user_id":          info.LinkedUAUserID,
+		"idle_view_mode":             info.ResolveIdleViewMode(),
+		"auto_screensaver_seconds":   info.ResolveAutoScreensaverSeconds(),
+		"screen_off_after_sec":       info.ResolveScreenOffAfterSec(),
+		"brightness_idle":            info.ResolveBrightnessIdle(),
+		"language":                   info.ResolveLanguage(),
+		"history_capture_enabled":    info.ResolveHistoryCaptureEnabled(),
+		"clock_layout":               info.ResolveClockLayout(),
+		"keep_stream_in_screensaver": info.ResolveKeepStreamInScreensaver(),
+		"keep_stream_in_screen_off":  info.ResolveKeepStreamInScreenOff(),
+		"has_password":               info.HasPassword,
+		"has_esp_token":              info.HasDeviceToken,
 	}
 }
 
