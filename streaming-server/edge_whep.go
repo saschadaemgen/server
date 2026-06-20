@@ -32,6 +32,58 @@ const (
 	edgeWHEPNackBufferSize                          = 4096
 )
 
+// isPrivateIPv4 is the single predicate shared by the LAN-WHEP mux bind and
+// the SettingEngine candidate filter: the edge binds and announces ONLY its
+// genuine private 192.168/10/172.16 IPv4 host (ICE type-pref 126) - no IPv6
+// noise, no NAT1To1 rewrite - so a same-WLAN peer takes the direct LAN path.
+func isPrivateIPv4(ip net.IP) bool { return ip.To4() != nil && ip.IsPrivate() }
+
+// LAN-WHEP fixed-port mux bind window. The mux is bound ONCE for the server
+// lifetime (newLANWHEPAPI runs at NewServer time). If the edge starts before
+// its LAN interface has an address - a restart/boot ordering race - pion's
+// NewMultiUDPMuxFromPort returns an empty mux with a nil error and the
+// LAN-direct path is then silently dead for the whole process lifetime, even
+// after the interface comes up and even during an active session (the bug:
+// CARVILON_STREAM_LAN_WHEP_ICE_PORT set, /whep answers 201, yet :port never
+// appears in `ss -ulpn`). Retrying within this window lets a transient boot
+// race resolve instead of permanently disabling the path. var (not const) so
+// tests can shrink it.
+var (
+	lanWHEPBindTimeout  = 30 * time.Second
+	lanWHEPBindInterval = time.Second
+)
+
+// bindLANWHEPMux opens the fixed-UDP-port ICE mux on the private-IPv4
+// interface(s), retrying until at least one socket is actually bound or the
+// window elapses. It exists because pion's NewMultiUDPMuxFromPort does NOT
+// report "no interface to bind" as an error: with an empty interface set it
+// returns a non-nil mux that owns ZERO sockets and a nil error. Trusting that
+// nil error is the root cause of the dead LAN-WHEP path - so here we treat a
+// zero-listen-address mux as a (retryable) failure. A real listen error (port
+// already in use, permission denied) is terminal and surfaced immediately.
+func bindLANWHEPMux(icePort int) (*ice.MultiUDPMuxDefault, error) {
+	deadline := time.Now().Add(lanWHEPBindTimeout)
+	for attempt := 1; ; attempt++ {
+		mux, err := ice.NewMultiUDPMuxFromPort(icePort,
+			ice.UDPMuxFromPortWithNetworks(ice.NetworkTypeUDP4),
+			ice.UDPMuxFromPortWithIPFilter(isPrivateIPv4),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("stream: lan-whep udp mux on :%d: %w", icePort, err)
+		}
+		if len(mux.GetListenAddresses()) > 0 {
+			return mux, nil
+		}
+		// Zero sockets bound + nil error: no private-IPv4 interface was up at
+		// this instant. Close the empty mux and retry until the window ends.
+		_ = mux.Close()
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("stream: lan-whep udp mux on :%d bound no private-IPv4 interface after %d attempts in %s (is the LAN interface up at start?)", icePort, attempt, lanWHEPBindTimeout)
+		}
+		time.Sleep(lanWHEPBindInterval)
+	}
+}
+
 // newLANWHEPAPI builds the webrtc.API for the edge LAN-direct WHEP endpoint.
 // Its SettingEngine is pinned to a FIXED UDP port (icePort) and advertises
 // ONLY the real private-IPv4 LAN host candidates - no SetNAT1To1IPs, so the
@@ -63,14 +115,21 @@ func newLANWHEPAPI(icePort int) (*webrtc.API, ice.UDPMux, error) {
 	ir.Add(responder)
 
 	se := webrtc.SettingEngine{}
-	mux, err := ice.NewMultiUDPMuxFromPort(icePort)
+	// Bind the fixed ICE port and VERIFY a socket actually opened. pion's
+	// NewMultiUDPMuxFromPort returns a mux with ZERO listen sockets AND a nil
+	// error when no qualifying interface is present at the instant of the call
+	// (see bindLANWHEPMux) - the silent-failure path that left the LAN-WHEP
+	// endpoint advertising a port nothing listens on. Bind only the private-
+	// IPv4 interface(s) we will actually advertise, so the bound set == the
+	// candidate set.
+	mux, err := bindLANWHEPMux(icePort)
 	if err != nil {
-		return nil, nil, fmt.Errorf("stream: lan-whep udp mux on :%d: %w", icePort, err)
+		return nil, nil, err
 	}
 	se.SetICEUDPMux(mux)
 	// Advertise ONLY the real private-IPv4 LAN host candidates: no IPv6 noise,
 	// no NAT1To1 rewrite. The edge announces its true 192.168 host.
-	se.SetIPFilter(func(ip net.IP) bool { return ip.To4() != nil && ip.IsPrivate() })
+	se.SetIPFilter(isPrivateIPv4)
 
 	api := webrtc.NewAPI(
 		webrtc.WithMediaEngine(me),

@@ -341,18 +341,28 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.LANWHEPICEPort > 0 {
 		whepAPI, whepMux, werr := newLANWHEPAPI(opts.LANWHEPICEPort)
 		if werr != nil {
-			_ = srcReg.Close()
-			return nil, fmt.Errorf("stream: lan whep: %w", werr)
+			// Degrade, do NOT sink the whole stream server: LAN-direct WHEP is
+			// an optimisation on top of the cloud WHEP path. If its fixed-port
+			// ICE mux genuinely cannot bind (no private-IPv4 interface within
+			// the bind window), log loudly and run WITHOUT the /whep route so
+			// /offer, MJPEG and the cloud push stay up - and so a POST /whep
+			// returns an honest 404 instead of a 201 whose answer points at a
+			// port nothing listens on.
+			opts.Logger.Printf("stream: LAN-direct WHEP DISABLED (route not registered): %v", werr)
+		} else {
+			s.whepAPI = whepAPI
+			s.whepMux = whepMux
+			s.egressKey = opts.EgressHMACKey
+			mux.HandleFunc("POST /whep/{streamID}", s.handleEdgeWHEP)
+			auth := "OFF (open, no key)"
+			if len(s.egressKey) > 0 {
+				auth = "ON (egress_token)"
+			}
+			// Log the ACTUAL bound listen addresses, not just the configured
+			// port: the old ":%d"-from-config line printed :8556 even when the
+			// mux had bound nothing, masking the dead path.
+			opts.Logger.Printf("stream: LAN-direct WHEP on /whep, ICE media UDP %v, egress auth %s", whepMux.GetListenAddresses(), auth)
 		}
-		s.whepAPI = whepAPI
-		s.whepMux = whepMux
-		s.egressKey = opts.EgressHMACKey
-		mux.HandleFunc("POST /whep/{streamID}", s.handleEdgeWHEP)
-		auth := "OFF (open, no key)"
-		if len(s.egressKey) > 0 {
-			auth = "ON (egress_token)"
-		}
-		opts.Logger.Printf("stream: LAN-direct WHEP on /whep, ICE media UDP :%d, egress auth %s", opts.LANWHEPICEPort, auth)
 	}
 
 	sub, err := fs.Sub(webFS, "web")
