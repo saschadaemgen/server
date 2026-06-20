@@ -156,6 +156,7 @@ func TestESPConfig_ReturnsAllFields(t *testing.T) {
 		"language", "idle_view_mode",
 		"auto_screensaver_seconds", "screensaver_after_sec",
 		"screen_off_after_sec", "brightness_idle",
+		"keep_stream_in_screensaver", "keep_stream_in_screen_off",
 	} {
 		if _, ok := ui[k]; !ok {
 			t.Errorf("missing ui.%s", k)
@@ -230,6 +231,60 @@ func TestESPConfig_IncludesNewSettingsFields(t *testing.T) {
 	if got["idle_view_mode"] != "screen_off" {
 		t.Errorf("top-level idle_view_mode = %v, want screen_off",
 			got["idle_view_mode"])
+	}
+}
+
+// TestESPConfig_KeepStreamFlags checks the Saison 20 contract: both
+// keep-stream keys are present in /esp/config with default false on an
+// unset viewer, and a persisted true round-trips back unchanged.
+func TestESPConfig_KeepStreamFlags(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Keep Config")
+
+	fetchUI := func() map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/config", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := env.client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /esp/config: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+		var got map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		ui, _ := got["ui"].(map[string]any)
+		return ui
+	}
+
+	// Default: both present, both false (JSON booleans, not absent).
+	ui := fetchUI()
+	for _, k := range []string{"keep_stream_in_screensaver", "keep_stream_in_screen_off"} {
+		v, ok := ui[k]
+		if !ok {
+			t.Errorf("missing ui.%s", k)
+			continue
+		}
+		if v != false {
+			t.Errorf("ui.%s = %v, want false (default)", k, v)
+		}
+	}
+
+	// Persist the screensaver flag; screen_off stays false (independent).
+	if err := env.viewerMgr.SetKeepStreamInScreensaver(context.Background(), espTestMAC, true); err != nil {
+		t.Fatalf("SetKeepStreamInScreensaver: %v", err)
+	}
+	ui = fetchUI()
+	if ui["keep_stream_in_screensaver"] != true {
+		t.Errorf("ui.keep_stream_in_screensaver = %v, want true", ui["keep_stream_in_screensaver"])
+	}
+	if ui["keep_stream_in_screen_off"] != false {
+		t.Errorf("ui.keep_stream_in_screen_off = %v, want false (untouched)", ui["keep_stream_in_screen_off"])
 	}
 }
 

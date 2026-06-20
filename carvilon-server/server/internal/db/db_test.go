@@ -39,8 +39,8 @@ func TestOpen_AppliesMigrations(t *testing.T) {
 	if err := d.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 24 {
-		t.Errorf("schema_version = %d, want 24", version)
+	if version != 25 {
+		t.Errorf("schema_version = %d, want 25", version)
 	}
 	for _, table := range []string{
 		"viewers", "viewer_sessions", "admin_sessions",
@@ -82,6 +82,20 @@ func TestMigration024_CloudStreamProfileColumn(t *testing.T) {
 	defer d.Close()
 	if _, err := d.Exec(`SELECT cloud_stream_profile FROM viewers`); err != nil {
 		t.Errorf("cloud_stream_profile column missing: %v", err)
+	}
+}
+
+// TestMigration025_KeepStreamColumns verifies the Saison 20 ESP
+// "keep stream in background" columns exist after the migrations. A
+// bare SELECT errors if either ALTER did not run.
+func TestMigration025_KeepStreamColumns(t *testing.T) {
+	d, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	if _, err := d.Exec(`SELECT keep_stream_in_screensaver, keep_stream_in_screen_off FROM viewers`); err != nil {
+		t.Errorf("keep_stream_in_background columns missing: %v", err)
 	}
 }
 

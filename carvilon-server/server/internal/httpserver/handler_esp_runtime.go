@@ -28,8 +28,8 @@ import (
 
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/uaapi"
+	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
 )
 
@@ -115,6 +115,12 @@ type espUISettings struct {
 	// AutoScreensaverSeconds verbatim. Will be dropped after the
 	// ESP firmware migration to the canonical key lands.
 	ScreensaverAfterSec int `json:"screensaver_after_sec"`
+	// KeepStreamInScreensaver / KeepStreamInScreenOff are the Saison 20
+	// "keep the stream open in the background" flags. Default false. The
+	// firmware reads them to decide whether to hold the running stream
+	// while the screensaver shows / the display is off.
+	KeepStreamInScreensaver bool `json:"keep_stream_in_screensaver"`
+	KeepStreamInScreenOff   bool `json:"keep_stream_in_screen_off"`
 }
 
 // handleESPConfig renders the snapshot for the calling ESP-Viewer.
@@ -152,13 +158,15 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 		Doors:   []espDoor{},
 		Cameras: []espCamera{},
 		UI: espUISettings{
-			Language:               info.ResolveLanguage(),
-			IdleViewMode:           info.ResolveIdleViewMode(),
-			AutoScreensaverSeconds: autoSec,
-			ScreensaverAfterSec:    autoSec,
-			ScreenOffAfterSec:      info.ResolveScreenOffAfterSec(),
-			BrightnessIdle:         info.ResolveBrightnessIdle(),
-			ClockLayout:            info.ResolveClockLayout(),
+			Language:                info.ResolveLanguage(),
+			IdleViewMode:            info.ResolveIdleViewMode(),
+			AutoScreensaverSeconds:  autoSec,
+			ScreensaverAfterSec:     autoSec,
+			ScreenOffAfterSec:       info.ResolveScreenOffAfterSec(),
+			BrightnessIdle:          info.ResolveBrightnessIdle(),
+			ClockLayout:             info.ResolveClockLayout(),
+			KeepStreamInScreensaver: info.ResolveKeepStreamInScreensaver(),
+			KeepStreamInScreenOff:   info.ResolveKeepStreamInScreenOff(),
 		},
 		IdleViewMode: info.ResolveIdleViewMode(),
 		Weather:      s.fetchHomeWeather(r),

@@ -99,14 +99,14 @@ func DefaultFactory(cfg mock.Config, log *slog.Logger) (Viewer, error) {
 // login itself. ESPModel / ESPFwVersion / DeviceTokenHash are only
 // honoured for Type='esp'; on TypeWeb they stay empty.
 type ViewerSpec struct {
-	MAC            string
-	Name           string
-	ServicePort    uint16
-	Type           string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
-	LinkedUAUserID string // optional UA-Access-User link
-	ESPModel       string
-	ESPFwVersion   string
-	DeviceTokenHash   string
+	MAC             string
+	Name            string
+	ServicePort     uint16
+	Type            string // TypeWeb / TypeESP. Empty defaults to TypeWeb.
+	LinkedUAUserID  string // optional UA-Access-User link
+	ESPModel        string
+	ESPFwVersion    string
+	DeviceTokenHash string
 	// PairedIntercomMAC is the UA-API intercom this viewer is
 	// paired with for the standby "Tuer auf" button. Empty string
 	// = no pairing, standby button is inert. Stored colon-form
@@ -155,7 +155,7 @@ type ViewerInfo struct {
 	LinkedUAUserID         string
 	ESPModel               string
 	ESPFwVersion           string
-	HasDeviceToken            bool
+	HasDeviceToken         bool
 	Running                bool
 	PairedIntercomMAC      string // standby intercom pairing
 	StreamProfile          string // go2rtc profile override (LAN path)
@@ -165,8 +165,8 @@ type ViewerInfo struct {
 	// ESP settings (also accessible to web viewers for the
 	// "language" choice; the two display-hardware fields are only
 	// honoured by ESP firmware).
-	BrightnessIdle    *int // 0..100; nil = use DefaultBrightnessIdle
-	ScreenOffAfterSec *int // seconds; nil/0 = backlight stays on
+	BrightnessIdle    *int   // 0..100; nil = use DefaultBrightnessIdle
+	ScreenOffAfterSec *int   // seconds; nil/0 = backlight stays on
 	Language          string // "de"/"en"; "" = use DefaultLanguage
 	// History-capture toggle. nil = treat as true (default);
 	// explicit false comes from the mieter settings page.
@@ -185,6 +185,13 @@ type ViewerInfo struct {
 	// 19-42): "high" / "medium" (default) / "low". carvilon only reports
 	// the choice; the stream pulls it + the app uses it at stream-start.
 	ResolutionMode string
+	// KeepStreamInScreensaver / KeepStreamInScreenOff are ESP-hardware
+	// flags (Saison 20): when true the ESP keeps the running stream open
+	// while it shows the screensaver / has the display switched off.
+	// Default false (= close the stream cleanly). carvilon only stores +
+	// serves them; the firmware evaluates them. Web viewers ignore them.
+	KeepStreamInScreensaver bool
+	KeepStreamInScreenOff   bool
 }
 
 // IdleViewMode constants. Storage tolerates NULL (= default
@@ -255,8 +262,9 @@ var ScreenOffAfterSecAllowed = []int{0, 30, 60, 300, 600, 1800}
 var LanguageAllowed = []string{"de", "en"}
 
 // Clock-layout preference for the screensaver clock:
-//   "vertical"   = Pixel-Style with HH stacked above MM
-//   "horizontal" = classic HH:MM with colon
+//
+//	"vertical"   = Pixel-Style with HH stacked above MM
+//	"horizontal" = classic HH:MM with colon
 const (
 	ClockLayoutVertical   = "vertical"
 	ClockLayoutHorizontal = "horizontal"
@@ -383,6 +391,27 @@ func (v *ViewerInfo) ResolveResolutionMode() string {
 	default:
 		return ResolutionModeMedium
 	}
+}
+
+// ResolveKeepStreamInScreensaver reports whether the ESP should keep
+// the stream open while the screensaver is showing (Saison 20). NULL /
+// unset resolves to false (= close the stream cleanly), the default a
+// fresh ESP expects.
+func (v *ViewerInfo) ResolveKeepStreamInScreensaver() bool {
+	if v == nil {
+		return false
+	}
+	return v.KeepStreamInScreensaver
+}
+
+// ResolveKeepStreamInScreenOff reports whether the ESP should keep the
+// stream open while the display is switched off (Saison 20). NULL /
+// unset resolves to false (= close the stream cleanly).
+func (v *ViewerInfo) ResolveKeepStreamInScreenOff() bool {
+	if v == nil {
+		return false
+	}
+	return v.KeepStreamInScreenOff
 }
 
 // ResolveStreamProfile picks the stream profile name for this
@@ -793,7 +822,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, ''),
+		        keep_stream_in_screensaver, keep_stream_in_screen_off
 		   FROM viewers
 		  WHERE type = 'web'`)
 	if err != nil {
@@ -814,13 +844,16 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			brightness sql.NullInt64
 			screenOff  sql.NullInt64
 			capture    sql.NullInt64
+			keepScr    sql.NullInt64
+			keepOff    sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile,
+			&keepScr, &keepOff); err != nil {
 			return nil, "", fmt.Errorf("viewermanager: scan: %w", err)
 		}
 		if autoSec.Valid {
@@ -839,6 +872,8 @@ func (m *Manager) LookupByName(ctx context.Context, name string) (*ViewerInfo, s
 			v := capture.Int64 != 0
 			info.HistoryCaptureEnabled = &v
 		}
+		info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
+		info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
 		if normalize.ViewerName(info.Name) != target {
 			continue
 		}
@@ -925,6 +960,8 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		brightness sql.NullInt64
 		screenOff  sql.NullInt64
 		capture    sql.NullInt64
+		keepScr    sql.NullInt64
+		keepOff    sql.NullInt64
 	)
 	err := m.db.QueryRowContext(ctx,
 		`SELECT mac, name, service_port, type, password_hash, password_set_at,
@@ -935,13 +972,15 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, ''),
+		        keep_stream_in_screensaver, keep_stream_in_screen_off
 		   FROM viewers WHERE mac = ?`, mac).
 		Scan(&info.MAC, &info.Name, &port, &info.Type, &hash, &setAt,
 			&info.LinkedUAUserID, &espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile)
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile,
+			&keepScr, &keepOff)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrViewerNotFound
 	}
@@ -981,6 +1020,8 @@ func (m *Manager) loadInfo(ctx context.Context, mac string) (*ViewerInfo, error)
 		v := capture.Int64 != 0
 		info.HistoryCaptureEnabled = &v
 	}
+	info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
+	info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
 	return &info, nil
 }
 
@@ -997,7 +1038,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 		        brightness_idle, screen_off_after_sec,
 		        COALESCE(language, ''),
 		        history_capture_enabled,
-		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, '')
+		        COALESCE(clock_layout, ''), COALESCE(path_mode, 'auto'), COALESCE(resolution_mode, 'medium'), COALESCE(cloud_stream_profile, ''),
+		        keep_stream_in_screensaver, keep_stream_in_screen_off
 		   FROM viewers ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("viewermanager: list: %w", err)
@@ -1017,13 +1059,16 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			brightness sql.NullInt64
 			screenOff  sql.NullInt64
 			capture    sql.NullInt64
+			keepScr    sql.NullInt64
+			keepOff    sql.NullInt64
 		)
 		if err := rows.Scan(&info.MAC, &info.Name, &port, &info.Type,
 			&hash, &setAt, &info.LinkedUAUserID,
 			&espModel, &espFW, &espHash, &info.PairedIntercomMAC,
 			&info.StreamProfile, &info.IdleViewMode, &autoSec,
 			&brightness, &screenOff, &info.Language, &capture,
-			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile); err != nil {
+			&info.ClockLayout, &info.PathMode, &info.ResolutionMode, &info.CloudStreamProfile,
+			&keepScr, &keepOff); err != nil {
 			return nil, fmt.Errorf("viewermanager: scan list: %w", err)
 		}
 		if autoSec.Valid {
@@ -1042,6 +1087,8 @@ func (m *Manager) ListViewers(ctx context.Context) ([]ViewerInfo, error) {
 			v := capture.Int64 != 0
 			info.HistoryCaptureEnabled = &v
 		}
+		info.KeepStreamInScreensaver = keepScr.Valid && keepScr.Int64 != 0
+		info.KeepStreamInScreenOff = keepOff.Valid && keepOff.Int64 != 0
 		info.ServicePort = uint16(port)
 		if hash.Valid {
 			info.HasPassword = true
@@ -1113,7 +1160,7 @@ func (m *Manager) insertViewerLocked(ctx context.Context, spec ViewerSpec) error
 		LinkedUAUserID:         spec.LinkedUAUserID,
 		ESPModel:               spec.ESPModel,
 		ESPFwVersion:           spec.ESPFwVersion,
-		DeviceTokenHash:           spec.DeviceTokenHash,
+		DeviceTokenHash:        spec.DeviceTokenHash,
 		PairedIntercomMAC:      spec.PairedIntercomMAC,
 		StreamProfile:          spec.StreamProfile,
 		IdleViewMode:           spec.IdleViewMode,
@@ -1509,6 +1556,30 @@ func (m *Manager) SetHistoryCaptureEnabled(ctx context.Context, mac string, enab
 		stored = 1
 	}
 	return m.setColumnExec(ctx, "set history capture", mac, "history_capture_enabled", stored)
+}
+
+// SetKeepStreamInScreensaver persists the ESP "keep the stream open
+// while the screensaver is showing" flag (Saison 20). Boolean, no
+// allow-list. Stored as 0/1; ResolveKeepStreamInScreensaver reads it
+// back with false as the default.
+func (m *Manager) SetKeepStreamInScreensaver(ctx context.Context, mac string, enabled bool) error {
+	var stored int64
+	if enabled {
+		stored = 1
+	}
+	return m.setColumnExec(ctx, "set keep stream in screensaver", mac, "keep_stream_in_screensaver", stored)
+}
+
+// SetKeepStreamInScreenOff persists the ESP "keep the stream open while
+// the display is off" flag (Saison 20). Boolean, no allow-list. Stored
+// as 0/1; ResolveKeepStreamInScreenOff reads it back with false as the
+// default.
+func (m *Manager) SetKeepStreamInScreenOff(ctx context.Context, mac string, enabled bool) error {
+	var stored int64
+	if enabled {
+		stored = 1
+	}
+	return m.setColumnExec(ctx, "set keep stream in screen off", mac, "keep_stream_in_screen_off", stored)
 }
 
 // SetLanguage persists the UI language. Values outside the

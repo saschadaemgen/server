@@ -225,6 +225,116 @@ func TestESPSettings_RejectsBogusClockLayout(t *testing.T) {
 	}
 }
 
+func TestESPSettings_AcceptsKeepStreamFlags(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Keep A")
+
+	// Fresh viewer: both flags resolve to false before anything is set.
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
+	if info.ResolveKeepStreamInScreensaver() || info.ResolveKeepStreamInScreenOff() {
+		t.Fatalf("fresh viewer keep-stream flags not false: scr=%v off=%v",
+			info.ResolveKeepStreamInScreensaver(), info.ResolveKeepStreamInScreenOff())
+	}
+
+	resp := postESPSettings(t, env, tok, map[string]any{
+		"keep_stream_in_screensaver": true,
+		"keep_stream_in_screen_off":  true,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	var out struct {
+		OK      bool           `json:"ok"`
+		Applied map[string]any `json:"applied"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, k := range []string{"keep_stream_in_screensaver", "keep_stream_in_screen_off"} {
+		if v, ok := out.Applied[k]; !ok || v != true {
+			t.Errorf("applied[%q] = %v (ok=%v), want true", k, v, ok)
+		}
+	}
+
+	info, _ = env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
+	if !info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("keep_stream_in_screensaver not persisted")
+	}
+	if !info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("keep_stream_in_screen_off not persisted")
+	}
+}
+
+func TestESPSettings_KeepStreamPartialUpdateIndependent(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Keep B")
+
+	resp := postESPSettings(t, env, tok, map[string]any{
+		"keep_stream_in_screensaver": true,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
+	if !info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("screensaver flag not set")
+	}
+	if info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("screen_off flag wrongly changed by a screensaver-only POST")
+	}
+}
+
+// TestESPSettings_KeepStreamMisspelledKeyIgnored guards the contract
+// that the JSON keys are word-identical: a near-miss key is silently
+// dropped by the strict struct allow-list (not applied, not persisted,
+// no broadcast). Adding the two new fields must not open a permissive
+// pass-through.
+func TestESPSettings_KeepStreamMisspelledKeyIgnored(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung Keep C")
+
+	bus := env.srv.EventBus()
+	sub := bus.Subscribe(espTestMAC)
+	defer bus.Unsubscribe(espTestMAC, sub)
+
+	resp := postESPSettings(t, env, tok, map[string]any{
+		// Missing the "_in_" infix and an entirely bogus key: neither
+		// is in the allow-list, so both must be ignored.
+		"keep_stream_screensaver": true,
+		"totally_bogus_field":     true,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	var out struct {
+		OK      bool           `json:"ok"`
+		Applied map[string]any `json:"applied"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Applied) != 0 {
+		t.Errorf("applied = %v, want empty (unknown keys must be dropped)", out.Applied)
+	}
+	info, _ := env.viewerMgr.GetViewerInfo(context.Background(), espTestMAC)
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("misspelled key leaked into keep_stream_in_screensaver")
+	}
+	// No field applied -> no config.changed broadcast.
+	select {
+	case ev := <-sub:
+		t.Errorf("got unexpected broadcast %+v", ev)
+	case <-time.After(120 * time.Millisecond):
+		// expected
+	}
+}
+
 func TestESPSettings_EmptyBodyNoBroadcast(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

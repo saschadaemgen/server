@@ -868,6 +868,79 @@ func TestSetClockLayout_UnknownViewer(t *testing.T) {
 	}
 }
 
+// ---------- keep_stream_in_background (Saison 20) ----------
+
+func TestKeepStreamFlags_DefaultFalseWhenUnset(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	// DB default 0 + resolver default false: a fresh viewer keeps
+	// neither stream in the background.
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("ResolveKeepStreamInScreensaver() = true, want false (default)")
+	}
+	if info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("ResolveKeepStreamInScreenOff() = true, want false (default)")
+	}
+}
+
+func TestSetKeepStreamInScreensaver_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetKeepStreamInScreensaver(context.Background(), spec.MAC, true); err != nil {
+		t.Fatalf("Set true: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if !info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("after Set(true) = false, want true")
+	}
+	// The sibling flag must stay independent (still false).
+	if info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("screen_off flag leaked to true after only screensaver was set")
+	}
+	if err := mgr.SetKeepStreamInScreensaver(context.Background(), spec.MAC, false); err != nil {
+		t.Fatalf("Set false: %v", err)
+	}
+	info, _ = mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("after Set(false) = true, want false")
+	}
+}
+
+func TestSetKeepStreamInScreenOff_RoundTrip(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	spec := sampleSpec("0c:ea:14:42:42:42", 8080)
+	if err := mgr.AddViewer(context.Background(), spec); err != nil {
+		t.Fatalf("AddViewer: %v", err)
+	}
+	if err := mgr.SetKeepStreamInScreenOff(context.Background(), spec.MAC, true); err != nil {
+		t.Fatalf("Set true: %v", err)
+	}
+	info, _ := mgr.GetViewerInfo(context.Background(), spec.MAC)
+	if !info.ResolveKeepStreamInScreenOff() {
+		t.Errorf("after Set(true) = false, want true")
+	}
+	if info.ResolveKeepStreamInScreensaver() {
+		t.Errorf("screensaver flag leaked to true after only screen_off was set")
+	}
+}
+
+func TestSetKeepStreamFlags_UnknownViewer(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	if err := mgr.SetKeepStreamInScreensaver(context.Background(), "0c:ea:14:00:00:00", true); !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("screensaver err = %v, want ErrViewerNotFound", err)
+	}
+	if err := mgr.SetKeepStreamInScreenOff(context.Background(), "0c:ea:14:00:00:00", true); !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("screen_off err = %v, want ErrViewerNotFound", err)
+	}
+}
+
 func TestSetLanguage_RejectsUnknown(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	spec := sampleSpec("0c:ea:14:42:42:42", 8080)

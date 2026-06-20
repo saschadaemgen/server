@@ -39,6 +39,12 @@ type espSettingsRequest struct {
 	Language               *string `json:"language,omitempty"`
 	ClockLayout            *string `json:"clock_layout,omitempty"`
 	HistoryCapture         *bool   `json:"history_capture,omitempty"`
+	// Saison 20: ESP "keep the stream open in the background" flags.
+	// Booleans, no allow-list. The JSON keys are part of the ESP
+	// contract and must stay verbatim - the firmware's strict
+	// allow-list keys exactly on these names.
+	KeepStreamInScreensaver *bool `json:"keep_stream_in_screensaver,omitempty"`
+	KeepStreamInScreenOff   *bool `json:"keep_stream_in_screen_off,omitempty"`
 }
 
 // idleViewModeAllowed mirrors the viewermanager.SetIdleViewMode
@@ -168,6 +174,27 @@ func (s *Server) handleESPSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		applied["history_capture"] = v
+	}
+
+	// Keep-stream-in-background flags (Saison 20). Booleans, no
+	// allow-list - false AND true are valid; the ESP firmware reads
+	// the value and decides whether to hold the stream open.
+	if body.KeepStreamInScreensaver != nil {
+		v := *body.KeepStreamInScreensaver
+		if err := s.viewerMgr.SetKeepStreamInScreensaver(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "keep_stream_in_screensaver", err)
+			return
+		}
+		applied["keep_stream_in_screensaver"] = v
+	}
+
+	if body.KeepStreamInScreenOff != nil {
+		v := *body.KeepStreamInScreenOff
+		if err := s.viewerMgr.SetKeepStreamInScreenOff(r.Context(), mac, v); err != nil {
+			s.respondSettingsErr(w, mac, "keep_stream_in_screen_off", err)
+			return
+		}
+		applied["keep_stream_in_screen_off"] = v
 	}
 
 	// Broadcast config.changed as soon as at least one field was
