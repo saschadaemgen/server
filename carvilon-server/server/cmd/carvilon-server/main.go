@@ -31,6 +31,7 @@ import (
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/fcm"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
@@ -306,6 +307,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		Streams:         streamBackend,
 		Weather:         weatherClient,
 		EgressIssuer:    egressIssuer,
+		Features:        featuregate.NewStore(database.DB),
 		Log:             log,
 	})
 	if err != nil {

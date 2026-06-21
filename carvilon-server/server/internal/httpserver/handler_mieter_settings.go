@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 
+	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/viewermanager"
 )
 
@@ -102,6 +103,12 @@ type mieterSettingsJSON struct {
 	// unconfigured viewers. The flat values above are NEVER omitted - the
 	// app still applies a value even when its control is hidden.
 	Visibility map[string]bool `json:"visibility,omitempty"`
+	// Gating is the ADDITIVE Saison-20 feature-gating block: per function key
+	// {licensed, active}. Rollout 2a - it carries NO values (the flat fields
+	// above stay the single source of values and are NEVER omitted), so old
+	// clients ignore it and the contract is unchanged. omitempty -> absent when
+	// the feature store is unwired.
+	Gating map[string]featuregate.Gate `json:"gating,omitempty"`
 }
 
 // handleMieterSettingsJSON returns the authenticated viewer's settings
@@ -132,6 +139,20 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 	if verr != nil {
 		s.log.Warn("mieter settings json visibility", "err", verr, "mac_prefix", safePrefix(mac))
 	}
+	// Saison-20 feature gating (rollout 2a, additive). The keep_stream VALUES
+	// now resolve through the template layer (Viewer ?? Vorlage ?? Default);
+	// identical to today until a template is attached. Non-fatal: on error fall
+	// back to the plain Resolve*() values + no gating block.
+	keepScr := info.ResolveKeepStreamInScreensaver()
+	keepOff := info.ResolveKeepStreamInScreenOff()
+	var gating map[string]featuregate.Gate
+	if gates, gerr := s.resolveFeatureGates(r.Context(), info); gerr != nil {
+		s.log.Warn("mieter settings json featuregate", "err", gerr, "mac_prefix", safePrefix(mac))
+	} else if gates != nil {
+		keepScr = gates[featuregate.KeyKeepStreamInScreensaver].Bool(keepScr)
+		keepOff = gates[featuregate.KeyKeepStreamInScreenOff].Bool(keepOff)
+		gating = featuregate.GateMap(gates)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(mieterSettingsJSON{
 		IdleViewMode:            info.ResolveIdleViewMode(),
@@ -141,10 +162,11 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 		HistoryCaptureEnabled:   info.ResolveHistoryCaptureEnabled(),
 		PathMode:                info.ResolvePathMode(),
 		ResolutionMode:          info.ResolveResolutionMode(),
-		KeepStreamInScreensaver: info.ResolveKeepStreamInScreensaver(),
-		KeepStreamInScreenOff:   info.ResolveKeepStreamInScreenOff(),
+		KeepStreamInScreensaver: keepScr,
+		KeepStreamInScreenOff:   keepOff,
 		UnitName:                info.Name,
 		Visibility:              vis,
+		Gating:                  gating,
 	})
 }
 

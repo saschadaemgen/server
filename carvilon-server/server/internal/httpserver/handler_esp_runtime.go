@@ -28,6 +28,7 @@ import (
 
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
 	"carvilon.local/server/internal/weather"
@@ -74,6 +75,11 @@ type espConfigResponse struct {
 	// does not know about them.
 	IdleViewMode string            `json:"idle_view_mode"`
 	Weather      *weather.Snapshot `json:"weather,omitempty"`
+	// Gating is the ADDITIVE Saison-20 feature-gating block: per function key
+	// {licensed, active}. Rollout 2a - it carries NO values (the ui fields stay
+	// the single source of values and are always present), so older firmware
+	// ignores it. omitempty -> absent when the feature store is unwired.
+	Gating map[string]featuregate.Gate `json:"gating,omitempty"`
 }
 
 type espStream struct {
@@ -146,6 +152,20 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 	// uaapi.ListDoors, location_name from the UA-API sitemap.
 	// For now defaults keep the ESP firmware skeleton buildable.
 	autoSec := info.ResolveAutoScreensaverSeconds()
+	// Saison-20 feature gating (rollout 2a, additive). The keep_stream VALUES
+	// now resolve through the template layer (Viewer ?? Vorlage ?? Default);
+	// identical to today (ESP default false) until a template is attached.
+	// Non-fatal: on error fall back to the plain Resolve*() values + no block.
+	keepScr := info.ResolveKeepStreamInScreensaver()
+	keepOff := info.ResolveKeepStreamInScreenOff()
+	var gating map[string]featuregate.Gate
+	if gates, gerr := s.resolveFeatureGates(r.Context(), info); gerr != nil {
+		s.log.Warn("esp config featuregate", "err", gerr)
+	} else if gates != nil {
+		keepScr = gates[featuregate.KeyKeepStreamInScreensaver].Bool(keepScr)
+		keepOff = gates[featuregate.KeyKeepStreamInScreenOff].Bool(keepOff)
+		gating = featuregate.GateMap(gates)
+	}
 	resp := espConfigResponse{
 		MieterName:   info.Name,
 		LocationName: "Hauseingang",
@@ -165,11 +185,12 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 			ScreenOffAfterSec:       info.ResolveScreenOffAfterSec(),
 			BrightnessIdle:          info.ResolveBrightnessIdle(),
 			ClockLayout:             info.ResolveClockLayout(),
-			KeepStreamInScreensaver: info.ResolveKeepStreamInScreensaver(),
-			KeepStreamInScreenOff:   info.ResolveKeepStreamInScreenOff(),
+			KeepStreamInScreensaver: keepScr,
+			KeepStreamInScreenOff:   keepOff,
 		},
 		IdleViewMode: info.ResolveIdleViewMode(),
 		Weather:      s.fetchHomeWeather(r),
+		Gating:       gating,
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

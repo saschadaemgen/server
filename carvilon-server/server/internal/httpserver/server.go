@@ -41,6 +41,7 @@ import (
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
@@ -137,7 +138,12 @@ type Deps struct {
 	// GET /webviewer/egress-token (Saison 18-14). Nil (no egress key
 	// configured) -> the endpoint soft-503s.
 	EgressIssuer *egresstoken.Issuer
-	Log          *slog.Logger
+	// Features is the Saison-20 feature-gating store (license / templates /
+	// per-viewer active overrides). Nil leaves /esp/config and
+	// /webviewer/settings.json on their plain Resolve*() values with no
+	// additive gating block - fully backwards compatible.
+	Features *featuregate.Store
+	Log      *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -178,6 +184,7 @@ type Server struct {
 	// bundle. Set post-construction by main (SetICERequester) once the
 	// side-channel client exists; nil when the cloud link is unconfigured.
 	iceRequester ICERequester
+	features     *featuregate.Store
 	log          *slog.Logger
 	mux          *http.ServeMux
 	tpl          *adminTemplates
@@ -244,6 +251,7 @@ func New(deps Deps) (*Server, error) {
 		streamStats:     streamStats,
 		weather:         deps.Weather,
 		egressIssuer:    deps.EgressIssuer,
+		features:        deps.Features,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,

@@ -29,6 +29,7 @@ import (
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
+	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
@@ -267,6 +268,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		EventBus:        hubBus,
 		DoorbellCalls:   callsSvc,
 		EventsHeartbeat: 50 * time.Millisecond,
+		Features:        featuregate.NewStore(d.DB),
 		Log:             quietLogger(),
 	})
 	if err != nil {
