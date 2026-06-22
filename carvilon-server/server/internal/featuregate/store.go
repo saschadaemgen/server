@@ -8,11 +8,10 @@ import (
 )
 
 // Store is the DB seam for the feature-gating tables (license,
-// license_features, templates, template_features, viewer_feature_active and
+// license_features, templates, template_features, viewer_feature_exposure and
 // viewers.template_id). It produces the immutable Snapshot the pure Resolve
 // function consumes, and carries the slim seed/admin helpers used by tests and
-// manual setup (no UI in this step). Stateless over *sql.DB; safe for
-// concurrent use.
+// manual setup (no UI in this step). Stateless over *sql.DB.
 type Store struct {
 	db    *sql.DB
 	nowMS func() int64
@@ -25,7 +24,7 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // SnapshotForViewer loads the license snapshot, the viewer's template (if any)
-// and its per-viewer active overrides for one resolution pass.
+// and its per-viewer exposure overrides for one resolution pass.
 func (s *Store) SnapshotForViewer(ctx context.Context, mac string) (Snapshot, error) {
 	lic, err := s.loadLicense(ctx)
 	if err != nil {
@@ -37,8 +36,7 @@ func (s *Store) SnapshotForViewer(ctx context.Context, mac string) (Snapshot, er
 	err = s.db.QueryRowContext(ctx, `SELECT template_id FROM viewers WHERE mac = ?`, mac).Scan(&templateID)
 	switch {
 	case err == sql.ErrNoRows:
-		// Viewer vanished mid-request: a license-only snapshot still resolves.
-		return snap, nil
+		return snap, nil // viewer vanished mid-request: license-only still resolves
 	case err != nil:
 		return Snapshot{}, fmt.Errorf("featuregate: load viewer template_id: %w", err)
 	}
@@ -80,21 +78,20 @@ func (s *Store) loadLicense(ctx context.Context) (License, error) {
 
 func (s *Store) loadTemplate(ctx context.Context, id int64) (*Template, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT feature_key, active, value FROM template_features WHERE template_id = ?`, id)
+		`SELECT feature_key, exposure, value FROM template_features WHERE template_id = ?`, id)
 	if err != nil {
 		return nil, fmt.Errorf("featuregate: load template_features: %w", err)
 	}
 	defer rows.Close()
-	t := &Template{active: map[string]bool{}, value: map[string]string{}}
+	t := &Template{exposure: map[string]string{}, value: map[string]string{}}
 	for rows.Next() {
 		var key string
-		var active sql.NullInt64
-		var value sql.NullString
-		if err := rows.Scan(&key, &active, &value); err != nil {
+		var exposure, value sql.NullString
+		if err := rows.Scan(&key, &exposure, &value); err != nil {
 			return nil, fmt.Errorf("featuregate: scan template_features: %w", err)
 		}
-		if active.Valid {
-			t.active[key] = active.Int64 != 0
+		if exposure.Valid {
+			t.exposure[key] = exposure.String
 		}
 		if value.Valid {
 			t.value[key] = value.String
@@ -106,31 +103,29 @@ func (s *Store) loadTemplate(ctx context.Context, id int64) (*Template, error) {
 	return t, nil
 }
 
-func (s *Store) loadOverrides(ctx context.Context, mac string) (map[string]bool, error) {
+func (s *Store) loadOverrides(ctx context.Context, mac string) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT feature_key, active FROM viewer_feature_active WHERE viewer_mac = ?`, mac)
+		`SELECT feature_key, exposure FROM viewer_feature_exposure WHERE viewer_mac = ?`, mac)
 	if err != nil {
-		return nil, fmt.Errorf("featuregate: load viewer_feature_active: %w", err)
+		return nil, fmt.Errorf("featuregate: load viewer_feature_exposure: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]bool{}
+	out := map[string]string{}
 	for rows.Next() {
-		var key string
-		var active int64
-		if err := rows.Scan(&key, &active); err != nil {
-			return nil, fmt.Errorf("featuregate: scan viewer_feature_active: %w", err)
+		var key, exposure string
+		if err := rows.Scan(&key, &exposure); err != nil {
+			return nil, fmt.Errorf("featuregate: scan viewer_feature_exposure: %w", err)
 		}
-		out[key] = active != 0
+		out[key] = exposure
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("featuregate: viewer_feature_active rows: %w", err)
+		return nil, fmt.Errorf("featuregate: viewer_feature_exposure rows: %w", err)
 	}
 	return out, nil
 }
 
 // ViewersByTemplate returns the MACs of every viewer attached to templateID,
-// for fanning a template change out over the per-MAC config.changed bus
-// (signal-only; viewers re-fetch and re-resolve live - no copy on attach).
+// for fanning a template change out over the per-MAC config.changed bus.
 func (s *Store) ViewersByTemplate(ctx context.Context, templateID int64) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT mac FROM viewers WHERE template_id = ? ORDER BY mac`, templateID)
@@ -203,23 +198,26 @@ func (s *Store) CreateTemplate(ctx context.Context, name string) (int64, error) 
 	return id, nil
 }
 
-// SetTemplateFeature upserts one template_features cell. active/value nil =
-// stored as NULL (= inherit that axis). Bumps the template's updated_at.
-func (s *Store) SetTemplateFeature(ctx context.Context, templateID int64, key string, active *bool, value *string) error {
-	var av, vv any
-	if active != nil {
-		av = boolToInt(*active)
+// SetTemplateFeature upserts one template_features cell. exposure/value nil =
+// stored as NULL (= inherit that axis). A non-nil exposure is validated.
+func (s *Store) SetTemplateFeature(ctx context.Context, templateID int64, key string, exposure, value *string) error {
+	if exposure != nil && !ValidExposure(*exposure) {
+		return fmt.Errorf("featuregate: set template feature: invalid exposure %q", *exposure)
+	}
+	var ev, vv any
+	if exposure != nil {
+		ev = *exposure
 	}
 	if value != nil {
 		vv = *value
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO template_features (template_id, feature_key, active, value)
+		INSERT INTO template_features (template_id, feature_key, exposure, value)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(template_id, feature_key) DO UPDATE SET
-		    active = excluded.active,
-		    value  = excluded.value`,
-		templateID, key, av, vv)
+		    exposure = excluded.exposure,
+		    value    = excluded.value`,
+		templateID, key, ev, vv)
 	if err != nil {
 		return fmt.Errorf("featuregate: set template feature: %w", err)
 	}
@@ -247,24 +245,29 @@ func (s *Store) AssignViewerTemplate(ctx context.Context, mac string, templateID
 	return nil
 }
 
-// SetViewerFeatureActive upserts the per-viewer active override.
-func (s *Store) SetViewerFeatureActive(ctx context.Context, mac, key string, active bool) error {
+// SetViewerExposure upserts the per-viewer exposure override. exposure is
+// validated against the known set (admin/seed path).
+func (s *Store) SetViewerExposure(ctx context.Context, mac, key, exposure string) error {
+	if !ValidExposure(exposure) {
+		return fmt.Errorf("featuregate: set viewer exposure: invalid exposure %q", exposure)
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO viewer_feature_active (viewer_mac, feature_key, active) VALUES (?, ?, ?)
-		ON CONFLICT(viewer_mac, feature_key) DO UPDATE SET active = excluded.active`,
-		mac, key, boolToInt(active))
+		INSERT INTO viewer_feature_exposure (viewer_mac, feature_key, exposure) VALUES (?, ?, ?)
+		ON CONFLICT(viewer_mac, feature_key) DO UPDATE SET exposure = excluded.exposure`,
+		mac, key, exposure)
 	if err != nil {
-		return fmt.Errorf("featuregate: set viewer feature active: %w", err)
+		return fmt.Errorf("featuregate: set viewer exposure: %w", err)
 	}
 	return nil
 }
 
-// ClearViewerFeatureActive removes the per-viewer override (back to inherit).
-func (s *Store) ClearViewerFeatureActive(ctx context.Context, mac, key string) error {
+// ClearViewerExposure removes the per-viewer override (back to default
+// tenant_visible).
+func (s *Store) ClearViewerExposure(ctx context.Context, mac, key string) error {
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM viewer_feature_active WHERE viewer_mac = ? AND feature_key = ?`, mac, key)
+		`DELETE FROM viewer_feature_exposure WHERE viewer_mac = ? AND feature_key = ?`, mac, key)
 	if err != nil {
-		return fmt.Errorf("featuregate: clear viewer feature active: %w", err)
+		return fmt.Errorf("featuregate: clear viewer exposure: %w", err)
 	}
 	return nil
 }

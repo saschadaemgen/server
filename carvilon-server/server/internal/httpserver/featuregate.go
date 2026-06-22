@@ -22,6 +22,26 @@ func (s *Server) resolveFeatureGates(ctx context.Context, info *viewermanager.Vi
 	return featuregate.ResolveAll(featuregate.DefaultCatalog(), snap, info), nil
 }
 
+// broadcastConfigChangedToTenant fans config.changed to every device of the
+// tenant (TenantSiblingMACs; today = just this one device). There is NO
+// server-side exclusion of the writing device - for the Android FCM case it is
+// not expressible - so the writer drops its own echo CLIENT-side, exactly like
+// the web viewer's CONFIG_ECHO_SKIP_MS window. The fan-out is degrading: with
+// no tenant group it hits only the writer (which discards the echo).
+func (s *Server) broadcastConfigChangedToTenant(ctx context.Context, mac string) {
+	if s.hub == nil {
+		return
+	}
+	macs, err := s.viewerMgr.TenantSiblingMACs(ctx, mac)
+	if err != nil {
+		s.log.Warn("featuregate: tenant fan-out", "err", err, "mac_prefix", safePrefix(mac))
+		macs = []string{mac} // degrade to just the writer
+	}
+	for _, m := range macs {
+		s.hub.BroadcastConfigChanged(ctx, m)
+	}
+}
+
 // broadcastTemplateChanged fans a template change out to every attached viewer
 // over the existing per-MAC config.changed bus (signal-only: the viewer
 // re-fetches /esp/config or /webviewer/settings.json and re-resolves live - no

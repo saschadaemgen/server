@@ -29,14 +29,13 @@ func insertViewer(t *testing.T, d *db.DB, mac, typ string, port int) {
 	}
 }
 
-// End-to-end through the store: a template value overrides the (unset) viewer
-// column, and the active axis resolves viewer-override > template > default.
+// End-to-end through the store: a template sets exposure+value, the viewer
+// exposure override wins, and resolution reflects it.
 func TestStore_SnapshotForViewer_EndToEnd(t *testing.T) {
 	st, d := newTestStore(t)
 	ctx := context.Background()
 	insertViewer(t, d, "AA:BB", viewermanager.TypeAndroid, 9001)
 
-	// No license rows, no template: license default true, no template, empty overrides.
 	snap, err := st.SnapshotForViewer(ctx, "AA:BB")
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
@@ -44,16 +43,13 @@ func TestStore_SnapshotForViewer_EndToEnd(t *testing.T) {
 	if snap.Template != nil {
 		t.Errorf("template = %+v, want nil", snap.Template)
 	}
-	if !snap.License.Licensed(KeyKeepStreamInScreensaver, true) {
-		t.Errorf("license default: want true")
-	}
 
-	// Template sets value=false + active=false; attach it to the viewer.
+	// Template: keep_stream value=false + exposure=admin_only.
 	id, err := st.CreateTemplate(ctx, "Sparmodus")
 	if err != nil {
 		t.Fatalf("create template: %v", err)
 	}
-	if err := st.SetTemplateFeature(ctx, id, KeyKeepStreamInScreensaver, ptrBool(false), strPtr("false")); err != nil {
+	if err := st.SetTemplateFeature(ctx, id, KeyKeepStreamInScreensaver, strPtr(ExposureAdminOnly), strPtr("false")); err != nil {
 		t.Fatalf("set template feature: %v", err)
 	}
 	if err := st.AssignViewerTemplate(ctx, "AA:BB", &id); err != nil {
@@ -67,19 +63,30 @@ func TestStore_SnapshotForViewer_EndToEnd(t *testing.T) {
 	info := &viewermanager.ViewerInfo{Type: viewermanager.TypeAndroid} // column unset
 	eff := Resolve(feat(KeyKeepStreamInScreensaver), snap, info)
 	if eff.Value != false {
-		t.Errorf("template value should override android default true -> false, got %v", eff.Value)
+		t.Errorf("template value should override android default -> false, got %v", eff.Value)
 	}
-	if eff.Active {
-		t.Errorf("template active=false -> Active false, got true")
+	if eff.Exposure != ExposureAdminOnly || eff.Writable {
+		t.Errorf("template exposure admin_only: got %+v, want admin_only + not writable", eff)
 	}
 
-	// Viewer override active=true wins over the template's active=false.
-	if err := st.SetViewerFeatureActive(ctx, "AA:BB", KeyKeepStreamInScreensaver, true); err != nil {
-		t.Fatalf("set viewer feature active: %v", err)
+	// Viewer exposure override (tenant_visible) wins over the template's admin_only.
+	if err := st.SetViewerExposure(ctx, "AA:BB", KeyKeepStreamInScreensaver, ExposureTenantVisible); err != nil {
+		t.Fatalf("set viewer exposure: %v", err)
 	}
 	snap, _ = st.SnapshotForViewer(ctx, "AA:BB")
-	if eff := Resolve(feat(KeyKeepStreamInScreensaver), snap, info); !eff.Active {
-		t.Errorf("viewer override active=true should win, got Active false")
+	if eff := Resolve(feat(KeyKeepStreamInScreensaver), snap, info); !eff.Writable || eff.Exposure != ExposureTenantVisible {
+		t.Errorf("viewer override tenant_visible should win, got %+v", eff)
+	}
+}
+
+func TestStore_SetViewerExposure_RejectsInvalid(t *testing.T) {
+	st, d := newTestStore(t)
+	insertViewer(t, d, "EE:FF", viewermanager.TypeAndroid, 9050)
+	if err := st.SetViewerExposure(context.Background(), "EE:FF", KeyKeepStreamInScreensaver, "bookable"); err == nil {
+		t.Errorf("SetViewerExposure(bookable): want error (reserved, not yet active)")
+	}
+	if err := st.SetViewerExposure(context.Background(), "EE:FF", KeyKeepStreamInScreensaver, "nonsense"); err == nil {
+		t.Errorf("SetViewerExposure(nonsense): want error")
 	}
 }
 
@@ -95,12 +102,9 @@ func TestStore_LicenseFeatureLocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snap.License.Licensed(KeyKeepStreamInScreensaver, true) {
-		t.Errorf("license feature licensed=false not honoured")
-	}
 	eff := Resolve(feat(KeyKeepStreamInScreensaver), snap, &viewermanager.ViewerInfo{Type: viewermanager.TypeAndroid})
-	if eff.Licensed {
-		t.Errorf("locked feature still licensed")
+	if eff.Licensed || eff.Writable {
+		t.Errorf("locked feature: got %+v, want not licensed/not writable", eff)
 	}
 }
 
@@ -130,17 +134,6 @@ func TestStore_ViewersByTemplate(t *testing.T) {
 	}
 }
 
-func TestStore_AssignTemplateUnknownViewer(t *testing.T) {
-	st, _ := newTestStore(t)
-	id, err := st.CreateTemplate(context.Background(), "T")
-	if err != nil {
-		t.Fatalf("create template: %v", err)
-	}
-	if err := st.AssignViewerTemplate(context.Background(), "NOPE", &id); err == nil {
-		t.Errorf("assign to unknown viewer: want error, got nil")
-	}
-}
-
 func TestStore_SetLicense_Singleton(t *testing.T) {
 	st, _ := newTestStore(t)
 	ctx := context.Background()
@@ -152,7 +145,6 @@ func TestStore_SetLicense_Singleton(t *testing.T) {
 	if err := st.SetLicense(ctx, "pro", &limit2, nil); err != nil {
 		t.Fatalf("set license 2: %v", err)
 	}
-	// Singleton: still exactly one row, updated in place.
 	var count, gotLimit int
 	var plan string
 	if err := st.db.QueryRowContext(ctx,

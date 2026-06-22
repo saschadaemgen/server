@@ -164,7 +164,7 @@ func (s *Server) handleESPConfig(w http.ResponseWriter, r *http.Request) {
 	} else if gates != nil {
 		keepScr = gates[featuregate.KeyKeepStreamInScreensaver].Bool(keepScr)
 		keepOff = gates[featuregate.KeyKeepStreamInScreenOff].Bool(keepOff)
-		gating = featuregate.GateMap(gates)
+		gating = featuregate.GatingBlock(featuregate.DefaultCatalog(), gates)
 	}
 	resp := espConfigResponse{
 		MieterName:   info.Name,

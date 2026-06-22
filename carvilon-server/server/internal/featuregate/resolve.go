@@ -4,8 +4,8 @@ import "carvilon.local/server/internal/viewermanager"
 
 // License is an immutable snapshot of the license_features rows. Licensed
 // applies the rule "a row overrides the catalog default; row absence = catalog
-// default" (Festlegung 4: zero behaviour break today, gesperrt only what is
-// deliberately entered).
+// default" (zero behaviour break today; gesperrt only what is deliberately
+// entered).
 type License struct {
 	features map[string]bool
 }
@@ -25,16 +25,16 @@ func (l License) Licensed(key string, catalogDefault bool) bool {
 // Only EXPLICIT (non-NULL) cells populate the maps; a missing key inherits.
 // All methods are nil-receiver safe so "no template" needs no special-casing.
 type Template struct {
-	active map[string]bool   // rows where active IS NOT NULL
-	value  map[string]string // rows where value  IS NOT NULL
+	exposure map[string]string // rows where exposure IS NOT NULL
+	value    map[string]string // rows where value    IS NOT NULL
 }
 
-// Active returns the template's active override for key, if one is set.
-func (t *Template) Active(key string) (bool, bool) {
+// Exposure returns the template's exposure override for key, if one is set.
+func (t *Template) Exposure(key string) (string, bool) {
 	if t == nil {
-		return false, false
+		return "", false
 	}
-	v, ok := t.active[key]
+	v, ok := t.exposure[key]
 	return v, ok
 }
 
@@ -56,58 +56,73 @@ func (t *Template) RawValue(key string) string {
 }
 
 // Snapshot bundles everything Resolve needs for one viewer: the license, the
-// viewer's template (nil = none) and the per-viewer active overrides.
+// viewer's template (nil = none) and the per-viewer exposure overrides.
 type Snapshot struct {
 	License   License
-	Template  *Template       // nil when the viewer has no template
-	Overrides map[string]bool // viewer_feature_active: feature_key -> active
+	Template  *Template         // nil when the viewer has no template
+	Overrides map[string]string // viewer_feature_exposure: feature_key -> exposure
 }
 
-// Resolve computes the Effective gate for one function + viewer. Pure: no I/O,
-// no globals beyond the passed Feature.
+// Resolve computes the Effective gate for one function + viewer. Pure.
 func Resolve(f Feature, snap Snapshot, info *viewermanager.ViewerInfo) Effective {
-	// 1) License gate. Not licensed -> locked, no value.
-	if !snap.License.Licensed(f.Key, f.DefaultLicensed) {
-		return Effective{Licensed: false, Active: false, Value: nil}
-	}
+	licensed := snap.License.Licensed(f.Key, f.DefaultLicensed)
 
-	// 2) active = viewer override ?? template ?? catalog default
-	active := f.DefaultActive
-	if a, ok := snap.Template.Active(f.Key); ok {
-		active = a
+	// exposure = viewer override ?? template ?? tenant_visible. Unknown values
+	// are ignored (defensive; validation happens on write).
+	exposure := DefaultExposure
+	if e, ok := snap.Template.Exposure(f.Key); ok && ValidExposure(e) {
+		exposure = e
 	}
 	if snap.Overrides != nil {
-		if a, ok := snap.Overrides[f.Key]; ok {
-			active = a
+		if e, ok := snap.Overrides[f.Key]; ok && ValidExposure(e) {
+			exposure = e
 		}
 	}
 
-	// 3) value = viewer column (set) ?? template value ?? catalog/type default.
-	// ResolveValue is the existing Resolve*(): in the "set" branch it returns
-	// the explicit column value, in the "default" branch the (type-dependent)
-	// default - so the proven keep_stream policy is reused, not rebuilt.
+	// value. Only meaningful when licensed; locked -> nil (the endpoint keeps
+	// delivering the flat value via its own Resolve*() fallback, rollout 2a).
 	var value any
-	switch {
-	case info != nil && f.ViewerValueSet != nil && f.ViewerValueSet(info):
-		value = resolveDefault(f, info)
-	case snap.Template.HasValue(f.Key):
-		if v, err := f.ParseValue(snap.Template.RawValue(f.Key)); err == nil {
-			value = v
-		} else {
-			// Defensive: a malformed template value never breaks delivery.
-			value = resolveDefault(f, info)
+	if licensed {
+		switch {
+		case exposure == ExposureHidden:
+			// hidden forces the catalog/type default; any override is ignored.
+			value = defaultValue(f, info)
+		case info != nil && f.ViewerValueSet != nil && f.ViewerValueSet(info):
+			value = resolveValue(f, info) // explicit viewer column wins
+		case snap.Template.HasValue(f.Key) && f.ParseValue != nil:
+			if v, err := f.ParseValue(snap.Template.RawValue(f.Key)); err == nil {
+				value = v
+			} else {
+				value = defaultValue(f, info) // malformed template value -> default
+			}
+		default:
+			value = defaultValue(f, info)
 		}
-	default:
-		value = resolveDefault(f, info)
 	}
-	return Effective{Licensed: true, Active: active, Value: value}
+
+	// writable is the SINGLE app-facing decision AND the server write-back
+	// accept rule: licensed && tenant_visible && a write bridge exists.
+	writable := licensed && exposure == ExposureTenantVisible && f.Write != nil
+
+	return Effective{Licensed: licensed, Exposure: exposure, Value: value, Writable: writable}
 }
 
-func resolveDefault(f Feature, info *viewermanager.ViewerInfo) any {
+// resolveValue is the column-aware value (set column, or type default when
+// unset). defaultValue is the override-ignoring catalog/type default.
+func resolveValue(f Feature, info *viewermanager.ViewerInfo) any {
 	if f.ResolveValue == nil {
 		return nil
 	}
 	return f.ResolveValue(info)
+}
+
+func defaultValue(f Feature, info *viewermanager.ViewerInfo) any {
+	if f.DefaultValue != nil {
+		return f.DefaultValue(info)
+	}
+	// No override-ignoring bridge: fall back to the column-aware resolver (for
+	// an unset column the two coincide).
+	return resolveValue(f, info)
 }
 
 // ResolveAll resolves every catalog function for one viewer.
@@ -119,16 +134,26 @@ func ResolveAll(cat []Feature, snap Snapshot, info *viewermanager.ViewerInfo) ma
 	return out
 }
 
-// GateMap projects a resolved set into the additive client gating block
-// (licensed + active per key; no values). Returns nil for an empty set so the
-// caller's omitempty drops the key.
-func GateMap(gates map[string]Effective) map[string]Gate {
-	if len(gates) == 0 {
-		return nil
+// GatingBlock projects the resolved set into the additive client gating block
+// {licensed, exposure, writable}, EMITTING ONLY write-back-capable functions
+// (those with a write bridge). That keeps every emitted `writable` exactly
+// equal to the server's write-back accept rule - one source, no drift. The
+// exposure-only legacy keys surface via the derived visibility block instead.
+// Returns nil for an empty set so the caller's omitempty drops the key.
+func GatingBlock(cat []Feature, gates map[string]Effective) map[string]Gate {
+	out := make(map[string]Gate)
+	for _, f := range cat {
+		if f.Write == nil {
+			continue
+		}
+		e, ok := gates[f.Key]
+		if !ok {
+			continue
+		}
+		out[f.Key] = Gate{Licensed: e.Licensed, Exposure: e.Exposure, Writable: e.Writable}
 	}
-	out := make(map[string]Gate, len(gates))
-	for k, e := range gates {
-		out[k] = Gate{Licensed: e.Licensed, Active: e.Active}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -1536,22 +1536,28 @@ func (m *Manager) SetResolutionMode(ctx context.Context, mac, value string) erro
 // ListViewerSettingVisibility returns the EXPLICIT per-setting
 // visibility rows for a viewer (setting_key -> visible). A setting with
 // NO row is visible by default, so the map carries only what the admin
-// explicitly set; callers treat a missing key as visible. (Saison 19-39)
+// explicitly set; callers treat a missing key as visible.
+//
+// Saison 20 Variante A: backed by viewer_feature_exposure (migration 028
+// replaced viewer_setting_visibility). visible is DERIVED from the three-level
+// exposure: visible = (exposure == "tenant_visible"). This keeps the web
+// settings.json visibility block byte-identical while exposure is the single
+// source of truth. The exposure strings mirror featuregate.Exposure* (the
+// manager must not import featuregate - cycle).
 func (m *Manager) ListViewerSettingVisibility(ctx context.Context, mac string) (map[string]bool, error) {
 	rows, err := m.db.QueryContext(ctx,
-		`SELECT setting_key, visible_to_tenant FROM viewer_setting_visibility WHERE viewer_mac = ?`, mac)
+		`SELECT feature_key, exposure FROM viewer_feature_exposure WHERE viewer_mac = ?`, mac)
 	if err != nil {
 		return nil, fmt.Errorf("viewermanager: list setting visibility: %w", err)
 	}
 	defer rows.Close()
 	out := map[string]bool{}
 	for rows.Next() {
-		var key string
-		var vis int
-		if err := rows.Scan(&key, &vis); err != nil {
+		var key, exposure string
+		if err := rows.Scan(&key, &exposure); err != nil {
 			return nil, fmt.Errorf("viewermanager: scan setting visibility: %w", err)
 		}
-		out[key] = vis != 0
+		out[key] = exposure == "tenant_visible"
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("viewermanager: list setting visibility rows: %w", err)
@@ -1559,22 +1565,25 @@ func (m *Manager) ListViewerSettingVisibility(ctx context.Context, mac string) (
 	return out, nil
 }
 
-// SetViewerSettingVisibility upserts the visibility of one setting for
-// one viewer (Saison 19-39). visible=true is stored explicitly as 1 (the
-// row is not deleted) so the admin's intent is recorded even when it
-// matches the default. setting_key is free-text (premium-extensible).
+// SetViewerSettingVisibility upserts the visibility of one setting for one
+// viewer via the binary admin toggle ("dem Mieter anzeigen"). It maps the
+// boolean to the exposure model: visible -> tenant_visible, hidden ->
+// admin_only (the admin still sets the value; the value keeps applying, which
+// matches the pre-028 visible_to_tenant=0 behaviour). The third state `hidden`
+// (force default) is reachable only via the later admin two-way UI / seed, not
+// this binary toggle. feature_key is free-text.
 func (m *Manager) SetViewerSettingVisibility(ctx context.Context, mac, settingKey string, visible bool) error {
 	settingKey = strings.TrimSpace(settingKey)
 	if settingKey == "" {
 		return fmt.Errorf("viewermanager: set setting visibility: setting_key required")
 	}
-	v := 0
+	exposure := "admin_only"
 	if visible {
-		v = 1
+		exposure = "tenant_visible"
 	}
 	if _, err := m.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO viewer_setting_visibility (viewer_mac, setting_key, visible_to_tenant)
-		 VALUES (?, ?, ?)`, mac, settingKey, v); err != nil {
+		`INSERT OR REPLACE INTO viewer_feature_exposure (viewer_mac, feature_key, exposure)
+		 VALUES (?, ?, ?)`, mac, settingKey, exposure); err != nil {
 		return fmt.Errorf("viewermanager: set setting visibility: %w", err)
 	}
 	return nil
@@ -1752,6 +1761,52 @@ func (m *Manager) SiblingDeviceMACs(ctx context.Context, mac string) ([]string, 
 		out = append(out, sibling)
 	}
 	return out, rows.Err()
+}
+
+// TenantSiblingMACs liefert alle Viewer-MACs desselben Mieters - typ-
+// unabhaengig (Android + Web + ESP) und INKLUSIVE des uebergebenen MAC selbst.
+// Verallgemeinert SiblingDeviceMACs fuer den Saison-20 Write-Back-Fan-out:
+// config.changed geht an alle Geraete des Mieters; der Schreiber selbst ist
+// dabei (sein Echo verwirft er client-seitig). Solange der Mieter-Verbund noch
+// nicht existiert (keine linked_ua_user_id), ist der Mieter genau das eine
+// Geraet -> die Liste enthaelt nur den uebergebenen MAC. Greift automatisch,
+// sobald der Verbund spaeter angelegt wird.
+func (m *Manager) TenantSiblingMACs(ctx context.Context, mac string) ([]string, error) {
+	var linked sql.NullString
+	err := m.db.QueryRowContext(ctx,
+		`SELECT linked_ua_user_id FROM viewers WHERE mac = ?`, mac).Scan(&linked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrViewerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("viewermanager: tenant sibling lookup self: %w", err)
+	}
+	if !linked.Valid || linked.String == "" {
+		// No tenant group yet: the tenant is this single device.
+		return []string{mac}, nil
+	}
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT mac FROM viewers WHERE linked_ua_user_id = ? ORDER BY mac`, linked.String)
+	if err != nil {
+		return nil, fmt.Errorf("viewermanager: tenant sibling query: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var sibling string
+		if err := rows.Scan(&sibling); err != nil {
+			return nil, fmt.Errorf("viewermanager: tenant sibling scan: %w", err)
+		}
+		out = append(out, sibling)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		// Defensive: the self row should always match, but never return empty.
+		return []string{mac}, nil
+	}
+	return out, nil
 }
 
 // TouchESPSeen only updates updated_at for an ESP viewer. Used by

@@ -151,7 +151,7 @@ func (s *Server) handleMieterSettingsJSON(w http.ResponseWriter, r *http.Request
 	} else if gates != nil {
 		keepScr = gates[featuregate.KeyKeepStreamInScreensaver].Bool(keepScr)
 		keepOff = gates[featuregate.KeyKeepStreamInScreenOff].Bool(keepOff)
-		gating = featuregate.GateMap(gates)
+		gating = featuregate.GatingBlock(featuregate.DefaultCatalog(), gates)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(mieterSettingsJSON{
@@ -174,6 +174,12 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 	mac := ViewerMACFromContext(r.Context())
 	if mac == "" {
 		http.Error(w, "no session", http.StatusUnauthorized)
+		return
+	}
+	// Saison-20 Variante A: the Android app writes via a JSON body (the generic
+	// feature write-back). The web form path (urlencoded) is untouched below.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		s.handleMieterSettingsWriteBack(w, r, mac)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -342,6 +348,90 @@ func (s *Server) handleMieterSettingsPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	http.Redirect(w, r, "/webviewer/", http.StatusSeeOther)
+}
+
+// handleMieterSettingsWriteBack is the Saison-20 Variante-A generic write-back
+// (Android first). Body = JSON object of changed catalog fields, e.g.
+// {"keep_stream_in_screensaver": false}. Identity is the device-bearer/cookie
+// MAC from context - NEVER a MAC in the body. It accepts ONLY fields whose
+// effective gate is `writable` (licensed && exposure==tenant_visible && a write
+// bridge exists) - the exact same rule the gating block reports to the app, so
+// there is no drift. Any non-writable / unknown / malformed field rejects the
+// WHOLE request (nothing is written). On success it writes via the catalog's
+// write bridge and fans config.changed to all of the tenant's devices
+// (TenantSiblingMACs; today just this one) - no server-side writer exclusion
+// (the device drops its own echo client-side).
+func (s *Server) handleMieterSettingsWriteBack(w http.ResponseWriter, r *http.Request, mac string) {
+	if s.features == nil {
+		http.Error(w, "feature gating not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		http.Error(w, "ungueltiges JSON", http.StatusBadRequest)
+		return
+	}
+	if len(body) == 0 {
+		http.Error(w, "keine Felder", http.StatusBadRequest)
+		return
+	}
+
+	info, err := s.viewerMgr.GetViewerInfo(r.Context(), mac)
+	if err != nil {
+		if errors.Is(err, viewermanager.ErrViewerNotFound) {
+			http.Error(w, "Viewer nicht gefunden.", http.StatusNotFound)
+			return
+		}
+		s.log.Error("writeback get viewer", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	snap, err := s.features.SnapshotForViewer(r.Context(), mac)
+	if err != nil {
+		s.log.Error("writeback snapshot", "err", err, "mac_prefix", safePrefix(mac))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Pass 1: validate EVERY field before writing anything (atomic accept).
+	type pending struct {
+		feat  featuregate.Feature
+		value any
+	}
+	writes := make([]pending, 0, len(body))
+	for key, raw := range body {
+		feat, ok := featuregate.Lookup(key)
+		if !ok {
+			http.Error(w, fmt.Sprintf("unbekanntes Feld: %s", key), http.StatusBadRequest)
+			return
+		}
+		if eff := featuregate.Resolve(feat, snap, info); !eff.Writable {
+			// Not visible to the tenant, locked, or not write-back-capable.
+			http.Error(w, fmt.Sprintf("Feld nicht schreibbar: %s", key), http.StatusForbidden)
+			return
+		}
+		val, err := featuregate.CoerceWriteValue(feat, raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("ungueltiger Wert fuer %s", key), http.StatusBadRequest)
+			return
+		}
+		writes = append(writes, pending{feat: feat, value: val})
+	}
+
+	// Pass 2: persist via the catalog write bridge.
+	for _, p := range writes {
+		if err := p.feat.Write(r.Context(), s.viewerMgr, mac, p.value); err != nil {
+			s.log.Error("writeback persist", "err", err, "key", p.feat.Key, "mac_prefix", safePrefix(mac))
+			http.Error(w, "Speichern fehlgeschlagen.", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Fan config.changed to all of the tenant's devices (today = just this one).
+	s.broadcastConfigChangedToTenant(r.Context(), mac)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "written": len(writes)})
 }
 
 // pickAutoScreensaverField returns the first non-empty value
