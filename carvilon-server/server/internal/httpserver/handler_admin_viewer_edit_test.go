@@ -530,9 +530,8 @@ func TestAdminViewerDetail_WebShowsPasswordSection(t *testing.T) {
 	defer resp.Body.Close()
 	markup := detailPageMarkup(readBody(t, resp))
 
-	if !contains(markup, `data-action="edit-stammdaten"`) {
-		t.Errorf("Edit-Stammdaten-Button fehlt")
-	}
+	// S20 card grid: stammdaten edit is inline (no edit toggle); the password
+	// cell-action + modal stay for web.
 	if !contains(markup, `data-action="reset-password"`) {
 		t.Errorf("Password-Reset-Button fehlt (Web-Viewer)")
 	}
@@ -545,8 +544,8 @@ func TestAdminViewerDetail_WebShowsPasswordSection(t *testing.T) {
 	if contains(markup, `id="token-confirm-modal"`) {
 		t.Errorf("Token-Confirm-Modal auf Web-Viewer sichtbar (sollte nur bei ESP)")
 	}
-	if !contains(markup, `id="settings-section"`) {
-		t.Errorf("Settings-Section fehlt")
+	if !contains(markup, `id="vd-grid"`) {
+		t.Errorf("Karten-Raster (vd-grid) fehlt")
 	}
 }
 

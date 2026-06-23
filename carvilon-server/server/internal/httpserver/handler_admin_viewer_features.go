@@ -111,6 +111,28 @@ func (s *Server) buildViewerFeatureRows(ctx context.Context, info *viewermanager
 	return rows
 }
 
+// buildExposureMaps resolves, per catalog key, the current exposure and the
+// licensed flag, so the card grid can render each cell's config-mode trailing
+// (active switch + X/check/lock) and lock state. Best-effort: unresolved keys
+// default to tenant_visible + licensed.
+func (s *Server) buildExposureMaps(ctx context.Context, info *viewermanager.ViewerInfo) (map[string]string, map[string]bool) {
+	gates, err := s.resolveFeatureGates(ctx, info)
+	if err != nil {
+		s.log.Warn("viewer detail exposure maps", "err", err, "mac_prefix", safePrefix(info.MAC))
+	}
+	exp := make(map[string]string)
+	lic := make(map[string]bool)
+	for _, f := range featuregate.DefaultCatalog() {
+		exp[f.Key] = featuregate.ExposureTenantVisible
+		lic[f.Key] = true
+		if eff, ok := gates[f.Key]; ok {
+			exp[f.Key] = eff.Exposure
+			lic[f.Key] = eff.Licensed
+		}
+	}
+	return exp, lic
+}
+
 // keepStreamColumnValue returns the column-aware keep_stream value via the
 // proven Resolve*() methods (set column, or per-type default when unset).
 func keepStreamColumnValue(key string, info *viewermanager.ViewerInfo) bool {

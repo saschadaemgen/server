@@ -128,21 +128,26 @@ func TestAdminViewerDetail_FunctionListMarkup(t *testing.T) {
 	defer resp.Body.Close()
 	markup := detailPageMarkup(readBody(t, resp))
 
+	// S20 card grid: per-function cells with the config-mode master switch and
+	// the three-state visibility control (X/check/lock = admin_only/
+	// tenant_visible/bookable; "hidden" is the active switch off).
 	for _, want := range []string{
-		`id="features-section"`,
-		`name="exp_keep_stream_in_screensaver"`,
-		`name="exp_idle_view_mode"`, // a legacy key shows the selector too
-		`value="hidden"`,
+		`id="vd-grid"`,
+		`data-vd-config`, // master switch "Aktivierung verwalten"
+		`data-feature-key="keep_stream_in_screensaver"`,
+		`name="vis_keep_stream_in_screensaver"`,
+		`name="vis_idle_view_mode"`,
 		`value="admin_only"`,
 		`value="tenant_visible"`,
+		`value="bookable"`,
 		`id="template-select"`,
-		`id="abo-section"`,
+		"Abo",
 	} {
 		if !contains(markup, want) {
-			t.Errorf("function-list markup missing %q", want)
+			t.Errorf("card-grid markup missing %q", want)
 		}
 	}
-	// The binary visibility control is replaced, not just hidden.
+	// The old binary visibility control is gone.
 	if contains(markup, `data-vis-key`) {
 		t.Errorf("legacy binary visibility markup (data-vis-key) still present")
 	}

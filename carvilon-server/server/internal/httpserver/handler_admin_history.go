@@ -73,6 +73,11 @@ type adminViewerDetailData struct {
 	HasTemplate     bool
 	TemplateName    string
 	License         *viewerAboView
+	// Saison 20 card grid: per-catalog-key current exposure + licensed, so
+	// each SettingCell can render its config-mode trailing (active switch +
+	// X/check/lock) from the one exposure axis (Option-A mapping).
+	ExposureByKey map[string]string
+	LicensedByKey map[string]bool
 }
 
 func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +150,7 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	// Vorlagen-Zuweisung dropdown and the read-only Abo frame. All best-effort:
 	// a feature-store error degrades to sane defaults (see the builders).
 	data.Features = s.buildViewerFeatureRows(r.Context(), info)
+	data.ExposureByKey, data.LicensedByKey = s.buildExposureMaps(r.Context(), info)
 	data.TemplateOptions, data.HasTemplate, data.TemplateName = s.buildTemplateSection(r.Context(), mac)
 	data.License = s.buildAboView(r.Context())
 	s.renderAdminPage(w, "viewer-detail", data)

@@ -69,6 +69,22 @@
   .cv-switch .cv-knob{ position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:linear-gradient(180deg,#9aa3ae,#6b7480); box-shadow:0 1px 2px rgba(0,0,0,0.6); transition:left 170ms,background 170ms; }
   .cv-switch.is-on{ background:linear-gradient(180deg, var(--cv-acc), color-mix(in srgb, var(--cv-acc) 70%, black)); }
   .cv-switch.is-on .cv-knob{ left:19px; background:#fff; }
+
+  /* responsive: keep the topbar/mega/flyout usable on narrow screens */
+  @media (max-width: 860px) {
+    .cv-topbar{ padding:0 12px; }
+    .cv-tb-left{ flex:1 1 auto; min-width:0; }
+    .cv-brand-sub{ display:none; }
+    .cv-nav{ overflow-x:auto; min-width:0; scrollbar-width:none; -ms-overflow-style:none; }
+    .cv-nav::-webkit-scrollbar{ display:none; }
+    .cv-link{ padding:8px 8px; }
+    .cv-mega-grid{ grid-template-columns:1fr; }
+    .cv-flyout{ left:8px; right:8px; width:auto; }
+  }
+  @media (max-width: 560px) {
+    .cv-user-name{ display:none; }
+    .cv-link svg{ display:none; }
+  }
 </style>
 
 <header class="cv-topbar" data-cv-topbar>

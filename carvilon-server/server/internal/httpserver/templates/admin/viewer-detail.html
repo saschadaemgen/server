@@ -2,803 +2,468 @@
 
 {{define "head-extra"}}
 <style>
-  /* viewer-detail page-scoped styles (Saison 20 redesign). The S20
-     model (header, Funktionen, Vorlage, Abo) uses the shared
-     admin-components; the carried-over legacy sections (Stammdaten,
-     Tueren, Einstellungen, Verlauf, Modals) are restyled here on the
-     new tokens while keeping their existing JS contracts. */
-  .card { display: block; }
-  .card + .card { margin-top: 0; }
-  .card h2 {
-    margin: 0 0 var(--space-6); font: var(--type-eyebrow);
-    letter-spacing: var(--tracking-label); text-transform: uppercase;
-    color: var(--text-tertiary); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-  }
-  .card .intro { margin: calc(-1 * var(--space-3)) 0 var(--space-6); font: var(--type-data); color: var(--text-tertiary); }
+  /* Saison 20 viewer-detail: two-column card grid (the grid is sacred -
+     non-cell things are offloaded: Verlauf -> modal, Tür -> one full-width
+     card, Token/Passwort -> cell action + modal). Fully responsive: 2 cols on
+     desktop, 1 col on tablet/phone. New tokens (page links admin-tokens). */
+  .vd-id { display:flex; align-items:center; justify-content:space-between; gap:var(--space-8); flex-wrap:wrap; padding-bottom:var(--space-8); border-bottom:1px solid var(--divider); }
+  .vd-id-left { display:flex; align-items:center; gap:var(--space-7); min-width:0; }
+  .vd-id-tile { flex:none; width:46px; height:46px; border-radius:var(--radius-lg); display:flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
+  .vd-crumb { font:var(--type-eyebrow); letter-spacing:var(--tracking-wide); color:var(--text-tertiary); }
+  .vd-crumb a { color:var(--text-tertiary); }
+  .vd-id h1 { margin:2px 0 0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); }
+  .vd-meta { display:flex; flex-wrap:wrap; gap:var(--space-3) var(--space-5); margin-top:5px; font:var(--type-data); color:var(--text-tertiary); }
+  .vd-meta .mono { font-family:var(--font-mono); color:var(--text-secondary); }
+  .vd-id-right { display:flex; align-items:center; gap:var(--space-5); flex-wrap:wrap; }
+  .vd-tplbtn { display:flex; align-items:center; gap:var(--space-4); padding:5px 12px; border-radius:var(--radius-md); background:var(--accent-haze); box-shadow:inset 0 0 0 1px var(--border-accent); }
+  .vd-tplbtn .eyebrow { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--accent-text); }
+  .vd-tplbtn select { background:transparent; border:none; color:var(--accent-text); font:var(--type-value); cursor:pointer; -webkit-appearance:none; appearance:none; }
+  .vd-tplbtn select option { background:var(--surface-panel); color:var(--text-primary); }
+  .vd-manage { display:flex; align-items:center; gap:var(--space-6); padding:6px 10px 6px 14px; border-radius:var(--radius-md); background:var(--surface-raised); box-shadow:var(--elev-1); transition:box-shadow var(--dur-base), background var(--dur-base); }
+  .vd-manage.is-on { background:var(--accent-haze); box-shadow:inset 0 0 0 1px var(--border-accent), 0 0 18px var(--accent-haze); }
+  .vd-manage .eyebrow { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .vd-manage .sub { font:var(--type-value); color:var(--accent-text); }
+  .vd-ghost { padding:7px 12px; border-radius:var(--radius-md); background:var(--surface-raised); box-shadow:inset 0 0 0 1px var(--border-default); color:var(--text-primary); font:var(--type-label); border:none; cursor:pointer; display:inline-flex; align-items:center; gap:var(--space-4); }
+  .vd-ghost:hover { background:var(--surface-hover); }
 
-  /* Stammdaten + Abo meta list */
-  .viewer-meta { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-3) var(--space-8); margin: 0; }
-  .viewer-meta dt { font: var(--type-data); color: var(--text-tertiary); }
-  .viewer-meta dd { margin: 0; font: var(--type-label); color: var(--text-primary); }
-  .inline-action, .btn-edit {
-    margin-left: var(--space-4); padding: 3px 9px; border-radius: var(--radius-sm);
-    font: var(--type-data); cursor: pointer; background: var(--surface-raised);
-    color: var(--accent-text); border: 1px solid var(--border-default);
-  }
-  .inline-action:hover, .btn-edit:hover { background: var(--surface-hover); }
-  .btn-edit.is-active { background: var(--accent-haze); border-color: var(--border-accent); }
-  .section-actions { font-weight: 400; }
+  /* switch (pill) used for the active toggle + on/off values */
+  .vd-sw { position:relative; width:46px; height:26px; border-radius:999px; border:none; cursor:pointer; flex:none; background:var(--field-bg); box-shadow:var(--well); transition:background var(--dur-base); }
+  .vd-sw .knob { position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:linear-gradient(180deg,#9aa3ae,#6b7480); box-shadow:0 1px 2px rgba(0,0,0,0.6); transition:left var(--dur-base), background var(--dur-base); }
+  .vd-sw.is-on { background:linear-gradient(180deg, var(--accent-bright), var(--accent)); }
+  .vd-sw.is-on .knob { left:23px; background:#fff; }
+  .vd-sw.sm { width:38px; height:22px; }
+  .vd-sw.sm .knob { width:16px; height:16px; }
+  .vd-sw.sm.is-on .knob { left:19px; }
 
-  /* Stammdaten edit form */
-  .stammdaten-edit-form { display: flex; flex-direction: column; gap: var(--space-5); }
-  .stammdaten-edit-form label { display: flex; flex-direction: column; gap: var(--space-3); font: var(--type-label); color: var(--text-secondary); }
-  .stammdaten-edit-form input, .stammdaten-edit-form select {
-    font: var(--type-body); color: var(--text-primary); background: var(--field-bg);
-    border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px;
-    -webkit-appearance: none; appearance: none; color-scheme: dark; max-width: 360px;
-  }
-  .stammdaten-edit-form select option { background: var(--surface-panel); color: var(--text-primary); }
-  .stammdaten-edit-actions { display: flex; gap: var(--space-4); margin-top: var(--space-3); }
-  .btn-primary, .btn-secondary {
-    padding: 8px 14px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer;
-    border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary);
-  }
-  .btn-primary { background: linear-gradient(180deg, var(--accent-bright), var(--accent)); color: var(--text-on-accent); border-color: var(--border-accent); font-weight: 600; }
-  .btn-secondary:hover { background: var(--surface-hover); }
-  .btn-sm { padding: 5px 10px; font-size: var(--text-xs); }
-  .btn-ghost { background: transparent; }
-  .btn-ghost:hover { background: var(--surface-hover); }
+  /* grid + cells */
+  .vd-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--grid-gap); margin-top:2px; }
+  .vd-span2 { grid-column:1 / -1; }
+  .vd-cell { display:flex; align-items:center; gap:var(--space-7); min-height:56px; padding:var(--space-5) var(--space-6); border-radius:var(--radius-md); background:var(--surface-cell); box-shadow:var(--elev-1); }
+  .vd-cell .vd-ico { flex:none; width:30px; height:30px; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent-text); }
+  .vd-cell .vd-lab { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 auto; }
+  .vd-cell .vd-name { font:var(--type-label); color:var(--text-primary); letter-spacing:var(--tracking-tight); display:flex; align-items:center; gap:var(--space-3); }
+  .vd-cell .vd-hint { font:var(--type-data); color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .vd-cell .vd-val { display:flex; align-items:center; flex:none; }
+  .vd-cell.is-locked { opacity:0.6; }
+  .vd-cell.is-locked .vd-ico { color:var(--text-disabled); }
+  .vd-cell.is-locked .vd-val { pointer-events:none; filter:saturate(0.35); }
+  .vd-lock { color:var(--lock); }
+  /* config-mode trailing: hidden until master switch on */
+  .vd-trail { display:none; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
+  .vd-grid.is-config .vd-trail { display:flex; }
+  .vd-grid.is-config .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
 
-  /* Tueren */
-  .door-intro { color: var(--text-tertiary); font: var(--type-data); margin-top: 0; }
-  .door-list { list-style: none; margin: 0; padding: 0; }
-  .door-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-5) 0; border-bottom: 1px solid var(--divider); }
-  .door-row:last-child { border-bottom: none; }
-  .door-row .door-name { font: var(--type-label); color: var(--text-primary); }
-  .door-remove { display: inline-flex; align-items: center; gap: var(--space-3); }
-  .door-empty { color: var(--text-tertiary); font: var(--type-data); margin: var(--space-4) 0 0; }
-  .door-add { margin-top: var(--space-6); }
-  .door-add select {
-    width: 100%; background: var(--field-bg); border: 1px solid var(--border-default);
-    border-radius: var(--radius-md); padding: 8px 12px; color: var(--text-primary); font: inherit; color-scheme: dark;
+  /* 3-state visibility checktoggle: X / check / lock */
+  .vd-vis { display:inline-flex; gap:2px; padding:2px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
+  .vd-vis label { position:relative; width:26px; height:22px; display:inline-flex; align-items:center; justify-content:center; border-radius:var(--radius-xs); cursor:pointer; color:var(--text-disabled); }
+  .vd-vis input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer; }
+  .vd-vis svg { width:13px; height:13px; }
+  .vd-vis label[data-v="admin_only"]:has(input:checked) { background:linear-gradient(180deg,#FF6F60,#E0463A); color:#2a0a07; }
+  .vd-vis label[data-v="tenant_visible"]:has(input:checked) { background:linear-gradient(180deg,#3FE6A4,#20B07A); color:#04130c; }
+  .vd-vis label[data-v="bookable"]:has(input:checked) { background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:var(--text-on-accent); }
+  .vd-vis.is-disabled { opacity:0.4; pointer-events:none; }
+
+  /* value control styles */
+  .vd-seg { display:inline-flex; gap:2px; padding:3px; border-radius:var(--radius-md); background:var(--field-bg); box-shadow:var(--well); }
+  .vd-seg label { position:relative; padding:5px 10px; border-radius:var(--radius-xs); font-size:var(--text-xs); font-weight:500; color:var(--text-secondary); cursor:pointer; white-space:nowrap; }
+  .vd-seg input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer; }
+  .vd-seg label:has(input:checked) { background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:var(--text-on-accent); font-weight:600; }
+  .vd-onoff { display:inline-flex; gap:2px; padding:3px; border-radius:var(--radius-md); background:var(--field-bg); box-shadow:var(--well); }
+  .vd-onoff label { position:relative; padding:5px 12px; border-radius:var(--radius-xs); font-size:var(--text-xs); font-weight:500; color:var(--text-secondary); cursor:pointer; }
+  .vd-onoff input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer; }
+  .vd-onoff label:has(input:checked) { background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:var(--text-on-accent); font-weight:600; }
+  .vd-text, .vd-sel { font:var(--type-value); color:var(--text-primary); background:var(--field-bg); border:1px solid var(--border-default); border-radius:var(--radius-md); padding:7px 10px; box-shadow:var(--well); min-width:150px; }
+  .vd-sel { -webkit-appearance:none; appearance:none; cursor:pointer; padding-right:28px; background-image:linear-gradient(45deg,transparent 50%,var(--text-tertiary) 50%),linear-gradient(135deg,var(--text-tertiary) 50%,transparent 50%); background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%; background-size:5px 5px; background-repeat:no-repeat; color-scheme:dark; }
+  .vd-sel option { background:var(--surface-panel); }
+  .vd-tokenchip { font:var(--type-value); color:var(--accent-text); padding:6px 10px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
+
+  .vd-legend { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-6); padding:0 var(--space-6) 2px; font:var(--type-data); color:var(--text-tertiary); }
+  .vd-legend .chip { width:22px; height:14px; border-radius:999px; background:linear-gradient(180deg,var(--accent-bright),var(--accent)); display:inline-block; vertical-align:-2px; margin-right:5px; }
+  .vd-legend .x { color:#E0463A; } .vd-legend .c { color:#20B07A; } .vd-legend .l { color:var(--accent-text); }
+
+  /* Tür card (1:n) */
+  .vd-door-list { list-style:none; margin:0; padding:0; }
+  .vd-door-row { display:flex; align-items:center; justify-content:space-between; gap:var(--space-5); padding:8px 0; border-bottom:1px solid var(--divider); }
+  .vd-door-row:last-child { border-bottom:none; }
+  .vd-door-name { font:var(--type-label); color:var(--text-primary); }
+  .door-empty { font:var(--type-data); color:var(--text-tertiary); margin:var(--space-3) 0 0; }
+  .vd-card-title { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; color:var(--text-tertiary); margin:0 0 var(--space-5); }
+
+  /* history modal table */
+  .vd-hist-wide .admin-modal-glass { width:min(760px,94vw); }
+  .history-table { width:100%; border-collapse:collapse; }
+  .history-table th { text-align:left; padding:var(--space-4) var(--space-5); border-bottom:1px solid var(--divider); font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .history-table td { padding:var(--space-4) var(--space-5); border-bottom:1px solid var(--divider); font:var(--type-label); color:var(--text-primary); }
+  .history-table tr.hidden-by-viewer td { color:var(--text-tertiary); }
+  .hidden-icon { width:14px; height:14px; vertical-align:-2px; margin-left:6px; stroke:currentColor; fill:none; stroke-width:2; }
+  .row-action { text-align:right; width:40px; }
+  .btn-icon-trash { background:transparent; border:1px solid var(--border-default); color:var(--text-tertiary); border-radius:var(--radius-sm); padding:5px; cursor:pointer; }
+  .btn-icon-trash:hover { color:#ff8a7d; border-color:rgba(232,74,68,0.4); background:var(--lock-haze); }
+  .btn-icon-trash svg { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; }
+  .hist-filter { display:flex; align-items:flex-end; gap:var(--space-5); flex-wrap:wrap; margin-bottom:var(--space-6); }
+  .hist-filter label { display:flex; flex-direction:column; gap:3px; font:var(--type-data); color:var(--text-tertiary); }
+  .hist-filter input[type=date] { font:var(--type-label); color:var(--text-primary); background:var(--field-bg); border:1px solid var(--border-default); border-radius:var(--radius-md); padding:6px 9px; color-scheme:dark; }
+  .filter-spacer { flex:1; }
+  .history-empty { font:var(--type-data); color:var(--text-tertiary); padding:var(--space-5) 0; }
+  .btn-load-more { margin-top:var(--space-4); }
+  .btn-danger-outline { padding:6px 11px; border-radius:var(--radius-md); border:1px solid rgba(232,74,68,0.4); background:transparent; color:#ff8a7d; cursor:pointer; font:var(--type-label); }
+  .btn-danger-confirm { background:linear-gradient(180deg,#ff8a7d,#e0463a) !important; color:#2a0a07 !important; border-color:rgba(232,74,68,0.6) !important; }
+
+  /* responsive: collapse the grid + identity to one column */
+  @media (max-width: 760px) {
+    .vd-grid { grid-template-columns:1fr; }
+    .vd-span2 { grid-column:1; }
+    .vd-id { align-items:flex-start; }
+    .vd-id-right { width:100%; }
+    .vd-cell { flex-wrap:wrap; }
+    .vd-cell .vd-val { width:100%; }
+    .vd-trail { padding-left:0; margin-left:0; box-shadow:none; width:100%; justify-content:space-between; }
   }
-  .door-add select option { background: var(--surface-panel); color: var(--text-primary); }
-
-  /* Einstellungen (legacy value editors) */
-  .settings-field { border: 0; padding: 0; margin: 0 0 var(--space-6); display: flex; flex-direction: column; gap: var(--space-3); }
-  .settings-field legend { font: var(--type-eyebrow); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-tertiary); margin-bottom: var(--space-3); padding: 0; }
-  .settings-field label { display: flex; align-items: center; gap: var(--space-4); padding: 4px 8px; border-radius: var(--radius-sm); font: var(--type-label); cursor: pointer; color: var(--text-primary); }
-  .settings-field label:hover { background: var(--surface-1, rgba(255,255,255,0.04)); }
-  .settings-field input[type="radio"] { accent-color: var(--accent); }
-  .brightness-row { display: flex; align-items: center; gap: var(--space-7); padding: 0 8px; }
-  .brightness-row input[type="range"] { flex: 1; accent-color: var(--accent); }
-
-  /* Verlauf */
-  .history-meta { font-weight: 400; display: inline-flex; gap: var(--space-4); }
-  .total-count, .hidden-count { font: var(--type-data); color: var(--text-tertiary); }
-  .history-filter-form { display: flex; align-items: flex-end; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-6); }
-  .filter-fields { display: flex; align-items: flex-end; gap: var(--space-5); flex-wrap: wrap; }
-  .history-filter-form label { display: flex; flex-direction: column; gap: var(--space-2); font: var(--type-data); color: var(--text-tertiary); }
-  .history-filter-form input[type="date"] { font: var(--type-label); color: var(--text-primary); background: var(--field-bg); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 7px 10px; color-scheme: dark; }
-  .filter-spacer { flex: 1; }
-  .history-table { width: 100%; border-collapse: collapse; }
-  .history-table th { text-align: left; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); font: var(--type-eyebrow); letter-spacing: var(--tracking-label); color: var(--text-tertiary); }
-  .history-table td { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); font: var(--type-label); color: var(--text-primary); }
-  .history-table tr.hidden-by-viewer td { color: var(--text-tertiary); }
-  .hidden-icon { width: 14px; height: 14px; vertical-align: -2px; margin-left: var(--space-3); stroke: currentColor; fill: none; stroke-width: 2; }
-  .row-action { text-align: right; width: 40px; }
-  .btn-icon-trash { background: transparent; border: 1px solid var(--border-default); color: var(--text-tertiary); border-radius: var(--radius-sm); padding: 5px; cursor: pointer; display: inline-flex; }
-  .btn-icon-trash:hover { color: #ff8a7d; border-color: rgba(232,74,68,0.4); background: var(--lock-haze); }
-  .btn-icon-trash svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
-  .history-empty { color: var(--text-tertiary); font: var(--type-data); padding: var(--space-6) 0; }
-  .btn-load-more { margin-top: var(--space-5); padding: 8px 14px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer; border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary); }
-  .btn-danger-outline { padding: 7px 12px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer; border: 1px solid rgba(232,74,68,0.4); background: transparent; color: #ff8a7d; }
-  .btn-danger-outline.confirming { background: var(--lock-haze); }
-  .btn-danger-confirm { background: linear-gradient(180deg, #ff8a7d, #e0463a) !important; color: #2a0a07 !important; border-color: rgba(232,74,68,0.6) !important; }
 </style>
 {{end}}
 
 {{define "content"}}
-  <div class="identity">
-    <div class="identity-tile">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-    </div>
-    <div class="identity-main">
-      <div class="crumb"><a href="{{.Page.BackHref}}">&larr; {{.Page.BackLabel}}</a></div>
-      <h1>{{.Page.Name}}
-        {{if .Page.Running}}<span class="badge is-accent">online</span>{{else}}<span class="badge is-outline">offline</span>{{end}}
-        <span class="badge is-neutral">{{.Page.Type}}</span>
-        {{if .Page.HasTemplate}}<span class="badge is-accent">Vorlage: {{.Page.TemplateName}}</span>{{end}}
-      </h1>
-      <div class="identity-meta">
-        <span class="mono">{{.Page.MAC}}</span>
-        {{if eq .Page.Type "esp"}}
-          {{if .Page.ESPModel}}<span>{{.Page.ESPModel}}</span>{{end}}
-          {{if .Page.ESPFwVersion}}<span class="mono">FW {{.Page.ESPFwVersion}}</span>{{end}}
-        {{end}}
+  <div class="vd-id">
+    <div class="vd-id-left">
+      <div class="vd-id-tile"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+      <div style="min-width:0">
+        <div class="vd-crumb"><a href="{{.Page.BackHref}}">{{.Page.BackLabel}}</a> › <span style="color:var(--text-secondary)">{{.Page.Name}}</span></div>
+        <h1>{{.Page.Name}}</h1>
+        <div class="vd-meta">
+          <span class="mono">{{.Page.MAC}}</span><span>·</span><span>{{.Page.Type}}</span>
+          {{if eq .Page.Type "esp"}}{{if .Page.ESPFwVersion}}<span>·</span><span class="mono">FW {{.Page.ESPFwVersion}}</span>{{end}}{{end}}
+          {{if .Page.Running}}<span>·</span><span style="color:var(--live)">online</span>{{else}}<span>·</span><span>offline</span>{{end}}
+        </div>
       </div>
     </div>
-    <div class="identity-right">
-      <span class="live-indicator{{if not .Page.Running}} is-off{{end}}"><span class="led"></span>{{if .Page.Running}}gilt live{{else}}offline{{end}}</span>
+    <div class="vd-id-right" id="template-section" data-viewer-mac="{{.Page.MAC}}">
+      <div class="vd-tplbtn">
+        <span style="display:flex;flex-direction:column;gap:2px"><span class="eyebrow">Vorlage</span>
+          <select id="template-select" aria-label="Vorlage zuweisen">
+            <option value="0"{{if not .Page.HasTemplate}} selected{{end}}>— keine —</option>
+            {{range .Page.TemplateOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </span>
+      </div>
+      <div class="vd-manage" data-vd-manage>
+        <div style="display:flex;flex-direction:column;gap:2px"><span class="eyebrow">Aktivierung verwalten</span><span class="sub" data-vd-manage-sub>Normal-Ansicht</span></div>
+        <button type="button" class="vd-sw" data-vd-config role="switch" aria-label="Aktivierung verwalten"><span class="knob"></span></button>
+      </div>
+      <button type="button" class="vd-ghost" data-vd-history-open><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>Verlauf</button>
     </div>
   </div>
 
-  <!-- Stammdaten -->
-  <section class="card" id="stammdaten-section" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
-    <h2>Stammdaten <span class="section-actions"><button type="button" class="btn-edit" data-action="edit-stammdaten">Bearbeiten</button></span></h2>
-    <dl class="viewer-meta" data-bind="stammdaten-read">
-      {{if eq .Page.Type "esp"}}
-        <dt>ESP-Modell</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
-        <dt>Firmware</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
-      {{end}}
-      {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
-        <dt>Bearer-Token gesetzt</dt><dd>{{if .Page.HasDeviceToken}}ja{{else}}nein{{end}}<button type="button" class="inline-action" data-action="regen-token">Token neu generieren</button></dd>
-      {{else}}
-        <dt>Passwort gesetzt</dt><dd>{{if .Page.HasPassword}}ja{{else}}nein{{end}}<button type="button" class="inline-action" data-action="reset-password">Passwort neu setzen</button></dd>
-      {{end}}
-      <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
-      <dt>Tueren</dt><dd>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} zugeordnet (siehe Tuer-Zuordnung){{else}}keine zugeordnet{{end}}</dd>
-      <dt>Stream-Profil (LAN)</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
-      <dt>Cloud-Profil</dt><dd data-bind="read-cloud-stream">{{if .Page.CloudStreamProfile}}{{.Page.CloudStreamProfile}}{{else}}wie LAN-Profil{{end}}</dd>
-      <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
-    </dl>
-    <form class="stammdaten-edit-form" data-bind="stammdaten-edit" hidden>
-      <label>Mieter-Name<input type="text" name="name" value="{{.Page.Name}}" required maxlength="64"></label>
-      <label>Stream-Profil (LAN)<select name="stream_profile" data-current="{{.Page.StreamProfile}}"><option value="">Convention-Fallback</option></select></label>
-      <label>Cloud-Profil<select name="cloud_stream_profile" data-current="{{.Page.CloudStreamProfile}}"><option value="">wie LAN-Profil</option></select></label>
-      <label>UA-User-Verknuepfung<select name="linked_ua_user_id" data-current="{{.Page.LinkedUAUserID}}"><option value="">-</option></select></label>
-      <div class="stammdaten-edit-actions">
-        <button type="button" class="btn-secondary" data-action="cancel-stammdaten">Abbrechen</button>
-        <button type="submit" class="btn-primary">Speichern</button>
-      </div>
-    </form>
-  </section>
-
-  <!-- Tuer-Zuordnung -->
-  <section class="card" id="doors-section" data-viewer-mac="{{.Page.MAC}}">
-    <h2>Tuer-Zuordnung</h2>
-    <p class="door-intro">Tueren, die dieser Viewer oeffnen darf. Mehrere moeglich; bei genau einer oeffnet „standby" direkt diese Tuer.</p>
-    <ul class="door-list" data-bind="assigned-doors">
-      {{range .Page.AssignedDoors}}
-        <li class="door-row" data-door-id="{{.DoorID}}">
-          <span class="door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span>
-          <button type="button" class="btn btn-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}" title="Tuer entfernen" aria-label="Tuer entfernen">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-            Entfernen
-          </button>
-        </li>
-      {{end}}
-    </ul>
-    <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>Noch keine Tuer zugeordnet.</p>
-    <div class="door-add"><select data-bind="door-add-select"><option value="">+ Tuer hinzufuegen …</option></select></div>
-  </section>
-
-  <!-- Einstellungen (Werte) -->
-  <section class="card" id="settings-section">
-    <h2>Einstellungen</h2>
-    <fieldset class="settings-field">
-      <legend>Idle-Ansicht</legend>
-      <label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq .Page.IdleViewMode "screensaver"}}checked{{end}}> Bildschirmschoner (Uhr &amp; Wetter)</label>
-      <label><input type="radio" name="idle_view_mode" value="livestream" {{if eq .Page.IdleViewMode "livestream"}}checked{{end}}> Live-Stream (Tuerkamera)</label>
-      {{if eq .Page.Type "esp"}}<label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq .Page.IdleViewMode "screen_off"}}checked{{end}}> Bildschirm aus</label>{{end}}
-    </fieldset>
-    <fieldset class="settings-field">
-      <legend>Auto-Bildschirmschoner</legend>
-      <label><input type="radio" name="auto_screensaver_seconds" value="0"   {{if eq .Page.AutoScreensaverSeconds 0}}checked{{end}}> aus</label>
-      <label><input type="radio" name="auto_screensaver_seconds" value="30"  {{if eq .Page.AutoScreensaverSeconds 30}}checked{{end}}> 30 Sekunden</label>
-      <label><input type="radio" name="auto_screensaver_seconds" value="60"  {{if eq .Page.AutoScreensaverSeconds 60}}checked{{end}}> 1 Minute</label>
-      <label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq .Page.AutoScreensaverSeconds 300}}checked{{end}}> 5 Minuten</label>
-      <label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq .Page.AutoScreensaverSeconds 600}}checked{{end}}> 10 Minuten</label>
-    </fieldset>
-    <fieldset class="settings-field">
-      <legend>Verlauf-Erfassung</legend>
-      <label><input type="radio" name="history_capture" value="1" {{if .Page.HistoryCaptureEnabled}}checked{{end}}> Aktiv</label>
-      <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
-    </fieldset>
-    <fieldset class="settings-field">
-      <legend>Uhr-Anzeige</legend>
-      <label><input type="radio" name="clock_layout" value="vertical"   {{if eq .Page.ClockLayout "vertical"}}checked{{end}}> Vertikal (Stunden ueber Minuten)</label>
-      <label><input type="radio" name="clock_layout" value="horizontal" {{if eq .Page.ClockLayout "horizontal"}}checked{{end}}> Horizontal (HH:MM)</label>
-    </fieldset>
-    <fieldset class="settings-field">
-      <legend>Verbindungsweg</legend>
-      <label><input type="radio" name="path_mode" value="auto"  {{if eq .Page.PathMode "auto"}}checked{{end}}> Automatik (LAN zuerst, Cloud-Fallback)</label>
-      <label><input type="radio" name="path_mode" value="local" {{if eq .Page.PathMode "local"}}checked{{end}}> Nur LAN (Edge)</label>
-      <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}> Nur Cloud</label>
-    </fieldset>
-    <fieldset class="settings-field">
-      <legend>Aufloesung</legend>
-      <label><input type="radio" name="resolution_mode" value="high"   {{if eq .Page.ResolutionMode "high"}}checked{{end}}> Hoch (1200×1600)</label>
-      <label><input type="radio" name="resolution_mode" value="medium" {{if eq .Page.ResolutionMode "medium"}}checked{{end}}> Mittel (960×1280)</label>
-      <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
-    </fieldset>
-    {{if eq .Page.Type "esp"}}
-      <fieldset class="settings-field">
-        <legend>Bildschirm aus nach (ESP)</legend>
-        <label><input type="radio" name="screen_off_after_sec" value="0"    {{if eq .Page.ScreenOffAfterSec 0}}checked{{end}}> nie</label>
-        <label><input type="radio" name="screen_off_after_sec" value="30"   {{if eq .Page.ScreenOffAfterSec 30}}checked{{end}}> 30 Sekunden</label>
-        <label><input type="radio" name="screen_off_after_sec" value="60"   {{if eq .Page.ScreenOffAfterSec 60}}checked{{end}}> 1 Minute</label>
-        <label><input type="radio" name="screen_off_after_sec" value="300"  {{if eq .Page.ScreenOffAfterSec 300}}checked{{end}}> 5 Minuten</label>
-        <label><input type="radio" name="screen_off_after_sec" value="600"  {{if eq .Page.ScreenOffAfterSec 600}}checked{{end}}> 10 Minuten</label>
-        <label><input type="radio" name="screen_off_after_sec" value="1800" {{if eq .Page.ScreenOffAfterSec 1800}}checked{{end}}> 30 Minuten</label>
-      </fieldset>
-      <fieldset class="settings-field">
-        <legend>Helligkeit (ESP)</legend>
-        <div class="brightness-row"><input type="range" name="brightness_idle" min="0" max="100" step="1" value="{{.Page.BrightnessIdle}}" data-bind="brightness-slider"><span data-bind="brightness-value">{{.Page.BrightnessIdle}}%</span></div>
-      </fieldset>
-      <fieldset class="settings-field">
-        <legend>Sprache (ESP)</legend>
-        <label><input type="radio" name="language" value="de" {{if eq .Page.Language "de"}}checked{{end}}> Deutsch</label>
-        <label><input type="radio" name="language" value="en" {{if eq .Page.Language "en"}}checked{{end}}> English</label>
-      </fieldset>
+  <div class="vd-grid" id="vd-grid" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
+    {{range .Page.Features}}
+    <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}">
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">{{.Label}}{{if not .Licensed}}<svg class="vd-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>{{end}}</span>{{if not .Licensed}}<span class="vd-hint" style="color:#d8745f">nicht im Abo · Premium</span>{{end}}</span>
+      <span class="vd-val{{if eq .Exposure "hidden"}} dim{{end}}">
+        {{if eq .Key "idle_view_mode"}}
+          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Schoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Stream</label>{{if eq $.Page.Type "esp"}}<label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Aus</label>{{end}}</span>
+        {{else if eq .Key "clock_layout"}}
+          <span class="vd-seg"><label><input type="radio" name="clock_layout" value="vertical" {{if eq $.Page.ClockLayout "vertical"}}checked{{end}}>Vertikal</label><label><input type="radio" name="clock_layout" value="horizontal" {{if eq $.Page.ClockLayout "horizontal"}}checked{{end}}>Horizontal</label></span>
+        {{else if eq .Key "auto_screensaver_seconds"}}
+          <span class="vd-seg"><label><input type="radio" name="auto_screensaver_seconds" value="0" {{if eq $.Page.AutoScreensaverSeconds 0}}checked{{end}}>aus</label><label><input type="radio" name="auto_screensaver_seconds" value="30" {{if eq $.Page.AutoScreensaverSeconds 30}}checked{{end}}>30s</label><label><input type="radio" name="auto_screensaver_seconds" value="60" {{if eq $.Page.AutoScreensaverSeconds 60}}checked{{end}}>1m</label><label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq $.Page.AutoScreensaverSeconds 300}}checked{{end}}>5m</label><label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq $.Page.AutoScreensaverSeconds 600}}checked{{end}}>10m</label></span>
+        {{else if eq .Key "resolution_mode"}}
+          <span class="vd-seg"><label><input type="radio" name="resolution_mode" value="high" {{if eq $.Page.ResolutionMode "high"}}checked{{end}}>Hoch</label><label><input type="radio" name="resolution_mode" value="medium" {{if eq $.Page.ResolutionMode "medium"}}checked{{end}}>Mittel</label><label><input type="radio" name="resolution_mode" value="low" {{if eq $.Page.ResolutionMode "low"}}checked{{end}}>Niedrig</label></span>
+        {{else if eq .Key "history_capture_enabled"}}
+          <span class="vd-onoff"><label><input type="radio" name="history_capture" value="1" {{if $.Page.HistoryCaptureEnabled}}checked{{end}}>An</label><label><input type="radio" name="history_capture" value="0" {{if not $.Page.HistoryCaptureEnabled}}checked{{end}}>Aus</label></span>
+        {{else if and (eq .Key "language") (eq $.Page.Type "esp")}}
+          <span class="vd-seg"><label><input type="radio" name="language" value="de" {{if eq $.Page.Language "de"}}checked{{end}}>DE</label><label><input type="radio" name="language" value="en" {{if eq $.Page.Language "en"}}checked{{end}}>EN</label></span>
+        {{else if .HasValue}}
+          <span class="vd-onoff"><label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}>Ein</label><label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}>Aus</label></span>
+        {{else}}
+          <span class="vd-hint">&mdash;</span>
+        {{end}}
+      </span>
+      <span class="vd-trail" data-vd-trail>
+        <button type="button" class="vd-sw sm{{if ne .Exposure "hidden"}} is-on{{end}}" data-vd-active role="switch" aria-label="Im Admin aktiv"><span class="knob"></span></button>
+        <span class="vd-vis{{if eq .Exposure "hidden"}} is-disabled{{end}}" data-vd-vis>
+          <label data-v="admin_only" title="nur Admin"><input type="radio" name="vis_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg></label>
+          <label data-v="tenant_visible" title="für Mieter sichtbar"><input type="radio" name="vis_{{.Key}}" value="tenant_visible" {{if or (eq .Exposure "tenant_visible") (eq .Exposure "hidden")}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></label>
+          <label data-v="bookable" title="buchbar (Premium)"><input type="radio" name="vis_{{.Key}}" value="bookable" {{if eq .Exposure "bookable"}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></label>
+        </span>
+      </span>
+    </div>
     {{end}}
-  </section>
 
-  <!-- Vorlage -->
-  <section class="card" id="template-section" data-viewer-mac="{{.Page.MAC}}">
-    <h2>Vorlage</h2>
-    <p class="intro">Eine Vorlage liefert Standard-Sichtbarkeiten und -Werte. Pro-Viewer-Einstellungen unten gewinnen.</p>
-    <select id="template-select" class="admin-select">
-      <option value="0"{{if not .Page.HasTemplate}} selected{{end}}>— keine —</option>
-      {{range .Page.TemplateOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
-    </select>
-  </section>
-
-  <!-- Abo -->
-  <section class="card" id="abo-section">
-    <h2>Abo</h2>
-    {{with .Page.License}}
-    <dl class="viewer-meta">
-      <dt>Tarif</dt><dd>{{if .PlanName}}{{.PlanName}}{{else}}&mdash;{{end}}</dd>
-      <dt>Viewer</dt><dd>{{.ViewerCount}} / {{.ViewerLimit}}{{if .OverLimit}} <span class="badge is-lock">ueber Limit</span>{{end}}</dd>
-      <dt>Gueltig bis</dt><dd>{{.ValidUntil}}</dd>
-    </dl>
-    {{else}}<p class="intro" style="margin:0;">Kein Abo hinterlegt.</p>{{end}}
-  </section>
-
-  <!-- Funktionen & Sichtbarkeit -->
-  <section class="card" id="features-section" data-viewer-mac="{{.Page.MAC}}">
-    <h2>Funktionen &amp; Sichtbarkeit</h2>
-    <p class="intro">Ausgeblendet = Standard erzwungen, Mieter sieht nichts. Nur Admin = Wert gilt, Mieter sieht nichts. Fuer Mieter sichtbar = Mieter sieht und aendert. Wert nur bei Stream-Funktionen (bei „ausgeblendet" ohne Wirkung).</p>
-    <div class="cell-grid">
-      {{range .Page.Features}}
-      <div class="setting-cell" data-feature-key="{{.Key}}">
-        <div class="cell-label"><span class="cell-name">{{.Label}}{{if not .Licensed}}<span class="badge is-lock">nicht im Abo</span>{{end}}</span></div>
-        {{if .HasValue}}
-        <div class="cell-value{{if eq .Exposure "hidden"}} is-disabled{{end}}" data-value-editor>
-          <span class="switch">
-            <label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}>Ein</label>
-            <label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}>Aus</label>
-          </span>
-        </div>
-        {{else}}<div class="cell-value"><span class="cell-hint">&mdash;</span></div>{{end}}
-        <div class="cell-control">
-          <span class="segmented" role="radiogroup" aria-label="Sichtbarkeit fuer den Mieter">
-            <label><input type="radio" name="exp_{{.Key}}" value="hidden" {{if eq .Exposure "hidden"}}checked{{end}}><span>ausgeblendet</span></label>
-            <label><input type="radio" name="exp_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><span>nur Admin</span></label>
-            <label><input type="radio" name="exp_{{.Key}}" value="tenant_visible" {{if eq .Exposure "tenant_visible"}}checked{{end}}><span>fuer Mieter sichtbar</span></label>
-          </span>
-        </div>
-      </div>
-      {{end}}
+    {{if eq .Page.Type "esp"}}
+    <!-- ESP hardware settings (not in the mockup -> designed in the same cell
+         style; admin-config, no tenant exposure) -->
+    <div class="vd-cell" data-setting>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Bildschirm aus nach</span></span>
+      <span class="vd-val"><span class="vd-seg">
+        <label><input type="radio" name="screen_off_after_sec" value="0" {{if eq .Page.ScreenOffAfterSec 0}}checked{{end}}>nie</label>
+        <label><input type="radio" name="screen_off_after_sec" value="30" {{if eq .Page.ScreenOffAfterSec 30}}checked{{end}}>30s</label>
+        <label><input type="radio" name="screen_off_after_sec" value="60" {{if eq .Page.ScreenOffAfterSec 60}}checked{{end}}>1m</label>
+        <label><input type="radio" name="screen_off_after_sec" value="300" {{if eq .Page.ScreenOffAfterSec 300}}checked{{end}}>5m</label>
+        <label><input type="radio" name="screen_off_after_sec" value="600" {{if eq .Page.ScreenOffAfterSec 600}}checked{{end}}>10m</label>
+        <label><input type="radio" name="screen_off_after_sec" value="1800" {{if eq .Page.ScreenOffAfterSec 1800}}checked{{end}}>30m</label>
+      </span></span>
     </div>
-  </section>
-
-  <!-- Verlauf -->
-  <section class="card viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
-    <h2>Verlauf <span class="history-meta"><span class="total-count" data-bind="total-count">-</span><span class="hidden-count" data-bind="hidden-count" hidden></span></span></h2>
-    <div class="history-filter-form">
-      <div class="filter-fields">
-        <label>Von <input type="date" id="history-filter-from"></label>
-        <label>Bis <input type="date" id="history-filter-to"></label>
-        <button type="button" id="history-filter-apply" class="btn-primary">Anwenden</button>
-        <button type="button" id="history-filter-reset" class="btn-secondary">Zuruecksetzen</button>
-      </div>
-      <div class="filter-spacer"></div>
-      <button type="button" id="history-clear-all" class="btn-danger-outline">Verlauf leeren</button>
+    <div class="vd-cell" data-setting>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Helligkeit</span></span>
+      <span class="vd-val" style="gap:10px"><input type="range" name="brightness_idle" min="0" max="100" step="1" value="{{.Page.BrightnessIdle}}" data-vd-bright><span data-vd-bright-val style="font:var(--type-value);color:var(--text-secondary)">{{.Page.BrightnessIdle}}%</span></span>
     </div>
-    <table class="history-table"><thead><tr><th>Tuer</th><th>Wann</th><th class="row-action"></th></tr></thead><tbody id="history-tbody"></tbody></table>
-    <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
-    <button type="button" class="btn-load-more" id="history-load-more" hidden>Mehr laden</button>
-  </section>
+    {{end}}
 
-  <!-- Modals -->
+    <!-- Stammdaten cells (admin config; no tenant exposure) -->
+    <div class="vd-cell" data-stamm>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Mieter-Name</span></span>
+      <span class="vd-val"><input class="vd-text" type="text" name="name" value="{{.Page.Name}}" maxlength="64" data-stamm-field></span>
+    </div>
+    <div class="vd-cell" data-stamm>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v6H4zM4 14h16v6H4zM7 7h.01M7 17h.01"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Stream-Profil (LAN)</span></span>
+      <span class="vd-val"><select class="vd-sel" name="stream_profile" data-stamm-field data-current="{{.Page.StreamProfile}}"><option value="">Convention-Fallback</option></select></span>
+    </div>
+    <div class="vd-cell" data-stamm>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Cloud-Profil</span></span>
+      <span class="vd-val"><select class="vd-sel" name="cloud_stream_profile" data-stamm-field data-current="{{.Page.CloudStreamProfile}}"><option value="">wie LAN-Profil</option></select></span>
+    </div>
+    {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
+    <div class="vd-cell" data-stamm>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Bearer-Token</span><span class="vd-hint">{{if .Page.HasDeviceToken}}gesetzt{{else}}nicht gesetzt{{end}}</span></span>
+      <span class="vd-val"><button type="button" class="vd-ghost btn-sm" data-action="regen-token">Token neu generieren</button></span>
+    </div>
+    {{else}}
+    <div class="vd-cell" data-stamm>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Passwort</span><span class="vd-hint">{{if .Page.HasPassword}}gesetzt{{else}}nicht gesetzt{{end}}</span></span>
+      <span class="vd-val"><button type="button" class="vd-ghost btn-sm" data-action="reset-password">Passwort neu setzen</button></span>
+    </div>
+    {{end}}
+
+    <!-- Abo (read-only) -->
+    <div class="vd-cell vd-span2">
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Abo</span>{{with .Page.License}}<span class="vd-hint">{{if .PlanName}}{{.PlanName}}{{else}}—{{end}} · {{.ViewerCount}} / {{.ViewerLimit}} Viewer · gültig bis {{.ValidUntil}}</span>{{else}}<span class="vd-hint">Kein Abo hinterlegt.</span>{{end}}</span>
+      <span class="vd-val"></span>
+    </div>
+
+    <!-- Tür-Zuordnung (1:n) as one full-width card -->
+    <div class="vd-cell vd-span2" id="doors-section" data-viewer-mac="{{.Page.MAC}}" style="display:block">
+      <div class="vd-card-title">Tür-Zuordnung</div>
+      <ul class="vd-door-list" data-bind="assigned-doors">
+        {{range .Page.AssignedDoors}}
+        <li class="vd-door-row" data-door-id="{{.DoorID}}"><span class="vd-door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span><button type="button" class="vd-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}">Entfernen</button></li>
+        {{end}}
+      </ul>
+      <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>Noch keine Tür zugeordnet.</p>
+      <div style="margin-top:var(--space-5)"><select class="vd-sel" data-bind="door-add-select" style="min-width:240px"><option value="">+ Tür hinzufügen …</option></select></div>
+    </div>
+  </div>
+
+  <div class="vd-legend"><span><span class="chip"></span>Funktion im Admin aktiv/inaktiv</span><span>·</span><span><span class="x">✕</span> <span class="c">✓</span> <span class="l">🔒</span> ausgeblendet/sichtbar/buchbar</span></div>
+
+  <!-- Verlauf modal -->
+  <div class="admin-modal vd-hist-wide" id="history-modal" role="dialog" aria-modal="true">
+    <div class="admin-modal-glass">
+      <h3>Klingel-Verlauf — {{.Page.Name}}</h3>
+      <div id="history-section" data-viewer-mac="{{.Page.MAC}}">
+        <div class="hist-filter">
+          <label>Von <input type="date" id="history-filter-from"></label>
+          <label>Bis <input type="date" id="history-filter-to"></label>
+          <button type="button" id="history-filter-apply" class="vd-ghost btn-sm">Anwenden</button>
+          <button type="button" id="history-filter-reset" class="vd-ghost btn-sm">Zurücksetzen</button>
+          <span class="filter-spacer"></span>
+          <button type="button" id="history-clear-all" class="btn-danger-outline">Verlauf leeren</button>
+        </div>
+        <table class="history-table"><thead><tr><th>Tür</th><th>Wann</th><th class="row-action"></th></tr></thead><tbody id="history-tbody"></tbody></table>
+        <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
+        <button type="button" class="vd-ghost btn-load-more" id="history-load-more" hidden>Mehr laden</button>
+        <span data-bind="total-count" hidden></span><span data-bind="hidden-count" hidden></span>
+      </div>
+      <div class="modal-actions"><button type="button" class="vd-ghost" data-action="modal-cancel">Schließen</button></div>
+    </div>
+  </div>
+
+  <!-- Token / Passwort modals -->
   {{if eq .Page.Type "web"}}
-    <div class="admin-modal" id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
-      <div class="admin-modal-glass">
-        <h3 id="password-modal-title">Passwort fuer {{.Page.Name}} neu setzen</h3>
-        <p class="modal-hint">Mindestens 8 Zeichen. Der Mieter wird sich neu anmelden muessen.</p>
-        <form data-bind="password-form">
-          <label>Neues Passwort<input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
-          <label>Wiederholen<input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
-          <div class="modal-actions">
-            <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
-            <button type="submit" class="btn-primary">Setzen</button>
-          </div>
-        </form>
-      </div>
+  <div class="admin-modal" id="password-modal" role="dialog" aria-modal="true">
+    <div class="admin-modal-glass">
+      <h3>Passwort für {{.Page.Name}} neu setzen</h3>
+      <p class="modal-hint">Mindestens 8 Zeichen. Der Mieter muss sich neu anmelden.</p>
+      <form data-bind="password-form">
+        <label>Neues Passwort<input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
+        <label>Wiederholen<input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
+        <div class="modal-actions"><button type="button" class="vd-ghost" data-action="modal-cancel">Abbrechen</button><button type="submit" class="vd-ghost" style="color:var(--accent-text)">Setzen</button></div>
+      </form>
     </div>
+  </div>
   {{end}}
   {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
-    <div class="admin-modal" id="token-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="token-confirm-title">
-      <div class="admin-modal-glass">
-        <h3 id="token-confirm-title">Bearer-Token neu generieren?</h3>
-        <p class="modal-warning">Das alte Token wird sofort ungueltig. Das Geraet muss neu provisioniert werden.</p>
-        <div class="modal-actions">
-          <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
-          <button type="button" class="btn-primary btn-danger-confirm" data-action="token-regen-confirm">Token neu generieren</button>
-        </div>
-      </div>
+  <div class="admin-modal" id="token-confirm-modal" role="dialog" aria-modal="true">
+    <div class="admin-modal-glass">
+      <h3>Bearer-Token neu generieren?</h3>
+      <p class="modal-warning">Das alte Token wird sofort ungültig. Das Gerät muss neu provisioniert werden.</p>
+      <div class="modal-actions"><button type="button" class="vd-ghost" data-action="modal-cancel">Abbrechen</button><button type="button" class="vd-ghost btn-danger-confirm" data-action="token-regen-confirm">Token neu generieren</button></div>
     </div>
-    <div class="admin-modal" id="token-display-modal" role="dialog" aria-modal="true" aria-labelledby="token-display-title">
-      <div class="admin-modal-glass">
-        <h3 id="token-display-title">Neues Bearer-Token (einmalig sichtbar)</h3>
-        <p class="modal-warning">Speichere das Token jetzt - es kann nicht erneut angezeigt werden.</p>
-        <pre class="token-value" data-bind="token-value"></pre>
-        <div class="modal-actions">
-          <button type="button" class="btn-secondary" data-action="token-copy">Kopieren</button>
-          <button type="button" class="btn-primary" data-action="modal-cancel">Verstanden</button>
-        </div>
-      </div>
+  </div>
+  <div class="admin-modal" id="token-display-modal" role="dialog" aria-modal="true">
+    <div class="admin-modal-glass">
+      <h3>Neues Bearer-Token (einmalig sichtbar)</h3>
+      <p class="modal-warning">Speichere das Token jetzt — es kann nicht erneut angezeigt werden.</p>
+      <pre class="token-value" data-bind="token-value"></pre>
+      <div class="modal-actions"><button type="button" class="vd-ghost" data-action="token-copy">Kopieren</button><button type="button" class="vd-ghost" data-action="modal-cancel">Verstanden</button></div>
     </div>
+  </div>
   {{end}}
 {{end}}
 
 {{define "scripts"}}
-  <script>
-    // Saison 20: Funktionsliste (Drei-Wege-Sichtbarkeit via SegmentedControl +
-    // keep_stream-Wert via Switch) und Vorlagen-Zuweisung. Jede Aenderung
-    // persistiert sofort (exposure -> POST .../exposure, Wert -> POST
-    // .../settings, Vorlage -> POST .../template); Fehler rollt zurueck.
-    (function () {
-      var toastEl = document.querySelector('[data-bind="toast"]');
-      function toast(msg, kind) {
-        if (!toastEl) return;
-        toastEl.textContent = msg;
-        toastEl.classList.remove('kind-error');
-        if (kind === 'error') toastEl.classList.add('kind-error');
-        toastEl.classList.add('is-visible');
-        setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
-      }
-      function firstLine(err, fallback) {
-        return (err && err.message ? String(err.message) : fallback).split('\n')[0];
-      }
+<script>
+(function () {
+  var toastEl = document.querySelector('[data-bind="toast"]');
+  function toast(msg, kind) { if (!toastEl) return; toastEl.textContent = msg; toastEl.classList.remove('kind-error'); if (kind === 'error') toastEl.classList.add('kind-error'); toastEl.classList.add('is-visible'); setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500); }
+  function firstLine(e, f) { return (e && e.message ? String(e.message) : f).split('\n')[0]; }
+  function postJSON(url, body) { return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); }); }
 
-      var section = document.getElementById('features-section');
-      if (section) {
-        var viewerMAC = section.getAttribute('data-viewer-mac');
-        function valueEditor(row) { return row.querySelector('[data-value-editor]'); }
-        function setEditorDisabled(row, disabled) {
-          var ed = valueEditor(row);
-          if (!ed) return;
-          ed.classList.toggle('is-disabled', disabled);
-          ed.querySelectorAll('input').forEach(function (i) { i.disabled = disabled; });
-        }
-        section.querySelectorAll('.setting-cell[data-feature-key]').forEach(function (row) {
-          var checked = row.querySelector('input[name^="exp_"]:checked');
-          var exp = checked ? checked.value : 'tenant_visible';
-          row.setAttribute('data-exposure', exp);
-          setEditorDisabled(row, exp === 'hidden');
-        });
-        section.addEventListener('change', function (e) {
-          var input = e.target;
-          if (!input || !input.name) return;
-          var row = input.closest('.setting-cell[data-feature-key]');
-          if (!row) return;
-          if (input.name.indexOf('exp_') === 0) {
-            saveExposure(row, input.value);
-          } else {
-            saveValue(row, input.name, input.value === '1');
-          }
-        });
-        function saveExposure(row, exposure) {
-          var key = row.getAttribute('data-feature-key');
-          var prev = row.getAttribute('data-exposure') || 'tenant_visible';
-          setEditorDisabled(row, exposure === 'hidden');
-          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/exposure', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ feature_key: key, exposure: exposure }),
-          })
-            .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
-            .then(function () { row.setAttribute('data-exposure', exposure); toast('Gespeichert'); })
-            .catch(function (err) {
-              var back = row.querySelector('input[name="exp_' + key + '"][value="' + prev + '"]');
-              if (back) back.checked = true;
-              setEditorDisabled(row, prev === 'hidden');
-              toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
-            });
-        }
-        function saveValue(row, key, on) {
-          var body = {}; body[key] = on;
-          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(body),
-          })
-            .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
-            .then(function () { toast('Gespeichert'); })
-            .catch(function (err) {
-              var back = row.querySelector('input[name="' + key + '"][value="' + (on ? '0' : '1') + '"]');
-              if (back) back.checked = true;
-              toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
-            });
-        }
-      }
+  var grid = document.getElementById('vd-grid');
+  var mac = grid.getAttribute('data-viewer-mac');
+  var type = grid.getAttribute('data-viewer-type');
 
-      var tplSection = document.getElementById('template-section');
-      if (tplSection) {
-        var tplMAC = tplSection.getAttribute('data-viewer-mac');
-        var sel = document.getElementById('template-select');
-        if (sel) {
-          var prevTpl = sel.value;
-          sel.addEventListener('change', function () {
-            var id = parseInt(sel.value, 10) || 0;
-            sel.disabled = true;
-            fetch('/a/viewers/' + encodeURIComponent(tplMAC) + '/template', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-              body: JSON.stringify({ template_id: id }),
-            })
-              .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
-              .then(function () { prevTpl = sel.value; toast('Vorlage gespeichert'); })
-              .catch(function (err) { sel.value = prevTpl; toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error'); })
-              .then(function () { sel.disabled = false; });
-          });
-        }
-      }
-    })();
-  </script>
+  // ---- master switch: config mode ----
+  var manage = document.querySelector('[data-vd-manage]');
+  var configBtn = document.querySelector('[data-vd-config]');
+  var manageSub = document.querySelector('[data-vd-manage-sub]');
+  configBtn.addEventListener('click', function () {
+    var on = !grid.classList.contains('is-config');
+    grid.classList.toggle('is-config', on);
+    configBtn.classList.toggle('is-on', on);
+    manage.classList.toggle('is-on', on);
+    if (manageSub) manageSub.textContent = on ? 'Konfigurations-Modus' : 'Normal-Ansicht';
+  });
 
-  <script>
-    // Door-assignment section (Saison 19-30). Self-contained: depends only on
-    // the shared toast slot. Carried over unchanged in the redesign.
-    (function () {
-      var section = document.getElementById('doors-section');
-      if (!section) return;
-      var viewerMAC = section.getAttribute('data-viewer-mac');
-      var list      = section.querySelector('[data-bind="assigned-doors"]');
-      var noDoors   = section.querySelector('[data-bind="no-doors"]');
-      var addSelect = section.querySelector('[data-bind="door-add-select"]');
-      var toastEl   = document.querySelector('[data-bind="toast"]');
-      function toast(msg, kind) {
-        if (!toastEl) return;
-        toastEl.textContent = msg;
-        toastEl.classList.remove('kind-error');
-        if (kind === 'error') toastEl.classList.add('kind-error');
-        toastEl.classList.add('is-visible');
-        setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
-      }
-      function rows() { return list.querySelectorAll('li[data-door-id]'); }
-      function doorIDs() { return Array.prototype.map.call(rows(), function (li) { return li.getAttribute('data-door-id'); }); }
-      function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
-      var TRASH_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      function makeRow(doorID, name) {
-        var li = document.createElement('li');
-        li.className = 'door-row';
-        li.setAttribute('data-door-id', doorID);
-        var span = document.createElement('span');
-        span.className = 'door-name';
-        span.textContent = name || doorID;
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-ghost btn-sm door-remove';
-        btn.setAttribute('data-action', 'remove-door');
-        btn.setAttribute('data-door-id', doorID);
-        btn.setAttribute('title', 'Tuer entfernen');
-        btn.setAttribute('aria-label', 'Tuer entfernen');
-        btn.innerHTML = TRASH_SVG + ' Entfernen';
-        li.appendChild(span); li.appendChild(btn);
-        return li;
-      }
-      fetch('/a/doors.json', { headers: { 'Accept': 'application/json' } })
-        .then(function (r) { return r.ok ? r.json() : { doors: [] }; })
-        .catch(function () { return { doors: [] }; })
-        .then(function (data) {
-          var doors = data.doors || [];
-          var nameByID = {};
-          doors.forEach(function (d) {
-            nameByID[d.door_id] = d.name || d.door_id;
-            var opt = document.createElement('option');
-            opt.value = d.door_id; opt.textContent = d.name || d.door_id;
-            addSelect.appendChild(opt);
-          });
-          Array.prototype.forEach.call(rows(), function (li) {
-            var id = li.getAttribute('data-door-id');
-            var span = li.querySelector('.door-name');
-            if (span && nameByID[id] && span.textContent === id) span.textContent = nameByID[id];
-          });
-        });
-      function doorURL(id) { return '/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors/' + encodeURIComponent(id); }
-      addSelect.addEventListener('change', function () {
-        var id = addSelect.value;
-        if (!id) return;
-        if (doorIDs().indexOf(id) !== -1) { toast('Tuer bereits zugeordnet', 'error'); addSelect.value = ''; return; }
-        var name = addSelect.options[addSelect.selectedIndex].textContent;
-        addSelect.disabled = true;
-        fetch(doorURL(id) + '?label=' + encodeURIComponent(name), { method: 'POST', headers: { 'Accept': 'application/json' } })
-          .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
-          .then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tuer hinzugefuegt'); })
-          .catch(function (err) { toast((err && err.message ? String(err.message) : 'Hinzufuegen fehlgeschlagen').split('\n')[0], 'error'); })
-          .then(function () { addSelect.value = ''; addSelect.disabled = false; });
-      });
-      list.addEventListener('click', function (e) {
-        var rem = e.target.closest('[data-action="remove-door"]');
-        if (!rem) return;
-        var li = rem.closest('li[data-door-id]');
-        if (!li) return;
-        var id = li.getAttribute('data-door-id');
-        rem.disabled = true;
-        fetch(doorURL(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } })
-          .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
-          .then(function () { li.remove(); refreshEmpty(); toast('Tuer entfernt'); })
-          .catch(function (err) { rem.disabled = false; toast((err && err.message ? String(err.message) : 'Entfernen fehlgeschlagen').split('\n')[0], 'error'); });
-      });
-    })();
-  </script>
+  // ---- exposure (Option A): active switch + 3-state visibility -> /exposure ----
+  function cellExposure(cell) {
+    var active = cell.querySelector('[data-vd-active]').classList.contains('is-on');
+    if (!active) return 'hidden';
+    var v = cell.querySelector('[data-vd-vis] input:checked');
+    return v ? v.value : 'tenant_visible';
+  }
+  function saveExposure(cell) {
+    var key = cell.getAttribute('data-feature-key');
+    var exposure = cellExposure(cell);
+    var vis = cell.querySelector('[data-vd-vis]');
+    var val = cell.querySelector('.vd-val');
+    vis.classList.toggle('is-disabled', exposure === 'hidden');
+    if (val) val.classList.toggle('dim', exposure === 'hidden');
+    postJSON('/a/viewers/' + encodeURIComponent(mac) + '/exposure', { feature_key: key, exposure: exposure })
+      .then(function () { cell.setAttribute('data-exposure', exposure); toast('Gespeichert'); })
+      .catch(function (e) { toast(firstLine(e, 'Speichern fehlgeschlagen'), 'error'); });
+  }
+  grid.querySelectorAll('.vd-cell[data-feature-key]').forEach(function (cell) {
+    if (cell.classList.contains('is-locked')) return;
+    var activeBtn = cell.querySelector('[data-vd-active]');
+    activeBtn.addEventListener('click', function () { activeBtn.classList.toggle('is-on'); saveExposure(cell); });
+    cell.querySelectorAll('[data-vd-vis] input').forEach(function (i) { i.addEventListener('change', function () { if (!activeBtn.classList.contains('is-on')) return; saveExposure(cell); }); });
+  });
 
-  <script>
-    // Stammdaten edit + password/token modals + settings auto-save. Carried
-    // over unchanged in the redesign (same DOM contracts, new look).
-    (function () {
-      var stammdatenSection = document.getElementById('stammdaten-section');
-      if (!stammdatenSection) return;
-      var viewerMAC  = stammdatenSection.getAttribute('data-viewer-mac');
-      var viewerType = stammdatenSection.getAttribute('data-viewer-type');
-      var toastEl = document.querySelector('[data-bind="toast"]');
-      var toastTimer = null;
-      function showToast(msg, kind, durationMs) {
-        if (!toastEl) return;
-        toastEl.textContent = msg;
-        toastEl.classList.remove('kind-error');
-        if (kind === 'error') toastEl.classList.add('kind-error');
-        toastEl.classList.add('is-visible');
-        if (toastTimer) clearTimeout(toastTimer);
-        toastTimer = setTimeout(function () { toastEl.classList.remove('is-visible'); }, durationMs || 1500);
-      }
-      function openModal(id) { var m = document.getElementById(id); if (m) m.classList.add('is-open'); }
-      function closeModal(modal) { if (modal) modal.classList.remove('is-open'); }
-      document.addEventListener('keydown', function (e) { if (e.key !== 'Escape') return; document.querySelectorAll('.admin-modal.is-open').forEach(closeModal); });
-      document.querySelectorAll('.admin-modal').forEach(function (m) { m.addEventListener('click', function (e) { if (e.target === m) closeModal(m); }); });
-      document.querySelectorAll('.admin-modal [data-action="modal-cancel"]').forEach(function (btn) { btn.addEventListener('click', function () { closeModal(btn.closest('.admin-modal')); }); });
+  // ---- value controls -> /settings (catalog) or /stammdaten (name/profiles) ----
+  function saveSetting(name, value) {
+    var body = {};
+    if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'resolution_mode') body[name] = String(value);
+    else if (name === 'history_capture' || name === 'keep_stream_in_screensaver' || name === 'keep_stream_in_screen_off') body[name] = (value === '1' || value === true);
+    else body[name] = parseInt(value, 10);
+    postJSON('/a/viewers/' + encodeURIComponent(mac) + '/settings', body).then(function () { toast('Gespeichert'); }).catch(function (e) { toast(firstLine(e, 'Speichern fehlgeschlagen'), 'error'); });
+  }
+  grid.addEventListener('change', function (e) {
+    var inp = e.target;
+    if (!inp.name) return;
+    if (inp.name.indexOf('vis_') === 0) return; // exposure handled above
+    var cell = inp.closest('.vd-cell');
+    if (cell && cell.hasAttribute('data-stamm')) return; // stammdaten handled below
+    if (inp.type === 'radio') saveSetting(inp.name, inp.value);
+  });
+  // brightness slider (ESP): live % + debounced save
+  var bright = grid.querySelector('[data-vd-bright]');
+  if (bright) { var brightVal = grid.querySelector('[data-vd-bright-val]'); var bt = null; bright.addEventListener('input', function () { if (brightVal) brightVal.textContent = bright.value + '%'; if (bt) clearTimeout(bt); bt = setTimeout(function () { saveSetting('brightness_idle', bright.value); }, 300); }); }
 
-      var readEl = stammdatenSection.querySelector('[data-bind="stammdaten-read"]');
-      var editForm = stammdatenSection.querySelector('[data-bind="stammdaten-edit"]');
-      var editBtn = stammdatenSection.querySelector('[data-action="edit-stammdaten"]');
-      var cancelBtn = stammdatenSection.querySelector('[data-action="cancel-stammdaten"]');
-      var dropdownsHydrated = false;
-      function setEditMode(on) {
-        if (on) {
-          readEl.hidden = true; editForm.hidden = false;
-          editBtn.classList.add('is-active'); editBtn.textContent = 'Bearbeiten aktiv';
-          if (!dropdownsHydrated) hydrateDropdowns();
-        } else {
-          readEl.hidden = false; editForm.hidden = true;
-          editBtn.classList.remove('is-active'); editBtn.textContent = 'Bearbeiten';
-        }
-      }
-      editBtn.addEventListener('click', function () { setEditMode(editForm.hidden); });
-      cancelBtn.addEventListener('click', function () { editForm.reset(); setEditMode(false); });
-      function hydrateDropdowns() {
-        dropdownsHydrated = true;
-        Promise.all([
-          fetch('/a/streams.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] }; }).catch(function () { return { profiles: [] }; }),
-          fetch('/a/users.json',   { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { users: [] }; }).catch(function () { return { users: [] }; }),
-        ]).then(function (results) {
-          populateSelect(editForm.elements['stream_profile'], results[0].profiles || [], 'Name', 'Name');
-          populateSelect(editForm.elements['cloud_stream_profile'], results[0].profiles || [], 'Name', 'Name');
-          populateSelect(editForm.elements['linked_ua_user_id'], results[1].users || [], 'ID', 'DisplayName');
-        });
-      }
-      function populateSelect(selectEl, items, valueKey, labelKey) {
-        if (!selectEl) return;
-        var current = selectEl.getAttribute('data-current') || '';
-        while (selectEl.options.length > 1) selectEl.remove(1);
-        items.forEach(function (it) {
-          var opt = document.createElement('option');
-          opt.value = String(it[valueKey] || '');
-          opt.textContent = String(it[labelKey] || it[valueKey] || '');
-          if (opt.value === current) opt.selected = true;
-          selectEl.appendChild(opt);
-        });
-      }
-      editForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var body = {
-          name: editForm.elements['name'].value,
-          stream_profile: editForm.elements['stream_profile'].value,
-          cloud_stream_profile: editForm.elements['cloud_stream_profile'].value,
-          linked_ua_user_id: editForm.elements['linked_ua_user_id'].value,
-        };
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/stammdaten', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(body),
-        })
-          .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg || ('http ' + r.status)); }); return r.json(); })
-          .then(function () { showToast('Gespeichert'); setTimeout(function () { location.reload(); }, 600); })
-          .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
-      });
+  // ---- stammdaten cells (name + profiles) -> /stammdaten on change ----
+  grid.querySelectorAll('[data-stamm] [data-stamm-field]').forEach(function (f) {
+    f.addEventListener('change', function () {
+      var body = {}; body[f.name] = f.value;
+      postJSON('/a/viewers/' + encodeURIComponent(mac) + '/stammdaten', body).then(function () { toast('Gespeichert'); }).catch(function (e) { toast(firstLine(e, 'Speichern fehlgeschlagen'), 'error'); });
+    });
+  });
+  // hydrate profile selects from /a/streams.json
+  (function () {
+    var sels = grid.querySelectorAll('select[name="stream_profile"],select[name="cloud_stream_profile"]');
+    if (!sels.length) return;
+    fetch('/a/streams.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] }; }).catch(function () { return { profiles: [] }; })
+      .then(function (d) { (d.profiles || []).forEach(function (p) { sels.forEach(function (sel) { var o = document.createElement('option'); o.value = p.Name; o.textContent = p.Name; if (p.Name === sel.getAttribute('data-current')) o.selected = true; sel.appendChild(o); }); }); });
+  })();
 
-      var pwBtn = stammdatenSection.querySelector('[data-action="reset-password"]');
-      if (pwBtn) {
-        pwBtn.addEventListener('click', function () { openModal('password-modal'); });
-        var pwForm = document.querySelector('[data-bind="password-form"]');
-        if (pwForm) {
-          pwForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            var newPw = pwForm.elements['new_password'].value;
-            var confirmPw = pwForm.elements['confirm_password'].value;
-            if (newPw !== confirmPw) { showToast('Passwoerter stimmen nicht ueberein', 'error', 3000); return; }
-            if (newPw.length < 8) { showToast('Mindestens 8 Zeichen', 'error', 3000); return; }
-            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/password', {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-              body: JSON.stringify({ new_password: newPw }),
-            })
-              .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
-              .then(function () { pwForm.reset(); closeModal(document.getElementById('password-modal')); showToast('Passwort gesetzt - Mieter-Sessions invalidiert'); })
-              .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
-          });
-        }
-      }
-      var tokenBtn = stammdatenSection.querySelector('[data-action="regen-token"]');
-      if (tokenBtn) {
-        tokenBtn.addEventListener('click', function () { openModal('token-confirm-modal'); });
-        var confirmBtn = document.querySelector('[data-action="token-regen-confirm"]');
-        if (confirmBtn) {
-          confirmBtn.addEventListener('click', function () {
-            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/regenerate-token', { method: 'POST', headers: { 'Accept': 'application/json' } })
-              .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
-              .then(function (resp) {
-                closeModal(document.getElementById('token-confirm-modal'));
-                var displayEl = document.querySelector('[data-bind="token-value"]');
-                if (displayEl) displayEl.textContent = resp.new_token || '';
-                openModal('token-display-modal');
-              })
-              .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Token-Regeneration fehlgeschlagen').split('\n')[0], 'error', 3000); });
-          });
-        }
-        var copyBtn = document.querySelector('[data-action="token-copy"]');
-        if (copyBtn) {
-          copyBtn.addEventListener('click', function () {
-            var displayEl = document.querySelector('[data-bind="token-value"]');
-            if (!displayEl) return;
-            var text = displayEl.textContent || '';
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(function () { showToast('Token in Zwischenablage'); }).catch(function () { showToast('Kopieren fehlgeschlagen', 'error', 2500); });
-            } else {
-              var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
-              try { document.execCommand('copy'); showToast('Token in Zwischenablage'); } catch (_) { showToast('Kopieren fehlgeschlagen', 'error', 2500); }
-              document.body.removeChild(ta);
-            }
-          });
-        }
-      }
+  // ---- template select ----
+  var tplSel = document.getElementById('template-select');
+  if (tplSel) { var prevTpl = tplSel.value; tplSel.addEventListener('change', function () { var id = parseInt(tplSel.value, 10) || 0; postJSON('/a/viewers/' + encodeURIComponent(mac) + '/template', { template_id: id }).then(function () { prevTpl = tplSel.value; toast('Vorlage gespeichert'); }).catch(function (e) { tplSel.value = prevTpl; toast(firstLine(e, 'Speichern fehlgeschlagen'), 'error'); }); }); }
 
-      var settingsSection = document.getElementById('settings-section');
-      if (settingsSection) {
-        var brightnessTimer = null;
-        function saveSetting(name, value) {
-          var body = {};
-          if (name === 'idle_view_mode' || name === 'language' || name === 'clock_layout' || name === 'path_mode' || name === 'resolution_mode') {
-            body[name] = String(value);
-          } else if (name === 'history_capture' || name === 'keep_stream_in_screensaver' || name === 'keep_stream_in_screen_off') {
-            body[name] = (value === '1' || value === 'true' || value === true);
-          } else {
-            body[name] = parseInt(value, 10);
-          }
-          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify(body),
-          })
-            .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
-            .then(function () { showToast('Gespeichert'); })
-            .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
-        }
-        settingsSection.querySelectorAll('input[type="radio"]').forEach(function (input) { input.addEventListener('change', function () { saveSetting(input.name, input.value); }); });
-        var slider = settingsSection.querySelector('[data-bind="brightness-slider"]');
-        var sliderValue = settingsSection.querySelector('[data-bind="brightness-value"]');
-        if (slider) {
-          slider.addEventListener('input', function () {
-            if (sliderValue) sliderValue.textContent = slider.value + '%';
-            if (brightnessTimer) clearTimeout(brightnessTimer);
-            brightnessTimer = setTimeout(function () { saveSetting('brightness_idle', slider.value); }, 300);
-          });
-        }
-      }
-      void viewerType;
-    })();
-  </script>
+  // ---- modals (history / token / password) ----
+  function openModal(id) { var m = document.getElementById(id); if (m) m.classList.add('is-open'); }
+  function closeModal(m) { if (m) m.classList.remove('is-open'); }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') document.querySelectorAll('.admin-modal.is-open').forEach(closeModal); });
+  document.querySelectorAll('.admin-modal').forEach(function (m) { m.addEventListener('click', function (e) { if (e.target === m) closeModal(m); }); });
+  document.querySelectorAll('.admin-modal [data-action="modal-cancel"]').forEach(function (b) { b.addEventListener('click', function () { closeModal(b.closest('.admin-modal')); }); });
+  var histBtn = document.querySelector('[data-vd-history-open]');
+  if (histBtn) histBtn.addEventListener('click', function () { openModal('history-modal'); });
 
-  <script>
-    // Verlauf (history) section. Carried over unchanged in the redesign.
-    (function () {
-      var section = document.getElementById('history-section');
-      var viewerMAC = section.getAttribute('data-viewer-mac');
-      var tbody = document.getElementById('history-tbody');
-      var emptyEl = document.getElementById('history-empty');
-      var totalEl = section.querySelector('[data-bind="total-count"]');
-      var hiddenEl = section.querySelector('[data-bind="hidden-count"]');
-      var loadMoreBtn = document.getElementById('history-load-more');
-      var fromInput = document.getElementById('history-filter-from');
-      var toInput = document.getElementById('history-filter-to');
-      var applyBtn = document.getElementById('history-filter-apply');
-      var resetBtn = document.getElementById('history-filter-reset');
-      var clearAllBtn = document.getElementById('history-clear-all');
-      var nextOffset = 0, pendingClearClick = false, pendingClearTimer = null;
-      function loadPage(append) {
-        var params = new URLSearchParams();
-        params.set('offset', append ? String(nextOffset) : '0');
-        params.set('limit', '50');
-        if (fromInput.value) params.set('from', fromInput.value);
-        if (toInput.value) params.set('to', toInput.value);
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history?' + params, { headers: { 'Accept': 'application/json' } })
-          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-          .then(function (resp) {
-            if (!append) { tbody.innerHTML = ''; nextOffset = 0; }
-            totalEl.textContent = resp.total_count + ' Eintraege';
-            if (resp.hidden_count > 0) { hiddenEl.textContent = resp.hidden_count + ' vom Mieter ausgeblendet'; hiddenEl.hidden = false; }
-            else { hiddenEl.hidden = true; }
-            (resp.events || []).forEach(function (ev) { tbody.appendChild(renderRow(ev)); });
-            loadMoreBtn.hidden = !resp.has_more;
-            nextOffset = resp.next_offset || (nextOffset + (resp.events || []).length);
-            emptyEl.hidden = tbody.children.length > 0;
-          })
-          .catch(function (err) { if (window.console) console.warn('history load failed', err); });
-      }
-      var EYE_OFF_SVG = '<svg class="hidden-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
-      var TRASH_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      function renderRow(ev) {
-        var tr = document.createElement('tr');
-        tr.setAttribute('data-event-id', String(ev.id));
-        if (ev.hidden_by_viewer) tr.classList.add('hidden-by-viewer');
-        var tdDoor = document.createElement('td');
-        tdDoor.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang';
-        if (ev.hidden_by_viewer) {
-          var iconSpan = document.createElement('span');
-          iconSpan.setAttribute('title', 'Vom Mieter ausgeblendet' + (ev.hidden_at ? ' am ' + formatStamp(ev.hidden_at) : ''));
-          iconSpan.innerHTML = EYE_OFF_SVG;
-          tdDoor.appendChild(iconSpan);
-        }
-        tr.appendChild(tdDoor);
-        var tdWhen = document.createElement('td'); tdWhen.textContent = ev.when; tr.appendChild(tdWhen);
-        var tdAction = document.createElement('td'); tdAction.className = 'row-action';
-        var btn = document.createElement('button');
-        btn.className = 'btn-icon-trash'; btn.type = 'button';
-        btn.setAttribute('data-event-id', String(ev.id));
-        btn.setAttribute('title', 'Eintrag dauerhaft loeschen');
-        btn.setAttribute('aria-label', 'Eintrag dauerhaft loeschen');
-        btn.innerHTML = TRASH_SVG;
-        tdAction.appendChild(btn); tr.appendChild(tdAction);
-        return tr;
-      }
-      function formatStamp(unix) { try { return new Date(unix * 1000).toLocaleString('de-DE'); } catch (_) { return ''; } }
-      tbody.addEventListener('click', function (e) {
-        var btn = e.target.closest('.btn-icon-trash');
-        if (!btn) return;
-        if (!confirm('Diesen Eintrag dauerhaft loeschen?')) return;
-        var id = btn.getAttribute('data-event-id');
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history/' + id, { method: 'DELETE' })
-          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); loadPage(false); })
-          .catch(function (err) { alert('Loeschen fehlgeschlagen.'); if (window.console) console.warn('delete failed', err); });
-      });
-      applyBtn.addEventListener('click', function () { loadPage(false); });
-      resetBtn.addEventListener('click', function () { fromInput.value = ''; toInput.value = ''; loadPage(false); });
-      loadMoreBtn.addEventListener('click', function () { loadPage(true); });
-      clearAllBtn.addEventListener('click', function () {
-        if (!pendingClearClick) {
-          pendingClearClick = true;
-          clearAllBtn.textContent = 'Wirklich? Nochmal klicken';
-          clearAllBtn.classList.add('confirming');
-          pendingClearTimer = setTimeout(function () { pendingClearClick = false; clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); }, 5000);
-          return;
-        }
-        clearTimeout(pendingClearTimer); pendingClearClick = false;
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history', { method: 'DELETE' })
-          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-          .then(function (resp) { clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); loadPage(false); if (window.console) console.log('deleted', resp.deleted_count, 'events'); })
-          .catch(function () { alert('Loeschen fehlgeschlagen.'); clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); });
-      });
-      loadPage(false);
-    })();
-  </script>
+  var pwBtn = grid.querySelector('[data-action="reset-password"]');
+  if (pwBtn) { pwBtn.addEventListener('click', function () { openModal('password-modal'); }); var pwForm = document.querySelector('[data-bind="password-form"]'); if (pwForm) pwForm.addEventListener('submit', function (e) { e.preventDefault(); var n = pwForm.elements['new_password'].value, c = pwForm.elements['confirm_password'].value; if (n !== c) { toast('Passwörter stimmen nicht überein', 'error'); return; } if (n.length < 8) { toast('Mindestens 8 Zeichen', 'error'); return; } postJSON('/a/viewers/' + encodeURIComponent(mac) + '/password', { new_password: n }).then(function () { pwForm.reset(); closeModal(document.getElementById('password-modal')); toast('Passwort gesetzt'); }).catch(function (e2) { toast(firstLine(e2, 'Speichern fehlgeschlagen'), 'error'); }); }); }
+
+  var tokBtn = grid.querySelector('[data-action="regen-token"]');
+  if (tokBtn) {
+    tokBtn.addEventListener('click', function () { openModal('token-confirm-modal'); });
+    var conf = document.querySelector('[data-action="token-regen-confirm"]');
+    if (conf) conf.addEventListener('click', function () { fetch('/a/viewers/' + encodeURIComponent(mac) + '/regenerate-token', { method: 'POST', headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m); }); return r.json(); }).then(function (resp) { closeModal(document.getElementById('token-confirm-modal')); var d = document.querySelector('[data-bind="token-value"]'); if (d) d.textContent = resp.new_token || ''; openModal('token-display-modal'); }).catch(function (e) { toast(firstLine(e, 'Token-Regeneration fehlgeschlagen'), 'error'); }); });
+    var cpy = document.querySelector('[data-action="token-copy"]');
+    if (cpy) cpy.addEventListener('click', function () { var d = document.querySelector('[data-bind="token-value"]'); if (!d) return; var t = d.textContent || ''; if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { toast('Token in Zwischenablage'); }); });
+  }
+
+  // ---- doors (1:n) ----
+  (function () {
+    var section = document.getElementById('doors-section');
+    if (!section) return;
+    var list = section.querySelector('[data-bind="assigned-doors"]'), noDoors = section.querySelector('[data-bind="no-doors"]'), addSelect = section.querySelector('[data-bind="door-add-select"]');
+    function rows() { return list.querySelectorAll('li[data-door-id]'); }
+    function doorIDs() { return Array.prototype.map.call(rows(), function (li) { return li.getAttribute('data-door-id'); }); }
+    function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
+    function makeRow(id, name) { var li = document.createElement('li'); li.className = 'vd-door-row'; li.setAttribute('data-door-id', id); var s = document.createElement('span'); s.className = 'vd-door-name'; s.textContent = name || id; var b = document.createElement('button'); b.type = 'button'; b.className = 'vd-ghost btn-sm door-remove'; b.setAttribute('data-action', 'remove-door'); b.setAttribute('data-door-id', id); b.textContent = 'Entfernen'; li.appendChild(s); li.appendChild(b); return li; }
+    function doorURL(id) { return '/a/viewers/' + encodeURIComponent(mac) + '/doors/' + encodeURIComponent(id); }
+    fetch('/a/doors.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { doors: [] }; }).catch(function () { return { doors: [] }; }).then(function (d) {
+      var nameByID = {}; (d.doors || []).forEach(function (dr) { nameByID[dr.door_id] = dr.name || dr.door_id; var o = document.createElement('option'); o.value = dr.door_id; o.textContent = dr.name || dr.door_id; addSelect.appendChild(o); });
+      Array.prototype.forEach.call(rows(), function (li) { var id = li.getAttribute('data-door-id'); var sp = li.querySelector('.vd-door-name'); if (sp && nameByID[id] && sp.textContent === id) sp.textContent = nameByID[id]; });
+    });
+    addSelect.addEventListener('change', function () { var id = addSelect.value; if (!id) return; if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); addSelect.value = ''; return; } var name = addSelect.options[addSelect.selectedIndex].textContent; addSelect.disabled = true; fetch(doorURL(id) + '?label=' + encodeURIComponent(name), { method: 'POST', headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m); }); return r.json(); }).then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tür hinzugefügt'); }).catch(function (e) { toast(firstLine(e, 'Hinzufügen fehlgeschlagen'), 'error'); }).then(function () { addSelect.value = ''; addSelect.disabled = false; }); });
+    list.addEventListener('click', function (e) { var rem = e.target.closest('[data-action="remove-door"]'); if (!rem) return; var li = rem.closest('li[data-door-id]'); var id = li.getAttribute('data-door-id'); rem.disabled = true; fetch(doorURL(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m); }); return r.json(); }).then(function () { li.remove(); refreshEmpty(); toast('Tür entfernt'); }).catch(function (e2) { rem.disabled = false; toast(firstLine(e2, 'Entfernen fehlgeschlagen'), 'error'); }); });
+  })();
+
+  // ---- history (in modal) ----
+  (function () {
+    var section = document.getElementById('history-section');
+    if (!section) return;
+    var tbody = document.getElementById('history-tbody'), emptyEl = document.getElementById('history-empty'), loadMoreBtn = document.getElementById('history-load-more');
+    var fromInput = document.getElementById('history-filter-from'), toInput = document.getElementById('history-filter-to');
+    var nextOffset = 0, pendingClear = false, pendingTimer = null;
+    var TRASH = '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+    var EYE = '<svg class="hidden-icon" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+    function renderRow(ev) { var tr = document.createElement('tr'); tr.setAttribute('data-event-id', String(ev.id)); if (ev.hidden_by_viewer) tr.classList.add('hidden-by-viewer'); var d = document.createElement('td'); d.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang'; if (ev.hidden_by_viewer) { var s = document.createElement('span'); s.innerHTML = EYE; d.appendChild(s); } tr.appendChild(d); var w = document.createElement('td'); w.textContent = ev.when; tr.appendChild(w); var a = document.createElement('td'); a.className = 'row-action'; var b = document.createElement('button'); b.className = 'btn-icon-trash'; b.type = 'button'; b.setAttribute('data-event-id', String(ev.id)); b.innerHTML = TRASH; a.appendChild(b); tr.appendChild(a); return tr; }
+    function loadPage(append) { var p = new URLSearchParams(); p.set('offset', append ? String(nextOffset) : '0'); p.set('limit', '50'); if (fromInput.value) p.set('from', fromInput.value); if (toInput.value) p.set('to', toInput.value); fetch('/a/viewers/' + encodeURIComponent(mac) + '/history?' + p, { headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); }).then(function (resp) { if (!append) { tbody.innerHTML = ''; nextOffset = 0; } (resp.events || []).forEach(function (ev) { tbody.appendChild(renderRow(ev)); }); loadMoreBtn.hidden = !resp.has_more; nextOffset = resp.next_offset || (nextOffset + (resp.events || []).length); emptyEl.hidden = tbody.children.length > 0; }).catch(function () {}); }
+    tbody.addEventListener('click', function (e) { var b = e.target.closest('.btn-icon-trash'); if (!b) return; if (!confirm('Diesen Eintrag dauerhaft löschen?')) return; fetch('/a/viewers/' + encodeURIComponent(mac) + '/history/' + b.getAttribute('data-event-id'), { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('x'); loadPage(false); }).catch(function () { alert('Löschen fehlgeschlagen.'); }); });
+    document.getElementById('history-filter-apply').addEventListener('click', function () { loadPage(false); });
+    document.getElementById('history-filter-reset').addEventListener('click', function () { fromInput.value = ''; toInput.value = ''; loadPage(false); });
+    loadMoreBtn.addEventListener('click', function () { loadPage(true); });
+    document.getElementById('history-clear-all').addEventListener('click', function () { var btn = this; if (!pendingClear) { pendingClear = true; btn.textContent = 'Wirklich? Nochmal klicken'; pendingTimer = setTimeout(function () { pendingClear = false; btn.textContent = 'Verlauf leeren'; }, 5000); return; } clearTimeout(pendingTimer); pendingClear = false; fetch('/a/viewers/' + encodeURIComponent(mac) + '/history', { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('x'); return r.json(); }).then(function () { btn.textContent = 'Verlauf leeren'; loadPage(false); }).catch(function () { alert('Löschen fehlgeschlagen.'); btn.textContent = 'Verlauf leeren'; }); });
+    loadPage(false);
+  })();
+
+  void type;
+})();
+</script>
 {{end}}

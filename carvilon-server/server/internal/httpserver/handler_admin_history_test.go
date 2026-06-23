@@ -30,11 +30,12 @@ func TestAdminViewerDetail_RendersStammdaten(t *testing.T) {
 	if !contains(body, testViewerName) {
 		t.Errorf("detail body missing viewer name %q", testViewerName)
 	}
-	if !contains(body, "Stammdaten") {
-		t.Errorf("detail body missing 'Stammdaten'")
+	// S20 card grid: stammdaten are inline cells (no "Stammdaten" heading).
+	if !contains(body, "Mieter-Name") {
+		t.Errorf("detail body missing the Mieter-Name cell")
 	}
 	if !contains(body, "history-section") {
-		t.Errorf("detail body missing history-section anchor")
+		t.Errorf("detail body missing history-section anchor (Verlauf modal)")
 	}
 }
 
