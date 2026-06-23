@@ -60,6 +60,10 @@
   .vd-grid:not(.is-config) .vd-cell[data-feature-key][data-exposure="hidden"] { display:none; }
   .vd-grid.is-config .vd-cell[data-feature-key] { box-shadow:var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
   .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
+  /* idle-mode dependency: an option cell shows only for the matching idle mode
+     (see data-idle-dep). Independent of the master switch — applies in both
+     normal and config mode. */
+  .vd-cell.vd-idle-off { display:none; }
 
   /* 3-state visibility checktoggle: X / check / lock */
   .vd-vis { display:inline-flex; gap:2px; padding:2px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
@@ -173,12 +177,12 @@
 
   <div class="vd-grid" id="vd-grid" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
     {{range .Page.Features}}
-    <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}">
+    <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}"{{if or (eq .Key "auto_screensaver_seconds") (eq .Key "keep_stream_in_screensaver") (eq .Key "clock_layout")}} data-idle-dep="screensaver"{{else if eq .Key "keep_stream_in_screen_off"}} data-idle-dep="screensaver screen_off"{{end}}>
       <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{{if or (eq .Key "idle_view_mode") (eq .Key "keep_stream_in_screensaver")}}<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>{{else if or (eq .Key "keep_stream_in_screen_off") (eq .Key "resolution_mode")}}<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>{{else if or (eq .Key "auto_screensaver_seconds") (eq .Key "clock_layout")}}<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>{{else if eq .Key "language"}}<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>{{else if eq .Key "history_capture_enabled"}}<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>{{else if eq .Key "path_mode"}}<rect x="2" y="14" width="20" height="8" rx="2"/><path d="M15 10v4"/><path d="M17.84 7.17a4 4 0 0 0-5.66 0"/><path d="M20.66 4.34a8 8 0 0 0-11.31 0"/>{{else}}<circle cx="12" cy="12" r="9"/>{{end}}</svg></span>
       <span class="vd-lab"><span class="vd-name">{{.Label}}{{if not .Licensed}}<svg class="vd-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>{{end}}</span>{{if not .Licensed}}<span class="vd-hint" style="color:#d8745f">nicht im Abo · Premium</span>{{end}}</span>
       <span class="vd-val{{if or (eq .Exposure "hidden") (eq .Exposure "bookable")}} dim{{end}}">
         {{if eq .Key "idle_view_mode"}}
-          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Bildschirmschoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Live-Stream</label><label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Schwarzbild</label></span>
+          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Bildschirmschoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Live-Stream</label><label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Bildschirm ausschalten</label></span>
         {{else if eq .Key "clock_layout"}}
           <span class="vd-seg"><label><input type="radio" name="clock_layout" value="vertical" {{if eq $.Page.ClockLayout "vertical"}}checked{{end}}>Vertikal</label><label><input type="radio" name="clock_layout" value="horizontal" {{if eq $.Page.ClockLayout "horizontal"}}checked{{end}}>Horizontal</label></span>
         {{else if eq .Key "auto_screensaver_seconds"}}
@@ -211,7 +215,7 @@
     {{if eq .Page.Type "esp"}}
     <!-- ESP hardware settings (not in the mockup -> designed in the same cell
          style; admin-config, no tenant exposure) -->
-    <div class="vd-cell" data-setting>
+    <div class="vd-cell" data-setting data-idle-dep="screen_off">
       <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></span>
       <span class="vd-lab"><span class="vd-name">Bildschirm aus nach</span></span>
       <span class="vd-val"><span class="vd-seg">
@@ -425,7 +429,22 @@
     var cell = inp.closest('.vd-cell');
     if (cell && cell.hasAttribute('data-stamm')) return; // stammdaten handled below
     if (inp.type === 'radio') saveSetting(inp.name, inp.value);
+    if (inp.name === 'idle_view_mode') applyIdleDeps();
   });
+
+  // ---- idle-mode dependency: each dependent option shows only for the matching
+  // idle mode (data-idle-dep). Screensaver -> auto-time + screensaver-keep +
+  // clock + display-off-keep; Bildschirm ausschalten -> screen-off time +
+  // display-off-keep; Live-Stream -> none. Independent of the master switch. ----
+  function applyIdleDeps() {
+    var sel = grid.querySelector('input[name="idle_view_mode"]:checked');
+    var idle = sel ? sel.value : 'screensaver';
+    grid.querySelectorAll('[data-idle-dep]').forEach(function (cell) {
+      var modes = cell.getAttribute('data-idle-dep').split(' ');
+      cell.classList.toggle('vd-idle-off', modes.indexOf(idle) === -1);
+    });
+  }
+  applyIdleDeps();
   // brightness slider (ESP): live % + debounced save
   var bright = grid.querySelector('[data-vd-bright]');
   if (bright) { var brightVal = grid.querySelector('[data-vd-bright-val]'); var bt = null; bright.addEventListener('input', function () { if (brightVal) brightVal.textContent = bright.value + '%'; if (bt) clearTimeout(bt); bt = setTimeout(function () { saveSetting('brightness_idle', bright.value); }, 300); }); }
