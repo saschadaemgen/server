@@ -53,12 +53,15 @@ const (
 )
 
 // KnownExposures is the set accepted today (admin/seed writes are validated
-// against it). ExposureBookable is deliberately absent until the abo/license
-// server gives it meaning.
+// against it). Saison 20: ExposureBookable is now accepted as a STATE only
+// (the admin "🔒 buchbar" CheckToggle position) - it resolves like Hidden
+// (default forced, tenant sees nothing) until the abo/license server gives it
+// offer/price logic. No migration: exposure is free TEXT, Go-validated.
 var KnownExposures = map[string]bool{
 	ExposureTenantVisible: true,
 	ExposureAdminOnly:     true,
 	ExposureHidden:        true,
+	ExposureBookable:      true,
 }
 
 // ValidExposure reports whether s is an accepted exposure value today.

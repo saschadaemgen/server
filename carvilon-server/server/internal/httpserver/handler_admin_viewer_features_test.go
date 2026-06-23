@@ -44,7 +44,6 @@ func TestAdminViewerExposure_Rejects(t *testing.T) {
 	cases := []map[string]any{
 		{"feature_key": "does_not_exist", "exposure": featuregate.ExposureHidden},
 		{"feature_key": featuregate.KeyClockLayout, "exposure": "bananas"},
-		{"feature_key": featuregate.KeyClockLayout, "exposure": featuregate.ExposureBookable}, // reserved, not yet valid
 	}
 	for _, body := range cases {
 		resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/exposure", body)

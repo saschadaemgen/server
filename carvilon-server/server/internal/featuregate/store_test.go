@@ -82,8 +82,9 @@ func TestStore_SnapshotForViewer_EndToEnd(t *testing.T) {
 func TestStore_SetViewerExposure_RejectsInvalid(t *testing.T) {
 	st, d := newTestStore(t)
 	insertViewer(t, d, "EE:FF", viewermanager.TypeAndroid, 9050)
-	if err := st.SetViewerExposure(context.Background(), "EE:FF", KeyKeepStreamInScreensaver, "bookable"); err == nil {
-		t.Errorf("SetViewerExposure(bookable): want error (reserved, not yet active)")
+	// Saison 20: bookable is now an accepted state (resolves like hidden).
+	if err := st.SetViewerExposure(context.Background(), "EE:FF", KeyKeepStreamInScreensaver, "bookable"); err != nil {
+		t.Errorf("SetViewerExposure(bookable): want accepted, got %v", err)
 	}
 	if err := st.SetViewerExposure(context.Background(), "EE:FF", KeyKeepStreamInScreensaver, "nonsense"); err == nil {
 		t.Errorf("SetViewerExposure(nonsense): want error")

@@ -84,8 +84,10 @@ func Resolve(f Feature, snap Snapshot, info *viewermanager.ViewerInfo) Effective
 	var value any
 	if licensed {
 		switch {
-		case exposure == ExposureHidden:
-			// hidden forces the catalog/type default; any override is ignored.
+		case exposure == ExposureHidden || exposure == ExposureBookable:
+			// hidden + bookable force the catalog/type default; any override is
+			// ignored and the tenant sees nothing (bookable has no offer logic
+			// yet - it is a state only, resolving like hidden).
 			value = defaultValue(f, info)
 		case info != nil && f.ViewerValueSet != nil && f.ViewerValueSet(info):
 			value = resolveValue(f, info) // explicit viewer column wins

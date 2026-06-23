@@ -174,13 +174,11 @@ func TestResolve_GenericIntTemplateValue(t *testing.T) {
 }
 
 func TestValidExposure(t *testing.T) {
-	for _, e := range []string{ExposureTenantVisible, ExposureAdminOnly, ExposureHidden} {
+	// Saison 20: bookable is now a valid state (resolves like hidden).
+	for _, e := range []string{ExposureTenantVisible, ExposureAdminOnly, ExposureHidden, ExposureBookable} {
 		if !ValidExposure(e) {
 			t.Errorf("ValidExposure(%q) = false, want true", e)
 		}
-	}
-	if ValidExposure(ExposureBookable) {
-		t.Errorf("ValidExposure(bookable) = true, want false (reserved, not yet active)")
 	}
 	if ValidExposure("nonsense") {
 		t.Errorf("ValidExposure(nonsense) = true, want false")
