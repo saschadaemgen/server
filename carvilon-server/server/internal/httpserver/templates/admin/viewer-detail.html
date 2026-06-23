@@ -36,8 +36,9 @@
   .vd-sw.sm.is-on .knob { left:19px; }
 
   /* grid + cells */
-  .vd-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--grid-gap); margin-top:2px; }
-  .vd-span2 { grid-column:1 / -1; }
+  /* one tile shape only: equal-width cells in a 2-col grid. No full-width
+     tile, ever (owner rule). What doesn't fit is offloaded (Verlauf -> modal). */
+  .vd-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--grid-gap); margin-top:2px; align-items:start; }
   .vd-cell { display:flex; align-items:center; gap:var(--space-7); min-height:56px; padding:var(--space-5) var(--space-6); border-radius:var(--radius-md); background:var(--surface-cell); box-shadow:var(--elev-1); }
   .vd-cell .vd-ico { flex:none; width:30px; height:30px; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent-text); }
   .vd-cell .vd-lab { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 auto; }
@@ -112,7 +113,6 @@
   /* responsive: collapse the grid + identity to one column */
   @media (max-width: 760px) {
     .vd-grid { grid-template-columns:1fr; }
-    .vd-span2 { grid-column:1; }
     .vd-id { align-items:flex-start; }
     .vd-id-right { width:100%; }
     .vd-cell { flex-wrap:wrap; }
@@ -241,14 +241,14 @@
     {{end}}
 
     <!-- Abo (read-only) -->
-    <div class="vd-cell vd-span2">
+    <div class="vd-cell">
       <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></span>
       <span class="vd-lab"><span class="vd-name">Abo</span>{{with .Page.License}}<span class="vd-hint">{{if .PlanName}}{{.PlanName}}{{else}}—{{end}} · {{.ViewerCount}} / {{.ViewerLimit}} Viewer · gültig bis {{.ValidUntil}}</span>{{else}}<span class="vd-hint">Kein Abo hinterlegt.</span>{{end}}</span>
       <span class="vd-val"></span>
     </div>
 
     <!-- Tür-Zuordnung (1:n) as one full-width card -->
-    <div class="vd-cell vd-span2" id="doors-section" data-viewer-mac="{{.Page.MAC}}" style="display:block">
+    <div class="vd-cell" id="doors-section" data-viewer-mac="{{.Page.MAC}}" style="display:block">
       <div class="vd-card-title">Tür-Zuordnung</div>
       <ul class="vd-door-list" data-bind="assigned-doors">
         {{range .Page.AssignedDoors}}
