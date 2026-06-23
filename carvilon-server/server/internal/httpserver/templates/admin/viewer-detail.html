@@ -64,6 +64,16 @@
      (see data-idle-dep). Independent of the master switch — applies in both
      normal and config mode. */
   .vd-cell.vd-idle-off { display:none; }
+  /* Layout order: the idle selector and its dependents are pulled to the front
+     of the grid in (time, keep, clock) order, so when a mode reveals them they
+     appear directly UNDER the idle row, not above it. Everything else keeps its
+     source order (default 0). */
+  #vd-grid > [data-feature-key="idle_view_mode"] { order:-10; }
+  #vd-grid > [data-feature-key="auto_screensaver_seconds"] { order:-9; }
+  #vd-grid > [data-feature-key="keep_stream_in_screensaver"] { order:-8; }
+  #vd-grid > [data-feature-key="clock_layout"] { order:-7; }
+  #vd-grid > [data-setting][data-idle-dep="screen_off"] { order:-6; }
+  #vd-grid > [data-feature-key="keep_stream_in_screen_off"] { order:-5; }
 
   /* 3-state visibility checktoggle: X / check / lock */
   .vd-vis { display:inline-flex; gap:2px; padding:2px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
@@ -177,7 +187,7 @@
 
   <div class="vd-grid" id="vd-grid" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
     {{range .Page.Features}}
-    <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}"{{if or (eq .Key "auto_screensaver_seconds") (eq .Key "keep_stream_in_screensaver") (eq .Key "clock_layout")}} data-idle-dep="screensaver"{{else if eq .Key "keep_stream_in_screen_off"}} data-idle-dep="screensaver screen_off"{{end}}>
+    <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}"{{if or (eq .Key "auto_screensaver_seconds") (eq .Key "keep_stream_in_screensaver") (eq .Key "clock_layout")}} data-idle-dep="screensaver"{{else if eq .Key "keep_stream_in_screen_off"}} data-idle-dep="screen_off"{{end}}>
       <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{{if or (eq .Key "idle_view_mode") (eq .Key "keep_stream_in_screensaver")}}<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>{{else if or (eq .Key "keep_stream_in_screen_off") (eq .Key "resolution_mode")}}<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>{{else if or (eq .Key "auto_screensaver_seconds") (eq .Key "clock_layout")}}<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>{{else if eq .Key "language"}}<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>{{else if eq .Key "history_capture_enabled"}}<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>{{else if eq .Key "path_mode"}}<rect x="2" y="14" width="20" height="8" rx="2"/><path d="M15 10v4"/><path d="M17.84 7.17a4 4 0 0 0-5.66 0"/><path d="M20.66 4.34a8 8 0 0 0-11.31 0"/>{{else}}<circle cx="12" cy="12" r="9"/>{{end}}</svg></span>
       <span class="vd-lab"><span class="vd-name">{{.Label}}{{if not .Licensed}}<svg class="vd-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>{{end}}</span>{{if not .Licensed}}<span class="vd-hint" style="color:#d8745f">nicht im Abo · Premium</span>{{end}}</span>
       <span class="vd-val{{if or (eq .Exposure "hidden") (eq .Exposure "bookable")}} dim{{end}}">
