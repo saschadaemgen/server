@@ -74,6 +74,8 @@
   #vd-grid > [data-feature-key="clock_layout"] { order:-7; }
   #vd-grid > [data-setting][data-idle-dep="screen_off"] { order:-6; }
   #vd-grid > [data-feature-key="keep_stream_in_screen_off"] { order:-5; }
+  /* idle cell: keep the title on a single line (no two-line "Idle-Ansicht"). */
+  #vd-grid > [data-feature-key="idle_view_mode"] .vd-name { white-space:nowrap; }
 
   /* 3-state visibility checktoggle: X / check / lock */
   .vd-vis { display:inline-flex; gap:2px; padding:2px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
@@ -192,7 +194,7 @@
       <span class="vd-lab"><span class="vd-name">{{.Label}}{{if not .Licensed}}<svg class="vd-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>{{end}}</span>{{if not .Licensed}}<span class="vd-hint" style="color:#d8745f">nicht im Abo · Premium</span>{{end}}</span>
       <span class="vd-val{{if or (eq .Exposure "hidden") (eq .Exposure "bookable")}} dim{{end}}">
         {{if eq .Key "idle_view_mode"}}
-          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Bildschirmschoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Live-Stream</label><label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Bildschirm ausschalten</label></span>
+          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Bildschirmschoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Live-Stream</label><label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Display aus</label></span>
         {{else if eq .Key "clock_layout"}}
           <span class="vd-seg"><label><input type="radio" name="clock_layout" value="vertical" {{if eq $.Page.ClockLayout "vertical"}}checked{{end}}>Vertikal</label><label><input type="radio" name="clock_layout" value="horizontal" {{if eq $.Page.ClockLayout "horizontal"}}checked{{end}}>Horizontal</label></span>
         {{else if eq .Key "auto_screensaver_seconds"}}
@@ -241,6 +243,18 @@
       <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg></span>
       <span class="vd-lab"><span class="vd-name">Helligkeit</span></span>
       <span class="vd-val" style="gap:10px"><input type="range" name="brightness_idle" min="0" max="100" step="1" value="{{.Page.BrightnessIdle}}" data-vd-bright><span data-vd-bright-val style="font:var(--type-value);color:var(--text-secondary)">{{.Page.BrightnessIdle}}%</span></span>
+    </div>
+    {{end}}
+
+    {{if eq .Page.Type "android"}}
+    <!-- Android has no app-controlled backlight timer (screen_off_after_sec is an
+         ESP-hardware field, deliberately omitted from the phone's settings.json).
+         Instead of an empty/half row in "Display aus", state honestly that the
+         display timeout is governed by the device. -->
+    <div class="vd-cell" data-setting data-idle-dep="screen_off">
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Bildschirm aus nach</span></span>
+      <span class="vd-val"><span class="vd-hint">geräteseitig (Android-Systemeinstellung)</span></span>
     </div>
     {{end}}
 
