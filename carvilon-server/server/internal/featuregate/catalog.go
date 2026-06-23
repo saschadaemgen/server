@@ -24,6 +24,10 @@ const (
 	KeyLanguage               = "language"
 	KeyHistoryCaptureEnabled  = "history_capture_enabled"
 	KeyResolutionMode         = "resolution_mode"
+	// KeyPathMode (Verbindungsweg) joins the catalog in S20 so its row carries
+	// the exposure controls too. Exposure-only (value stays in the handler);
+	// migration 029 made viewers.path_mode nullable so it can inherit.
+	KeyPathMode = "path_mode"
 )
 
 // catalog is the function registry, built once. Closures capture nothing, so a
@@ -89,6 +93,7 @@ var catalog = []Feature{
 	{Key: KeyLanguage, Type: TypeEnum, DefaultLicensed: true, Column: "language"},
 	{Key: KeyHistoryCaptureEnabled, Type: TypeBool, DefaultLicensed: true, Column: "history_capture_enabled"},
 	{Key: KeyResolutionMode, Type: TypeEnum, DefaultLicensed: true, Column: "resolution_mode"},
+	{Key: KeyPathMode, Type: TypeEnum, DefaultLicensed: true, Column: "path_mode"},
 }
 
 var catalogByKey = func() map[string]Feature {

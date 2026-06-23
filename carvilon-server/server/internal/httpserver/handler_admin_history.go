@@ -78,6 +78,11 @@ type adminViewerDetailData struct {
 	// X/check/lock) from the one exposure axis (Option-A mapping).
 	ExposureByKey map[string]string
 	LicensedByKey map[string]bool
+	// Manage-box counters (Vorlage): how many catalog functions are hidden
+	// from the tenant, vs active, out of the total.
+	HiddenCount  int
+	ActiveCount  int
+	FeatureTotal int
 }
 
 func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +156,14 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	// a feature-store error degrades to sane defaults (see the builders).
 	data.Features = s.buildViewerFeatureRows(r.Context(), info)
 	data.ExposureByKey, data.LicensedByKey = s.buildExposureMaps(r.Context(), info)
+	data.FeatureTotal = len(data.ExposureByKey)
+	for _, e := range data.ExposureByKey {
+		if e == "hidden" {
+			data.HiddenCount++
+		} else {
+			data.ActiveCount++
+		}
+	}
 	data.TemplateOptions, data.HasTemplate, data.TemplateName = s.buildTemplateSection(r.Context(), mac)
 	data.License = s.buildAboView(r.Context())
 	s.renderAdminPage(w, "viewer-detail", data)

@@ -604,20 +604,17 @@ func TestAdminViewerDetail_WebHidesESPSettings(t *testing.T) {
 	defer resp.Body.Close()
 	markup := detailPageMarkup(readBody(t, resp))
 
+	// ESP-hardware-only fields stay hidden on web. (S20: keep_stream + the
+	// 3-option idle now appear on every type per the design, so they are no
+	// longer in this list.)
 	for _, espField := range []string{
 		`name="brightness_idle"`,
 		`name="screen_off_after_sec"`,
 		`name="language"`,
-		`name="keep_stream_in_screensaver"`,
-		`name="keep_stream_in_screen_off"`,
 	} {
 		if contains(markup, espField) {
 			t.Errorf("ESP-Settings-Field %q ist im Web-Viewer-Markup sichtbar", espField)
 		}
-	}
-	// Web-Viewer hat NICHT screen_off als idle_view_mode Option.
-	if contains(markup, `value="screen_off"`) {
-		t.Errorf("idle_view_mode=screen_off Option im Web-Viewer sichtbar (sollte nur bei ESP)")
 	}
 }
 

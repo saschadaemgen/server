@@ -50,10 +50,12 @@
   .vd-cell.is-locked .vd-val { pointer-events:none; filter:saturate(0.35); }
   .vd-cell.is-locked .vd-trail { pointer-events:none; opacity:0.5; }
   .vd-lock { color:var(--lock); }
-  /* config-mode trailing: hidden until master switch on */
-  .vd-trail { display:none; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
-  .vd-grid.is-config .vd-trail { display:flex; }
-  .vd-grid.is-config .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
+  /* the management controls (active switch + visibility) are ALWAYS visible in
+     every catalog row — admin rights, never hidden. The master switch only
+     changes the optic (highlights config mode), it does not toggle them. */
+  .vd-trail { display:flex; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
+  .vd-grid.is-config .vd-cell[data-feature-key] { box-shadow:var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
 
   /* 3-state visibility checktoggle: X / check / lock */
   .vd-vis { display:inline-flex; gap:2px; padding:2px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
@@ -91,8 +93,13 @@
   .door-empty { font:var(--type-data); color:var(--text-tertiary); margin:var(--space-3) 0 0; }
   .vd-card-title { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; color:var(--text-tertiary); margin:0 0 var(--space-5); }
 
-  /* history modal table */
-  .vd-hist-wide .admin-modal-glass { width:min(760px,94vw); }
+  /* history modal: bounded, centered, header + filter fixed, list inner-scroll */
+  .vd-hist-wide .admin-modal-glass { width:min(760px,94vw); max-height:80vh; display:flex; flex-direction:column; }
+  .vd-hist-wide .admin-modal-glass h3 { flex:none; }
+  .vd-hist-wide #history-section { display:flex; flex-direction:column; min-height:0; flex:1 1 auto; }
+  .vd-hist-wide .hist-filter { flex:none; }
+  .vd-hist-scroll { overflow:auto; min-height:0; flex:1 1 auto; }
+  .vd-hist-wide .modal-actions { flex:none; }
   .history-table { width:100%; border-collapse:collapse; }
   .history-table th { text-align:left; padding:var(--space-4) var(--space-5); border-bottom:1px solid var(--divider); font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
   .history-table td { padding:var(--space-4) var(--space-5); border-bottom:1px solid var(--divider); font:var(--type-label); color:var(--text-primary); }
@@ -147,7 +154,7 @@
         </span>
       </div>
       <div class="vd-manage" data-vd-manage>
-        <div style="display:flex;flex-direction:column;gap:2px"><span class="eyebrow">Aktivierung verwalten</span><span class="sub" data-vd-manage-sub>Normal-Ansicht</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px"><span class="eyebrow">Aktivierung verwalten</span><span class="sub" data-vd-manage-sub>{{if gt .Page.HiddenCount 0}}{{.Page.HiddenCount}} ausgeblendet{{else}}{{.Page.ActiveCount}}/{{.Page.FeatureTotal}} aktiv{{end}}</span></div>
         <button type="button" class="vd-sw" data-vd-config role="switch" aria-label="Aktivierung verwalten"><span class="knob"></span></button>
       </div>
       <button type="button" class="vd-ghost" data-vd-history-open><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>Verlauf</button>
@@ -157,23 +164,25 @@
   <div class="vd-grid" id="vd-grid" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
     {{range .Page.Features}}
     <div class="vd-cell{{if not .Licensed}} is-locked{{end}}" data-feature-key="{{.Key}}" data-exposure="{{.Exposure}}">
-      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/></svg></span>
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{{if or (eq .Key "idle_view_mode") (eq .Key "keep_stream_in_screensaver")}}<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>{{else if or (eq .Key "keep_stream_in_screen_off") (eq .Key "resolution_mode")}}<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>{{else if or (eq .Key "auto_screensaver_seconds") (eq .Key "clock_layout")}}<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>{{else if eq .Key "language"}}<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>{{else if eq .Key "history_capture_enabled"}}<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>{{else if eq .Key "path_mode"}}<rect x="2" y="14" width="20" height="8" rx="2"/><path d="M15 10v4"/><path d="M17.84 7.17a4 4 0 0 0-5.66 0"/><path d="M20.66 4.34a8 8 0 0 0-11.31 0"/>{{else}}<circle cx="12" cy="12" r="9"/>{{end}}</svg></span>
       <span class="vd-lab"><span class="vd-name">{{.Label}}{{if not .Licensed}}<svg class="vd-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>{{end}}</span>{{if not .Licensed}}<span class="vd-hint" style="color:#d8745f">nicht im Abo · Premium</span>{{end}}</span>
       <span class="vd-val{{if or (eq .Exposure "hidden") (eq .Exposure "bookable")}} dim{{end}}">
         {{if eq .Key "idle_view_mode"}}
-          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Schoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Stream</label>{{if eq $.Page.Type "esp"}}<label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Aus</label>{{end}}</span>
+          <span class="vd-seg"><label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq $.Page.IdleViewMode "screensaver"}}checked{{end}}>Bildschirmschoner</label><label><input type="radio" name="idle_view_mode" value="livestream" {{if eq $.Page.IdleViewMode "livestream"}}checked{{end}}>Live-Stream</label><label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq $.Page.IdleViewMode "screen_off"}}checked{{end}}>Schwarzbild</label></span>
         {{else if eq .Key "clock_layout"}}
           <span class="vd-seg"><label><input type="radio" name="clock_layout" value="vertical" {{if eq $.Page.ClockLayout "vertical"}}checked{{end}}>Vertikal</label><label><input type="radio" name="clock_layout" value="horizontal" {{if eq $.Page.ClockLayout "horizontal"}}checked{{end}}>Horizontal</label></span>
         {{else if eq .Key "auto_screensaver_seconds"}}
-          <span class="vd-seg"><label><input type="radio" name="auto_screensaver_seconds" value="0" {{if eq $.Page.AutoScreensaverSeconds 0}}checked{{end}}>aus</label><label><input type="radio" name="auto_screensaver_seconds" value="30" {{if eq $.Page.AutoScreensaverSeconds 30}}checked{{end}}>30s</label><label><input type="radio" name="auto_screensaver_seconds" value="60" {{if eq $.Page.AutoScreensaverSeconds 60}}checked{{end}}>1m</label><label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq $.Page.AutoScreensaverSeconds 300}}checked{{end}}>5m</label><label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq $.Page.AutoScreensaverSeconds 600}}checked{{end}}>10m</label></span>
+          <span class="vd-seg"><label><input type="radio" name="auto_screensaver_seconds" value="0" {{if eq $.Page.AutoScreensaverSeconds 0}}checked{{end}}>aus</label><label><input type="radio" name="auto_screensaver_seconds" value="30" {{if eq $.Page.AutoScreensaverSeconds 30}}checked{{end}}>30 Sek</label><label><input type="radio" name="auto_screensaver_seconds" value="60" {{if eq $.Page.AutoScreensaverSeconds 60}}checked{{end}}>1 Min</label><label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq $.Page.AutoScreensaverSeconds 300}}checked{{end}}>5 Min</label><label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq $.Page.AutoScreensaverSeconds 600}}checked{{end}}>10 Min</label></span>
         {{else if eq .Key "resolution_mode"}}
           <span class="vd-seg"><label><input type="radio" name="resolution_mode" value="high" {{if eq $.Page.ResolutionMode "high"}}checked{{end}}>Hoch</label><label><input type="radio" name="resolution_mode" value="medium" {{if eq $.Page.ResolutionMode "medium"}}checked{{end}}>Mittel</label><label><input type="radio" name="resolution_mode" value="low" {{if eq $.Page.ResolutionMode "low"}}checked{{end}}>Niedrig</label></span>
+        {{else if eq .Key "path_mode"}}
+          <span class="vd-seg"><label><input type="radio" name="path_mode" value="auto" {{if eq $.Page.PathMode "auto"}}checked{{end}}>Auto</label><label><input type="radio" name="path_mode" value="local" {{if eq $.Page.PathMode "local"}}checked{{end}}>LAN</label><label><input type="radio" name="path_mode" value="cloud" {{if eq $.Page.PathMode "cloud"}}checked{{end}}>Cloud</label></span>
         {{else if eq .Key "history_capture_enabled"}}
           <span class="vd-onoff"><label><input type="radio" name="history_capture" value="1" {{if $.Page.HistoryCaptureEnabled}}checked{{end}}>An</label><label><input type="radio" name="history_capture" value="0" {{if not $.Page.HistoryCaptureEnabled}}checked{{end}}>Aus</label></span>
         {{else if and (eq .Key "language") (eq $.Page.Type "esp")}}
-          <span class="vd-seg"><label><input type="radio" name="language" value="de" {{if eq $.Page.Language "de"}}checked{{end}}>DE</label><label><input type="radio" name="language" value="en" {{if eq $.Page.Language "en"}}checked{{end}}>EN</label></span>
+          <span class="vd-seg"><label><input type="radio" name="language" value="de" {{if eq $.Page.Language "de"}}checked{{end}}>Deutsch</label><label><input type="radio" name="language" value="en" {{if eq $.Page.Language "en"}}checked{{end}}>English</label></span>
         {{else if .HasValue}}
-          <span class="vd-onoff"><label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}>Ein</label><label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}>Aus</label></span>
+          <span class="vd-onoff"><label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}>An</label><label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}>Aus</label></span>
         {{else}}
           <span class="vd-hint">&mdash;</span>
         {{end}}
@@ -188,17 +197,6 @@
       </span>
     </div>
     {{end}}
-
-    <!-- Verbindungsweg (WEG-Schalter) — admin config, all types -->
-    <div class="vd-cell" data-setting>
-      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12h7l2-3 2 6 2-3h5"/></svg></span>
-      <span class="vd-lab"><span class="vd-name">Verbindungsweg</span></span>
-      <span class="vd-val"><span class="vd-seg">
-        <label><input type="radio" name="path_mode" value="auto" {{if eq .Page.PathMode "auto"}}checked{{end}}>Auto</label>
-        <label><input type="radio" name="path_mode" value="local" {{if eq .Page.PathMode "local"}}checked{{end}}>LAN</label>
-        <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}>Cloud</label>
-      </span></span>
-    </div>
 
     {{if eq .Page.Type "esp"}}
     <!-- ESP hardware settings (not in the mockup -> designed in the same cell
@@ -292,9 +290,11 @@
           <span class="filter-spacer"></span>
           <button type="button" id="history-clear-all" class="btn-danger-outline">Verlauf leeren</button>
         </div>
-        <table class="history-table"><thead><tr><th>Tür</th><th>Wann</th><th class="row-action"></th></tr></thead><tbody id="history-tbody"></tbody></table>
-        <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
-        <button type="button" class="vd-ghost btn-load-more" id="history-load-more" hidden>Mehr laden</button>
+        <div class="vd-hist-scroll">
+          <table class="history-table"><thead><tr><th>Tür</th><th>Wann</th><th class="row-action"></th></tr></thead><tbody id="history-tbody"></tbody></table>
+          <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
+          <button type="button" class="vd-ghost btn-load-more" id="history-load-more" hidden>Mehr laden</button>
+        </div>
         <span data-bind="total-count" hidden></span><span data-bind="hidden-count" hidden></span>
       </div>
       <div class="modal-actions"><button type="button" class="vd-ghost" data-action="modal-cancel">Schließen</button></div>
@@ -355,7 +355,7 @@
     grid.classList.toggle('is-config', on);
     configBtn.classList.toggle('is-on', on);
     manage.classList.toggle('is-on', on);
-    if (manageSub) manageSub.textContent = on ? 'Konfigurations-Modus' : 'Normal-Ansicht';
+    if (manageSub) { if (on) { manageSub.dataset.orig = manageSub.dataset.orig || manageSub.textContent; manageSub.textContent = 'Konfigurations-Modus'; } else if (manageSub.dataset.orig) { manageSub.textContent = manageSub.dataset.orig; } }
   });
 
   // ---- exposure (Option A): active switch + 3-state visibility -> /exposure ----

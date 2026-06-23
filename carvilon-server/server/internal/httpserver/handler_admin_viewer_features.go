@@ -65,6 +65,7 @@ var featureLabelsDE = map[string]string{
 	featuregate.KeyLanguage:                "Sprache",
 	featuregate.KeyHistoryCaptureEnabled:   "Verlauf-Erfassung",
 	featuregate.KeyResolutionMode:          "Auflösung",
+	featuregate.KeyPathMode:                "Verbindungsweg",
 }
 
 func featureLabelDE(key string) string {
@@ -83,9 +84,6 @@ func (s *Server) buildViewerFeatureRows(ctx context.Context, info *viewermanager
 	if err != nil {
 		s.log.Warn("viewer detail resolve gates", "err", err, "mac_prefix", safePrefix(info.MAC))
 	}
-	// keep_stream gates a display state; web viewers have none, so they get the
-	// exposure selector only (no value editor), matching the pre-S20 markup.
-	streamDevice := info.Type == viewermanager.TypeESP || info.Type == viewermanager.TypeAndroid
 	cat := featuregate.DefaultCatalog()
 	rows := make([]viewerFeatureRow, 0, len(cat))
 	for _, f := range cat {
@@ -99,10 +97,11 @@ func (s *Server) buildViewerFeatureRows(ctx context.Context, info *viewermanager
 			row.Exposure = eff.Exposure
 			row.Licensed = eff.Licensed
 		}
-		// The value editor shows the column-aware (admin-set) value regardless
-		// of exposure - so the greyed-out editor under "ausgeblendet" still
-		// reflects what the admin stored, not the forced default.
-		if f.Write != nil && streamDevice {
+		// keep_stream value editor shows on every viewer type (Vorlage: every
+		// row has its control). The value is the column-aware (admin-set) value
+		// regardless of exposure, so the greyed editor under hidden/bookable
+		// still shows what was stored.
+		if f.Write != nil {
 			row.HasValue = true
 			row.BoolValue = keepStreamColumnValue(f.Key, info)
 		}
