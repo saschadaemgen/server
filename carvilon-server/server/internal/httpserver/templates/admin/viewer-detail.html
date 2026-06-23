@@ -50,10 +50,14 @@
   .vd-cell.is-locked .vd-val { pointer-events:none; filter:saturate(0.35); }
   .vd-cell.is-locked .vd-trail { pointer-events:none; opacity:0.5; }
   .vd-lock { color:var(--lock); }
-  /* the management controls (active switch + visibility) are ALWAYS visible in
-     every catalog row — admin rights, never hidden. The master switch only
-     changes the optic (highlights config mode), it does not toggle them. */
-  .vd-trail { display:flex; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
+  /* The management controls (active switch + visibility) show ONLY in config
+     mode (the master switch). In normal mode each row shows just its value
+     control, and hidden functions drop OUT of the list entirely — their catalog
+     default applies and neither admin nor tenant sees them. In config mode ALL
+     functions reappear (incl. hidden ones) so the admin can edit / bring back. */
+  .vd-trail { display:none; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
+  .vd-grid.is-config .vd-trail { display:flex; }
+  .vd-grid:not(.is-config) .vd-cell[data-feature-key][data-exposure="hidden"] { display:none; }
   .vd-grid.is-config .vd-cell[data-feature-key] { box-shadow:var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
   .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
 
@@ -369,7 +373,14 @@
     grid.classList.toggle('is-config', on);
     configBtn.classList.toggle('is-on', on);
     manage.classList.toggle('is-on', on);
-    if (manageSub) { if (on) { manageSub.dataset.orig = manageSub.dataset.orig || manageSub.textContent; manageSub.textContent = 'Konfigurations-Modus'; } else if (manageSub.dataset.orig) { manageSub.textContent = manageSub.dataset.orig; } }
+    if (manageSub) {
+      if (on) { manageSub.textContent = 'Konfigurations-Modus'; }
+      else {
+        var h = grid.querySelectorAll('.vd-cell[data-feature-key][data-exposure="hidden"]').length;
+        var tot = grid.querySelectorAll('.vd-cell[data-feature-key]').length;
+        manageSub.textContent = h > 0 ? (h + ' ausgeblendet') : ((tot - h) + '/' + tot + ' aktiv');
+      }
+    }
   });
 
   // ---- exposure (Option A): active switch + 3-state visibility -> /exposure ----
