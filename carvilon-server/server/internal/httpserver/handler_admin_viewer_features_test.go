@@ -151,6 +151,14 @@ func TestAdminViewerDetail_FunctionListMarkup(t *testing.T) {
 	if contains(markup, `data-vis-key`) {
 		t.Errorf("legacy binary visibility markup (data-vis-key) still present")
 	}
+	// Controls that must NOT be lost in the card-grid rebuild (path_mode +
+	// UA-user link are still live settings).
+	if !contains(markup, `name="path_mode"`) {
+		t.Errorf("Verbindungsweg (path_mode) control missing")
+	}
+	if !contains(markup, `name="linked_ua_user_id"`) {
+		t.Errorf("UA-user link (linked_ua_user_id) control missing")
+	}
 }
 
 // TestAdminViewerDetail_AndroidTokenModal locks the redesign fix: the
