@@ -419,6 +419,73 @@
     }
     .settings-field label:hover { background: rgba(255, 255, 255, 0.04); }
     .settings-field input[type="radio"] { accent-color: var(--color-accent); }
+
+    /* Saison 20: Funktionsliste - Wert + Drei-Wege-Sichtbarkeit pro Zeile. */
+    .feature-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 18px;
+      padding: 11px 8px;
+      border-top: 0.5px solid rgba(255, 255, 255, 0.06);
+    }
+    .feature-row:first-of-type { border-top: 0; }
+    .feature-name { font-size: 14px; color: var(--color-text-primary, #f0f4ff); }
+    .feature-locked-tag {
+      font-size: 11px;
+      color: var(--color-accent);
+      border: 0.5px solid var(--color-accent);
+      border-radius: 5px;
+      padding: 1px 6px;
+      margin-left: 6px;
+      white-space: nowrap;
+    }
+    .feature-value { display: inline-flex; gap: 12px; align-items: center; }
+    .feature-value.is-empty { color: var(--color-text-tertiary, #64748b); }
+    .feature-value.is-disabled { opacity: 0.4; }
+    .feature-value label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--color-text-primary, #f0f4ff);
+    }
+    .feature-value input[type="radio"] { accent-color: var(--color-accent); }
+
+    /* Segmented three-way exposure selector (scharf, NI-Maschine-Stil). */
+    .exposure-seg {
+      display: inline-flex;
+      border: 0.5px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .exposure-seg label {
+      position: relative;
+      font-size: 12px;
+      padding: 5px 11px;
+      cursor: pointer;
+      color: var(--color-text-tertiary, #94a3b8);
+      border-left: 0.5px solid rgba(255, 255, 255, 0.10);
+      white-space: nowrap;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .exposure-seg label:first-child { border-left: 0; }
+    .exposure-seg label:hover { background: rgba(255, 255, 255, 0.05); }
+    .exposure-seg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+    .exposure-seg label:has(input:checked) { background: var(--color-accent); color: #0b0f17; font-weight: 600; }
+
+    /* Vorlagen-Auswahl. */
+    .exposure-select {
+      background: rgba(255, 255, 255, 0.04);
+      border: 0.5px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      color: var(--color-text-primary, #f0f4ff);
+      font: inherit;
+      font-size: 14px;
+      padding: 7px 10px;
+      min-width: 240px;
+    }
     .brightness-row {
       display: flex;
       align-items: center;
@@ -816,25 +883,8 @@
         <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
       </fieldset>
 
-      <!-- Saison 20: Stream im Hintergrund halten. Gilt fuer alle Viewer
-           mit Stream (ESP + Android); der Wert ist eine Admin-Vorgabe und
-           schlaegt ueber config.changed sofort in der App durch. Ein
-           expliziter Wert gewinnt ueber den Typ-Default (ESP: aus,
-           Android: an). Web hat kein Display-Zustands-Konzept -> nicht
-           gezeigt. -->
-      {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
-        <fieldset class="settings-field">
-          <legend>Stream im Bildschirmschoner halten</legend>
-          <label><input type="radio" name="keep_stream_in_screensaver" value="1" {{if .Page.KeepStreamInScreensaver}}checked{{end}}> Ein</label>
-          <label><input type="radio" name="keep_stream_in_screensaver" value="0" {{if not .Page.KeepStreamInScreensaver}}checked{{end}}> Aus</label>
-        </fieldset>
-
-        <fieldset class="settings-field">
-          <legend>Stream bei Display-aus halten</legend>
-          <label><input type="radio" name="keep_stream_in_screen_off" value="1" {{if .Page.KeepStreamInScreenOff}}checked{{end}}> Ein</label>
-          <label><input type="radio" name="keep_stream_in_screen_off" value="0" {{if not .Page.KeepStreamInScreenOff}}checked{{end}}> Aus</label>
-        </fieldset>
-      {{end}}
+      <!-- Saison 20: die keep_stream-Werte stehen jetzt in der Funktionsliste
+           (#features-section) - Wert und Sichtbarkeit pro Zeile nebeneinander. -->
 
       {{if eq .Page.Type "esp"}}
         <fieldset class="settings-field">
@@ -864,22 +914,69 @@
       {{end}}
     </section>
 
-    <!-- Saison 19-39: per-Setting Sichtbarkeit für den Mieter. Aus = nur
-         Admin (die App blendet das Control aus; der gespeicherte Wert gilt
-         weiter). Speichern -> POST /a/viewers/{mac}/visibility + config.changed. -->
-    <section class="viewer-detail-section" id="visibility-section" data-viewer-mac="{{.Page.MAC}}">
-      <h2>Sichtbarkeit für den Mieter</h2>
+    <!-- Saison 20: Vorlagen-Zuweisung. Nur Auswahl (Anlegen/Bearbeiten ist
+         eine eigene spätere Seite). Änderung -> POST /a/viewers/{mac}/template
+         + config.changed; die Werte erben sich live (kein Copy-on-Attach). -->
+    <section class="viewer-detail-section" id="template-section" data-viewer-mac="{{.Page.MAC}}">
+      <h2>Vorlage</h2>
       <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
-        Welche Einstellungen der Mieter in seiner App sieht und ändern darf. Aus = nur Admin.
+        Eine Vorlage liefert Standard-Sichtbarkeiten und -Werte. Pro-Viewer-Einstellungen unten gewinnen.
       </p>
       <fieldset class="settings-field">
-        <label><input type="checkbox" data-vis-key="idle_view_mode"           {{if index .Page.SettingVisibility "idle_view_mode"}}checked{{end}}> Idle-Ansicht</label>
-        <label><input type="checkbox" data-vis-key="auto_screensaver_seconds" {{if index .Page.SettingVisibility "auto_screensaver_seconds"}}checked{{end}}> Auto-Bildschirmschoner</label>
-        <label><input type="checkbox" data-vis-key="clock_layout"             {{if index .Page.SettingVisibility "clock_layout"}}checked{{end}}> Uhr-Anzeige</label>
-        <label><input type="checkbox" data-vis-key="language"                 {{if index .Page.SettingVisibility "language"}}checked{{end}}> Sprache</label>
-        <label><input type="checkbox" data-vis-key="history_capture_enabled"  {{if index .Page.SettingVisibility "history_capture_enabled"}}checked{{end}}> Verlauf-Erfassung</label>
-        <label><input type="checkbox" data-vis-key="resolution_mode"          {{if index .Page.SettingVisibility "resolution_mode"}}checked{{end}}> Auflösung</label>
+        <legend>Zugewiesene Vorlage</legend>
+        <select id="template-select" class="exposure-select">
+          <option value="0"{{if not .Page.HasTemplate}} selected{{end}}>— keine —</option>
+          {{range .Page.TemplateOptions}}
+          <option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
       </fieldset>
+    </section>
+
+    <!-- Saison 20: Abo-Rahmen (read-only; die zentrale Hersteller-Verwaltung
+         schreibt später auf diesen Datensatz). -->
+    <section class="viewer-detail-section" id="abo-section">
+      <h2>Abo</h2>
+      {{with .Page.License}}
+      <dl class="viewer-meta">
+        <dt>Tarif</dt><dd>{{if .PlanName}}{{.PlanName}}{{else}}&mdash;{{end}}</dd>
+        <dt>Viewer</dt><dd>{{.ViewerCount}} / {{.ViewerLimit}}{{if .OverLimit}} <span class="feature-locked-tag">über Limit</span>{{end}}</dd>
+        <dt>Gültig bis</dt><dd>{{.ValidUntil}}</dd>
+      </dl>
+      {{else}}
+      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin:0;">Kein Abo hinterlegt.</p>
+      {{end}}
+    </section>
+
+    <!-- Saison 20: Funktionsliste - je Funktion eine Sichtbarkeits-Stufe
+         (ausgeblendet / nur Admin / für Mieter sichtbar), Wert nur bei den
+         keep_stream-Funktionen. Sichtbarkeit -> POST /a/viewers/{mac}/exposure
+         (löst die binäre /visibility ab); keep_stream-Wert -> POST .../settings.
+         Beides feuert config.changed. -->
+    <section class="viewer-detail-section" id="features-section" data-viewer-mac="{{.Page.MAC}}">
+      <h2>Funktionen &amp; Sichtbarkeit</h2>
+      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
+        Ausgeblendet = Standard erzwungen, Mieter sieht nichts. Nur Admin = Wert gilt, Mieter sieht nichts.
+        Für Mieter sichtbar = Mieter sieht und ändert. Wert nur bei Stream-Funktionen (bei „ausgeblendet" ohne Wirkung).
+      </p>
+      {{range .Page.Features}}
+      <div class="feature-row" data-feature-key="{{.Key}}">
+        <div class="feature-name">{{.Label}}{{if not .Licensed}}<span class="feature-locked-tag">nicht im Abo</span>{{end}}</div>
+        {{if .HasValue}}
+        <div class="feature-value{{if eq .Exposure "hidden"}} is-disabled{{end}}" data-value-editor>
+          <label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}> Ein</label>
+          <label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}> Aus</label>
+        </div>
+        {{else}}
+        <div class="feature-value is-empty">&mdash;</div>
+        {{end}}
+        <div class="exposure-seg" role="radiogroup" aria-label="Sichtbarkeit für den Mieter">
+          <label><input type="radio" name="exp_{{.Key}}" value="hidden" {{if eq .Exposure "hidden"}}checked{{end}}><span>ausgeblendet</span></label>
+          <label><input type="radio" name="exp_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><span>nur Admin</span></label>
+          <label><input type="radio" name="exp_{{.Key}}" value="tenant_visible" {{if eq .Exposure "tenant_visible"}}checked{{end}}><span>für Mieter sichtbar</span></label>
+        </div>
+      </div>
+      {{end}}
     </section>
 
     <section class="viewer-detail-section viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
@@ -979,13 +1076,12 @@
   </main>
 
   <script>
-    // Visibility toggles (Saison 19-39). Lives AFTER </main> like the
-    // door-assignment script so the markup tests still see every section.
-    // Each checkbox change persists at once via POST .../visibility.
+    // Saison 20: Funktionsliste (Drei-Wege-Sichtbarkeit + keep_stream-Wert)
+    // und Vorlagen-Zuweisung. Lebt nach </main> wie die anderen Sektion-
+    // Skripte, damit die Markup-Tests jede Sektion sehen. Jede Änderung
+    // persistiert sofort (exposure -> POST .../exposure, Wert -> POST
+    // .../settings, Vorlage -> POST .../template); Fehler rollt zurück.
     (function () {
-      var section = document.getElementById('visibility-section');
-      if (!section) return;
-      var viewerMAC = section.getAttribute('data-viewer-mac');
       var toastEl = document.querySelector('[data-bind="toast"]');
       function toast(msg, kind) {
         if (!toastEl) return;
@@ -995,28 +1091,114 @@
         toastEl.classList.add('is-visible');
         setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
       }
-      section.addEventListener('change', function (e) {
-        var cb = e.target.closest('[data-vis-key]');
-        if (!cb) return;
-        var key = cb.getAttribute('data-vis-key');
-        var visible = cb.checked;
-        cb.disabled = true;
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/visibility', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ setting_key: key, visible: visible }),
-        })
-          .then(function (r) {
-            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-            return r.json();
+      function firstLine(err, fallback) {
+        return (err && err.message ? String(err.message) : fallback).split('\n')[0];
+      }
+
+      var section = document.getElementById('features-section');
+      if (section) {
+        var viewerMAC = section.getAttribute('data-viewer-mac');
+
+        function valueEditor(row) { return row.querySelector('[data-value-editor]'); }
+        function setEditorDisabled(row, disabled) {
+          var ed = valueEditor(row);
+          if (!ed) return;
+          ed.classList.toggle('is-disabled', disabled);
+          ed.querySelectorAll('input').forEach(function (i) { i.disabled = disabled; });
+        }
+
+        // Init: remember each row's exposure (for revert) and grey out the
+        // value editor where the function is already hidden.
+        section.querySelectorAll('.feature-row').forEach(function (row) {
+          var checked = row.querySelector('input[name^="exp_"]:checked');
+          var exp = checked ? checked.value : 'tenant_visible';
+          row.setAttribute('data-exposure', exp);
+          setEditorDisabled(row, exp === 'hidden');
+        });
+
+        section.addEventListener('change', function (e) {
+          var input = e.target;
+          if (!input || !input.name) return;
+          var row = input.closest('.feature-row');
+          if (!row) return;
+          if (input.name.indexOf('exp_') === 0) {
+            saveExposure(row, input.value);
+          } else {
+            saveValue(row, input.name, input.value === '1');
+          }
+        });
+
+        function saveExposure(row, exposure) {
+          var key = row.getAttribute('data-feature-key');
+          var prev = row.getAttribute('data-exposure') || 'tenant_visible';
+          setEditorDisabled(row, exposure === 'hidden');
+          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/exposure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ feature_key: key, exposure: exposure }),
           })
-          .then(function () { toast('Gespeichert'); })
-          .catch(function (err) {
-            cb.checked = !visible; // revert the toggle on failure
-            toast((err && err.message ? String(err.message) : 'Speichern fehlgeschlagen').split('\n')[0], 'error');
+            .then(function (r) {
+              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+              return r.json();
+            })
+            .then(function () { row.setAttribute('data-exposure', exposure); toast('Gespeichert'); })
+            .catch(function (err) {
+              var back = row.querySelector('input[name="exp_' + key + '"][value="' + prev + '"]');
+              if (back) back.checked = true;
+              setEditorDisabled(row, prev === 'hidden');
+              toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
+            });
+        }
+
+        function saveValue(row, key, on) {
+          var body = {};
+          body[key] = on;
+          fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
           })
-          .then(function () { cb.disabled = false; });
-      });
+            .then(function (r) {
+              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+              return r.json();
+            })
+            .then(function () { toast('Gespeichert'); })
+            .catch(function (err) {
+              var back = row.querySelector('input[name="' + key + '"][value="' + (on ? '0' : '1') + '"]');
+              if (back) back.checked = true;
+              toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
+            });
+        }
+      }
+
+      // Vorlagen-Zuweisung.
+      var tplSection = document.getElementById('template-section');
+      if (tplSection) {
+        var tplMAC = tplSection.getAttribute('data-viewer-mac');
+        var sel = document.getElementById('template-select');
+        if (sel) {
+          var prevTpl = sel.value;
+          sel.addEventListener('change', function () {
+            var id = parseInt(sel.value, 10) || 0;
+            sel.disabled = true;
+            fetch('/a/viewers/' + encodeURIComponent(tplMAC) + '/template', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify({ template_id: id }),
+            })
+              .then(function (r) {
+                if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
+                return r.json();
+              })
+              .then(function () { prevTpl = sel.value; toast('Vorlage gespeichert'); })
+              .catch(function (err) {
+                sel.value = prevTpl; // revert on failure
+                toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
+              })
+              .then(function () { sel.disabled = false; });
+          });
+        }
+      }
     })();
   </script>
 

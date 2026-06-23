@@ -272,6 +272,106 @@ func (s *Store) ClearViewerExposure(ctx context.Context, mac, key string) error 
 	return nil
 }
 
+// --- Admin read helpers (Saison 20 viewer-settings page) ---
+
+// LicenseInfo is the singleton license/abo record, surfaced read-only for the
+// admin Abo frame. ViewerLimit nil = unlimited; ValidUntil nil = perpetual.
+type LicenseInfo struct {
+	PlanName    string
+	ViewerLimit *int
+	ValidUntil  *int64 // unix millis
+	UpdatedAt   int64
+}
+
+// GetLicense returns the singleton license record (id=1), or (nil, nil) when
+// none has been seeded yet (fresh install) so the page shows "kein Abo".
+func (s *Store) GetLicense(ctx context.Context) (*LicenseInfo, error) {
+	var (
+		plan       string
+		limit      sql.NullInt64
+		validUntil sql.NullInt64
+		updatedAt  int64
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT plan_name, viewer_limit, valid_until, updated_at FROM license WHERE id = 1`).
+		Scan(&plan, &limit, &validUntil, &updatedAt)
+	switch {
+	case err == sql.ErrNoRows:
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("featuregate: get license: %w", err)
+	}
+	out := &LicenseInfo{PlanName: plan, UpdatedAt: updatedAt}
+	if limit.Valid {
+		v := int(limit.Int64)
+		out.ViewerLimit = &v
+	}
+	if validUntil.Valid {
+		v := validUntil.Int64
+		out.ValidUntil = &v
+	}
+	return out, nil
+}
+
+// CountViewers returns the number of adopted viewers, for the Abo "n / Limit"
+// display.
+func (s *Store) CountViewers(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM viewers`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("featuregate: count viewers: %w", err)
+	}
+	return n, nil
+}
+
+// TemplateInfo is one row for the admin "Vorlage zuweisen" dropdown.
+type TemplateInfo struct {
+	ID   int64
+	Name string
+}
+
+// ListTemplates returns every template (id + name) ordered by name for the
+// admin assignment dropdown.
+func (s *Store) ListTemplates(ctx context.Context) ([]TemplateInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM templates ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("featuregate: list templates: %w", err)
+	}
+	defer rows.Close()
+	var out []TemplateInfo
+	for rows.Next() {
+		var t TemplateInfo
+		if err := rows.Scan(&t.ID, &t.Name); err != nil {
+			return nil, fmt.Errorf("featuregate: scan template: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ViewerTemplate returns the viewer's currently assigned template (id + name).
+// found=false when the viewer has no template (NULL) or vanished.
+func (s *Store) ViewerTemplate(ctx context.Context, mac string) (id int64, name string, found bool, err error) {
+	var tid sql.NullInt64
+	e := s.db.QueryRowContext(ctx, `SELECT template_id FROM viewers WHERE mac = ?`, mac).Scan(&tid)
+	switch {
+	case e == sql.ErrNoRows:
+		return 0, "", false, nil
+	case e != nil:
+		return 0, "", false, fmt.Errorf("featuregate: viewer template_id: %w", e)
+	}
+	if !tid.Valid {
+		return 0, "", false, nil
+	}
+	e = s.db.QueryRowContext(ctx, `SELECT name FROM templates WHERE id = ?`, tid.Int64).Scan(&name)
+	switch {
+	case e == sql.ErrNoRows:
+		return tid.Int64, "", true, nil // assigned id but name gone (shouldn't happen)
+	case e != nil:
+		return 0, "", false, fmt.Errorf("featuregate: template name: %w", e)
+	}
+	return tid.Int64, name, true, nil
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

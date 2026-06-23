@@ -69,6 +69,14 @@ type adminViewerDetailData struct {
 	// 19-30). Rendered server-side as door_id/label; the JS upgrades
 	// the labels to live names via /a/doors.json.
 	AssignedDoors []viewermanager.DoorAssignment
+	// Saison 20 function list: one row per catalog function with its
+	// three-level exposure (+ keep_stream value editor), the Vorlagen-
+	// Zuweisung dropdown and the read-only Abo frame.
+	Features        []viewerFeatureRow
+	TemplateOptions []viewerTemplateOption
+	HasTemplate     bool
+	TemplateName    string
+	License         *viewerAboView
 }
 
 func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +155,12 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	} else {
 		s.log.Warn("viewer detail setting visibility", "err", verr, "mac_prefix", safePrefix(mac))
 	}
+	// Saison 20: function list (three-level exposure + keep_stream value),
+	// Vorlagen-Zuweisung dropdown and the read-only Abo frame. All best-effort:
+	// a feature-store error degrades to sane defaults (see the builders).
+	data.Features = s.buildViewerFeatureRows(r.Context(), info)
+	data.TemplateOptions, data.HasTemplate, data.TemplateName = s.buildTemplateSection(r.Context(), mac)
+	data.License = s.buildAboView(r.Context())
 	s.renderAdminPage(w, "viewer-detail", data)
 }
 

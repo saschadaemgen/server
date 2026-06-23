@@ -1,0 +1,178 @@
+package httpserver
+
+import (
+	"context"
+	"net/http"
+	"testing"
+
+	"carvilon.local/server/internal/featuregate"
+)
+
+// TestAdminViewerExposure_SetsThreeLevel proves the Saison-20 three-level
+// exposure endpoint writes the per-viewer override the resolver reads back.
+func TestAdminViewerExposure_SetsThreeLevel(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/exposure", map[string]any{
+		"feature_key": featuregate.KeyKeepStreamInScreensaver,
+		"exposure":    featuregate.ExposureHidden,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+
+	st := featuregate.NewStore(env.d.DB)
+	snap, err := st.SnapshotForViewer(context.Background(), testViewerMAC)
+	if err != nil {
+		t.Fatalf("SnapshotForViewer: %v", err)
+	}
+	if got := snap.Overrides[featuregate.KeyKeepStreamInScreensaver]; got != featuregate.ExposureHidden {
+		t.Errorf("override = %q, want %q", got, featuregate.ExposureHidden)
+	}
+}
+
+// TestAdminViewerExposure_Rejects covers the two 400 paths: an unknown
+// catalog key and an exposure value outside the known set.
+func TestAdminViewerExposure_Rejects(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	cases := []map[string]any{
+		{"feature_key": "does_not_exist", "exposure": featuregate.ExposureHidden},
+		{"feature_key": featuregate.KeyClockLayout, "exposure": "bananas"},
+		{"feature_key": featuregate.KeyClockLayout, "exposure": featuregate.ExposureBookable}, // reserved, not yet valid
+	}
+	for _, body := range cases {
+		resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/exposure", body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %v -> status %d, want 400", body, resp.StatusCode)
+		}
+	}
+}
+
+// TestAdminViewerTemplate_AssignAndClear assigns a template, then clears it,
+// verifying viewers.template_id through the store getter both ways.
+func TestAdminViewerTemplate_AssignAndClear(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	ctx := context.Background()
+	st := featuregate.NewStore(env.d.DB)
+	tmplID, err := st.CreateTemplate(ctx, "Standard")
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+
+	// Assign.
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/template", map[string]any{
+		"template_id": tmplID,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("assign status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	id, name, found, err := st.ViewerTemplate(ctx, testViewerMAC)
+	if err != nil {
+		t.Fatalf("ViewerTemplate: %v", err)
+	}
+	if !found || id != tmplID || name != "Standard" {
+		t.Errorf("after assign: found=%v id=%d name=%q, want true %d Standard", found, id, name, tmplID)
+	}
+
+	// Clear (template_id 0).
+	resp = postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/template", map[string]any{
+		"template_id": 0,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear status = %d, body=%s", resp.StatusCode, readBody(t, resp))
+	}
+	resp.Body.Close()
+	if _, _, found, _ = st.ViewerTemplate(ctx, testViewerMAC); found {
+		t.Errorf("after clear: template still assigned")
+	}
+}
+
+// TestAdminViewerTemplate_RejectsUnknown proves a non-existent template id is a
+// clean 400 (not an FK 500).
+func TestAdminViewerTemplate_RejectsUnknown(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	resp := postAdminViewerJSON(t, env, "/a/viewers/"+testViewerMAC+"/template", map[string]any{
+		"template_id": 999999,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for unknown template", resp.StatusCode)
+	}
+}
+
+// TestAdminViewerDetail_FunctionListMarkup verifies the page renders the
+// Saison-20 function list (three-level exposure selector per function) and the
+// Vorlage/Abo frames, and that the old binary visibility markup is gone.
+func TestAdminViewerDetail_FunctionListMarkup(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	adoptESPForTest(t, env, espTestMAC, "Wohnung ESP Feat")
+
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + espTestMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	for _, want := range []string{
+		`id="features-section"`,
+		`name="exp_keep_stream_in_screensaver"`,
+		`name="exp_idle_view_mode"`, // a legacy key shows the selector too
+		`value="hidden"`,
+		`value="admin_only"`,
+		`value="tenant_visible"`,
+		`id="template-select"`,
+		`id="abo-section"`,
+	} {
+		if !contains(markup, want) {
+			t.Errorf("function-list markup missing %q", want)
+		}
+	}
+	// The binary visibility control is replaced, not just hidden.
+	if contains(markup, `data-vis-key`) {
+		t.Errorf("legacy binary visibility markup (data-vis-key) still present")
+	}
+}
+
+// TestAdminViewerDetail_AboFrame proves a seeded license renders in the Abo
+// frame (plan name + viewer limit).
+func TestAdminViewerDetail_AboFrame(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.seedViewer(t)
+
+	limit := 10
+	st := featuregate.NewStore(env.d.DB)
+	if err := st.SetLicense(context.Background(), "Pro", &limit, nil); err != nil {
+		t.Fatalf("SetLicense: %v", err)
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + testViewerMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, "Pro") {
+		t.Errorf("Abo frame missing plan name 'Pro'")
+	}
+	if !contains(markup, "/ 10") {
+		t.Errorf("Abo frame missing viewer limit '/ 10'")
+	}
+}

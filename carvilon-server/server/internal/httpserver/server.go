@@ -538,7 +538,14 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerAddDoor)))
 	s.mux.Handle("DELETE /a/viewers/{mac}/doors/{door_id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRemoveDoor)))
 	// Saison 19-39: per-setting tenant visibility ("dem Mieter anzeigen").
+	// Binary (tenant_visible / admin_only); superseded by the three-level
+	// /exposure below but kept for API/back-compat.
 	s.mux.Handle("POST /a/viewers/{mac}/visibility", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerVisibility)))
+	// Saison 20: three-level exposure per function (ausgeblendet / nur Admin /
+	// fuer Mieter sichtbar) and template assignment. Both broadcast
+	// config.changed for the one viewer; a template attaches live (no copy).
+	s.mux.Handle("POST /a/viewers/{mac}/exposure", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerExposure)))
+	s.mux.Handle("POST /a/viewers/{mac}/template", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerTemplate)))
 	// Saison 19-32: admin-side door open from the viewer lists (per-row
 	// "Tuer oeffnen"). Standby semantics; admin-trusted, no door authz.
 	s.mux.Handle("POST /a/viewers/{mac}/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerUnlock)))
