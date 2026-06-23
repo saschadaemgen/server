@@ -1,1086 +1,355 @@
-<!doctype html>
-<html lang="de" data-theme="dark">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>carvilon - {{.Page.Name}}</title>
-  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
-  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
-  <style>
-    /* Polish:
-       Detail-Seite uebernimmt das Apple-Style / Dark-Pro-Tool
-       Vokabular des Dashboards. Stammdaten und Verlauf liegen in
-       eigenen Cards (.viewer-detail-section) mit 0.5px-Border auf
-       leicht durchscheinendem Hintergrund; Section-Headings sind
-       Manrope-Uppercase-Tertiary (matches .app-card-title).
-       Akzentfarbe kommt durchgaengig aus var(--color-accent) damit
-       der spaeter geplante User-Setting-Schalter ohne Code-Patch
-       wirkt. */
+{{define "title"}}{{.Page.Name}}{{end}}
 
-    /* Section-Card */
-    .viewer-detail-section {
-      background: rgba(255, 255, 255, 0.03);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 24px 28px;
-      margin-bottom: 24px;
-    }
-    .viewer-detail-section h2 {
-      font-family: 'Manrope', system-ui, sans-serif;
-      font-size: 11px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--color-text-tertiary, #94a3b8);
-      margin: 0 0 16px 0;
-      display: flex;
-      align-items: baseline;
-      gap: 14px;
-      flex-wrap: wrap;
-    }
+{{define "head-extra"}}
+<style>
+  /* viewer-detail page-scoped styles (Saison 20 redesign). The S20
+     model (header, Funktionen, Vorlage, Abo) uses the shared
+     admin-components; the carried-over legacy sections (Stammdaten,
+     Tueren, Einstellungen, Verlauf, Modals) are restyled here on the
+     new tokens while keeping their existing JS contracts. */
+  .card { display: block; }
+  .card + .card { margin-top: 0; }
+  .card h2 {
+    margin: 0 0 var(--space-6); font: var(--type-eyebrow);
+    letter-spacing: var(--tracking-label); text-transform: uppercase;
+    color: var(--text-tertiary); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  }
+  .card .intro { margin: calc(-1 * var(--space-3)) 0 var(--space-6); font: var(--type-data); color: var(--text-tertiary); }
 
-    /* Stammdaten-Liste: zweispaltiges Grid, dt etwas dezenter. */
-    .viewer-meta {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      row-gap: 10px;
-      column-gap: 24px;
-      margin: 0;
-      font-size: 14px;
-    }
-    .viewer-meta dt {
-      color: var(--color-text-secondary, #94a3b8);
-      font-weight: 500;
-    }
-    .viewer-meta dd {
-      margin: 0;
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-    }
+  /* Stammdaten + Abo meta list */
+  .viewer-meta { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-3) var(--space-8); margin: 0; }
+  .viewer-meta dt { font: var(--type-data); color: var(--text-tertiary); }
+  .viewer-meta dd { margin: 0; font: var(--type-label); color: var(--text-primary); }
+  .inline-action, .btn-edit {
+    margin-left: var(--space-4); padding: 3px 9px; border-radius: var(--radius-sm);
+    font: var(--type-data); cursor: pointer; background: var(--surface-raised);
+    color: var(--accent-text); border: 1px solid var(--border-default);
+  }
+  .inline-action:hover, .btn-edit:hover { background: var(--surface-hover); }
+  .btn-edit.is-active { background: var(--accent-haze); border-color: var(--border-accent); }
+  .section-actions { font-weight: 400; }
 
-    /* Status-Pills im Header. */
-    .pill {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 500;
-      background: rgba(91,157,255,0.10);
-      color: var(--color-accent, #5b9dff);
-      border: 1px solid rgba(91,157,255,0.25);
-    }
-    .pill.is-running {
-      background: rgba(34,197,94,0.10);
-      color: #22c55e;
-      border-color: rgba(34,197,94,0.25);
-    }
+  /* Stammdaten edit form */
+  .stammdaten-edit-form { display: flex; flex-direction: column; gap: var(--space-5); }
+  .stammdaten-edit-form label { display: flex; flex-direction: column; gap: var(--space-3); font: var(--type-label); color: var(--text-secondary); }
+  .stammdaten-edit-form input, .stammdaten-edit-form select {
+    font: var(--type-body); color: var(--text-primary); background: var(--field-bg);
+    border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px;
+    -webkit-appearance: none; appearance: none; color-scheme: dark; max-width: 360px;
+  }
+  .stammdaten-edit-form select option { background: var(--surface-panel); color: var(--text-primary); }
+  .stammdaten-edit-actions { display: flex; gap: var(--space-4); margin-top: var(--space-3); }
+  .btn-primary, .btn-secondary {
+    padding: 8px 14px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer;
+    border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary);
+  }
+  .btn-primary { background: linear-gradient(180deg, var(--accent-bright), var(--accent)); color: var(--text-on-accent); border-color: var(--border-accent); font-weight: 600; }
+  .btn-secondary:hover { background: var(--surface-hover); }
+  .btn-sm { padding: 5px 10px; font-size: var(--text-xs); }
+  .btn-ghost { background: transparent; }
+  .btn-ghost:hover { background: var(--surface-hover); }
 
-    /* Verlauf-Section Meta-Counter. Total in heller Text-Farbe,
-       Hidden-Counter in Amber damit der "Mieter hat ausgeblendet"-
-       Hinweis sofort ins Auge faellt. Beide leben innerhalb von
-       h2 - nicht zu laut. */
-    .history-meta {
-      display: inline-flex;
-      gap: 14px;
-      font-size: 12px;
-      font-weight: 400;
-      text-transform: none;
-      letter-spacing: normal;
-      color: var(--color-text-secondary, #94a3b8);
-    }
-    .history-meta .total-count {
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-      font-weight: 500;
-    }
-    .history-meta .hidden-count { color: #facc15; }
-    .history-meta .hidden-count[hidden] { display: none; }
+  /* Tueren */
+  .door-intro { color: var(--text-tertiary); font: var(--type-data); margin-top: 0; }
+  .door-list { list-style: none; margin: 0; padding: 0; }
+  .door-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-5) 0; border-bottom: 1px solid var(--divider); }
+  .door-row:last-child { border-bottom: none; }
+  .door-row .door-name { font: var(--type-label); color: var(--text-primary); }
+  .door-remove { display: inline-flex; align-items: center; gap: var(--space-3); }
+  .door-empty { color: var(--text-tertiary); font: var(--type-data); margin: var(--space-4) 0 0; }
+  .door-add { margin-top: var(--space-6); }
+  .door-add select {
+    width: 100%; background: var(--field-bg); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); padding: 8px 12px; color: var(--text-primary); font: inherit; color-scheme: dark;
+  }
+  .door-add select option { background: var(--surface-panel); color: var(--text-primary); }
 
-    /* Filter form: dark inputs + primary/secondary buttons.
-       color-scheme:dark turns the browser's native date-picker
-       dark without needing a custom calendar (the brief was
-       explicit about not building a custom picker). */
-    .history-filter-form {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-    }
-    .history-filter-form .filter-fields {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .history-filter-form label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--color-text-secondary, #94a3b8);
-    }
-    .history-filter-form input[type="date"] {
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-      font-family: inherit;
-      font-size: 14px;
-      color-scheme: dark;
-    }
-    .history-filter-form input[type="date"]:focus {
-      outline: none;
-      border-color: var(--color-accent, #3d7bff);
-    }
-    .history-filter-form .btn-primary {
-      background: var(--color-accent, #3d7bff);
-      color: #ffffff;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-weight: 500;
-      cursor: pointer;
-      font: inherit;
-    }
-    .history-filter-form .btn-primary:hover { filter: brightness(1.08); }
-    .history-filter-form .btn-secondary {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      padding: 8px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-    }
-    .history-filter-form .btn-secondary:hover { background: rgba(255, 255, 255, 0.06); }
-    .history-filter-form .filter-spacer { flex: 1; }
+  /* Einstellungen (legacy value editors) */
+  .settings-field { border: 0; padding: 0; margin: 0 0 var(--space-6); display: flex; flex-direction: column; gap: var(--space-3); }
+  .settings-field legend { font: var(--type-eyebrow); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-tertiary); margin-bottom: var(--space-3); padding: 0; }
+  .settings-field label { display: flex; align-items: center; gap: var(--space-4); padding: 4px 8px; border-radius: var(--radius-sm); font: var(--type-label); cursor: pointer; color: var(--text-primary); }
+  .settings-field label:hover { background: var(--surface-1, rgba(255,255,255,0.04)); }
+  .settings-field input[type="radio"] { accent-color: var(--accent); }
+  .brightness-row { display: flex; align-items: center; gap: var(--space-7); padding: 0 8px; }
+  .brightness-row input[type="range"] { flex: 1; accent-color: var(--accent); }
 
-    /* Verlauf leeren: neutral by default, Hover faerbt rot. Die
-       confirming-Class (Zwei-Klick-State) zeigt den Rot-Ton
-       persistent ohne Hover. */
-    .btn-danger-outline {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-secondary, #94a3b8);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      padding: 8px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-      transition: background 150ms, border-color 150ms, color 150ms;
-    }
-    .btn-danger-outline:hover {
-      background: rgba(239, 68, 68, 0.08);
-      border-color: rgba(239, 68, 68, 0.40);
-      color: rgb(239, 68, 68);
-    }
-    .btn-danger-outline.confirming {
-      background: rgba(239, 68, 68, 0.12);
-      border-color: rgb(239, 68, 68);
-      color: rgb(239, 68, 68);
-    }
+  /* Verlauf */
+  .history-meta { font-weight: 400; display: inline-flex; gap: var(--space-4); }
+  .total-count, .hidden-count { font: var(--type-data); color: var(--text-tertiary); }
+  .history-filter-form { display: flex; align-items: flex-end; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-6); }
+  .filter-fields { display: flex; align-items: flex-end; gap: var(--space-5); flex-wrap: wrap; }
+  .history-filter-form label { display: flex; flex-direction: column; gap: var(--space-2); font: var(--type-data); color: var(--text-tertiary); }
+  .history-filter-form input[type="date"] { font: var(--type-label); color: var(--text-primary); background: var(--field-bg); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 7px 10px; color-scheme: dark; }
+  .filter-spacer { flex: 1; }
+  .history-table { width: 100%; border-collapse: collapse; }
+  .history-table th { text-align: left; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); font: var(--type-eyebrow); letter-spacing: var(--tracking-label); color: var(--text-tertiary); }
+  .history-table td { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--divider); font: var(--type-label); color: var(--text-primary); }
+  .history-table tr.hidden-by-viewer td { color: var(--text-tertiary); }
+  .hidden-icon { width: 14px; height: 14px; vertical-align: -2px; margin-left: var(--space-3); stroke: currentColor; fill: none; stroke-width: 2; }
+  .row-action { text-align: right; width: 40px; }
+  .btn-icon-trash { background: transparent; border: 1px solid var(--border-default); color: var(--text-tertiary); border-radius: var(--radius-sm); padding: 5px; cursor: pointer; display: inline-flex; }
+  .btn-icon-trash:hover { color: #ff8a7d; border-color: rgba(232,74,68,0.4); background: var(--lock-haze); }
+  .btn-icon-trash svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .history-empty { color: var(--text-tertiary); font: var(--type-data); padding: var(--space-6) 0; }
+  .btn-load-more { margin-top: var(--space-5); padding: 8px 14px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer; border: 1px solid var(--border-default); background: var(--surface-raised); color: var(--text-primary); }
+  .btn-danger-outline { padding: 7px 12px; border-radius: var(--radius-md); font: var(--type-label); cursor: pointer; border: 1px solid rgba(232,74,68,0.4); background: transparent; color: #ff8a7d; }
+  .btn-danger-outline.confirming { background: var(--lock-haze); }
+  .btn-danger-confirm { background: linear-gradient(180deg, #ff8a7d, #e0463a) !important; color: #2a0a07 !important; border-color: rgba(232,74,68,0.6) !important; }
+</style>
+{{end}}
 
-    /* Tabelle. Header-Cells im Manrope-Uppercase, Body-Rows mit
-       hover-Akzent und 0.5px-Trenner. */
-    .history-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    .history-table thead th {
-      font-family: 'Manrope', system-ui, sans-serif;
-      font-size: 11px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--color-text-tertiary, #94a3b8);
-      text-align: left;
-      padding: 12px 16px;
-      border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
-    }
-    .history-table tbody tr {
-      border-bottom: 0.5px solid rgba(255, 255, 255, 0.04);
-      transition: background 150ms;
-    }
-    .history-table tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
-    .history-table tbody td {
-      padding: 14px 16px;
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-      font-size: 14px;
-    }
-    .history-table .row-action {
-      text-align: right;
-      white-space: nowrap;
-      width: 1%;
-    }
-    .history-table tr.hidden-by-viewer td { opacity: 0.55; }
-    .history-table .hidden-icon {
-      width: 14px;
-      height: 14px;
-      vertical-align: middle;
-      margin-left: 6px;
-      stroke: currentColor;
-      stroke-width: 1.5;
-      fill: none;
-      opacity: 0.5;
-      cursor: help;
-    }
-
-    /* Trash-Icon: subtle, default Opacity 0.6, Hover-rot. */
-    .btn-icon-trash {
-      background: transparent;
-      border: none;
-      padding: 6px;
-      border-radius: 6px;
-      color: var(--color-text-tertiary, #94a3b8);
-      cursor: pointer;
-      opacity: 0.6;
-      transition: background 150ms, color 150ms, opacity 150ms;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .btn-icon-trash:hover {
-      background: rgba(239, 68, 68, 0.08);
-      color: rgb(239, 68, 68);
-      opacity: 1;
-    }
-    .btn-icon-trash svg {
-      width: 16px;
-      height: 16px;
-      stroke: currentColor;
-      stroke-width: 1.5;
-      fill: none;
-    }
-
-    .history-empty {
-      padding: 24px 0;
-      color: var(--color-text-secondary, #94a3b8);
-      text-align: center;
-    }
-
-    /* Mehr-Laden im Card-Aesthetic. */
-    .btn-load-more {
-      display: block;
-      margin: 16px auto 0;
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-primary, var(--color-text, #f0f4ff));
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      padding: 10px 24px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-      transition: background 150ms, border-color 150ms;
-    }
-    .btn-load-more:hover {
-      background: rgba(255, 255, 255, 0.06);
-      border-color: rgba(255, 255, 255, 0.16);
-    }
-    .btn-load-more[hidden] { display: none; }
-
-    /* Stammdaten Edit-Mode.
-       Section-Header hat rechts einen Bearbeiten-Button; im
-       Edit-Mode wird die <dl> ausgeblendet und ein <form> mit
-       Inputs + Selects + Save/Cancel-Buttons gezeigt. */
-    .viewer-detail-section h2 .section-actions {
-      margin-left: auto;
-      display: inline-flex;
-      gap: 8px;
-    }
-    .btn-edit {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-secondary, #94a3b8);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      padding: 4px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: normal;
-      text-transform: none;
-    }
-    .btn-edit:hover { background: rgba(255, 255, 255, 0.08); color: var(--color-text-primary, #f0f4ff); }
-    .btn-edit.is-active {
-      background: var(--color-accent);
-      color: #ffffff;
-      border-color: var(--color-accent);
-    }
-    .inline-action {
-      margin-left: 12px;
-      background: transparent;
-      color: var(--color-accent);
-      border: none;
-      padding: 0;
-      cursor: pointer;
-      font: inherit;
-      font-size: 13px;
-      text-decoration: underline;
-    }
-    .inline-action:hover { filter: brightness(1.15); }
-
-    .stammdaten-edit-form {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      row-gap: 14px;
-      column-gap: 24px;
-      margin: 0;
-    }
-    .stammdaten-edit-form[hidden] { display: none; }
-    .stammdaten-edit-form label {
-      display: contents;
-      font-size: 14px;
-      color: var(--color-text-secondary, #94a3b8);
-    }
-    .stammdaten-edit-form label > span,
-    .stammdaten-edit-form label > input,
-    .stammdaten-edit-form label > select { display: block; }
-    .stammdaten-edit-form input[type="text"],
-    .stammdaten-edit-form select {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: var(--color-text-primary, #f0f4ff);
-      font: inherit;
-      font-size: 14px;
-      color-scheme: dark;
-    }
-    /* Ein expliziter background auf dem <select> schaltet Chromium in den
-       Author-Styled-Modus und deaktiviert das color-scheme:dark-Popup; die
-       Optionen fielen sonst auf das helle System-Popup zurueck (heller
-       Hintergrund, fast weisser Text -> erst beim Hover lesbar). Solider
-       dunkler Option-Hintergrund (kein translucentes --color-surface-*). */
-    .stammdaten-edit-form select option {
-      background-color: var(--color-bg-elev, #0e1014);
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .stammdaten-edit-form input[type="text"]:focus,
-    .stammdaten-edit-form select:focus {
-      outline: none;
-      border-color: var(--color-accent);
-    }
-    .stammdaten-edit-actions {
-      grid-column: 1 / -1;
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      margin-top: 4px;
-    }
-    .stammdaten-edit-actions .btn-primary {
-      background: var(--color-accent);
-      color: #ffffff;
-      border: none;
-      padding: 8px 18px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-      font-weight: 500;
-    }
-    .stammdaten-edit-actions .btn-primary:hover { filter: brightness(1.08); }
-    .stammdaten-edit-actions .btn-secondary {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-primary, #f0f4ff);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      padding: 8px 18px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-    }
-    .stammdaten-edit-actions .btn-secondary:hover { background: rgba(255, 255, 255, 0.06); }
-
-    /* Settings-Fieldsets (Auto-Save). */
-    .settings-field {
-      border: 0;
-      padding: 0;
-      margin: 0 0 18px 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .settings-field legend {
-      font-family: 'Manrope', system-ui, sans-serif;
-      font-size: 11px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--color-text-tertiary, #94a3b8);
-      margin-bottom: 6px;
-      padding: 0;
-    }
-    .settings-field label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .settings-field label:hover { background: rgba(255, 255, 255, 0.04); }
-    .settings-field input[type="radio"] { accent-color: var(--color-accent); }
-
-    /* Saison 20: Funktionsliste - Wert + Drei-Wege-Sichtbarkeit pro Zeile. */
-    .feature-row {
-      display: grid;
-      grid-template-columns: 1fr auto auto;
-      align-items: center;
-      gap: 18px;
-      padding: 11px 8px;
-      border-top: 0.5px solid rgba(255, 255, 255, 0.06);
-    }
-    .feature-row:first-of-type { border-top: 0; }
-    .feature-name { font-size: 14px; color: var(--color-text-primary, #f0f4ff); }
-    .feature-locked-tag {
-      font-size: 11px;
-      color: var(--color-accent);
-      border: 0.5px solid var(--color-accent);
-      border-radius: 5px;
-      padding: 1px 6px;
-      margin-left: 6px;
-      white-space: nowrap;
-    }
-    .feature-value { display: inline-flex; gap: 12px; align-items: center; }
-    .feature-value.is-empty { color: var(--color-text-tertiary, #64748b); }
-    .feature-value.is-disabled { opacity: 0.4; }
-    .feature-value label {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 13px;
-      cursor: pointer;
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .feature-value input[type="radio"] { accent-color: var(--color-accent); }
-
-    /* Segmented three-way exposure selector (scharf, NI-Maschine-Stil). */
-    .exposure-seg {
-      display: inline-flex;
-      border: 0.5px solid rgba(255, 255, 255, 0.14);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .exposure-seg label {
-      position: relative;
-      font-size: 12px;
-      padding: 5px 11px;
-      cursor: pointer;
-      color: var(--color-text-tertiary, #94a3b8);
-      border-left: 0.5px solid rgba(255, 255, 255, 0.10);
-      white-space: nowrap;
-      transition: background 120ms ease, color 120ms ease;
-    }
-    .exposure-seg label:first-child { border-left: 0; }
-    .exposure-seg label:hover { background: rgba(255, 255, 255, 0.05); }
-    .exposure-seg input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-    .exposure-seg label:has(input:checked) { background: var(--color-accent); color: #0b0f17; font-weight: 600; }
-
-    /* Vorlagen-Auswahl. */
-    .exposure-select {
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.14);
-      border-radius: 8px;
-      color: var(--color-text-primary, #f0f4ff);
-      font: inherit;
-      font-size: 14px;
-      padding: 7px 10px;
-      min-width: 240px;
-    }
-    .brightness-row {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 0 8px;
-    }
-    .brightness-row input[type="range"] {
-      flex: 1;
-      accent-color: var(--color-accent);
-    }
-    .brightness-row span {
-      min-width: 48px;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-      font-size: 13px;
-      color: var(--color-text-secondary, #94a3b8);
-    }
-
-    /* Modal-Overlay (Password + Token-Confirm + Token-Display). */
-    .admin-modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.55);
-      backdrop-filter: blur(8px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
-      padding: 24px;
-    }
-    .admin-modal.is-open { display: flex; }
-    .admin-modal-glass {
-      background: #0b1220;
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      border-radius: 16px;
-      padding: 24px 28px;
-      width: min(460px, 92vw);
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .admin-modal-glass h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .modal-hint {
-      margin: 0;
-      color: var(--color-text-secondary, #94a3b8);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .modal-warning {
-      margin: 0;
-      color: #facc15;
-      font-size: 13px;
-      line-height: 1.5;
-      padding: 10px 14px;
-      background: rgba(250, 204, 21, 0.06);
-      border: 0.5px solid rgba(250, 204, 21, 0.20);
-      border-radius: 8px;
-    }
-    .admin-modal-glass form { display: flex; flex-direction: column; gap: 14px; }
-    .admin-modal-glass form label {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--color-text-secondary, #94a3b8);
-    }
-    .admin-modal-glass input[type="password"] {
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: var(--color-text-primary, #f0f4ff);
-      font: inherit;
-      font-size: 14px;
-    }
-    .admin-modal-glass input[type="password"]:focus {
-      outline: none;
-      border-color: var(--color-accent);
-    }
-    .modal-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-      margin-top: 4px;
-    }
-    .modal-actions .btn-primary {
-      background: var(--color-accent);
-      color: #ffffff;
-      border: none;
-      padding: 8px 18px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-      font-weight: 500;
-    }
-    .modal-actions .btn-primary:hover { filter: brightness(1.08); }
-    .modal-actions .btn-primary.btn-danger-confirm {
-      background: rgb(239, 68, 68);
-    }
-    .modal-actions .btn-secondary {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--color-text-primary, #f0f4ff);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      padding: 8px 18px;
-      border-radius: 8px;
-      cursor: pointer;
-      font: inherit;
-    }
-    .token-value {
-      margin: 0;
-      padding: 14px 16px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      font-family: 'JetBrains Mono', 'Menlo', monospace;
-      font-size: 13px;
-      color: var(--color-text-primary, #f0f4ff);
-      word-break: break-all;
-      white-space: pre-wrap;
-    }
-
-    /* Toast (1.5s fade). */
-    .admin-toast {
-      position: fixed;
-      top: 24px;
-      left: 50%;
-      transform: translate(-50%, -8px);
-      padding: 10px 18px;
-      border-radius: 10px;
-      background: rgba(15, 23, 42, 0.96);
-      color: var(--color-text-primary, #f0f4ff);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      font-size: 13px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 200ms ease, transform 200ms ease;
-      z-index: 100;
-      white-space: nowrap;
-    }
-    .admin-toast.is-visible {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
-    .admin-toast.kind-error {
-      background: rgba(127, 29, 29, 0.96);
-      border-color: rgba(239, 68, 68, 0.40);
-    }
-
-    /* Tür-Zuordnung (Saison 19-32 redesign). Shared token vocabulary
-       instead of inline styles; reads as a clean list with one add
-       control, consistent with the other detail cards. */
-    .door-intro {
-      color: var(--color-text-tertiary);
-      font-size: var(--fs-sm);
-      margin-top: 0;
-    }
-    .door-list { list-style: none; margin: 0; padding: 0; }
-    .door-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 0;
-      border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
-    }
-    .door-row:last-child { border-bottom: none; }
-    .door-row .door-name {
-      font-size: 14px;
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .door-row .door-remove { flex: none; display: inline-flex; align-items: center; gap: 6px; }
-    .door-empty {
-      color: var(--color-text-tertiary);
-      font-size: var(--fs-sm);
-      margin: 8px 0 0;
-    }
-    .door-add { margin-top: 12px; }
-    .door-add select {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.04);
-      border: 0.5px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: var(--color-text-primary, #f0f4ff);
-      font: inherit;
-      font-size: 14px;
-      color-scheme: dark;
-    }
-    /* Siehe Stammdaten-Select: solider dunkler Option-Hintergrund, sonst
-       fällt das Popup auf hell zurück (nur beim Hover lesbar). */
-    .door-add select option {
-      background-color: var(--color-bg-elev, #0e1014);
-      color: var(--color-text-primary, #f0f4ff);
-    }
-    .door-add select:focus { outline: none; border-color: var(--color-accent); }
-  </style>
-</head>
-<body class="admin-shell">
-
-  {{template "admin-nav" .}}
-
-  <main class="page" role="main">
-    <header class="page-header">
-      <div class="page-title-stack">
-        <a href="{{.Page.BackHref}}" class="back-link" style="color:var(--color-accent);text-decoration:none;font-size:13px;">&larr; {{.Page.BackLabel}}</a>
-        <h1 class="page-title">{{.Page.Name}}
-          {{if .Page.Running}}<span class="pill is-running">online</span>
-          {{else}}<span class="pill">offline</span>{{end}}
-          <span class="pill">{{.Page.Type}}</span>
-        </h1>
-        <p class="page-subtitle">{{.Page.MAC}}</p>
-      </div>
-    </header>
-
-    <!-- Toast. Global slot, fed by every form path via
-         showToast(). -->
-    <div class="admin-toast" data-bind="toast" role="status" aria-live="polite"></div>
-
-    <section class="viewer-detail-section" id="stammdaten-section"
-             data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
-      <h2>
-        Stammdaten
-        <span class="section-actions">
-          <button type="button" class="btn-edit" data-action="edit-stammdaten">Bearbeiten</button>
-        </span>
-      </h2>
-
-      <!-- READ-Mode (default). Nicht-editierbare Felder bleiben
-           hier auch im Edit-Mode (MAC, Online, Type, ESP-Modell,
-           Firmware), die editierbaren werden ueber das Display-
-           Toggle ausgeblendet. -->
-      <dl class="viewer-meta" data-bind="stammdaten-read">
+{{define "content"}}
+  <div class="identity">
+    <div class="identity-tile">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+    </div>
+    <div class="identity-main">
+      <div class="crumb"><a href="{{.Page.BackHref}}">&larr; {{.Page.BackLabel}}</a></div>
+      <h1>{{.Page.Name}}
+        {{if .Page.Running}}<span class="badge is-accent">online</span>{{else}}<span class="badge is-outline">offline</span>{{end}}
+        <span class="badge is-neutral">{{.Page.Type}}</span>
+        {{if .Page.HasTemplate}}<span class="badge is-accent">Vorlage: {{.Page.TemplateName}}</span>{{end}}
+      </h1>
+      <div class="identity-meta">
+        <span class="mono">{{.Page.MAC}}</span>
         {{if eq .Page.Type "esp"}}
-          <dt>ESP-Modell</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
-          <dt>Firmware</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
+          {{if .Page.ESPModel}}<span>{{.Page.ESPModel}}</span>{{end}}
+          {{if .Page.ESPFwVersion}}<span class="mono">FW {{.Page.ESPFwVersion}}</span>{{end}}
         {{end}}
-        {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
-          <dt>Bearer-Token gesetzt</dt><dd>
-            {{if .Page.HasDeviceToken}}ja{{else}}nein{{end}}
-            <button type="button" class="inline-action" data-action="regen-token">Token neu generieren</button>
-          </dd>
-        {{else}}
-          <dt>Passwort gesetzt</dt><dd>
-            {{if .Page.HasPassword}}ja{{else}}nein{{end}}
-            <button type="button" class="inline-action" data-action="reset-password">Passwort neu setzen</button>
-          </dd>
-        {{end}}
-        <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
-        <dt>Türen</dt><dd>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} zugeordnet (siehe Tür-Zuordnung){{else}}keine zugeordnet{{end}}</dd>
-        <dt>Stream-Profil (LAN)</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
-        <dt>Cloud-Profil</dt><dd data-bind="read-cloud-stream">{{if .Page.CloudStreamProfile}}{{.Page.CloudStreamProfile}}{{else}}wie LAN-Profil{{end}}</dd>
-        <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
-        <dt>Uhr-Anzeige</dt><dd>{{if eq .Page.ClockLayout "horizontal"}}Horizontal{{else}}Vertikal{{end}}</dd>
-      </dl>
-
-      <!-- EDIT-Mode (versteckt by default). Aktiviert via
-           data-action="edit-stammdaten". Dropdowns werden lazy
-           per fetch befuellt damit die Initial-Page ohne extra
-           Roundtrips rendert. -->
-      <form class="stammdaten-edit-form" data-bind="stammdaten-edit" hidden>
-        <label>
-          Mieter-Name
-          <input type="text" name="name" value="{{.Page.Name}}" required maxlength="64">
-        </label>
-        <label>
-          Stream-Profil (LAN)
-          <select name="stream_profile" data-current="{{.Page.StreamProfile}}">
-            <option value="">Convention-Fallback</option>
-          </select>
-        </label>
-        <label>
-          Cloud-Profil
-          <select name="cloud_stream_profile" data-current="{{.Page.CloudStreamProfile}}">
-            <option value="">wie LAN-Profil</option>
-          </select>
-        </label>
-        <label>
-          UA-User-Verknuepfung
-          <select name="linked_ua_user_id" data-current="{{.Page.LinkedUAUserID}}">
-            <option value="">-</option>
-          </select>
-        </label>
-        <div class="stammdaten-edit-actions">
-          <button type="button" class="btn-secondary" data-action="cancel-stammdaten">Abbrechen</button>
-          <button type="submit" class="btn-primary">Speichern</button>
-        </div>
-      </form>
-    </section>
-
-    <!-- Saison 19-30: 1:n Tür-Zuordnung. Ersetzt die einzelne
-         "Verknüpfte Klingel". Auswahl-Quelle ist /a/doors.json
-         (ListDoors, funktioniert); Speichern -> POST
-         /a/viewers/{mac}/doors. Gilt für alle drei Viewer-Typen. -->
-    <section class="viewer-detail-section" id="doors-section"
-             data-viewer-mac="{{.Page.MAC}}">
-      <h2>Tür-Zuordnung</h2>
-      <p class="door-intro">
-        Türen, die dieser Viewer öffnen darf - Standby-Knopf und App-Buttons.
-        Mehrere möglich; bei genau einer öffnet „standby" direkt diese Tür.
-      </p>
-      <ul class="door-list" data-bind="assigned-doors">
-        {{range .Page.AssignedDoors}}
-          <li class="door-row" data-door-id="{{.DoorID}}">
-            <span class="door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span>
-            <button type="button" class="btn btn-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}" title="Tür entfernen" aria-label="Tür entfernen">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-              Entfernen
-            </button>
-          </li>
-        {{end}}
-      </ul>
-      <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>
-        Noch keine Tür zugeordnet.
-      </p>
-      <div class="door-add">
-        <select data-bind="door-add-select">
-          <option value="">+ Tür hinzufügen …</option>
-        </select>
       </div>
-    </section>
+    </div>
+    <div class="identity-right">
+      <span class="live-indicator{{if not .Page.Running}} is-off{{end}}"><span class="led"></span>{{if .Page.Running}}gilt live{{else}}offline{{end}}</span>
+    </div>
+  </div>
 
-    <!-- Settings-Auto-Save-Section.
-         Sichtbar fuer beide Typen; ESP-spezifische Fields nur
-         wenn Type=esp. Aenderung an einem Radio/Slider feuert
-         sofort fetch -> POST /a/viewers/{mac}/settings. -->
-    <section class="viewer-detail-section" id="settings-section">
-      <h2>Einstellungen</h2>
-
-      <fieldset class="settings-field">
-        <legend>Idle-Ansicht</legend>
-        <label>
-          <input type="radio" name="idle_view_mode" value="screensaver"
-                 {{if eq .Page.IdleViewMode "screensaver"}}checked{{end}}>
-          Bildschirmschoner (Uhr &amp; Wetter)
-        </label>
-        <label>
-          <input type="radio" name="idle_view_mode" value="livestream"
-                 {{if eq .Page.IdleViewMode "livestream"}}checked{{end}}>
-          Live-Stream (Tuerkamera)
-        </label>
-        {{if eq .Page.Type "esp"}}
-          <label>
-            <input type="radio" name="idle_view_mode" value="screen_off"
-                   {{if eq .Page.IdleViewMode "screen_off"}}checked{{end}}>
-            Bildschirm aus
-          </label>
-        {{end}}
-      </fieldset>
-
-      <fieldset class="settings-field">
-        <legend>Auto-Bildschirmschoner</legend>
-        <label><input type="radio" name="auto_screensaver_seconds" value="0"   {{if eq .Page.AutoScreensaverSeconds 0}}checked{{end}}> aus</label>
-        <label><input type="radio" name="auto_screensaver_seconds" value="30"  {{if eq .Page.AutoScreensaverSeconds 30}}checked{{end}}> 30 Sekunden</label>
-        <label><input type="radio" name="auto_screensaver_seconds" value="60"  {{if eq .Page.AutoScreensaverSeconds 60}}checked{{end}}> 1 Minute</label>
-        <label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq .Page.AutoScreensaverSeconds 300}}checked{{end}}> 5 Minuten</label>
-        <label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq .Page.AutoScreensaverSeconds 600}}checked{{end}}> 10 Minuten</label>
-      </fieldset>
-
-      <fieldset class="settings-field">
-        <legend>Verlauf-Erfassung</legend>
-        <label><input type="radio" name="history_capture" value="1" {{if .Page.HistoryCaptureEnabled}}checked{{end}}> Aktiv</label>
-        <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
-      </fieldset>
-
-      <!-- Uhr-Anzeige. -->
-      <fieldset class="settings-field">
-        <legend>Uhr-Anzeige</legend>
-        <label><input type="radio" name="clock_layout" value="vertical"   {{if eq .Page.ClockLayout "vertical"}}checked{{end}}> Vertikal (Stunden über Minuten)</label>
-        <label><input type="radio" name="clock_layout" value="horizontal" {{if eq .Page.ClockLayout "horizontal"}}checked{{end}}> Horizontal (HH:MM)</label>
-      </fieldset>
-
-      <!-- Saison 19-39: Verbindungsweg (WEG-Schalter). Admin-gesetzt; die App
-           honoriert ihn bei der Endpunkt-Wahl (auto = LAN zuerst, Cloud-Fallback). -->
-      <fieldset class="settings-field">
-        <legend>Verbindungsweg</legend>
-        <label><input type="radio" name="path_mode" value="auto"  {{if eq .Page.PathMode "auto"}}checked{{end}}> Automatik (LAN zuerst, Cloud-Fallback)</label>
-        <label><input type="radio" name="path_mode" value="local" {{if eq .Page.PathMode "local"}}checked{{end}}> Nur LAN (Edge)</label>
-        <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}> Nur Cloud</label>
-      </fieldset>
-
-      <!-- Saison 19-42: Auflösungs-Wahl. Admin-gesetzt; Default mittel
-           (ressourcenschonend für Cloud/Android), hoch im LAN/per Wahl. carvilon
-           wählt nur die Stufe; das Ziehen ist Stream-/App-Seite. -->
-      <fieldset class="settings-field">
-        <legend>Auflösung</legend>
-        <label><input type="radio" name="resolution_mode" value="high"   {{if eq .Page.ResolutionMode "high"}}checked{{end}}> Hoch (1200×1600)</label>
-        <label><input type="radio" name="resolution_mode" value="medium" {{if eq .Page.ResolutionMode "medium"}}checked{{end}}> Mittel (960×1280)</label>
-        <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
-      </fieldset>
-
-      <!-- Saison 20: die keep_stream-Werte stehen jetzt in der Funktionsliste
-           (#features-section) - Wert und Sichtbarkeit pro Zeile nebeneinander. -->
-
+  <!-- Stammdaten -->
+  <section class="card" id="stammdaten-section" data-viewer-mac="{{.Page.MAC}}" data-viewer-type="{{.Page.Type}}">
+    <h2>Stammdaten <span class="section-actions"><button type="button" class="btn-edit" data-action="edit-stammdaten">Bearbeiten</button></span></h2>
+    <dl class="viewer-meta" data-bind="stammdaten-read">
       {{if eq .Page.Type "esp"}}
-        <fieldset class="settings-field">
-          <legend>Bildschirm aus nach (ESP)</legend>
-          <label><input type="radio" name="screen_off_after_sec" value="0"    {{if eq .Page.ScreenOffAfterSec 0}}checked{{end}}> nie</label>
-          <label><input type="radio" name="screen_off_after_sec" value="30"   {{if eq .Page.ScreenOffAfterSec 30}}checked{{end}}> 30 Sekunden</label>
-          <label><input type="radio" name="screen_off_after_sec" value="60"   {{if eq .Page.ScreenOffAfterSec 60}}checked{{end}}> 1 Minute</label>
-          <label><input type="radio" name="screen_off_after_sec" value="300"  {{if eq .Page.ScreenOffAfterSec 300}}checked{{end}}> 5 Minuten</label>
-          <label><input type="radio" name="screen_off_after_sec" value="600"  {{if eq .Page.ScreenOffAfterSec 600}}checked{{end}}> 10 Minuten</label>
-          <label><input type="radio" name="screen_off_after_sec" value="1800" {{if eq .Page.ScreenOffAfterSec 1800}}checked{{end}}> 30 Minuten</label>
-        </fieldset>
-
-        <fieldset class="settings-field">
-          <legend>Helligkeit (ESP)</legend>
-          <div class="brightness-row">
-            <input type="range" name="brightness_idle" min="0" max="100" step="1"
-                   value="{{.Page.BrightnessIdle}}" data-bind="brightness-slider">
-            <span data-bind="brightness-value">{{.Page.BrightnessIdle}}%</span>
-          </div>
-        </fieldset>
-
-        <fieldset class="settings-field">
-          <legend>Sprache (ESP)</legend>
-          <label><input type="radio" name="language" value="de" {{if eq .Page.Language "de"}}checked{{end}}> Deutsch</label>
-          <label><input type="radio" name="language" value="en" {{if eq .Page.Language "en"}}checked{{end}}> English</label>
-        </fieldset>
+        <dt>ESP-Modell</dt><dd>{{if .Page.ESPModel}}{{.Page.ESPModel}}{{else}}-{{end}}</dd>
+        <dt>Firmware</dt><dd>{{if .Page.ESPFwVersion}}{{.Page.ESPFwVersion}}{{else}}-{{end}}</dd>
       {{end}}
-    </section>
-
-    <!-- Saison 20: Vorlagen-Zuweisung. Nur Auswahl (Anlegen/Bearbeiten ist
-         eine eigene spätere Seite). Änderung -> POST /a/viewers/{mac}/template
-         + config.changed; die Werte erben sich live (kein Copy-on-Attach). -->
-    <section class="viewer-detail-section" id="template-section" data-viewer-mac="{{.Page.MAC}}">
-      <h2>Vorlage</h2>
-      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
-        Eine Vorlage liefert Standard-Sichtbarkeiten und -Werte. Pro-Viewer-Einstellungen unten gewinnen.
-      </p>
-      <fieldset class="settings-field">
-        <legend>Zugewiesene Vorlage</legend>
-        <select id="template-select" class="exposure-select">
-          <option value="0"{{if not .Page.HasTemplate}} selected{{end}}>— keine —</option>
-          {{range .Page.TemplateOptions}}
-          <option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>
-          {{end}}
-        </select>
-      </fieldset>
-    </section>
-
-    <!-- Saison 20: Abo-Rahmen (read-only; die zentrale Hersteller-Verwaltung
-         schreibt später auf diesen Datensatz). -->
-    <section class="viewer-detail-section" id="abo-section">
-      <h2>Abo</h2>
-      {{with .Page.License}}
-      <dl class="viewer-meta">
-        <dt>Tarif</dt><dd>{{if .PlanName}}{{.PlanName}}{{else}}&mdash;{{end}}</dd>
-        <dt>Viewer</dt><dd>{{.ViewerCount}} / {{.ViewerLimit}}{{if .OverLimit}} <span class="feature-locked-tag">über Limit</span>{{end}}</dd>
-        <dt>Gültig bis</dt><dd>{{.ValidUntil}}</dd>
-      </dl>
+      {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
+        <dt>Bearer-Token gesetzt</dt><dd>{{if .Page.HasDeviceToken}}ja{{else}}nein{{end}}<button type="button" class="inline-action" data-action="regen-token">Token neu generieren</button></dd>
       {{else}}
-      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin:0;">Kein Abo hinterlegt.</p>
+        <dt>Passwort gesetzt</dt><dd>{{if .Page.HasPassword}}ja{{else}}nein{{end}}<button type="button" class="inline-action" data-action="reset-password">Passwort neu setzen</button></dd>
       {{end}}
-    </section>
-
-    <!-- Saison 20: Funktionsliste - je Funktion eine Sichtbarkeits-Stufe
-         (ausgeblendet / nur Admin / für Mieter sichtbar), Wert nur bei den
-         keep_stream-Funktionen. Sichtbarkeit -> POST /a/viewers/{mac}/exposure
-         (löst die binäre /visibility ab); keep_stream-Wert -> POST .../settings.
-         Beides feuert config.changed. -->
-    <section class="viewer-detail-section" id="features-section" data-viewer-mac="{{.Page.MAC}}">
-      <h2>Funktionen &amp; Sichtbarkeit</h2>
-      <p style="color: var(--color-text-tertiary); font-size: var(--fs-sm); margin-top:0;">
-        Ausgeblendet = Standard erzwungen, Mieter sieht nichts. Nur Admin = Wert gilt, Mieter sieht nichts.
-        Für Mieter sichtbar = Mieter sieht und ändert. Wert nur bei Stream-Funktionen (bei „ausgeblendet" ohne Wirkung).
-      </p>
-      {{range .Page.Features}}
-      <div class="feature-row" data-feature-key="{{.Key}}">
-        <div class="feature-name">{{.Label}}{{if not .Licensed}}<span class="feature-locked-tag">nicht im Abo</span>{{end}}</div>
-        {{if .HasValue}}
-        <div class="feature-value{{if eq .Exposure "hidden"}} is-disabled{{end}}" data-value-editor>
-          <label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}> Ein</label>
-          <label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}> Aus</label>
-        </div>
-        {{else}}
-        <div class="feature-value is-empty">&mdash;</div>
-        {{end}}
-        <div class="exposure-seg" role="radiogroup" aria-label="Sichtbarkeit für den Mieter">
-          <label><input type="radio" name="exp_{{.Key}}" value="hidden" {{if eq .Exposure "hidden"}}checked{{end}}><span>ausgeblendet</span></label>
-          <label><input type="radio" name="exp_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><span>nur Admin</span></label>
-          <label><input type="radio" name="exp_{{.Key}}" value="tenant_visible" {{if eq .Exposure "tenant_visible"}}checked{{end}}><span>für Mieter sichtbar</span></label>
-        </div>
+      <dt>Mieter-Name</dt><dd data-bind="read-name">{{.Page.Name}}</dd>
+      <dt>Tueren</dt><dd>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} zugeordnet (siehe Tuer-Zuordnung){{else}}keine zugeordnet{{end}}</dd>
+      <dt>Stream-Profil (LAN)</dt><dd data-bind="read-stream">{{if .Page.StreamProfile}}{{.Page.StreamProfile}}{{else}}Convention-Fallback{{end}}</dd>
+      <dt>Cloud-Profil</dt><dd data-bind="read-cloud-stream">{{if .Page.CloudStreamProfile}}{{.Page.CloudStreamProfile}}{{else}}wie LAN-Profil{{end}}</dd>
+      <dt>UA-User-Verknuepfung</dt><dd data-bind="read-ua">{{if .Page.LinkedUAUserID}}{{.Page.LinkedUAUserID}}{{else}}-{{end}}</dd>
+    </dl>
+    <form class="stammdaten-edit-form" data-bind="stammdaten-edit" hidden>
+      <label>Mieter-Name<input type="text" name="name" value="{{.Page.Name}}" required maxlength="64"></label>
+      <label>Stream-Profil (LAN)<select name="stream_profile" data-current="{{.Page.StreamProfile}}"><option value="">Convention-Fallback</option></select></label>
+      <label>Cloud-Profil<select name="cloud_stream_profile" data-current="{{.Page.CloudStreamProfile}}"><option value="">wie LAN-Profil</option></select></label>
+      <label>UA-User-Verknuepfung<select name="linked_ua_user_id" data-current="{{.Page.LinkedUAUserID}}"><option value="">-</option></select></label>
+      <div class="stammdaten-edit-actions">
+        <button type="button" class="btn-secondary" data-action="cancel-stammdaten">Abbrechen</button>
+        <button type="submit" class="btn-primary">Speichern</button>
       </div>
+    </form>
+  </section>
+
+  <!-- Tuer-Zuordnung -->
+  <section class="card" id="doors-section" data-viewer-mac="{{.Page.MAC}}">
+    <h2>Tuer-Zuordnung</h2>
+    <p class="door-intro">Tueren, die dieser Viewer oeffnen darf. Mehrere moeglich; bei genau einer oeffnet „standby" direkt diese Tuer.</p>
+    <ul class="door-list" data-bind="assigned-doors">
+      {{range .Page.AssignedDoors}}
+        <li class="door-row" data-door-id="{{.DoorID}}">
+          <span class="door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span>
+          <button type="button" class="btn btn-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}" title="Tuer entfernen" aria-label="Tuer entfernen">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            Entfernen
+          </button>
+        </li>
       {{end}}
-    </section>
+    </ul>
+    <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>Noch keine Tuer zugeordnet.</p>
+    <div class="door-add"><select data-bind="door-add-select"><option value="">+ Tuer hinzufuegen …</option></select></div>
+  </section>
 
-    <section class="viewer-detail-section viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
-      <h2>
-        Verlauf
-        <span class="history-meta">
-          <span class="total-count" data-bind="total-count">-</span>
-          <span class="hidden-count" data-bind="hidden-count" hidden></span>
-        </span>
-      </h2>
-
-      <div class="history-filter-form">
-        <div class="filter-fields">
-          <label>Von <input type="date" id="history-filter-from"></label>
-          <label>Bis <input type="date" id="history-filter-to"></label>
-          <button type="button" id="history-filter-apply" class="btn-primary">Anwenden</button>
-          <button type="button" id="history-filter-reset" class="btn-secondary">Zuruecksetzen</button>
-        </div>
-        <div class="filter-spacer"></div>
-        <button type="button" id="history-clear-all" class="btn-danger-outline">Verlauf leeren</button>
-      </div>
-
-      <table class="history-table">
-        <thead>
-          <tr><th>Tuer</th><th>Wann</th><th class="row-action"></th></tr>
-        </thead>
-        <tbody id="history-tbody"></tbody>
-      </table>
-      <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
-
-      <button type="button" class="btn-load-more" id="history-load-more" hidden>Mehr laden</button>
-    </section>
-
-    <!-- Modals.
-         Custom modal-overlay statt <dialog>-Element damit das
-         Design konsistent zur restlichen Admin-UI bleibt. Alle
-         Modals haben dieselbe Hide/Show-Mechanik via .is-open. -->
-
-    {{if ne .Page.Type "esp"}}
-      <!-- Password-Reset (Web-Viewer only). -->
-      <div class="admin-modal" id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
-        <div class="admin-modal-glass">
-          <h3 id="password-modal-title">Passwort fuer {{.Page.Name}} neu setzen</h3>
-          <p class="modal-hint">Mindestens 8 Zeichen. Der Mieter wird sich neu anmelden muessen.</p>
-          <form data-bind="password-form">
-            <label>
-              Neues Passwort
-              <input type="password" name="new_password" required minlength="8" autocomplete="new-password">
-            </label>
-            <label>
-              Wiederholen
-              <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password">
-            </label>
-            <div class="modal-actions">
-              <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
-              <button type="submit" class="btn-primary">Setzen</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    {{end}}
-
+  <!-- Einstellungen (Werte) -->
+  <section class="card" id="settings-section">
+    <h2>Einstellungen</h2>
+    <fieldset class="settings-field">
+      <legend>Idle-Ansicht</legend>
+      <label><input type="radio" name="idle_view_mode" value="screensaver" {{if eq .Page.IdleViewMode "screensaver"}}checked{{end}}> Bildschirmschoner (Uhr &amp; Wetter)</label>
+      <label><input type="radio" name="idle_view_mode" value="livestream" {{if eq .Page.IdleViewMode "livestream"}}checked{{end}}> Live-Stream (Tuerkamera)</label>
+      {{if eq .Page.Type "esp"}}<label><input type="radio" name="idle_view_mode" value="screen_off" {{if eq .Page.IdleViewMode "screen_off"}}checked{{end}}> Bildschirm aus</label>{{end}}
+    </fieldset>
+    <fieldset class="settings-field">
+      <legend>Auto-Bildschirmschoner</legend>
+      <label><input type="radio" name="auto_screensaver_seconds" value="0"   {{if eq .Page.AutoScreensaverSeconds 0}}checked{{end}}> aus</label>
+      <label><input type="radio" name="auto_screensaver_seconds" value="30"  {{if eq .Page.AutoScreensaverSeconds 30}}checked{{end}}> 30 Sekunden</label>
+      <label><input type="radio" name="auto_screensaver_seconds" value="60"  {{if eq .Page.AutoScreensaverSeconds 60}}checked{{end}}> 1 Minute</label>
+      <label><input type="radio" name="auto_screensaver_seconds" value="300" {{if eq .Page.AutoScreensaverSeconds 300}}checked{{end}}> 5 Minuten</label>
+      <label><input type="radio" name="auto_screensaver_seconds" value="600" {{if eq .Page.AutoScreensaverSeconds 600}}checked{{end}}> 10 Minuten</label>
+    </fieldset>
+    <fieldset class="settings-field">
+      <legend>Verlauf-Erfassung</legend>
+      <label><input type="radio" name="history_capture" value="1" {{if .Page.HistoryCaptureEnabled}}checked{{end}}> Aktiv</label>
+      <label><input type="radio" name="history_capture" value="0" {{if not .Page.HistoryCaptureEnabled}}checked{{end}}> Deaktiviert</label>
+    </fieldset>
+    <fieldset class="settings-field">
+      <legend>Uhr-Anzeige</legend>
+      <label><input type="radio" name="clock_layout" value="vertical"   {{if eq .Page.ClockLayout "vertical"}}checked{{end}}> Vertikal (Stunden ueber Minuten)</label>
+      <label><input type="radio" name="clock_layout" value="horizontal" {{if eq .Page.ClockLayout "horizontal"}}checked{{end}}> Horizontal (HH:MM)</label>
+    </fieldset>
+    <fieldset class="settings-field">
+      <legend>Verbindungsweg</legend>
+      <label><input type="radio" name="path_mode" value="auto"  {{if eq .Page.PathMode "auto"}}checked{{end}}> Automatik (LAN zuerst, Cloud-Fallback)</label>
+      <label><input type="radio" name="path_mode" value="local" {{if eq .Page.PathMode "local"}}checked{{end}}> Nur LAN (Edge)</label>
+      <label><input type="radio" name="path_mode" value="cloud" {{if eq .Page.PathMode "cloud"}}checked{{end}}> Nur Cloud</label>
+    </fieldset>
+    <fieldset class="settings-field">
+      <legend>Aufloesung</legend>
+      <label><input type="radio" name="resolution_mode" value="high"   {{if eq .Page.ResolutionMode "high"}}checked{{end}}> Hoch (1200×1600)</label>
+      <label><input type="radio" name="resolution_mode" value="medium" {{if eq .Page.ResolutionMode "medium"}}checked{{end}}> Mittel (960×1280)</label>
+      <label><input type="radio" name="resolution_mode" value="low"    {{if eq .Page.ResolutionMode "low"}}checked{{end}}> Niedrig (360×480)</label>
+    </fieldset>
     {{if eq .Page.Type "esp"}}
-      <!-- ESP-Token-Regenerate Bestaetigung. -->
-      <div class="admin-modal" id="token-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="token-confirm-title">
-        <div class="admin-modal-glass">
-          <h3 id="token-confirm-title">Bearer-Token neu generieren?</h3>
-          <p class="modal-warning">
-            Das alte Token wird sofort ungueltig. Der ESP-Viewer
-            muss neu provisioniert werden.
-          </p>
+      <fieldset class="settings-field">
+        <legend>Bildschirm aus nach (ESP)</legend>
+        <label><input type="radio" name="screen_off_after_sec" value="0"    {{if eq .Page.ScreenOffAfterSec 0}}checked{{end}}> nie</label>
+        <label><input type="radio" name="screen_off_after_sec" value="30"   {{if eq .Page.ScreenOffAfterSec 30}}checked{{end}}> 30 Sekunden</label>
+        <label><input type="radio" name="screen_off_after_sec" value="60"   {{if eq .Page.ScreenOffAfterSec 60}}checked{{end}}> 1 Minute</label>
+        <label><input type="radio" name="screen_off_after_sec" value="300"  {{if eq .Page.ScreenOffAfterSec 300}}checked{{end}}> 5 Minuten</label>
+        <label><input type="radio" name="screen_off_after_sec" value="600"  {{if eq .Page.ScreenOffAfterSec 600}}checked{{end}}> 10 Minuten</label>
+        <label><input type="radio" name="screen_off_after_sec" value="1800" {{if eq .Page.ScreenOffAfterSec 1800}}checked{{end}}> 30 Minuten</label>
+      </fieldset>
+      <fieldset class="settings-field">
+        <legend>Helligkeit (ESP)</legend>
+        <div class="brightness-row"><input type="range" name="brightness_idle" min="0" max="100" step="1" value="{{.Page.BrightnessIdle}}" data-bind="brightness-slider"><span data-bind="brightness-value">{{.Page.BrightnessIdle}}%</span></div>
+      </fieldset>
+      <fieldset class="settings-field">
+        <legend>Sprache (ESP)</legend>
+        <label><input type="radio" name="language" value="de" {{if eq .Page.Language "de"}}checked{{end}}> Deutsch</label>
+        <label><input type="radio" name="language" value="en" {{if eq .Page.Language "en"}}checked{{end}}> English</label>
+      </fieldset>
+    {{end}}
+  </section>
+
+  <!-- Vorlage -->
+  <section class="card" id="template-section" data-viewer-mac="{{.Page.MAC}}">
+    <h2>Vorlage</h2>
+    <p class="intro">Eine Vorlage liefert Standard-Sichtbarkeiten und -Werte. Pro-Viewer-Einstellungen unten gewinnen.</p>
+    <select id="template-select" class="admin-select">
+      <option value="0"{{if not .Page.HasTemplate}} selected{{end}}>— keine —</option>
+      {{range .Page.TemplateOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </section>
+
+  <!-- Abo -->
+  <section class="card" id="abo-section">
+    <h2>Abo</h2>
+    {{with .Page.License}}
+    <dl class="viewer-meta">
+      <dt>Tarif</dt><dd>{{if .PlanName}}{{.PlanName}}{{else}}&mdash;{{end}}</dd>
+      <dt>Viewer</dt><dd>{{.ViewerCount}} / {{.ViewerLimit}}{{if .OverLimit}} <span class="badge is-lock">ueber Limit</span>{{end}}</dd>
+      <dt>Gueltig bis</dt><dd>{{.ValidUntil}}</dd>
+    </dl>
+    {{else}}<p class="intro" style="margin:0;">Kein Abo hinterlegt.</p>{{end}}
+  </section>
+
+  <!-- Funktionen & Sichtbarkeit -->
+  <section class="card" id="features-section" data-viewer-mac="{{.Page.MAC}}">
+    <h2>Funktionen &amp; Sichtbarkeit</h2>
+    <p class="intro">Ausgeblendet = Standard erzwungen, Mieter sieht nichts. Nur Admin = Wert gilt, Mieter sieht nichts. Fuer Mieter sichtbar = Mieter sieht und aendert. Wert nur bei Stream-Funktionen (bei „ausgeblendet" ohne Wirkung).</p>
+    <div class="cell-grid">
+      {{range .Page.Features}}
+      <div class="setting-cell" data-feature-key="{{.Key}}">
+        <div class="cell-label"><span class="cell-name">{{.Label}}{{if not .Licensed}}<span class="badge is-lock">nicht im Abo</span>{{end}}</span></div>
+        {{if .HasValue}}
+        <div class="cell-value{{if eq .Exposure "hidden"}} is-disabled{{end}}" data-value-editor>
+          <span class="switch">
+            <label><input type="radio" name="{{.Key}}" value="1" {{if .BoolValue}}checked{{end}}>Ein</label>
+            <label><input type="radio" name="{{.Key}}" value="0" {{if not .BoolValue}}checked{{end}}>Aus</label>
+          </span>
+        </div>
+        {{else}}<div class="cell-value"><span class="cell-hint">&mdash;</span></div>{{end}}
+        <div class="cell-control">
+          <span class="segmented" role="radiogroup" aria-label="Sichtbarkeit fuer den Mieter">
+            <label><input type="radio" name="exp_{{.Key}}" value="hidden" {{if eq .Exposure "hidden"}}checked{{end}}><span>ausgeblendet</span></label>
+            <label><input type="radio" name="exp_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><span>nur Admin</span></label>
+            <label><input type="radio" name="exp_{{.Key}}" value="tenant_visible" {{if eq .Exposure "tenant_visible"}}checked{{end}}><span>fuer Mieter sichtbar</span></label>
+          </span>
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </section>
+
+  <!-- Verlauf -->
+  <section class="card viewer-history-section" id="history-section" data-viewer-mac="{{.Page.MAC}}">
+    <h2>Verlauf <span class="history-meta"><span class="total-count" data-bind="total-count">-</span><span class="hidden-count" data-bind="hidden-count" hidden></span></span></h2>
+    <div class="history-filter-form">
+      <div class="filter-fields">
+        <label>Von <input type="date" id="history-filter-from"></label>
+        <label>Bis <input type="date" id="history-filter-to"></label>
+        <button type="button" id="history-filter-apply" class="btn-primary">Anwenden</button>
+        <button type="button" id="history-filter-reset" class="btn-secondary">Zuruecksetzen</button>
+      </div>
+      <div class="filter-spacer"></div>
+      <button type="button" id="history-clear-all" class="btn-danger-outline">Verlauf leeren</button>
+    </div>
+    <table class="history-table"><thead><tr><th>Tuer</th><th>Wann</th><th class="row-action"></th></tr></thead><tbody id="history-tbody"></tbody></table>
+    <div class="history-empty" id="history-empty" hidden>Noch keine Klingel-Ereignisse.</div>
+    <button type="button" class="btn-load-more" id="history-load-more" hidden>Mehr laden</button>
+  </section>
+
+  <!-- Modals -->
+  {{if eq .Page.Type "web"}}
+    <div class="admin-modal" id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+      <div class="admin-modal-glass">
+        <h3 id="password-modal-title">Passwort fuer {{.Page.Name}} neu setzen</h3>
+        <p class="modal-hint">Mindestens 8 Zeichen. Der Mieter wird sich neu anmelden muessen.</p>
+        <form data-bind="password-form">
+          <label>Neues Passwort<input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
+          <label>Wiederholen<input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
           <div class="modal-actions">
             <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
-            <button type="button" class="btn-primary btn-danger-confirm" data-action="token-regen-confirm">
-              Token neu generieren
-            </button>
+            <button type="submit" class="btn-primary">Setzen</button>
           </div>
+        </form>
+      </div>
+    </div>
+  {{end}}
+  {{if or (eq .Page.Type "esp") (eq .Page.Type "android")}}
+    <div class="admin-modal" id="token-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="token-confirm-title">
+      <div class="admin-modal-glass">
+        <h3 id="token-confirm-title">Bearer-Token neu generieren?</h3>
+        <p class="modal-warning">Das alte Token wird sofort ungueltig. Das Geraet muss neu provisioniert werden.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" data-action="modal-cancel">Abbrechen</button>
+          <button type="button" class="btn-primary btn-danger-confirm" data-action="token-regen-confirm">Token neu generieren</button>
         </div>
       </div>
-
-      <!-- ESP-Token-Display (one-shot reveal). -->
-      <div class="admin-modal" id="token-display-modal" role="dialog" aria-modal="true" aria-labelledby="token-display-title">
-        <div class="admin-modal-glass">
-          <h3 id="token-display-title">Neues Bearer-Token (einmalig sichtbar)</h3>
-          <p class="modal-warning">
-            Speichere das Token jetzt - es kann nicht erneut
-            angezeigt werden.
-          </p>
-          <pre class="token-value" data-bind="token-value"></pre>
-          <div class="modal-actions">
-            <button type="button" class="btn-secondary" data-action="token-copy">Kopieren</button>
-            <button type="button" class="btn-primary" data-action="modal-cancel">Verstanden</button>
-          </div>
+    </div>
+    <div class="admin-modal" id="token-display-modal" role="dialog" aria-modal="true" aria-labelledby="token-display-title">
+      <div class="admin-modal-glass">
+        <h3 id="token-display-title">Neues Bearer-Token (einmalig sichtbar)</h3>
+        <p class="modal-warning">Speichere das Token jetzt - es kann nicht erneut angezeigt werden.</p>
+        <pre class="token-value" data-bind="token-value"></pre>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" data-action="token-copy">Kopieren</button>
+          <button type="button" class="btn-primary" data-action="modal-cancel">Verstanden</button>
         </div>
       </div>
-    {{end}}
-  </main>
+    </div>
+  {{end}}
+{{end}}
 
+{{define "scripts"}}
   <script>
-    // Saison 20: Funktionsliste (Drei-Wege-Sichtbarkeit + keep_stream-Wert)
-    // und Vorlagen-Zuweisung. Lebt nach </main> wie die anderen Sektion-
-    // Skripte, damit die Markup-Tests jede Sektion sehen. Jede Änderung
+    // Saison 20: Funktionsliste (Drei-Wege-Sichtbarkeit via SegmentedControl +
+    // keep_stream-Wert via Switch) und Vorlagen-Zuweisung. Jede Aenderung
     // persistiert sofort (exposure -> POST .../exposure, Wert -> POST
-    // .../settings, Vorlage -> POST .../template); Fehler rollt zurück.
+    // .../settings, Vorlage -> POST .../template); Fehler rollt zurueck.
     (function () {
       var toastEl = document.querySelector('[data-bind="toast"]');
       function toast(msg, kind) {
@@ -1098,7 +367,6 @@
       var section = document.getElementById('features-section');
       if (section) {
         var viewerMAC = section.getAttribute('data-viewer-mac');
-
         function valueEditor(row) { return row.querySelector('[data-value-editor]'); }
         function setEditorDisabled(row, disabled) {
           var ed = valueEditor(row);
@@ -1106,20 +374,16 @@
           ed.classList.toggle('is-disabled', disabled);
           ed.querySelectorAll('input').forEach(function (i) { i.disabled = disabled; });
         }
-
-        // Init: remember each row's exposure (for revert) and grey out the
-        // value editor where the function is already hidden.
-        section.querySelectorAll('.feature-row').forEach(function (row) {
+        section.querySelectorAll('.setting-cell[data-feature-key]').forEach(function (row) {
           var checked = row.querySelector('input[name^="exp_"]:checked');
           var exp = checked ? checked.value : 'tenant_visible';
           row.setAttribute('data-exposure', exp);
           setEditorDisabled(row, exp === 'hidden');
         });
-
         section.addEventListener('change', function (e) {
           var input = e.target;
           if (!input || !input.name) return;
-          var row = input.closest('.feature-row');
+          var row = input.closest('.setting-cell[data-feature-key]');
           if (!row) return;
           if (input.name.indexOf('exp_') === 0) {
             saveExposure(row, input.value);
@@ -1127,7 +391,6 @@
             saveValue(row, input.name, input.value === '1');
           }
         });
-
         function saveExposure(row, exposure) {
           var key = row.getAttribute('data-feature-key');
           var prev = row.getAttribute('data-exposure') || 'tenant_visible';
@@ -1137,10 +400,7 @@
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ feature_key: key, exposure: exposure }),
           })
-            .then(function (r) {
-              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-              return r.json();
-            })
+            .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
             .then(function () { row.setAttribute('data-exposure', exposure); toast('Gespeichert'); })
             .catch(function (err) {
               var back = row.querySelector('input[name="exp_' + key + '"][value="' + prev + '"]');
@@ -1149,19 +409,14 @@
               toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
             });
         }
-
         function saveValue(row, key, on) {
-          var body = {};
-          body[key] = on;
+          var body = {}; body[key] = on;
           fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(body),
           })
-            .then(function (r) {
-              if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-              return r.json();
-            })
+            .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
             .then(function () { toast('Gespeichert'); })
             .catch(function (err) {
               var back = row.querySelector('input[name="' + key + '"][value="' + (on ? '0' : '1') + '"]');
@@ -1171,7 +426,6 @@
         }
       }
 
-      // Vorlagen-Zuweisung.
       var tplSection = document.getElementById('template-section');
       if (tplSection) {
         var tplMAC = tplSection.getAttribute('data-viewer-mac');
@@ -1186,15 +440,9 @@
               headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
               body: JSON.stringify({ template_id: id }),
             })
-              .then(function (r) {
-                if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-                return r.json();
-              })
+              .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
               .then(function () { prevTpl = sel.value; toast('Vorlage gespeichert'); })
-              .catch(function (err) {
-                sel.value = prevTpl; // revert on failure
-                toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error');
-              })
+              .catch(function (err) { sel.value = prevTpl; toast(firstLine(err, 'Speichern fehlgeschlagen'), 'error'); })
               .then(function () { sel.disabled = false; });
           });
         }
@@ -1203,10 +451,8 @@
   </script>
 
   <script>
-    // Door-assignment section (Saison 19-30). Lives AFTER </main> so
-    // the detail-page markup tests (which read up to the first
-    // <script> inside <main>) still see every section. Self-contained:
-    // depends only on the shared toast slot, not the main IIFE below.
+    // Door-assignment section (Saison 19-30). Self-contained: depends only on
+    // the shared toast slot. Carried over unchanged in the redesign.
     (function () {
       var section = document.getElementById('doors-section');
       if (!section) return;
@@ -1215,7 +461,6 @@
       var noDoors   = section.querySelector('[data-bind="no-doors"]');
       var addSelect = section.querySelector('[data-bind="door-add-select"]');
       var toastEl   = document.querySelector('[data-bind="toast"]');
-
       function toast(msg, kind) {
         if (!toastEl) return;
         toastEl.textContent = msg;
@@ -1225,11 +470,7 @@
         setTimeout(function () { toastEl.classList.remove('is-visible'); }, 2500);
       }
       function rows() { return list.querySelectorAll('li[data-door-id]'); }
-      function doorIDs() {
-        return Array.prototype.map.call(rows(), function (li) {
-          return li.getAttribute('data-door-id');
-        });
-      }
+      function doorIDs() { return Array.prototype.map.call(rows(), function (li) { return li.getAttribute('data-door-id'); }); }
       function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
       var TRASH_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
       function makeRow(doorID, name) {
@@ -1238,22 +479,18 @@
         li.setAttribute('data-door-id', doorID);
         var span = document.createElement('span');
         span.className = 'door-name';
-        span.textContent = name || doorID; // textContent: no injection from the door name
+        span.textContent = name || doorID;
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-ghost btn-sm door-remove';
         btn.setAttribute('data-action', 'remove-door');
         btn.setAttribute('data-door-id', doorID);
-        btn.setAttribute('title', 'Tür entfernen');
-        btn.setAttribute('aria-label', 'Tür entfernen');
-        btn.innerHTML = TRASH_SVG + ' Entfernen'; // fixed SVG literal, no user data
-        li.appendChild(span);
-        li.appendChild(btn);
+        btn.setAttribute('title', 'Tuer entfernen');
+        btn.setAttribute('aria-label', 'Tuer entfernen');
+        btn.innerHTML = TRASH_SVG + ' Entfernen';
+        li.appendChild(span); li.appendChild(btn);
         return li;
       }
-
-      // Load the live door list: fill the add-dropdown and upgrade
-      // the server-rendered labels (UUID) to real door names.
       fetch('/a/doors.json', { headers: { 'Accept': 'application/json' } })
         .then(function (r) { return r.ok ? r.json() : { doors: [] }; })
         .catch(function () { return { doors: [] }; })
@@ -1263,8 +500,7 @@
           doors.forEach(function (d) {
             nameByID[d.door_id] = d.name || d.door_id;
             var opt = document.createElement('option');
-            opt.value = d.door_id;
-            opt.textContent = d.name || d.door_id;
+            opt.value = d.door_id; opt.textContent = d.name || d.door_id;
             addSelect.appendChild(opt);
           });
           Array.prototype.forEach.call(rows(), function (li) {
@@ -1273,32 +509,17 @@
             if (span && nameByID[id] && span.textContent === id) span.textContent = nameByID[id];
           });
         });
-
-      // One-step flow (S19-32): selecting a door in the dropdown
-      // persists it at once (POST .../doors/{id}); "Entfernen"
-      // deletes at once (DELETE). No separate "save" step that could
-      // wipe the list on an empty submit, and the toast reflects the
-      // actual server result.
-      function doorURL(id) {
-        return '/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors/' + encodeURIComponent(id);
-      }
+      function doorURL(id) { return '/a/viewers/' + encodeURIComponent(viewerMAC) + '/doors/' + encodeURIComponent(id); }
       addSelect.addEventListener('change', function () {
         var id = addSelect.value;
         if (!id) return;
-        if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); addSelect.value = ''; return; }
+        if (doorIDs().indexOf(id) !== -1) { toast('Tuer bereits zugeordnet', 'error'); addSelect.value = ''; return; }
         var name = addSelect.options[addSelect.selectedIndex].textContent;
         addSelect.disabled = true;
-        fetch(doorURL(id) + '?label=' + encodeURIComponent(name), {
-          method: 'POST', headers: { 'Accept': 'application/json' },
-        })
-          .then(function (r) {
-            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-            return r.json();
-          })
-          .then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tür hinzugefügt'); })
-          .catch(function (err) {
-            toast((err && err.message ? String(err.message) : 'Hinzufügen fehlgeschlagen').split('\n')[0], 'error');
-          })
+        fetch(doorURL(id) + '?label=' + encodeURIComponent(name), { method: 'POST', headers: { 'Accept': 'application/json' } })
+          .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
+          .then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tuer hinzugefuegt'); })
+          .catch(function (err) { toast((err && err.message ? String(err.message) : 'Hinzufuegen fehlgeschlagen').split('\n')[0], 'error'); })
           .then(function () { addSelect.value = ''; addSelect.disabled = false; });
       });
       list.addEventListener('click', function (e) {
@@ -1309,34 +530,21 @@
         var id = li.getAttribute('data-door-id');
         rem.disabled = true;
         fetch(doorURL(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } })
-          .then(function (r) {
-            if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); });
-            return r.json();
-          })
-          .then(function () { li.remove(); refreshEmpty(); toast('Tür entfernt'); })
-          .catch(function (err) {
-            rem.disabled = false;
-            toast((err && err.message ? String(err.message) : 'Entfernen fehlgeschlagen').split('\n')[0], 'error');
-          });
+          .then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m || ('http ' + r.status)); }); return r.json(); })
+          .then(function () { li.remove(); refreshEmpty(); toast('Tuer entfernt'); })
+          .catch(function (err) { rem.disabled = false; toast((err && err.message ? String(err.message) : 'Entfernen fehlgeschlagen').split('\n')[0], 'error'); });
       });
     })();
   </script>
 
   <script>
-    // Admin-Inline-Edit-Runtime.
-    //
-    // Drei Blocks:
-    //   1. Globaler Toast + Modal-Open/Close-Helper
-    //   2. Stammdaten Edit-Mode (Lazy-Dropdown-Hydrate + Save-
-    //      Form + Modals fuer Password/Token)
-    //   3. Settings Auto-Save (Radio-Change + Brightness-Debounce)
+    // Stammdaten edit + password/token modals + settings auto-save. Carried
+    // over unchanged in the redesign (same DOM contracts, new look).
     (function () {
       var stammdatenSection = document.getElementById('stammdaten-section');
       if (!stammdatenSection) return;
       var viewerMAC  = stammdatenSection.getAttribute('data-viewer-mac');
       var viewerType = stammdatenSection.getAttribute('data-viewer-type');
-
-      // ---- Toast ----
       var toastEl = document.querySelector('[data-bind="toast"]');
       var toastTimer = null;
       function showToast(msg, kind, durationMs) {
@@ -1346,90 +554,45 @@
         if (kind === 'error') toastEl.classList.add('kind-error');
         toastEl.classList.add('is-visible');
         if (toastTimer) clearTimeout(toastTimer);
-        toastTimer = setTimeout(function () {
-          toastEl.classList.remove('is-visible');
-        }, durationMs || 1500);
+        toastTimer = setTimeout(function () { toastEl.classList.remove('is-visible'); }, durationMs || 1500);
       }
+      function openModal(id) { var m = document.getElementById(id); if (m) m.classList.add('is-open'); }
+      function closeModal(modal) { if (modal) modal.classList.remove('is-open'); }
+      document.addEventListener('keydown', function (e) { if (e.key !== 'Escape') return; document.querySelectorAll('.admin-modal.is-open').forEach(closeModal); });
+      document.querySelectorAll('.admin-modal').forEach(function (m) { m.addEventListener('click', function (e) { if (e.target === m) closeModal(m); }); });
+      document.querySelectorAll('.admin-modal [data-action="modal-cancel"]').forEach(function (btn) { btn.addEventListener('click', function () { closeModal(btn.closest('.admin-modal')); }); });
 
-      // ---- Modal-Helpers ----
-      function openModal(id) {
-        var modal = document.getElementById(id);
-        if (modal) modal.classList.add('is-open');
-      }
-      function closeModal(modal) {
-        if (modal) modal.classList.remove('is-open');
-      }
-      // ESC schliesst offenes Modal.
-      document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Escape') return;
-        document.querySelectorAll('.admin-modal.is-open').forEach(closeModal);
-      });
-      // Klick auf den dunklen Backdrop (nicht auf .admin-modal-glass)
-      // schliesst.
-      document.querySelectorAll('.admin-modal').forEach(function (m) {
-        m.addEventListener('click', function (e) {
-          if (e.target === m) closeModal(m);
-        });
-      });
-      // Universeller "Abbrechen"/"Verstanden"-Button im Modal-Footer.
-      document.querySelectorAll('.admin-modal [data-action="modal-cancel"]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          closeModal(btn.closest('.admin-modal'));
-        });
-      });
-
-      // ---- Stammdaten Edit-Mode ----
       var readEl = stammdatenSection.querySelector('[data-bind="stammdaten-read"]');
       var editForm = stammdatenSection.querySelector('[data-bind="stammdaten-edit"]');
       var editBtn = stammdatenSection.querySelector('[data-action="edit-stammdaten"]');
       var cancelBtn = stammdatenSection.querySelector('[data-action="cancel-stammdaten"]');
       var dropdownsHydrated = false;
-
       function setEditMode(on) {
         if (on) {
-          readEl.hidden = true;
-          editForm.hidden = false;
-          editBtn.classList.add('is-active');
-          editBtn.textContent = 'Bearbeiten aktiv';
+          readEl.hidden = true; editForm.hidden = false;
+          editBtn.classList.add('is-active'); editBtn.textContent = 'Bearbeiten aktiv';
           if (!dropdownsHydrated) hydrateDropdowns();
         } else {
-          readEl.hidden = false;
-          editForm.hidden = true;
-          editBtn.classList.remove('is-active');
-          editBtn.textContent = 'Bearbeiten';
+          readEl.hidden = false; editForm.hidden = true;
+          editBtn.classList.remove('is-active'); editBtn.textContent = 'Bearbeiten';
         }
       }
       editBtn.addEventListener('click', function () { setEditMode(editForm.hidden); });
-      cancelBtn.addEventListener('click', function () {
-        // Reset auf die initialen Werte (HTMLFormElement.reset
-        // setzt jeden Eintrag auf sein defaultValue / defaultSelected).
-        editForm.reset();
-        setEditMode(false);
-      });
-
-      // Dropdowns lazy hydraten: erst beim ersten Klick auf
-      // "Bearbeiten" feuern wir die fetches gegen die existierenden
-      // JSON-Endpoints. data-current auf jedem <select> ist der
-      // serverseitig gerenderte Ist-Wert; wir markieren die passende
-      // Option dann als selected. Die Tür-Zuordnung lebt seit Saison
-      // 19-30 in einer eigenen Section (nicht mehr hier).
+      cancelBtn.addEventListener('click', function () { editForm.reset(); setEditMode(false); });
       function hydrateDropdowns() {
         dropdownsHydrated = true;
         Promise.all([
-          fetch('/a/streams.json',   { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] };  }).catch(function () { return { profiles: [] }; }),
-          fetch('/a/users.json',     { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { users: [] };     }).catch(function () { return { users: [] }; }),
+          fetch('/a/streams.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { profiles: [] }; }).catch(function () { return { profiles: [] }; }),
+          fetch('/a/users.json',   { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { users: [] }; }).catch(function () { return { users: [] }; }),
         ]).then(function (results) {
-          // streamRow + userRow serialisieren mit Go-Defaults (PascalCase).
-          populateSelect(editForm.elements['stream_profile'],    results[0].profiles || [], 'Name', 'Name');
+          populateSelect(editForm.elements['stream_profile'], results[0].profiles || [], 'Name', 'Name');
           populateSelect(editForm.elements['cloud_stream_profile'], results[0].profiles || [], 'Name', 'Name');
-          populateSelect(editForm.elements['linked_ua_user_id'], results[1].users    || [], 'ID',   'DisplayName');
+          populateSelect(editForm.elements['linked_ua_user_id'], results[1].users || [], 'ID', 'DisplayName');
         });
       }
       function populateSelect(selectEl, items, valueKey, labelKey) {
         if (!selectEl) return;
         var current = selectEl.getAttribute('data-current') || '';
-        // Erste Option (placeholder "-" oder "Convention-Fallback")
-        // bleibt; alles dahinter raus + neu fuellen.
         while (selectEl.options.length > 1) selectEl.remove(1);
         items.forEach(function (it) {
           var opt = document.createElement('option');
@@ -1439,37 +602,23 @@
           selectEl.appendChild(opt);
         });
       }
-
       editForm.addEventListener('submit', function (e) {
         e.preventDefault();
         var body = {
-          name:              editForm.elements['name'].value,
-          stream_profile:    editForm.elements['stream_profile'].value,
+          name: editForm.elements['name'].value,
+          stream_profile: editForm.elements['stream_profile'].value,
           cloud_stream_profile: editForm.elements['cloud_stream_profile'].value,
           linked_ua_user_id: editForm.elements['linked_ua_user_id'].value,
         };
         fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/stammdaten', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify(body),
         })
-          .then(function (r) {
-            if (!r.ok) return r.text().then(function (msg) { throw new Error(msg || ('http ' + r.status)); });
-            return r.json();
-          })
-          .then(function () {
-            showToast('Gespeichert');
-            // Volle Page reloaden damit Read-Mode-Felder, Title-
-            // Bar und Verlauf-Section die neuen Werte zeigen.
-            setTimeout(function () { location.reload(); }, 600);
-          })
-          .catch(function (err) {
-            var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
-            showToast(msg.split('\n')[0], 'error', 3000);
-          });
+          .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg || ('http ' + r.status)); }); return r.json(); })
+          .then(function () { showToast('Gespeichert'); setTimeout(function () { location.reload(); }, 600); })
+          .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
       });
 
-      // ---- Password-Reset (Web only) ----
       var pwBtn = stammdatenSection.querySelector('[data-action="reset-password"]');
       if (pwBtn) {
         pwBtn.addEventListener('click', function () { openModal('password-modal'); });
@@ -1479,64 +628,35 @@
             e.preventDefault();
             var newPw = pwForm.elements['new_password'].value;
             var confirmPw = pwForm.elements['confirm_password'].value;
-            if (newPw !== confirmPw) {
-              showToast('Passwoerter stimmen nicht ueberein', 'error', 3000);
-              return;
-            }
-            if (newPw.length < 8) {
-              showToast('Mindestens 8 Zeichen', 'error', 3000);
-              return;
-            }
+            if (newPw !== confirmPw) { showToast('Passwoerter stimmen nicht ueberein', 'error', 3000); return; }
+            if (newPw.length < 8) { showToast('Mindestens 8 Zeichen', 'error', 3000); return; }
             fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/password', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
               body: JSON.stringify({ new_password: newPw }),
             })
-              .then(function (r) {
-                if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
-                return r.json();
-              })
-              .then(function () {
-                pwForm.reset();
-                closeModal(document.getElementById('password-modal'));
-                showToast('Passwort gesetzt - Mieter-Sessions invalidiert');
-              })
-              .catch(function (err) {
-                var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
-                showToast(msg.split('\n')[0], 'error', 3000);
-              });
+              .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
+              .then(function () { pwForm.reset(); closeModal(document.getElementById('password-modal')); showToast('Passwort gesetzt - Mieter-Sessions invalidiert'); })
+              .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
           });
         }
       }
-
-      // ---- ESP-Token-Regenerate ----
       var tokenBtn = stammdatenSection.querySelector('[data-action="regen-token"]');
       if (tokenBtn) {
         tokenBtn.addEventListener('click', function () { openModal('token-confirm-modal'); });
         var confirmBtn = document.querySelector('[data-action="token-regen-confirm"]');
         if (confirmBtn) {
           confirmBtn.addEventListener('click', function () {
-            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/regenerate-token', {
-              method: 'POST',
-              headers: { 'Accept': 'application/json' },
-            })
-              .then(function (r) {
-                if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
-                return r.json();
-              })
+            fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/regenerate-token', { method: 'POST', headers: { 'Accept': 'application/json' } })
+              .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
               .then(function (resp) {
                 closeModal(document.getElementById('token-confirm-modal'));
                 var displayEl = document.querySelector('[data-bind="token-value"]');
                 if (displayEl) displayEl.textContent = resp.new_token || '';
                 openModal('token-display-modal');
               })
-              .catch(function (err) {
-                var msg = (err && err.message) ? String(err.message).trim() : 'Token-Regeneration fehlgeschlagen';
-                showToast(msg.split('\n')[0], 'error', 3000);
-              });
+              .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Token-Regeneration fehlgeschlagen').split('\n')[0], 'error', 3000); });
           });
         }
-        // Copy-Button auf dem Display-Modal.
         var copyBtn = document.querySelector('[data-action="token-copy"]');
         if (copyBtn) {
           copyBtn.addEventListener('click', function () {
@@ -1544,26 +664,16 @@
             if (!displayEl) return;
             var text = displayEl.textContent || '';
             if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(function () {
-                showToast('Token in Zwischenablage');
-              }).catch(function () {
-                showToast('Kopieren fehlgeschlagen', 'error', 2500);
-              });
+              navigator.clipboard.writeText(text).then(function () { showToast('Token in Zwischenablage'); }).catch(function () { showToast('Kopieren fehlgeschlagen', 'error', 2500); });
             } else {
-              // Fallback: text in temp-textarea + execCommand.
-              var ta = document.createElement('textarea');
-              ta.value = text;
-              document.body.appendChild(ta);
-              ta.select();
-              try { document.execCommand('copy'); showToast('Token in Zwischenablage'); }
-              catch (_) { showToast('Kopieren fehlgeschlagen', 'error', 2500); }
+              var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+              try { document.execCommand('copy'); showToast('Token in Zwischenablage'); } catch (_) { showToast('Kopieren fehlgeschlagen', 'error', 2500); }
               document.body.removeChild(ta);
             }
           });
         }
       }
 
-      // ---- Settings Auto-Save ----
       var settingsSection = document.getElementById('settings-section');
       if (settingsSection) {
         var brightnessTimer = null;
@@ -1577,42 +687,30 @@
             body[name] = parseInt(value, 10);
           }
           fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify(body),
           })
-            .then(function (r) {
-              if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); });
-              return r.json();
-            })
+            .then(function (r) { if (!r.ok) return r.text().then(function (msg) { throw new Error(msg); }); return r.json(); })
             .then(function () { showToast('Gespeichert'); })
-            .catch(function (err) {
-              var msg = (err && err.message) ? String(err.message).trim() : 'Speichern fehlgeschlagen';
-              showToast(msg.split('\n')[0], 'error', 3000);
-            });
+            .catch(function (err) { showToast((err && err.message ? String(err.message).trim() : 'Speichern fehlgeschlagen').split('\n')[0], 'error', 3000); });
         }
-        settingsSection.querySelectorAll('input[type="radio"]').forEach(function (input) {
-          input.addEventListener('change', function () {
-            saveSetting(input.name, input.value);
-          });
-        });
+        settingsSection.querySelectorAll('input[type="radio"]').forEach(function (input) { input.addEventListener('change', function () { saveSetting(input.name, input.value); }); });
         var slider = settingsSection.querySelector('[data-bind="brightness-slider"]');
         var sliderValue = settingsSection.querySelector('[data-bind="brightness-value"]');
         if (slider) {
           slider.addEventListener('input', function () {
             if (sliderValue) sliderValue.textContent = slider.value + '%';
             if (brightnessTimer) clearTimeout(brightnessTimer);
-            brightnessTimer = setTimeout(function () {
-              saveSetting('brightness_idle', slider.value);
-            }, 300);
+            brightnessTimer = setTimeout(function () { saveSetting('brightness_idle', slider.value); }, 300);
           });
         }
       }
-      // viewerType wird im JS aktuell nur fuer kuenftige Branches
-      // gebraucht; hier referenzieren um Linter ruhig zu stellen.
       void viewerType;
     })();
+  </script>
 
+  <script>
+    // Verlauf (history) section. Carried over unchanged in the redesign.
     (function () {
       var section = document.getElementById('history-section');
       var viewerMAC = section.getAttribute('data-viewer-mac');
@@ -1626,59 +724,33 @@
       var applyBtn = document.getElementById('history-filter-apply');
       var resetBtn = document.getElementById('history-filter-reset');
       var clearAllBtn = document.getElementById('history-clear-all');
-
-      var nextOffset = 0;
-      var pendingClearClick = false;
-      var pendingClearTimer = null;
-
+      var nextOffset = 0, pendingClearClick = false, pendingClearTimer = null;
       function loadPage(append) {
         var params = new URLSearchParams();
         params.set('offset', append ? String(nextOffset) : '0');
         params.set('limit', '50');
         if (fromInput.value) params.set('from', fromInput.value);
-        if (toInput.value)   params.set('to',   toInput.value);
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history?' + params, {
-          headers: { 'Accept': 'application/json' },
-        })
-          .then(function (r) {
-            if (!r.ok) throw new Error('http ' + r.status);
-            return r.json();
-          })
+        if (toInput.value) params.set('to', toInput.value);
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history?' + params, { headers: { 'Accept': 'application/json' } })
+          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
           .then(function (resp) {
-            if (!append) {
-              tbody.innerHTML = '';
-              nextOffset = 0;
-            }
+            if (!append) { tbody.innerHTML = ''; nextOffset = 0; }
             totalEl.textContent = resp.total_count + ' Eintraege';
-            if (resp.hidden_count > 0) {
-              hiddenEl.textContent = resp.hidden_count + ' vom Mieter ausgeblendet';
-              hiddenEl.hidden = false;
-            } else {
-              hiddenEl.hidden = true;
-            }
-            (resp.events || []).forEach(function (ev) {
-              tbody.appendChild(renderRow(ev));
-            });
+            if (resp.hidden_count > 0) { hiddenEl.textContent = resp.hidden_count + ' vom Mieter ausgeblendet'; hiddenEl.hidden = false; }
+            else { hiddenEl.hidden = true; }
+            (resp.events || []).forEach(function (ev) { tbody.appendChild(renderRow(ev)); });
             loadMoreBtn.hidden = !resp.has_more;
             nextOffset = resp.next_offset || (nextOffset + (resp.events || []).length);
             emptyEl.hidden = tbody.children.length > 0;
           })
-          .catch(function (err) {
-            if (window.console) console.warn('history load failed', err);
-          });
+          .catch(function (err) { if (window.console) console.warn('history load failed', err); });
       }
-
-      // Lucide-style eye-off + trash SVGs. Inline-Strings damit
-       // wir keinen externen Lucide-Loader brauchen; stroke kommt
-       // ueber currentColor aus dem umgebenden Element.
       var EYE_OFF_SVG = '<svg class="hidden-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
       var TRASH_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-
       function renderRow(ev) {
         var tr = document.createElement('tr');
         tr.setAttribute('data-event-id', String(ev.id));
         if (ev.hidden_by_viewer) tr.classList.add('hidden-by-viewer');
-
         var tdDoor = document.createElement('td');
         tdDoor.textContent = ev.door_name || ev.intercom_mac || 'Hauseingang';
         if (ev.hidden_by_viewer) {
@@ -1688,94 +760,45 @@
           tdDoor.appendChild(iconSpan);
         }
         tr.appendChild(tdDoor);
-
-        var tdWhen = document.createElement('td');
-        tdWhen.textContent = ev.when;
-        tr.appendChild(tdWhen);
-
-        var tdAction = document.createElement('td');
-        tdAction.className = 'row-action';
+        var tdWhen = document.createElement('td'); tdWhen.textContent = ev.when; tr.appendChild(tdWhen);
+        var tdAction = document.createElement('td'); tdAction.className = 'row-action';
         var btn = document.createElement('button');
-        btn.className = 'btn-icon-trash';
-        btn.type = 'button';
+        btn.className = 'btn-icon-trash'; btn.type = 'button';
         btn.setAttribute('data-event-id', String(ev.id));
         btn.setAttribute('title', 'Eintrag dauerhaft loeschen');
         btn.setAttribute('aria-label', 'Eintrag dauerhaft loeschen');
         btn.innerHTML = TRASH_SVG;
-        tdAction.appendChild(btn);
-        tr.appendChild(tdAction);
+        tdAction.appendChild(btn); tr.appendChild(tdAction);
         return tr;
       }
-
-      function formatStamp(unix) {
-        try {
-          return new Date(unix * 1000).toLocaleString('de-DE');
-        } catch (_) { return ''; }
-      }
-
+      function formatStamp(unix) { try { return new Date(unix * 1000).toLocaleString('de-DE'); } catch (_) { return ''; } }
       tbody.addEventListener('click', function (e) {
         var btn = e.target.closest('.btn-icon-trash');
         if (!btn) return;
         if (!confirm('Diesen Eintrag dauerhaft loeschen?')) return;
         var id = btn.getAttribute('data-event-id');
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history/' + id, {
-          method: 'DELETE',
-        })
-          .then(function (r) {
-            if (!r.ok) throw new Error('http ' + r.status);
-            loadPage(false);
-          })
-          .catch(function (err) {
-            alert('Loeschen fehlgeschlagen.');
-            if (window.console) console.warn('delete failed', err);
-          });
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history/' + id, { method: 'DELETE' })
+          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); loadPage(false); })
+          .catch(function (err) { alert('Loeschen fehlgeschlagen.'); if (window.console) console.warn('delete failed', err); });
       });
-
       applyBtn.addEventListener('click', function () { loadPage(false); });
-      resetBtn.addEventListener('click', function () {
-        fromInput.value = '';
-        toInput.value = '';
-        loadPage(false);
-      });
+      resetBtn.addEventListener('click', function () { fromInput.value = ''; toInput.value = ''; loadPage(false); });
       loadMoreBtn.addEventListener('click', function () { loadPage(true); });
-
       clearAllBtn.addEventListener('click', function () {
         if (!pendingClearClick) {
           pendingClearClick = true;
           clearAllBtn.textContent = 'Wirklich? Nochmal klicken';
           clearAllBtn.classList.add('confirming');
-          pendingClearTimer = setTimeout(function () {
-            pendingClearClick = false;
-            clearAllBtn.textContent = 'Verlauf leeren';
-            clearAllBtn.classList.remove('confirming');
-          }, 5000);
+          pendingClearTimer = setTimeout(function () { pendingClearClick = false; clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); }, 5000);
           return;
         }
-        clearTimeout(pendingClearTimer);
-        pendingClearClick = false;
-        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history', {
-          method: 'DELETE',
-        })
-          .then(function (r) {
-            if (!r.ok) throw new Error('http ' + r.status);
-            return r.json();
-          })
-          .then(function (resp) {
-            clearAllBtn.textContent = 'Verlauf leeren';
-            clearAllBtn.classList.remove('confirming');
-            loadPage(false);
-            if (window.console) console.log('deleted', resp.deleted_count, 'events');
-          })
-          .catch(function () {
-            alert('Loeschen fehlgeschlagen.');
-            clearAllBtn.textContent = 'Verlauf leeren';
-            clearAllBtn.classList.remove('confirming');
-          });
+        clearTimeout(pendingClearTimer); pendingClearClick = false;
+        fetch('/a/viewers/' + encodeURIComponent(viewerMAC) + '/history', { method: 'DELETE' })
+          .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+          .then(function (resp) { clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); loadPage(false); if (window.console) console.log('deleted', resp.deleted_count, 'events'); })
+          .catch(function () { alert('Loeschen fehlgeschlagen.'); clearAllBtn.textContent = 'Verlauf leeren'; clearAllBtn.classList.remove('confirming'); });
       });
-
       loadPage(false);
     })();
   </script>
-
-</body>
-</html>
+{{end}}

@@ -19,6 +19,7 @@ type adminSettingsData struct {
 	User      adminUser
 	UA        uaSettingsBlock
 	Station   stationSettingsBlock
+	Accent    accentSettingsBlock
 	Audit     []auditRow
 	Locks     []lockRow
 	Flash     string
@@ -199,6 +200,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 			Lat: stationLat,
 			Lon: stationLon,
 		},
+		Accent: s.accentSettingsBlock(),
 	}
 
 	if s.audit != nil {

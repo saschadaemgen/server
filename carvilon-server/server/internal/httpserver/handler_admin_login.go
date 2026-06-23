@@ -147,9 +147,10 @@ func friendlyAdminError(err error) string {
 func (s *Server) renderAdminPage(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	envelope := navEnvelope{
-		ActiveNav: navSlotFor(name),
-		User:      extractUser(data),
-		Page:      data,
+		ActiveNav:   navSlotFor(name),
+		User:        extractUser(data),
+		AccentColor: s.resolveAccentColor(),
+		Page:        data,
 	}
 	if err := s.tpl.renderPage(w, name, envelope); err != nil {
 		s.log.Error("render page", "name", name, "err", err)
@@ -162,7 +163,11 @@ func (s *Server) renderAdminPage(w http.ResponseWriter, name string, data any) {
 type navEnvelope struct {
 	ActiveNav string
 	User      adminUser
-	Page      any
+	// AccentColor is the resolved admin accent (hex "#rrggbb"),
+	// injected as a :root{--accent;--color-accent} override by the
+	// nav/layout so the whole admin reflects the chosen color.
+	AccentColor string
+	Page        any
 }
 
 func navSlotFor(name string) string {

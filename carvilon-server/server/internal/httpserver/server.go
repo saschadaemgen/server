@@ -406,6 +406,8 @@ func (s *Server) routes() {
 	// Admin-side weather preview for the station-coordinates
 	// form in /a/settings.
 	s.mux.Handle("POST /a/settings/station", s.requireAdminSession(http.HandlerFunc(s.handleAdminStationPost)))
+	// Saison 20: admin UI accent color (single platform_config value).
+	s.mux.Handle("POST /a/settings/accent", s.requireAdminSession(http.HandlerFunc(s.handleAdminAccentPost)))
 	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))
 
 	// Web-viewer CRUD (replaces the legacy /a/mocks tree).

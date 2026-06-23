@@ -1,0 +1,35 @@
+{{define "admin-topbar"}}
+<header class="topbar">
+  <div class="topbar-left">
+    <a class="topbar-brand" href="/a/" aria-label="CARVILON Administration">
+      <span class="brand-name">CARVILON</span>
+      <span class="brand-sub">ADMINISTRATION</span>
+    </a>
+    <nav class="topbar-nav" aria-label="Hauptnavigation">
+      <a class="topbar-link{{if eq .ActiveNav "dashboard"}} is-active{{end}}" href="/a/">Dashboard</a>
+      <a class="topbar-link{{if eq .ActiveNav "web-viewers"}} is-active{{end}}" href="/a/web-viewers">Web-Viewer</a>
+      <a class="topbar-link{{if eq .ActiveNav "esp-viewers"}} is-active{{end}}" href="/a/esp-viewers">ESP-Viewer</a>
+      <a class="topbar-link{{if eq .ActiveNav "android-viewers"}} is-active{{end}}" href="/a/android-viewers">Android-Viewer</a>
+      <a class="topbar-link{{if eq .ActiveNav "esp-pager"}} is-active{{end}}" href="/a/esp-pager">ESP-Pager</a>
+      <a class="topbar-link{{if eq .ActiveNav "streams"}} is-active{{end}}" href="/a/streams">Streams</a>
+      <a class="topbar-link{{if eq .ActiveNav "turn"}} is-active{{end}}" href="/a/turn">TURN</a>
+      <a class="topbar-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users">Benutzer</a>
+      <a class="topbar-link{{if eq .ActiveNav "settings"}} is-active{{end}}" href="/a/settings">Einstellungen</a>
+    </nav>
+  </div>
+  <div class="topbar-right">
+    <button class="icon-btn" type="button" aria-label="Theme umschalten" data-action="toggle-theme">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg>
+    </button>
+    <span class="topbar-user">
+      <span class="topbar-avatar">{{.User.Initials}}</span>
+      <span class="topbar-user-name">{{.User.Name}}</span>
+    </span>
+    <form method="post" action="/a/logout" style="margin:0;">
+      <button class="icon-btn" type="submit" title="Abmelden" aria-label="Abmelden">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5H5v14h10"/><path d="M15 9l4 3-4 3M9 12h10"/></svg>
+      </button>
+    </form>
+  </div>
+</header>
+{{end}}

@@ -25,6 +25,10 @@ const (
 	// weather snapshot rendered on the mieter screensaver.
 	KeyStationLat = "station_lat"
 	KeyStationLon = "station_lon"
+	// Saison 20: the single admin UI accent color (hex "#rrggbb").
+	// One stored value drives the whole admin --accent; the later
+	// setup wizard writes the same key. Empty/unset -> orange default.
+	KeyAdminAccentColor = "admin_accent_color"
 )
 
 // Service combines the DB and the secrets service.

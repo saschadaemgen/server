@@ -68,6 +68,16 @@ var adminLibraryFor = map[string][]string{
 	"viewer-detail":   {},
 }
 
+// newDesignPages are the admin pages rebuilt on the Saison-20 design.
+// They are rendered through the shared _admin_layout.html shell (new
+// topbar + tokens) instead of their own full-document template, and
+// each such page file only carries {{define "content"}} (+ optional
+// "title"/"scripts"/"head-extra" blocks). The set grows page by page
+// as the redesign proceeds; un-listed pages keep the legacy shell.
+var newDesignPages = map[string]bool{
+	"viewer-detail": true,
+}
+
 func newAdminTemplates() (*adminTemplates, error) {
 	funcMap := template.FuncMap{
 		// asset appends the process-start cache-busting token to
@@ -75,16 +85,29 @@ func newAdminTemplates() (*adminTemplates, error) {
 		"asset":    assetURL,
 		"macID":    macIDFromMAC,
 		"safeHTML": func(s string) template.HTML { return template.HTML(s) },
+		// safeCSS injects a server-validated CSS fragment (the admin
+		// accent override, a strict #rrggbb hex) into a <style> context
+		// without the CSS escaper mangling custom-property values.
+		"safeCSS": func(s string) template.CSS { return template.CSS(s) },
 	}
 
 	pages := make(map[string]*template.Template, len(adminLibraryFor))
 	for name, snippets := range adminLibraryFor {
-		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(
-			templatesFS,
-			"templates/admin/"+name+".html",
-			"templates/admin/_nav.html",
+		// New-design pages render through the shared layout shell +
+		// new topbar; legacy pages carry their own document + the old
+		// nav partial. Both keep the credentials modal partial.
+		shellFiles := []string{
+			"templates/admin/" + name + ".html",
 			"templates/admin/_credentials_modal.html",
-		)
+		}
+		if newDesignPages[name] {
+			shellFiles = append(shellFiles,
+				"templates/admin/_admin_layout.html",
+				"templates/admin/_admin_topbar.html")
+		} else {
+			shellFiles = append(shellFiles, "templates/admin/_nav.html")
+		}
+		tmpl, err := template.New(name).Funcs(funcMap).ParseFS(templatesFS, shellFiles...)
 		if err != nil {
 			return nil, fmt.Errorf("parse admin shell %s: %w", name, err)
 		}
@@ -151,11 +174,16 @@ func addLibrarySnippets(tmpl *template.Template, names []string) error {
 	return nil
 }
 
-// renderPage executes the named admin shell.
+// renderPage executes the named admin shell. New-design pages run
+// through the shared "admin-layout" template (content block); legacy
+// pages execute their own full-document "<name>.html".
 func (t *adminTemplates) renderPage(w io.Writer, name string, data any) error {
 	tmpl, ok := t.pages[name]
 	if !ok {
 		return fmt.Errorf("unknown page template %q", name)
+	}
+	if newDesignPages[name] {
+		return tmpl.ExecuteTemplate(w, "admin-layout", data)
 	}
 	return tmpl.ExecuteTemplate(w, name+".html", data)
 }

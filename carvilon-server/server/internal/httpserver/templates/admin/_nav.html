@@ -1,5 +1,11 @@
 {{define "admin-nav"}}
 <style>
+  /* Saison 20: the admin accent. One stored value (admin_accent_color)
+     overrides --color-accent on every legacy admin page so the whole
+     admin reflects the chosen color (default orange). Mieter pages never
+     include this nav, so their accent is untouched. */
+  {{printf ":root { --accent: %s; --color-accent: %s; }" .AccentColor .AccentColor | safeCSS}}
+
   /* dunkles Theme fuer Select-
      Dropdowns. Browser-default ist meist weiss, das bricht die
      Library-Aesthetik. Hier global (in jeder Admin-Seite via

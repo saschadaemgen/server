@@ -1,0 +1,21 @@
+{{define "admin-layout"}}<!doctype html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>carvilon - {{block "title" .}}Admin{{end}}</title>
+  <link rel="stylesheet" href="{{asset "/static/admin-tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "/static/admin-components.css"}}">
+  {{if .AccentColor}}<style>{{printf ":root{ --accent: %s; --color-accent: %s; }" .AccentColor .AccentColor | safeCSS}}</style>{{end}}
+  {{block "head-extra" .}}{{end}}
+</head>
+<body class="admin-shell">
+  {{template "admin-topbar" .}}
+  <div class="admin-toast" data-bind="toast" role="status" aria-live="polite"></div>
+  <main class="page" role="main">
+    {{block "content" .}}{{end}}
+  </main>
+  <script src="{{asset "/static/interactions.js"}}"></script>
+  {{block "scripts" .}}{{end}}
+</body>
+</html>{{end}}

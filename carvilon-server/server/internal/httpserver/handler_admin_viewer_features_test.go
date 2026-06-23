@@ -149,6 +149,34 @@ func TestAdminViewerDetail_FunctionListMarkup(t *testing.T) {
 	}
 }
 
+// TestAdminViewerDetail_AndroidTokenModal locks the redesign fix: the
+// "Token neu generieren" button renders for Android, so its modals must
+// render too (they were ESP-only before, leaving the button dead). The
+// password modal must NOT render on Android (no reset-password button).
+func TestAdminViewerDetail_AndroidTokenModal(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	const androidMAC = "0c:ea:14:77:77:77"
+	seedAndroidViewer(t, env, androidMAC, 8203)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/viewers/" + androidMAC)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	markup := detailPageMarkup(readBody(t, resp))
+
+	if !contains(markup, `data-action="regen-token"`) {
+		t.Errorf("Android regen-token button missing")
+	}
+	if !contains(markup, `id="token-confirm-modal"`) || !contains(markup, `id="token-display-modal"`) {
+		t.Errorf("Android token modals missing -> regen button would be a dead control")
+	}
+	if contains(markup, `id="password-modal"`) {
+		t.Errorf("password modal should not render on Android")
+	}
+}
+
 // TestAdminViewerDetail_AboFrame proves a seeded license renders in the Abo
 // frame (plan name + viewer limit).
 func TestAdminViewerDetail_AboFrame(t *testing.T) {

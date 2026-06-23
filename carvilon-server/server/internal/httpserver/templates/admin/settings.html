@@ -90,6 +90,34 @@
     </section>
 
     <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Akzentfarbe (Admin)</div>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Voreinstellungen</span>
+            <span class="set-row-sub">Ein Klick speichert sofort und faerbt den ganzen Admin.</span>
+          </div>
+          <form method="post" action="/a/settings/accent" style="display:flex;flex-wrap:wrap;gap:8px;margin:0;justify-content:flex-end;">
+            {{range .Page.Accent.Presets}}
+            <button type="submit" name="accent" value="{{.Hex}}" title="{{.Name}} ({{.Hex}})" aria-label="{{.Name}}"
+              style="width:30px;height:30px;border-radius:6px;cursor:pointer;padding:0;background:{{.Hex}};border:2px solid {{if eq $.Page.Accent.Current .Hex}}#ffffff{{else}}transparent{{end}};box-shadow:inset 0 0 0 1px rgba(0,0,0,0.45);"></button>
+            {{end}}
+          </form>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Eigene Farbe</span>
+            <span class="set-row-sub">Aktuell: <code>{{.Page.Accent.Current}}</code>. Standard ist Orange (#ff7a1a).</span>
+          </div>
+          <form method="post" action="/a/settings/accent" style="display:flex;gap:8px;align-items:center;margin:0;">
+            <input type="color" name="accent" value="{{.Page.Accent.Current}}" style="width:44px;height:34px;padding:0;border:1px solid var(--color-hairline-strong);border-radius:6px;background:none;cursor:pointer;"/>
+            <button class="btn btn-secondary btn-sm" type="submit">Speichern</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
       <div class="set-section-title">Admin-Passwort</div>
       <form class="set-card" method="post" action="/a/settings/admin-password">
         <div class="set-row">

@@ -106,6 +106,11 @@ func assetGate(next http.Handler) http.Handler {
 		case strings.HasSuffix(r.URL.Path, ".js"):
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			w.Header().Set("Cache-Control", assetCacheControl(r))
+		case strings.HasSuffix(r.URL.Path, ".woff2"):
+			// Self-hosted IBM Plex (admin redesign). Go's default mime
+			// table does not always register woff2, so set it here.
+			w.Header().Set("Content-Type", "font/woff2")
+			w.Header().Set("Cache-Control", assetCacheControl(r))
 		case strings.HasSuffix(r.URL.Path, ".html"),
 			strings.HasSuffix(r.URL.Path, ".md"):
 			http.NotFound(w, r)

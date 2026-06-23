@@ -59,12 +59,8 @@ type adminViewerDetailData struct {
 	// POST /esp/settings (last-write-wins, same DB column).
 	KeepStreamInScreensaver bool
 	KeepStreamInScreenOff   bool
-	// SettingVisibility is a COMPLETE map (every tenantVisibleSettingKeys
-	// entry -> effective visible, default true) for the "dem Mieter
-	// anzeigen" toggles. (Saison 19-39)
-	SettingVisibility map[string]bool
-	BackHref          string // "/a/web-viewers" or "/a/esp-viewers"
-	BackLabel         string
+	BackHref  string // "/a/web-viewers" or "/a/esp-viewers"
+	BackLabel string
 	// AssignedDoors is the viewer's 1:n door assignment (Saison
 	// 19-30). Rendered server-side as door_id/label; the JS upgrades
 	// the labels to live names via /a/doors.json.
@@ -141,20 +137,10 @@ func (s *Server) handleAdminViewerDetail(w http.ResponseWriter, r *http.Request)
 	} else {
 		s.log.Warn("viewer detail list doors", "err", derr, "mac_prefix", safePrefix(mac))
 	}
-	// Saison 19-39: per-setting tenant visibility for the toggles. A
-	// COMPLETE map (every toggleable key) so the template can index each
-	// one; default true (= visible), explicit rows overlaid.
-	data.SettingVisibility = make(map[string]bool, len(tenantVisibleSettingKeys))
-	for _, k := range tenantVisibleSettingKeys {
-		data.SettingVisibility[k] = true
-	}
-	if explicit, verr := s.viewerMgr.ListViewerSettingVisibility(r.Context(), mac); verr == nil {
-		for k, v := range explicit {
-			data.SettingVisibility[k] = v
-		}
-	} else {
-		s.log.Warn("viewer detail setting visibility", "err", verr, "mac_prefix", safePrefix(mac))
-	}
+	// Saison 20: the redesigned viewer-detail derives per-function tenant
+	// visibility from the three-level exposure (Funktionen section), so the
+	// old binary SettingVisibility map is no longer built here. The
+	// /visibility endpoint + its derivation for settings.json stay intact.
 	// Saison 20: function list (three-level exposure + keep_stream value),
 	// Vorlagen-Zuweisung dropdown and the read-only Abo frame. All best-effort:
 	// a feature-store error degrades to sane defaults (see the builders).

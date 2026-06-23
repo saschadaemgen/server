@@ -1,0 +1,188 @@
+/* ============================================================
+   carvilon · Admin Design Tokens  (Saison 20 redesign)
+   ------------------------------------------------------------
+   Admin-ONLY token layer. Linked exclusively by the new
+   _admin_layout.html shell, NEVER by the mieter (tenant) pages -
+   those keep tokens.css/components.css untouched.
+
+   Aesthetic: high-resolution device display (HMI). Deep OLED
+   black, crisp hairlines, ONE vivid orange accent for active
+   states. IBM Plex, self-hosted (no CDN) via @font-face below.
+
+   The accent is a single variable (--accent). The default is
+   orange; _admin_topbar.html / _nav.html inject a
+   :root{--accent;--color-accent} override from the stored admin
+   setting (admin_accent_color), so the whole admin reflects the
+   chosen accent without rebuilding every page.
+   ============================================================ */
+
+/* ---- Self-hosted IBM Plex (OFL-1.1, see fonts/OFL.txt) ---- */
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('/static/fonts/ibm-plex-sans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500;
+  font-display: swap; src: url('/static/fonts/ibm-plex-sans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600;
+  font-display: swap; src: url('/static/fonts/ibm-plex-sans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 700;
+  font-display: swap; src: url('/static/fonts/ibm-plex-sans-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400;
+  font-display: swap; src: url('/static/fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500;
+  font-display: swap; src: url('/static/fonts/ibm-plex-mono-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 600;
+  font-display: swap; src: url('/static/fonts/ibm-plex-mono-600.woff2') format('woff2');
+}
+
+:root {
+  /* ---- Neutral ramp (true blacks -> light) ---- */
+  --black-950: #07080A;   /* page */
+  --black-900: #0A0C0E;
+  --gray-900:  #0E1013;   /* panel: cards, nav, dropdowns */
+  --gray-850:  #121519;   /* cell */
+  --gray-800:  #171A1F;   /* raised / hover */
+  --gray-780:  #1C2026;   /* control face */
+  --gray-750:  #21262C;
+  --gray-700:  #2A3038;
+  --gray-600:  #3D444E;
+  --gray-500:  #4E5660;
+  --gray-400:  #7B848F;   /* tertiary text */
+  --gray-300:  #9AA3AE;   /* secondary text */
+  --gray-100:  #E2E6EB;
+  --white:     #F4F6F8;   /* primary text */
+
+  /* ---- The single accent (default orange; override-able) ----
+     Only --accent is set by the admin picker; every variant below
+     derives from it via color-mix, so one override recolors the
+     whole admin. */
+  --accent:        #FF7A1A;
+  --accent-bright: color-mix(in srgb, var(--accent) 78%, white);
+  --accent-dim:    color-mix(in srgb, var(--accent) 70%, black);
+  --accent-text:   color-mix(in srgb, var(--accent) 72%, white);
+  --accent-glow:   color-mix(in srgb, var(--accent) 45%, transparent);
+  --accent-haze:   color-mix(in srgb, var(--accent) 14%, transparent);
+  /* Dark text reads well on the warm default + presets; very dark
+     custom accents trade a little label contrast (admin tool). */
+  --text-on-accent: #1A0E02;
+
+  /* ---- Signals ---- */
+  --live:      #34E29B;   /* live / applied / online */
+  --live-glow: rgba(52, 226, 155, 0.45);
+  --lock:      #FF5C4D;   /* not in tariff / blocked / offline */
+  --lock-haze: rgba(255, 92, 77, 0.11);
+
+  /* ---- Semantic surfaces ---- */
+  --bg-page:         var(--black-950);
+  --surface-panel:   var(--gray-900);
+  --surface-cell:    var(--gray-850);
+  --surface-raised:  var(--gray-800);
+  --surface-control: var(--gray-780);
+  --surface-hover:   var(--gray-750);
+  --field-bg:        #0a0c0f;
+
+  /* ---- Text ---- */
+  --text-primary:   var(--white);
+  --text-secondary: var(--gray-300);
+  --text-tertiary:  var(--gray-400);
+  --text-disabled:  var(--gray-500);
+
+  /* ---- Hairline borders ---- */
+  --border-subtle:  rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.09);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+  --border-accent:  color-mix(in srgb, var(--accent) 60%, transparent);
+  --divider:        rgba(255, 255, 255, 0.07);
+
+  /* ---- Typography ---- */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-2xs: 11px;
+  --text-xs:  12px;
+  --text-sm:  13px;
+  --text-base:14px;
+  --text-md:  16px;
+  --text-lg:  19px;
+  --text-xl:  24px;
+  --text-2xl: 32px;
+
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semibold:600;
+  --weight-bold:    700;
+
+  --tracking-tight:  -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.04em;
+  --tracking-label:  0.06em;
+
+  --type-heading: var(--weight-semibold) var(--text-lg)/1.15 var(--font-sans);
+  --type-title:   var(--weight-semibold) var(--text-md)/1.3 var(--font-sans);
+  --type-label:   var(--weight-medium) var(--text-sm)/1.3 var(--font-sans);
+  --type-body:    var(--weight-regular) var(--text-base)/1.5 var(--font-sans);
+  --type-value:   var(--weight-medium) var(--text-sm)/1.3 var(--font-mono);
+  --type-data:    var(--weight-regular) var(--text-xs)/1.3 var(--font-mono);
+  --type-eyebrow: var(--weight-medium) var(--text-2xs)/1 var(--font-sans);
+
+  /* ---- Spacing (4px grid; design scale) ---- */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-16: 32px;
+  --space-20: 40px;
+  --space-24: 48px;
+  --grid-gap: var(--space-3);
+  --content-max: 1320px;
+
+  /* ---- Radii (small, precise, hardware-like) ---- */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 9px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-pill: 999px;
+
+  /* ---- Materials / embossing ---- */
+  --emboss-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+  --elev-1: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 0 0 1px rgba(255,255,255,0.045), 0 1px 2px rgba(0,0,0,0.5);
+  --elev-2: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.5);
+  --well: inset 0 1px 2px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04);
+  --recess: inset 0 2px 4px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.4);
+  --shadow-pop: 0 8px 28px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.5);
+  --glow-accent: 0 0 0 1px var(--border-accent), 0 0 12px var(--accent-glow);
+  --glow-live: 0 0 8px var(--live-glow);
+
+  /* ---- Motion (tactile, no bounce) ---- */
+  --ease-tactile: cubic-bezier(0.22, 0.8, 0.28, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 110ms;
+  --dur-base: 170ms;
+  --dur-slow: 280ms;
+
+  /* ---- Z-index ---- */
+  --z-sticky: 40;
+  --z-overlay: 100;
+  --z-modal: 300;
+  --z-toast: 400;
+}
