@@ -50,13 +50,13 @@
   .vd-cell.is-locked .vd-val { pointer-events:none; filter:saturate(0.35); }
   .vd-cell.is-locked .vd-trail { pointer-events:none; opacity:0.5; }
   .vd-lock { color:var(--lock); }
-  /* The management controls (active switch + visibility) show ONLY in config
-     mode (the master switch). In normal mode each row shows just its value
-     control, and hidden functions drop OUT of the list entirely — their catalog
-     default applies and neither admin nor tenant sees them. In config mode ALL
-     functions reappear (incl. hidden ones) so the admin can edit / bring back. */
-  .vd-trail { display:none; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
-  .vd-grid.is-config .vd-trail { display:flex; }
+  /* The visibility control (X/check/lock) is a NORMAL option: always visible in
+     both modes. ONLY the blue active switch is config-mode-gated (it alone hides
+     a row). In normal mode hidden functions (active off) drop OUT of the list;
+     config mode brings them all back so they can be re-activated. */
+  .vd-trail { display:flex; flex:none; padding-left:var(--space-6); margin-left:var(--space-2); box-shadow:inset 1px 0 0 var(--divider); align-items:center; gap:var(--space-5); }
+  .vd-trail [data-vd-active] { display:none; }
+  .vd-grid.is-config .vd-trail [data-vd-active] { display:inline-flex; }
   .vd-grid:not(.is-config) .vd-cell[data-feature-key][data-exposure="hidden"] { display:none; }
   .vd-grid.is-config .vd-cell[data-feature-key] { box-shadow:var(--elev-1), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
   .vd-cell[data-feature-key] .vd-val.dim { opacity:0.42; pointer-events:none; filter:saturate(0.35); }
@@ -69,10 +69,7 @@
   .vd-vis label[data-v="admin_only"]:has(input:checked) { background:linear-gradient(180deg,#FF6F60,#E0463A); color:#2a0a07; }
   .vd-vis label[data-v="tenant_visible"]:has(input:checked) { background:linear-gradient(180deg,#3FE6A4,#20B07A); color:#04130c; }
   .vd-vis label[data-v="bookable"]:has(input:checked) { background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:var(--text-on-accent); }
-  /* two independent controls: the active switch hides the row; the visibility
-     X/check/lock shows ONLY for active rows (and then always, in config mode) —
-     for an inactive row the visibility control is removed, not greyed. */
-  .vd-vis.is-hidden { display:none; }
+  /* visibility is always shown; choosing one re-activates a hidden row. */
 
   /* value control styles */
   .vd-seg { display:inline-flex; gap:2px; padding:3px; border-radius:var(--radius-md); background:var(--field-bg); box-shadow:var(--well); }
@@ -202,7 +199,7 @@
       </span>
       <span class="vd-trail" data-vd-trail>
         <button type="button" class="vd-sw sm{{if ne .Exposure "hidden"}} is-on{{end}}" data-vd-active role="switch" aria-label="Im Admin aktiv"><span class="knob"></span></button>
-        <span class="vd-vis{{if eq .Exposure "hidden"}} is-hidden{{end}}" data-vd-vis>
+        <span class="vd-vis" data-vd-vis>
           <label data-v="admin_only" title="nur Admin"><input type="radio" name="vis_{{.Key}}" value="admin_only" {{if eq .Exposure "admin_only"}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6 6 18M6 6l12 12"/></svg></label>
           <label data-v="tenant_visible" title="für Mieter sichtbar"><input type="radio" name="vis_{{.Key}}" value="tenant_visible" {{if or (eq .Exposure "tenant_visible") (eq .Exposure "hidden")}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></label>
           <label data-v="bookable" title="buchbar (Premium)"><input type="radio" name="vis_{{.Key}}" value="bookable" {{if eq .Exposure "bookable"}}checked{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></label>
@@ -396,9 +393,9 @@
   function saveExposure(cell) {
     var key = cell.getAttribute('data-feature-key');
     var exposure = cellExposure(cell);
-    var vis = cell.querySelector('[data-vd-vis]');
     var val = cell.querySelector('.vd-val');
-    vis.classList.toggle('is-hidden', exposure === 'hidden');
+    // value editor is dimmed when its value can't reach the tenant (hidden or
+    // bookable both force the catalog default). Visibility stays always shown.
     if (val) val.classList.toggle('dim', exposure === 'hidden' || exposure === 'bookable');
     postJSON('/a/viewers/' + encodeURIComponent(mac) + '/exposure', { feature_key: key, exposure: exposure })
       .then(function () { cell.setAttribute('data-exposure', exposure); toast('Gespeichert'); })
@@ -408,7 +405,9 @@
     if (cell.classList.contains('is-locked')) return;
     var activeBtn = cell.querySelector('[data-vd-active]');
     activeBtn.addEventListener('click', function () { activeBtn.classList.toggle('is-on'); saveExposure(cell); });
-    cell.querySelectorAll('[data-vd-vis] input').forEach(function (i) { i.addEventListener('change', function () { if (!activeBtn.classList.contains('is-on')) return; saveExposure(cell); }); });
+    // Visibility is a normal option, operable in both modes: choosing one
+    // (re)activates the row and sets that tenant-visibility.
+    cell.querySelectorAll('[data-vd-vis] input').forEach(function (i) { i.addEventListener('change', function () { activeBtn.classList.add('is-on'); saveExposure(cell); }); });
   });
 
   // ---- value controls -> /settings (catalog) or /stammdaten (name/profiles) ----
