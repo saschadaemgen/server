@@ -96,14 +96,16 @@ func newAdminTemplates() (*adminTemplates, error) {
 		// New-design pages render through the shared layout shell +
 		// new topbar; legacy pages carry their own document + the old
 		// nav partial. Both keep the credentials modal partial.
+		// The new topbar partial is parsed for every admin page: new-design
+		// pages reach it through _admin_layout.html, legacy pages through the
+		// _nav.html "admin-nav" shim. So all pages share one global chrome.
 		shellFiles := []string{
 			"templates/admin/" + name + ".html",
 			"templates/admin/_credentials_modal.html",
+			"templates/admin/_admin_topbar.html",
 		}
 		if newDesignPages[name] {
-			shellFiles = append(shellFiles,
-				"templates/admin/_admin_layout.html",
-				"templates/admin/_admin_topbar.html")
+			shellFiles = append(shellFiles, "templates/admin/_admin_layout.html")
 		} else {
 			shellFiles = append(shellFiles, "templates/admin/_nav.html")
 		}

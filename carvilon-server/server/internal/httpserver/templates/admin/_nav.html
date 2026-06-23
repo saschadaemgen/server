@@ -237,50 +237,10 @@
     color: #ffffff;
   }
 </style>
-<nav class="admin-nav" aria-label="Hauptnavigation">
-  <a class="admin-nav-brand" href="/a/" aria-label="CARVILON Intercom Administration">
-    <span class="carvilon-brand sz-sm" aria-hidden="true">
-      <span class="name">CARVILON</span>
-      <span class="sub-wrap">
-        <!-- subtitle ratio bumped to 0.95 for the
-             longer 23-char "INTERCOM ADMINISTRATION" so the
-             letter-spacing JS does not have to compress it
-             into negative tracking. -->
-        <span class="sub" data-target-ratio="0.95">INTERCOM ADMINISTRATION</span>
-      </span>
-    </span>
-  </a>
-  <div class="admin-nav-links" role="navigation">
-    <a class="admin-nav-link{{if eq .ActiveNav "dashboard"}} is-active{{end}}" href="/a/">Dashboard</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "web-viewers"}} is-active{{end}}" href="/a/web-viewers">Web-Viewer</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "esp-viewers"}} is-active{{end}}" href="/a/esp-viewers">ESP-Viewer</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "android-viewers"}} is-active{{end}}" href="/a/android-viewers">Android-Viewer</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "esp-pager"}} is-active{{end}}" href="/a/esp-pager">ESP-Pager</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "streams"}} is-active{{end}}" href="/a/streams">Streams</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "turn"}} is-active{{end}}" href="/a/turn">TURN</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users">Benutzer</a>
-    <a class="admin-nav-link{{if eq .ActiveNav "settings"}} is-active{{end}}" href="/a/settings">Einstellungen</a>
-  </div>
-  <div class="admin-nav-actions">
-    <button class="btn-icon btn-ghost" aria-label="Theme umschalten" data-action="toggle-theme">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>
-      </svg>
-    </button>
-    <div class="admin-nav-user" tabindex="0" role="button" aria-label="Konto">
-      <div class="admin-nav-user-avatar">{{.User.Initials}}</div>
-      <span class="admin-nav-user-name">{{.User.Name}}</span>
-    </div>
-    <form method="post" action="/a/logout" style="margin:0;">
-      <button class="btn-icon btn-ghost" type="submit" title="Abmelden" aria-label="Abmelden">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M15 5H5v14h10"/>
-          <path d="M15 9l4 3-4 3M9 12h10"/>
-        </svg>
-      </button>
-    </form>
-  </div>
-</nav>
+<!-- Saison 20: the legacy admin-nav now renders the shared new topbar, so
+     every legacy page inherits the new chrome (Viewer mega-menu + user flyout)
+     while its body is migrated to the new design page by page. -->
+{{template "admin-topbar" .}}
 <!-- CARVILON brand width-sync runtime,
      measured and applied to every .carvilon-brand on the page. -->
 <script src="{{asset "/static/carvilon-brand.js"}}" defer></script>

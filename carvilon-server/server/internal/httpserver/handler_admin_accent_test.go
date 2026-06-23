@@ -51,7 +51,7 @@ func TestAdminAccent_PersistsAndInjects(t *testing.T) {
 	if !contains(body, "--accent: #3d7bff") {
 		t.Errorf("new-design page missing injected --accent override")
 	}
-	if !contains(body, "/static/admin-tokens.css") || !contains(body, `class="topbar"`) {
+	if !contains(body, "/static/admin-tokens.css") || !contains(body, "data-cv-topbar") {
 		t.Errorf("new-design page missing the new shell (tokens link / topbar)")
 	}
 
@@ -64,6 +64,14 @@ func TestAdminAccent_PersistsAndInjects(t *testing.T) {
 	lbody := readBody(t, legacy)
 	if !contains(lbody, "--color-accent: #3d7bff") {
 		t.Errorf("legacy page missing injected --color-accent override")
+	}
+	// The new global topbar is rolled out to legacy pages too (the old
+	// admin-nav now renders the shared topbar).
+	if !contains(lbody, "data-cv-topbar") {
+		t.Errorf("legacy page missing the new shared topbar")
+	}
+	if contains(lbody, `class="admin-nav-link`) {
+		t.Errorf("legacy page still has the old nav markup")
 	}
 }
 
