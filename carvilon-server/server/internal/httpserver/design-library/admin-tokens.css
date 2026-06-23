@@ -63,11 +63,11 @@
   --gray-100:  #E2E6EB;
   --white:     #F4F6F8;   /* primary text */
 
-  /* ---- The single accent (default orange; override-able) ----
+  /* ---- The single accent (default blue; override-able) ----
      Only --accent is set by the admin picker; every variant below
      derives from it via color-mix, so one override recolors the
-     whole admin. */
-  --accent:        #FF7A1A;
+     whole admin. Owner default (S20) is blue; orange is a preset. */
+  --accent:        #3D7BFF;
   --accent-bright: color-mix(in srgb, var(--accent) 78%, white);
   --accent-dim:    color-mix(in srgb, var(--accent) 70%, black);
   --accent-text:   color-mix(in srgb, var(--accent) 72%, white);

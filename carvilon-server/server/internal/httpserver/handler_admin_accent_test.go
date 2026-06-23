@@ -67,9 +67,9 @@ func TestAdminAccent_PersistsAndInjects(t *testing.T) {
 	}
 }
 
-// TestAdminAccent_DefaultOrange proves an unset accent renders the orange
-// default on the new shell.
-func TestAdminAccent_DefaultOrange(t *testing.T) {
+// TestAdminAccent_DefaultColor proves an unset accent renders the default
+// (blue, owner decision) on the new shell.
+func TestAdminAccent_DefaultColor(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	env.seedViewer(t)

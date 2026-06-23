@@ -16,8 +16,9 @@ import (
 	"carvilon.local/server/internal/platformconfig"
 )
 
-// DefaultAccentColor is the orange used when no accent has been chosen.
-const DefaultAccentColor = "#ff7a1a"
+// DefaultAccentColor is the accent used when none has been chosen. Owner
+// decision (S20): the default is blue; orange stays available as a preset.
+const DefaultAccentColor = "#3d7bff"
 
 var accentHexRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
