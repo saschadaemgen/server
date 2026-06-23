@@ -92,6 +92,12 @@
   .vd-door-name { font:var(--type-label); color:var(--text-primary); }
   .door-empty { font:var(--type-data); color:var(--text-tertiary); margin:var(--space-3) 0 0; }
   .vd-card-title { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; color:var(--text-tertiary); margin:0 0 var(--space-5); }
+  /* Tür dropdown: same-height cell; all management lives in the popover */
+  .vd-door-btn { display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; text-align:left; min-width:150px; }
+  .vd-door-pop { position:absolute; top:calc(100% + 4px); right:0; z-index:50; min-width:260px; max-height:300px; overflow:auto; background:var(--surface-panel); border-radius:var(--radius-md); box-shadow:var(--shadow-pop); padding:var(--space-5); }
+  .vd-door-pop[hidden] { display:none; }
+  .vd-door-pop-title { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; color:var(--text-tertiary); margin:var(--space-4) 0 var(--space-3); }
+  .vd-door-pop-title:first-child { margin-top:0; }
 
   /* history modal: bounded, centered, header + filter fixed, list inner-scroll */
   .vd-hist-wide .admin-modal-glass { width:min(760px,94vw); max-height:80vh; display:flex; flex-direction:column; }
@@ -263,15 +269,23 @@
     </div>
 
     <!-- Tür-Zuordnung (1:n) as one full-width card -->
-    <div class="vd-cell" id="doors-section" data-viewer-mac="{{.Page.MAC}}" style="display:block">
-      <div class="vd-card-title">Tür-Zuordnung</div>
-      <ul class="vd-door-list" data-bind="assigned-doors">
-        {{range .Page.AssignedDoors}}
-        <li class="vd-door-row" data-door-id="{{.DoorID}}"><span class="vd-door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span><button type="button" class="vd-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}">Entfernen</button></li>
-        {{end}}
-      </ul>
-      <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>Noch keine Tür zugeordnet.</p>
-      <div style="margin-top:var(--space-5)"><select class="vd-sel" data-bind="door-add-select" style="min-width:240px"><option value="">+ Tür hinzufügen …</option></select></div>
+    <div class="vd-cell" id="doors-section" data-viewer-mac="{{.Page.MAC}}">
+      <span class="vd-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><path d="M14 12v.01"/></svg></span>
+      <span class="vd-lab"><span class="vd-name">Tür-Zuordnung</span></span>
+      <span class="vd-val" style="position:relative">
+        <button type="button" class="vd-sel vd-door-btn" data-vd-door-btn aria-haspopup="true" aria-expanded="false">
+          <span data-vd-door-summary>{{if .Page.AssignedDoors}}{{len .Page.AssignedDoors}} Tür(en){{else}}keine{{end}}</span>
+        </button>
+        <div class="vd-door-pop" data-vd-door-pop hidden>
+          <div class="vd-door-pop-title">Zugeordnet</div>
+          <ul class="vd-door-list" data-bind="assigned-doors">
+            {{range .Page.AssignedDoors}}<li class="vd-door-row" data-door-id="{{.DoorID}}"><span class="vd-door-name">{{if .Label}}{{.Label}}{{else}}{{.DoorID}}{{end}}</span><button type="button" class="vd-ghost btn-sm door-remove" data-action="remove-door" data-door-id="{{.DoorID}}">Entfernen</button></li>{{end}}
+          </ul>
+          <p class="door-empty" data-bind="no-doors"{{if .Page.AssignedDoors}} hidden{{end}}>Noch keine Tür zugeordnet.</p>
+          <div class="vd-door-pop-title">Hinzufügen</div>
+          <select class="vd-sel" data-bind="door-add-select" style="width:100%"><option value="">+ Tür auswählen …</option></select>
+        </div>
+      </span>
     </div>
   </div>
 
@@ -453,14 +467,28 @@
     var section = document.getElementById('doors-section');
     if (!section) return;
     var list = section.querySelector('[data-bind="assigned-doors"]'), noDoors = section.querySelector('[data-bind="no-doors"]'), addSelect = section.querySelector('[data-bind="door-add-select"]');
+    var doorBtn = section.querySelector('[data-vd-door-btn]'), doorPop = section.querySelector('[data-vd-door-pop]'), doorSummary = section.querySelector('[data-vd-door-summary]');
+    function closeDoorPop() { if (doorPop) doorPop.hidden = true; if (doorBtn) doorBtn.setAttribute('aria-expanded', 'false'); }
+    if (doorBtn) {
+      doorBtn.addEventListener('click', function (e) { e.stopPropagation(); var willOpen = doorPop.hidden; doorPop.hidden = !willOpen; doorBtn.setAttribute('aria-expanded', String(willOpen)); });
+      document.addEventListener('mousedown', function (e) { if (doorPop.hidden) return; if (section.contains(e.target)) return; closeDoorPop(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDoorPop(); });
+    }
     function rows() { return list.querySelectorAll('li[data-door-id]'); }
     function doorIDs() { return Array.prototype.map.call(rows(), function (li) { return li.getAttribute('data-door-id'); }); }
-    function refreshEmpty() { if (noDoors) noDoors.hidden = rows().length > 0; }
+    // refreshEmpty also keeps the collapsed cell summary current, so the tile
+    // never grows a second line (same height as every other cell).
+    function refreshEmpty() {
+      var n = rows().length;
+      if (noDoors) noDoors.hidden = n > 0;
+      if (doorSummary) doorSummary.textContent = n === 0 ? 'keine' : (n === 1 ? (rows()[0].querySelector('.vd-door-name').textContent) : (n + ' Tür(en)'));
+    }
     function makeRow(id, name) { var li = document.createElement('li'); li.className = 'vd-door-row'; li.setAttribute('data-door-id', id); var s = document.createElement('span'); s.className = 'vd-door-name'; s.textContent = name || id; var b = document.createElement('button'); b.type = 'button'; b.className = 'vd-ghost btn-sm door-remove'; b.setAttribute('data-action', 'remove-door'); b.setAttribute('data-door-id', id); b.textContent = 'Entfernen'; li.appendChild(s); li.appendChild(b); return li; }
     function doorURL(id) { return '/a/viewers/' + encodeURIComponent(mac) + '/doors/' + encodeURIComponent(id); }
     fetch('/a/doors.json', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : { doors: [] }; }).catch(function () { return { doors: [] }; }).then(function (d) {
       var nameByID = {}; (d.doors || []).forEach(function (dr) { nameByID[dr.door_id] = dr.name || dr.door_id; var o = document.createElement('option'); o.value = dr.door_id; o.textContent = dr.name || dr.door_id; addSelect.appendChild(o); });
       Array.prototype.forEach.call(rows(), function (li) { var id = li.getAttribute('data-door-id'); var sp = li.querySelector('.vd-door-name'); if (sp && nameByID[id] && sp.textContent === id) sp.textContent = nameByID[id]; });
+      refreshEmpty();
     });
     addSelect.addEventListener('change', function () { var id = addSelect.value; if (!id) return; if (doorIDs().indexOf(id) !== -1) { toast('Tür bereits zugeordnet', 'error'); addSelect.value = ''; return; } var name = addSelect.options[addSelect.selectedIndex].textContent; addSelect.disabled = true; fetch(doorURL(id) + '?label=' + encodeURIComponent(name), { method: 'POST', headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m); }); return r.json(); }).then(function () { list.appendChild(makeRow(id, name)); refreshEmpty(); toast('Tür hinzugefügt'); }).catch(function (e) { toast(firstLine(e, 'Hinzufügen fehlgeschlagen'), 'error'); }).then(function () { addSelect.value = ''; addSelect.disabled = false; }); });
     list.addEventListener('click', function (e) { var rem = e.target.closest('[data-action="remove-door"]'); if (!rem) return; var li = rem.closest('li[data-door-id]'); var id = li.getAttribute('data-door-id'); rem.disabled = true; fetch(doorURL(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) return r.text().then(function (m) { throw new Error(m); }); return r.json(); }).then(function () { li.remove(); refreshEmpty(); toast('Tür entfernt'); }).catch(function (e2) { rem.disabled = false; toast(firstLine(e2, 'Entfernen fehlgeschlagen'), 'error'); }); });
