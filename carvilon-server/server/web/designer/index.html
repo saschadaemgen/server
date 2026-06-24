@@ -364,11 +364,13 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 .dock{position:fixed;left:var(--rail-w);right:54px;bottom:0;z-index:16;display:flex;flex-direction:column;background:linear-gradient(180deg, rgba(11,12,15,.72), rgba(8,9,12,.93));border-top:1px solid var(--border);backdrop-filter:blur(16px)}
 .dock-bar{height:34px;display:flex;align-items:center;gap:4px;padding:0 6px 0 10px}
 .dock-tabs{display:flex;align-items:center;gap:2px}
-.dock-tab{height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--muted);font:500 11.5px/1 var(--font);cursor:pointer;transition:.12s}
+.dock-tab{height:26px;display:flex;align-items:center;gap:7px;padding:0 11px;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--muted);font:500 11.5px/1 var(--font);cursor:pointer;transition:.12s;user-select:none}
 .dock-tab:hover{background:rgba(120,150,180,.08);color:var(--text)}
 .dock-tab.active{background:rgba(59,130,246,.14);border-color:rgba(59,130,246,.4);color:#fff}
 .dock-tab svg{width:13px;height:13px}
 .dock-tab .led{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok)}
+/* split-count badge (×2..×4) shown when a terminal tab is split into columns */
+.dock-tab[data-split]:not([data-split="1"])::after{content:"×" attr(data-split);margin-left:3px;font:600 10px/1 var(--mono);color:var(--accent);opacity:.9}
 .dock-spacer{flex:1}
 .dock-status{display:flex;align-items:center;gap:14px;padding-right:4px}
 .dock-status .st{display:flex;align-items:center;gap:6px;font:500 10.5px/1 var(--font);color:var(--faint)}
@@ -381,8 +383,11 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 .dock.collapsed .dock-toggle svg{transform:rotate(180deg)}
 .dock-body{height:210px;border-top:1px solid var(--border);overflow:hidden;transition:height .22s ease}
 .dock.collapsed .dock-body{height:0;border-top:none}
-.term{height:100%;overflow:auto;padding:10px 14px;font:500 12px/1.55 var(--mono);color:#c8d2dc;display:none;white-space:pre-wrap;word-break:break-word}
-.term.active{display:block}
+.term{height:100%;display:none}
+.term.active{display:flex}
+/* one or more side-by-side terminal columns (double-click a tab to split) */
+.term-col{flex:1 1 0;min-width:0;height:100%;overflow:auto;padding:10px 14px;font:500 12px/1.55 var(--mono);color:#c8d2dc;white-space:pre-wrap;word-break:break-word}
+.term-col+.term-col{border-left:1px solid var(--border)}
 .term .t{color:var(--faint)}.term .ok{color:var(--ok)}.term .blue{color:#5fa8ff}.term .amber{color:var(--warn)}.term .err{color:var(--err)}.term .dim{color:var(--faint)}.term .pr{color:var(--accent)}
 @keyframes nodePop{from{transform:translateY(12px) scale(.97)}to{transform:none}}
 .node.in{animation:nodePop .45s cubic-bezier(.2,.7,.2,1)}
@@ -476,10 +481,12 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 <div class="dock" id="dock">
   <div class="dock-bar">
     <div class="dock-tabs">
-      <button class="dock-tab active" data-tab="ssh"><span class="led"></span>SSH Terminal</button>
-      <button class="dock-tab" data-tab="mqtt"><i data-lucide="radio"></i>MQTT</button>
-      <button class="dock-tab" data-tab="sys"><i data-lucide="scroll-text"></i>System Log</button>
-      <button class="dock-tab" data-tab="engine"><i data-lucide="cpu"></i>Engine</button>
+      <button class="dock-tab active" data-tab="ssh" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><span class="led"></span>SSH Terminal</button>
+      <button class="dock-tab" data-tab="mqtt" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><i data-lucide="radio"></i>MQTT</button>
+      <button class="dock-tab" data-tab="tcp" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><i data-lucide="network"></i>TCP</button>
+      <button class="dock-tab" data-tab="udp" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><i data-lucide="radio-tower"></i>UDP</button>
+      <button class="dock-tab" data-tab="sys" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><i data-lucide="scroll-text"></i>System Log</button>
+      <button class="dock-tab" data-tab="engine" title="Doppelklick: nebeneinander aufteilen (bis 4×)"><i data-lucide="cpu"></i>Engine</button>
     </div>
     <div class="dock-spacer"></div>
     <div class="dock-status">
@@ -493,6 +500,8 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
   <div class="dock-body" id="dock-body">
     <div class="term active" data-pane="ssh" id="term-ssh"></div>
     <div class="term" data-pane="mqtt" id="term-mqtt"></div>
+    <div class="term" data-pane="tcp" id="term-tcp"></div>
+    <div class="term" data-pane="udp" id="term-udp"></div>
     <div class="term" data-pane="sys" id="term-sys"></div>
     <div class="term" data-pane="engine" id="term-engine"></div>
   </div>
@@ -638,7 +647,7 @@ tickClock();setInterval(tickClock,1000);
 (function(){
   const dock=document.getElementById('dock');if(!dock)return;
   const tabs=[...document.querySelectorAll('.dock-tab')];
-  const pick=a=>a[Math.random()*a.length|0], rb=()=>Math.random()<.5?'true':'false';
+  const pick=a=>a[Math.random()*a.length|0], rb=()=>Math.random()<.5?'true':'false', ri=n=>Math.random()*n|0;
   const nowt=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());};
   const INIT={
     ssh:`<div><span class="ok">\u25cf</span> ssh carvilon@miniserver-eg \u2014 connected <span class="dim">(aes256-gcm \u00b7 port 22)</span></div>`+
@@ -650,6 +659,13 @@ tickClock();setInterval(tickClock,1000);
     mqtt:`<div><span class="t">${nowt()}</span> <span class="ok">CONNACK</span> broker tcp://10.0.0.4:1883 \u00b7 keepalive 60s</div>`+
         `<div><span class="t">${nowt()}</span> <span class="blue">SUB</span> carvilon/eg/flur/# \u00b7 qos1</div>`+
         `<div><span class="t">${nowt()}</span> <span class="amber">\u25b8</span> carvilon/eg/flur/button/btn <span class="dim">{"state":"released"}</span></div>`,
+    tcp:`<div><span class="ok">\u25cf</span> tcp listener <span class="dim">0.0.0.0:9090</span> \u00b7 accepting</div>`+
+        `<div><span class="t">${nowt()}</span> <span class="blue">SYN</span> 10.0.0.21:54122 \u2192 :9090</div>`+
+        `<div><span class="t">${nowt()}</span> <span class="ok">EST</span> conn #4 \u00b7 mss 1460 \u00b7 rtt 6ms</div>`+
+        `<div class="dim">tx 1.2 kB \u00b7 rx 884 B \u00b7 win 64k</div>`,
+    udp:`<div><span class="ok">\u25cf</span> udp socket <span class="dim">:9091</span> \u00b7 bound</div>`+
+        `<div><span class="t">${nowt()}</span> <span class="blue">RECV</span> 10.0.0.33:5353 \u00b7 len 142</div>`+
+        `<div><span class="t">${nowt()}</span> <span class="amber">\u25b8</span> datagram \u00b7 discovery beacon</div>`,
     sys:`<div><span class="t">${nowt()}</span> <span class="ok">INFO</span> designer \u00b7 graph loaded \u00b7 nodes=3 edges=2</div>`+
         `<div><span class="t">${nowt()}</span> <span class="ok">INFO</span> catalog \u00b7 111 blocks \u00b7 schema 1</div>`+
         `<div><span class="t">${nowt()}</span> <span class="amber">WARN</span> validate \u00b7 W_DEFAULT_DURATION on 'stair'</div>`,
@@ -657,17 +673,37 @@ tickClock();setInterval(tickClock,1000);
         `<div><span class="t">${nowt()}</span> <span class="ok">BUILD</span> topo sort \u2026 ok \u00b7 boundaries: 1 (time.staircase)</div>`+
         `<div><span class="dim">idle \u00b7 editing is not live \u2014 Activate to deploy</span></div>`,
   };
-  for(const k in INIT){const el=document.getElementById('term-'+k);if(el){el.innerHTML=INIT[k];el.scrollTop=el.scrollHeight;}}
-  function setTab(name){tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.querySelectorAll('.term').forEach(p=>p.classList.toggle('active',p.dataset.pane===name));dock.classList.remove('collapsed');const a=document.getElementById('term-'+name);if(a)a.scrollTop=a.scrollHeight;}
-  tabs.forEach(t=>t.onclick=()=>setTab(t.dataset.tab));
+  const MAXCOLS=4;
+  // how many side-by-side columns each terminal tab is split into (1..MAXCOLS).
+  const splits={};tabs.forEach(t=>{splits[t.dataset.tab]=1;});
+  // (re)build the columns of one tab: n independent terminals, each seeded
+  // with the tab's INIT content; reflect the count in the tab's ×N badge.
+  function renderPanes(name){
+    const host=document.getElementById('term-'+name);if(!host)return;
+    const n=splits[name]||1;let h='';
+    for(let i=0;i<n;i++)h+=`<div class="term-col">${INIT[name]||''}</div>`;
+    host.innerHTML=h;
+    host.querySelectorAll('.term-col').forEach(c=>{c.scrollTop=c.scrollHeight;});
+    const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split=String(n);
+  }
+  tabs.forEach(t=>renderPanes(t.dataset.tab));
+  function setTab(name){tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.querySelectorAll('.term').forEach(p=>p.classList.toggle('active',p.dataset.pane===name));dock.classList.remove('collapsed');const a=document.getElementById('term-'+name);if(a)a.querySelectorAll('.term-col').forEach(c=>{c.scrollTop=c.scrollHeight;});}
+  // double-click a tab title splits that terminal into up to 4 side-by-side
+  // columns (cycles 1→2→3→4→1); a single click just activates the tab.
+  tabs.forEach(t=>{
+    t.onclick=()=>setTab(t.dataset.tab);
+    t.ondblclick=()=>{const name=t.dataset.tab;splits[name]=splits[name]>=MAXCOLS?1:splits[name]+1;renderPanes(name);setTab(name);};
+  });
   document.getElementById('dock-toggle').onclick=()=>dock.classList.toggle('collapsed');
   const POOL={
     ssh:()=>`<div><span class="t">[${nowt()}]</span> ${pick(['input.manual <span class="blue">btn:out</span> = <span class="amber">'+rb()+'</span>','time.staircase q=<span class="ok">true</span> \u00b7 hold 3.0s','output.lamp set=<span class="ok">true</span> \u00b7 ch DALI 1','heartbeat ok \u00b7 tree 42/42','keepalive \u00b7 rtt 7ms'])}</div>`,
     mqtt:()=>`<div><span class="t">${nowt()}</span> <span class="amber">\u25b8</span> ${pick(['carvilon/eg/flur/button/btn <span class="dim">{"state":"'+pick(['pressed','released'])+'"}</span>','carvilon/eg/flur/staircase/q <span class="dim">{"on":'+rb()+',"hold":3}</span>','carvilon/eg/flur/lamp/set <span class="dim">{"value":'+rb()+'}</span>','$SYS/broker/clients/connected <span class="dim">7</span>'])}</div>`,
+    tcp:()=>`<div><span class="t">[${nowt()}]</span> ${pick(['<span class="blue">SYN</span> 10.0.0.'+(20+ri(40))+':'+(49152+ri(16000))+' \u2192 :9090','<span class="ok">EST</span> conn #'+(1+ri(9))+' \u00b7 rtt '+(3+ri(12))+'ms','RX '+(64+ri(1400))+' B \u00b7 frame ok','TX '+(64+ri(1400))+' B \u00b7 ack','<span class="amber">FIN</span> conn #'+(1+ri(9))+' \u00b7 closed'])}</div>`,
+    udp:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">RECV</span> 10.0.0.'+(20+ri(40))+' \u00b7 len '+(40+ri(460)),'<span class="ok">SEND</span> broadcast \u00b7 len '+(40+ri(200)),'<span class="amber">\u25b8</span> datagram <span class="dim">discovery</span>','<span class="err">drop</span> \u00b7 checksum mismatch'])}</div>`,
     sys:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">DBG</span> render \u00b7 60 fps \u00b7 nodes '+(typeof nodes!=='undefined'?Object.keys(nodes).length:3),'<span class="ok">INFO</span> designer \u00b7 autosave draft','<span class="ok">INFO</span> catalog \u00b7 111 blocks','<span class="amber">WARN</span> validate \u00b7 W_DEFAULT_DURATION on stair'])}</div>`,
     engine:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">SIM</span> tick \u00b7 btn=0 stair=0 lamp=0','<span class="blue">SIM</span> waiting for input\u2026','<span class="ok">BUILD</span> graph ok \u00b7 boundaries 1','<span class="dim">editing not live \u2014 Activate to deploy</span>'])}</div>`,
   };
-  function addLine(name){const el=document.getElementById('term-'+name);if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;}
+  function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(el=>{const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
   if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');addLine(a?a.dataset.tab:'ssh');},2600);
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n&&typeof nodes!=='undefined')n.textContent=Object.keys(nodes).length;},1000);
 })();
