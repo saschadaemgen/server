@@ -233,6 +233,8 @@ func extractUser(data any) adminUser {
 		return v.User
 	case turnPageData:
 		return v.User
+	case designerData:
+		return v.User
 	case placeholderData:
 		return v.User
 	case adminLoginPageData:

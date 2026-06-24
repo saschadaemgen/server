@@ -9,18 +9,30 @@
   {{if .AccentColor}}<style>{{printf ":root{ --accent: %s; --color-accent: %s; }" .AccentColor .AccentColor | safeCSS}}</style>{{end}}
   {{block "head-extra" .}}{{end}}
   <style>
-    /* Global admin copyright footer — bottom-right, subtle, click-through
-       (pointer-events:none) so it never blocks page or editor content.
-       Pages that fill the viewport (e.g. the logic editor) reserve
-       var(--admin-footer-h) at the bottom so the footer is not covered. */
-    .admin-shell { --admin-footer-h: 28px; }
+    /* Global admin footer — a full-width bar pinned to the bottom, set off
+       from the content above by a hairline (+ a faint accent glow). The
+       copyright sits at the right. pointer-events:none so it never blocks
+       clicks; pages reserve var(--admin-footer-h) at the bottom so content
+       is never hidden behind it (the logic editor subtracts it from the
+       iframe height instead, via its own .page padding:0 override). */
+    .admin-shell { --admin-footer-h: 30px; }
+    .admin-shell .page { padding-bottom: calc(var(--space-24, 24px) + var(--admin-footer-h)); }
     .admin-footer {
-      position: fixed; right: 16px; bottom: 8px; z-index: 150;
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 150;
+      height: var(--admin-footer-h);
+      display: flex; align-items: center; justify-content: flex-end;
+      padding: 0 18px;
+      background: rgba(14, 16, 19, 0.86);
+      border-top: 1px solid rgba(255, 255, 255, 0.09);
+      box-shadow: 0 -1px 0 color-mix(in srgb, var(--accent, #3d7bff) 32%, transparent);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       font-family: var(--font-sans, system-ui, sans-serif);
-      font-size: 11px; font-weight: 500; letter-spacing: .01em;
+      font-size: 11px; font-weight: 500; letter-spacing: .02em;
       color: var(--color-text-tertiary, #7b848f);
-      pointer-events: none; user-select: none;
+      user-select: none; pointer-events: none;
     }
+    .admin-footer .af-dot { color: var(--accent, #3d7bff); margin: 0 7px; }
+    .admin-footer .af-org { color: #c4ccd4; font-weight: 600; letter-spacing: .04em; }
   </style>
 </head>
 <body class="admin-shell">
@@ -29,7 +41,7 @@
   <main class="page" role="main">
     {{block "content" .}}{{end}}
   </main>
-  <footer class="admin-footer">© Sascha Dämgen · IT and More Systems</footer>
+  <footer class="admin-footer">© Sascha Dämgen <span class="af-dot">·</span> <span class="af-org">IT and More Systems</span></footer>
   <script src="{{asset "/static/interactions.js"}}"></script>
   {{block "scripts" .}}{{end}}
 </body>
