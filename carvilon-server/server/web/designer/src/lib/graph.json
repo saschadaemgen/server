@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "id": "btn",
+      "type": "input.manual",
+      "params": {},
+      "ui": {
+        "x": 120,
+        "y": 140
+      }
+    },
+    {
+      "id": "stair",
+      "type": "time.staircase",
+      "params": {
+        "duration": "3s"
+      },
+      "ui": {
+        "x": 460,
+        "y": 140
+      }
+    },
+    {
+      "id": "lamp",
+      "type": "output.lamp",
+      "params": {},
+      "ui": {
+        "x": 800,
+        "y": 140
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "btn:out",
+      "to": "stair:trig"
+    },
+    {
+      "from": "stair:q",
+      "to": "lamp:set"
+    }
+  ]
+}

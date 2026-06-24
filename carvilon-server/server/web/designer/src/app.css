@@ -1,0 +1,34 @@
+@import '@xyflow/svelte/dist/style.css';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --bg-0:#050506; --bg-1:#0A0B0D;
+  --accent:#3B82F6; --accent-dim:#2563EB; --ok:#22C55E; --warn:#F6B23C; --err:#FF5A5A;
+  --wire:#3B82F6; --wire-soft:rgba(59,130,246,.5);
+  --text:#EAF1F5; --muted:#8A97A6; --faint:#52606E;
+  --panel:rgba(18,20,23,.78); --panel-2:rgba(11,12,14,.74);
+  --border:rgba(120,150,180,.12); --border-bright:rgba(150,200,235,.32);
+  --rail-w:236px; --insp-w:300px;
+  --font:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace; /* @kind font */
+  --kind-bool:#3B82F6; --kind-float:#F6B23C; --kind-text:#A78BFA;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg-0);color:var(--text);font-family:var(--font);
+  -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none}
+#app{height:100%}
+
+/* layout shell */
+.editor{position:fixed;inset:0;display:grid;grid-template-columns:var(--rail-w) 1fr;grid-template-rows:54px 1fr}
+.topbar{grid-column:1/3;z-index:20}
+.rail{grid-row:2;overflow:hidden}
+.stage{grid-row:2;position:relative;overflow:hidden}
+
+/* Svelte Flow surface: we draw our own background, hide the library's */
+.svelte-flow{background:transparent !important}
+.svelte-flow__background{opacity:0}
+.svelte-flow__edge .svelte-flow__edge-path{stroke:none}
+.svelte-flow__handle{border:none;min-width:0;min-height:0;width:14px;height:14px}
+.svelte-flow__attribution{display:none}
+
+/* reduced motion: stop wire flow */
+@media (prefers-reduced-motion: reduce){ .signal-flow{animation:none !important} }
