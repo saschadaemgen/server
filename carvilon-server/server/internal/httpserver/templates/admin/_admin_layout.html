@@ -15,24 +15,25 @@
        clicks; pages reserve var(--admin-footer-h) at the bottom so content
        is never hidden behind it (the logic editor subtracts it from the
        iframe height instead, via its own .page padding:0 override). */
-    .admin-shell { --admin-footer-h: 30px; }
+    .admin-shell { --admin-footer-h: 28px; }
     .admin-shell .page { padding-bottom: calc(var(--space-24, 24px) + var(--admin-footer-h)); }
     .admin-footer {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 150;
       height: var(--admin-footer-h);
       display: flex; align-items: center; justify-content: flex-end;
-      padding: 0 18px;
-      background: rgba(14, 16, 19, 0.86);
-      border-top: 1px solid rgba(255, 255, 255, 0.09);
-      box-shadow: 0 -1px 0 color-mix(in srgb, var(--accent, #3d7bff) 32%, transparent);
-      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      padding: 0 16px;
+      /* near-black so the strip reads as a continuation of the editor's
+         dark dock, not a separate bar; one faint hairline is the only
+         seam. */
+      background: #070809;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
       font-family: var(--font-sans, system-ui, sans-serif);
-      font-size: 11px; font-weight: 500; letter-spacing: .02em;
-      color: var(--color-text-tertiary, #7b848f);
+      font-size: 10.5px; font-weight: 500; letter-spacing: .02em;
+      color: #6a7480;
       user-select: none; pointer-events: none;
     }
-    .admin-footer .af-dot { color: var(--accent, #3d7bff); margin: 0 7px; }
-    .admin-footer .af-org { color: #c4ccd4; font-weight: 600; letter-spacing: .04em; }
+    .admin-footer .af-dot { color: var(--accent, #3d7bff); margin: 0 7px; opacity: .85; }
+    .admin-footer .af-org { color: #9aa3ae; font-weight: 600; letter-spacing: .03em; }
   </style>
 </head>
 <body class="admin-shell">
