@@ -232,17 +232,19 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 .lib-glabel{display:flex;align-items:center;gap:8px;padding:9px 8px 8px;cursor:pointer;user-select:none}
 .lib-glabel .gd{width:8px;height:8px;border-radius:3px;background:var(--gc);box-shadow:0 0 8px -1px var(--gc);flex:none}
 .lib-glabel .gname{font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);flex:1}
-.lib-glabel .gcount{font:600 9px/1 var(--mono);color:var(--faint);background:rgba(120,150,180,.08);padding:2px 6px;border-radius:5px}
+.lib-glabel .gcount,.lib-glabel .gcount-off{font:600 9px/1 var(--mono);color:var(--faint);background:rgba(120,150,180,.08);padding:2px 6px;border-radius:5px;cursor:pointer;transition:.12s}
+.lib-glabel .gcount:hover,.lib-glabel .gcount-off:hover{color:var(--text);background:rgba(120,150,180,.16)}
+.lib-glabel .gcount-off.zero{opacity:.45}
+/* the selected view's badge (active=front, hidden=rear) is highlighted */
+.lib-group[data-view="active"] .gcount,.lib-group[data-view="off"] .gcount-off{color:#fff;background:rgba(130,170,205,.22);box-shadow:inset 0 0 0 1px rgba(150,200,235,.3)}
 .lib-glabel .chev{width:14px;height:14px;color:var(--faint);transition:transform .18s}
 .lib-group.collapsed .chev{transform:rotate(-90deg)}
 .lib-group.collapsed .lib-items{display:none}
-.lib-sub{display:none}
-.lib-subhead{display:flex;align-items:center;gap:7px;padding:7px 8px;cursor:pointer;border-top:1px solid rgba(255,255,255,.06);color:var(--faint)}
-.lib-subhead .chev{width:13px;height:13px;transition:transform .18s;flex:none}
-.lib-sub.collapsed .chev{transform:rotate(-90deg)}
-.lib-sub.collapsed .lib-subitems{display:none}
-.lib-subhead>span:first-of-type{font:600 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:1}
-.lib-subhead .subcount{font:600 9px/1 var(--mono);background:rgba(120,150,180,.08);padding:2px 6px;border-radius:5px}
+/* per-category view: the header's active/hidden badges switch the list
+   between active blocks and deactivated ones. Deactivated entries stay in
+   place (same list, marked .inactive), just hidden in the other view. */
+.lib-group[data-view="active"] .lib-item.inactive{display:none}
+.lib-group[data-view="off"] .lib-item:not(.inactive){display:none}
 .lib-item.inactive{opacity:.5}
 .lib-item.inactive:hover{opacity:.78}
 .li-ic{cursor:pointer;transition:.12s}
@@ -553,12 +555,14 @@ function mkItem(name,icon,cat,c){const it=document.createElement('div');it.class
   it.innerHTML=`<span class="li-ic" title="Activate / deactivate"><i data-lucide="${icon}"></i></span><span class="li-name">${name}</span>`;return it;}
 for(const [cat,items] of Object.entries(LIBRARY)){
   const c=CAT[cat],g=document.createElement('div');g.className='lib-group';g.dataset.cat=cat;
-  g.innerHTML=`<div class="lib-glabel"><span class="gd" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount">${items.length}</span><i class="chev" data-lucide="chevron-down"></i></div><div class="lib-items"></div><div class="lib-sub collapsed"><div class="lib-subhead"><i class="chev" data-lucide="chevron-down"></i><span>Deactivated</span><span class="subcount">0</span></div><div class="lib-subitems"></div></div>`;
+  g.dataset.view='active';
+  g.innerHTML=`<div class="lib-glabel"><span class="gd" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div><div class="lib-items"></div>`;
   const iw=g.querySelector('.lib-items');
   for(const [name,icon] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c));}
   g.querySelector('.lib-glabel').addEventListener('click',()=>g.classList.toggle('collapsed'));
   g.querySelector('.lib-glabel .gd').addEventListener('click',e=>{e.stopPropagation();openCatColor(cat,e.currentTarget);});
-  g.querySelector('.lib-subhead').addEventListener('click',()=>g.querySelector('.lib-sub').classList.toggle('collapsed'));
+  g.querySelector('.gcount').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'active');});
+  g.querySelector('.gcount-off').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'off');});
   libEl.appendChild(g);
 }
 const railTotal=Object.values(LIBRARY).reduce((a,x)=>a+x.length,0);const cntEl=document.querySelector('.search-cnt');if(cntEl)cntEl.textContent='('+railTotal+')';
@@ -618,9 +622,14 @@ function lpEnd(){if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}if(lpIcon){lpIc
 libEl.addEventListener('pointerup',lpEnd,true);libEl.addEventListener('pointercancel',lpEnd,true);
 libEl.addEventListener('pointermove',e=>{if(lpTimer&&!e.target.closest('.li-ic'))lpEnd();},true);
 libEl.addEventListener('click',e=>{const ic=e.target.closest('.li-ic');if(!ic)return;if(lpLong){lpLong=false;return;}toggleItem(ic.closest('.lib-item'));});
-function toggleItem(it){if(!it)return;const g=it.closest('.lib-group'),sub=g.querySelector('.lib-sub'),subItems=g.querySelector('.lib-subitems'),mainItems=g.querySelector('.lib-items');
-  if(it.classList.contains('inactive')){it.classList.remove('inactive');mainItems.appendChild(it);}else{it.classList.add('inactive');subItems.appendChild(it);}
-  const sc=subItems.children.length;g.querySelector('.subcount').textContent=sc;g.querySelector('.gcount').textContent=mainItems.children.length;sub.style.display=sc?'block':'none';}
+function setGroupView(g,view){g.dataset.view=view;g.classList.remove('collapsed');}
+function updateGroupCounts(g){const items=[...g.querySelectorAll('.lib-item')];const off=items.filter(x=>x.classList.contains('inactive')).length;
+  g.querySelector('.gcount').textContent=items.length-off;
+  const offEl=g.querySelector('.gcount-off');offEl.textContent=off;offEl.classList.toggle('zero',off===0);}
+// click a block's icon to (de)activate it; it stays in the list, just gets
+// the .inactive flag, and the two header counts update. The active/hidden
+// views (header badges) decide which set is shown.
+function toggleItem(it){if(!it)return;const g=it.closest('.lib-group');it.classList.toggle('inactive');updateGroupCounts(g);}
 /* category filter (button at end of search) */
 const activeCats=new Set(Object.keys(CAT));
 const filterPop=document.getElementById('filter-pop'),filterBtn=document.getElementById('filter-btn');
