@@ -2,26 +2,20 @@
 
 {{define "head-extra"}}
 <style>
-  /* The logic editor renders inside the iframe as a rounded card, inset in
-     a single uniform surround colour (#14171c). The page background, the
-     inset around the card and the footer all share that one colour, so
-     there are no stray colour seams — just the deliberate contrast between
-     the near-black editor card and its slightly lighter frame, which makes
-     the rounded corners read. Scoped to this page only. */
-  body.admin-shell { background: #14171c; }
+  /* The editor stage fills the content area FLUSH — no inset, no border, no
+     shadow, no surround band (that extra space looked wrong). The only
+     flourish is a modest corner radius on the stage; because the stage is
+     flush on every edge, the rounding shows only as four soft corners, with
+     no gap or band anywhere. The colour behind (= the admin topbar's) peeks
+     only at those corner arcs. Scoped to this page. */
+  body.admin-shell { background: #0e1013; }
   body.admin-shell .page {
     height: calc(100vh - 58px - var(--admin-footer-h, 28px));
-    max-width: none; margin: 0; padding: 14px; gap: 0;
-    box-sizing: border-box; background: #14171c;
+    max-width: none; margin: 0; padding: 0; gap: 0;
+    box-sizing: border-box; background: #0e1013;
   }
-  body.admin-shell .admin-footer { background: #14171c; } /* same surround → no colour diff */
-  .designer-stage {
-    width: 100%; height: 100%;
-    border-radius: 14px; overflow: hidden;            /* clips the iframe to a rounded card */
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-    background: #050506;
-  }
+  body.admin-shell .admin-footer { background: #0e1013; }
+  .designer-stage { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: #050506; }
   .designer-frame { display: block; width: 100%; height: 100%; border: 0; background: #050506; }
 </style>
 {{end}}
