@@ -3,6 +3,7 @@ package engine
 import (
 	"container/heap"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -24,11 +25,11 @@ type Engine struct {
 	start time.Time
 	now   time.Time
 
-	addOrder  []string              // node ids in insertion order
-	nodes     map[string]Node       // id -> node
-	outs      map[string]storeMap   // id -> port -> last output value
-	inEdge    map[string]edgeMap    // dst id -> dst port -> source endpoint
-	consumers map[endpoint][]string // source endpoint -> dst node ids
+	addOrder []string                // node ids in insertion order
+	nodes    map[string]Node         // id -> node
+	outs     map[string]storeMap     // id -> port -> last output value
+	inEdge   map[string]edgeMap      // dst id -> dst port -> source endpoint
+	wires    map[endpoint][]endpoint // source endpoint -> driven dst endpoints
 
 	order     []string // cached topological order of node ids
 	topoStale bool     // order needs recompute
@@ -37,6 +38,15 @@ type Engine struct {
 	timers timerHeap // min-heap of pending wakeups, keyed by fire time
 
 	events []Event // collected Emit stub output
+
+	// Monitor fan-out (S1-02). mu guards the fields below plus the
+	// state Tick mutates, so Subscribe/Snapshot are race-safe against
+	// a Tick running on another goroutine. The tick computation itself
+	// is unchanged and stays deterministic.
+	mu           sync.Mutex
+	tickCount    int64                   // total ticks elapsed
+	frameChanges []Change                // signals changed during the current tick
+	subs         map[chan Frame]struct{} // monitor subscribers
 }
 
 type storeMap = map[string]Value
@@ -49,12 +59,13 @@ func New(tick time.Duration) *Engine {
 		panic("engine: tick must be > 0")
 	}
 	e := &Engine{
-		tick:      tick,
-		nodes:     map[string]Node{},
-		outs:      map[string]storeMap{},
-		inEdge:    map[string]edgeMap{},
-		consumers: map[endpoint][]string{},
-		dirty:     map[string]bool{},
+		tick:   tick,
+		nodes:  map[string]Node{},
+		outs:   map[string]storeMap{},
+		inEdge: map[string]edgeMap{},
+		wires:  map[endpoint][]endpoint{},
+		dirty:  map[string]bool{},
+		subs:   map[chan Frame]struct{}{},
 	}
 	heap.Init(&e.timers)
 	return e
@@ -117,7 +128,7 @@ func (e *Engine) Connect(srcNode, srcPort, dstNode, dstPort string) {
 	}
 	src := endpoint{srcNode, srcPort}
 	edges[dstPort] = src
-	e.consumers[src] = append(e.consumers[src], dstNode)
+	e.wires[src] = append(e.wires[src], endpoint{dstNode, dstPort})
 	e.topoStale = true
 }
 
@@ -125,6 +136,8 @@ func (e *Engine) Connect(srcNode, srcPort, dstNode, dstPort string) {
 // dirty, simulating a real Source (doorbell, NFC, MQTT, ...). The
 // node must accept external input (e.g. input.manual).
 func (e *Engine) SetInput(nodeID, port string, v Value) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	n, ok := e.nodes[nodeID]
 	if !ok {
 		panic("engine: SetInput on unknown node " + nodeID)
@@ -154,29 +167,50 @@ func (e *Engine) markDirty(id string) { e.dirty[id] = true }
 //  4. an output that actually changes marks its downstream consumers
 //     dirty; they sit later in the topo order and so are caught in
 //     this same pass
+//
+// After the pass, the signals that actually changed this tick are
+// fanned out to monitor subscribers as one Frame (empty ticks send
+// nothing). The fan-out is non-blocking and never affects the tick.
 func (e *Engine) Tick() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.tickCount++
 	e.now = e.now.Add(e.tick)
+	e.frameChanges = nil
 
 	for e.timers.Len() > 0 && !e.timers[0].at.After(e.now) {
 		w := heap.Pop(&e.timers).(wakeup)
 		e.markDirty(w.node)
 	}
 
-	if len(e.dirty) == 0 {
-		return
+	if len(e.dirty) > 0 {
+		for _, id := range e.topo() {
+			if !e.dirty[id] {
+				continue
+			}
+			delete(e.dirty, id)
+			e.evalNode(id)
+		}
 	}
 
-	for _, id := range e.topo() {
-		if !e.dirty[id] {
-			continue
-		}
-		delete(e.dirty, id)
-		e.evalNode(id)
+	if len(e.frameChanges) > 0 {
+		e.fanout(Frame{
+			Tick:    e.tickCount,
+			TimeMs:  e.now.Sub(e.start).Milliseconds(),
+			Changes: e.frameChanges,
+		})
+		e.frameChanges = nil // handed off to the Frame; next tick allocates fresh
 	}
 }
 
 // evalNode runs one node's Eval, then propagates any changed outputs
-// to downstream consumers (marking them dirty for this same pass).
+// along their wires: each downstream input is marked dirty for this
+// same pass and recorded as a Change on the current tick's frame.
+//
+// Signals are reported at the consuming (destination) end of each
+// wire - that is what the editor highlights as a live value - so a
+// changed staircase "q" surfaces as a change on lamp "set".
 func (e *Engine) evalNode(id string) {
 	var changed []string
 	in := inAdapter{eng: e, node: id}
@@ -186,8 +220,10 @@ func (e *Engine) evalNode(id string) {
 	e.nodes[id].Eval(ctx, in, out)
 
 	for _, port := range changed {
-		for _, dst := range e.consumers[endpoint{id, port}] {
-			e.markDirty(dst)
+		v := e.outs[id][port]
+		for _, dst := range e.wires[endpoint{id, port}] {
+			e.markDirty(dst.node)
+			e.frameChanges = append(e.frameChanges, Change{Node: dst.node, Port: dst.port, Value: v})
 		}
 	}
 }

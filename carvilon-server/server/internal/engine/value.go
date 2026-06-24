@@ -45,11 +45,12 @@ const (
 // Value is a tagged union over the three supported kinds. Only the
 // field matching Kind is meaningful; the others are zero. Value is
 // comparable (==), which the engine relies on for change detection.
+// The JSON tags let monitor frames serialize cleanly for the editor.
 type Value struct {
-	Kind Kind
-	B    bool
-	F    float64
-	S    string
+	Kind Kind    `json:"kind"`
+	B    bool    `json:"b"`
+	F    float64 `json:"f"`
+	S    string  `json:"s"`
 }
 
 // BoolVal, FloatVal and TextVal are convenience constructors.
