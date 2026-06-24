@@ -247,8 +247,8 @@ func (e *Engine) topo() []string {
 
 	deps := make([]depEdge, 0, len(e.inEdge))
 	for dst, edges := range e.inEdge {
-		for _, src := range edges {
-			deps = append(deps, depEdge{src: src.node, dst: dst})
+		for dstPort, src := range edges {
+			deps = append(deps, depEdge{src: src.node, srcPort: src.port, dst: dst, dstPort: dstPort})
 		}
 	}
 

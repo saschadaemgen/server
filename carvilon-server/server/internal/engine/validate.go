@@ -186,7 +186,7 @@ func Validate(g Graph, reg *Registry) []Issue {
 	deps := make([]depEdge, 0, len(edges))
 	for _, e := range edges {
 		if e.from.ok && e.to.ok {
-			deps = append(deps, depEdge{src: e.from.node, dst: e.to.node})
+			deps = append(deps, depEdge{src: e.from.node, srcPort: e.from.port, dst: e.to.node, dstPort: e.to.port})
 		}
 	}
 	_, cyclic := topoCut(ids, deps, func(id string) bool {
@@ -224,10 +224,26 @@ func kindName(k Kind) string {
 	}
 }
 
-// depEdge is a dependency: dst consumes the output of src (src -> dst).
+// depEdge is a dependency: dst:dstPort consumes the output src:srcPort
+// (src -> dst). The ports make the cut deterministic and edge-precise.
 type depEdge struct {
-	src string
-	dst string
+	src     string
+	srcPort string
+	dst     string
+	dstPort string
+}
+
+func (e depEdge) less(o depEdge) bool {
+	if e.src != o.src {
+		return e.src < o.src
+	}
+	if e.srcPort != o.srcPort {
+		return e.srcPort < o.srcPort
+	}
+	if e.dst != o.dst {
+		return e.dst < o.dst
+	}
+	return e.dstPort < o.dstPort
 }
 
 // topoCut topologically orders nodes for single-tick evaluation while
@@ -238,71 +254,127 @@ type depEdge struct {
 //
 // A delay boundary serves its output from stored state at tick start,
 // so a consumer does not depend on it within the tick. The cut is
-// applied lazily - only when the Kahn frontier stalls on a cycle - so
-// a boundary edge that does not close any cycle is still respected and
-// its consumer is ordered after it (same-tick propagation). What
-// remains unorderable after cutting every reachable boundary out-edge
-// is a genuine combinational cycle.
+// lazy AND edge-precise: only when the Kahn frontier stalls on a cycle,
+// and only an edge that is genuinely cycle-closing - one out of an
+// unplaced boundary whose target can reach back to that boundary
+// through the still-unsolved graph. A forward boundary edge (whose
+// target cannot loop back, e.g. staircase -> lamp) is never cut, so
+// its consumer stays ordered after the boundary and sees the value in
+// the same tick. Exactly one edge is cut per stall, chosen by a fixed
+// (src,srcPort,dst,dstPort) order for reproducibility, then Kahn
+// resumes. What stays unorderable once no cycle-closing boundary edge
+// remains is a genuine combinational cycle.
 func topoCut(nodes []string, deps []depEdge, isBoundary func(string) bool) (order, cyclic []string) {
 	exists := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
 		exists[n] = true
 	}
 
-	succ := make(map[string][]string, len(nodes))
+	// Build the (deduplicated) edge set and per-node out-adjacency and
+	// indegree. Indegree counts edges, decremented per edge as sources
+	// are placed - a multigraph Kahn.
+	edges := make([]depEdge, 0, len(deps))
+	out := make(map[string][]int, len(nodes))
 	indeg := make(map[string]int, len(nodes))
 	for _, n := range nodes {
 		indeg[n] = 0
 	}
-	seen := make(map[[2]string]bool, len(deps))
+	seen := make(map[depEdge]bool, len(deps))
 	for _, e := range deps {
-		if !exists[e.src] || !exists[e.dst] || seen[[2]string{e.src, e.dst}] {
-			continue // unknown endpoints handled elsewhere; collapse parallel edges
+		if !exists[e.src] || !exists[e.dst] || seen[e] {
+			continue // unknown endpoints handled elsewhere; collapse exact dups
 		}
-		seen[[2]string{e.src, e.dst}] = true
-		succ[e.src] = append(succ[e.src], e.dst)
+		seen[e] = true
+		idx := len(edges)
+		edges = append(edges, e)
+		out[e.src] = append(out[e.src], idx)
 		indeg[e.dst]++
 	}
 
 	order = make([]string, 0, len(nodes))
 	placed := make(map[string]bool, len(nodes))
-	cutDone := make(map[string]bool, len(nodes)) // boundary nodes already cut
+	cut := make([]bool, len(edges))
 
-	for len(order) < len(nodes) {
-		progressed := false
-		for _, n := range nodes {
-			if !placed[n] && indeg[n] == 0 {
+	// drain places every currently-ready node, cascading within one
+	// call. Iterating nodes in their given (slice) order keeps the
+	// result deterministic - never map iteration.
+	drain := func() {
+		for {
+			advanced := false
+			for _, n := range nodes {
+				if placed[n] || indeg[n] != 0 {
+					continue
+				}
 				placed[n] = true
 				order = append(order, n)
-				for _, d := range succ[n] {
-					indeg[d]--
+				for _, ei := range out[n] {
+					if !cut[ei] {
+						indeg[edges[ei].dst]--
+					}
 				}
-				progressed = true
+				advanced = true
+			}
+			if !advanced {
+				return
 			}
 		}
-		if progressed {
-			continue
+	}
+
+	// reaches reports whether `from` can reach `to` over uncut edges
+	// among the still-unplaced nodes. Cycles live entirely within the
+	// unplaced set, so placed nodes are skipped.
+	reaches := func(from, to string) bool {
+		if from == to {
+			return true
 		}
-		// Stalled: the remaining nodes form one or more cycles. Break
-		// them by cutting the out-edges of any still-unplaced delay
-		// boundary, lowering its consumers' indegree.
-		cut := false
-		for _, n := range nodes {
-			if placed[n] || cutDone[n] || !isBoundary(n) {
+		visited := make(map[string]bool, len(nodes))
+		stack := []string{from}
+		for len(stack) > 0 {
+			n := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if visited[n] {
 				continue
 			}
-			cutDone[n] = true
-			for _, d := range succ[n] {
-				if !placed[d] {
-					indeg[d]--
-					cut = true
+			visited[n] = true
+			for _, ei := range out[n] {
+				if cut[ei] {
+					continue
 				}
+				d := edges[ei].dst
+				if placed[d] {
+					continue
+				}
+				if d == to {
+					return true
+				}
+				stack = append(stack, d)
 			}
-			succ[n] = nil // its out-edges are now cut
 		}
-		if !cut {
-			break // nothing left to cut: the remainder is combinational
+		return false
+	}
+
+	drain()
+	for len(order) < len(nodes) {
+		// Stalled: pick the deterministically-first cycle-closing edge
+		// out of an unplaced delay boundary, cut it, and resume.
+		best := -1
+		for i, e := range edges {
+			if cut[i] || placed[e.src] || placed[e.dst] || !isBoundary(e.src) {
+				continue
+			}
+			if !reaches(e.dst, e.src) {
+				continue // forward edge, not cycle-closing
+			}
+			if best == -1 || e.less(edges[best]) {
+				best = i
+			}
 		}
+		if best == -1 {
+			break // no cuttable boundary edge: the remainder is combinational
+		}
+		cut[best] = true
+		indeg[edges[best].dst]--
+		drain()
 	}
 
 	for _, n := range nodes {
