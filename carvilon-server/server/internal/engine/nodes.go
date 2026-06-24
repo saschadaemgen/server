@@ -1,0 +1,132 @@
+package engine
+
+import (
+	"encoding/json"
+	"time"
+)
+
+func init() {
+	Register(Descriptor{
+		Type:     "input.manual",
+		Category: "input",
+		Title:    "Manual input",
+		Outputs:  []Port{{Name: "out", Kind: Bool}},
+		New:      func(map[string]Value) Node { return &manual{} },
+	})
+
+	Register(Descriptor{
+		Type:          "time.staircase",
+		Category:      "time",
+		Title:         "Staircase timer",
+		Inputs:        []Port{{Name: "trig", Kind: Bool}},
+		Outputs:       []Port{{Name: "q", Kind: Bool}},
+		Params:        []Param{{Name: "duration", Kind: Float, Default: FloatVal(180)}},
+		DelayBoundary: true,
+		New: func(p map[string]Value) Node {
+			return &staircase{duration: time.Duration(p["duration"].F * float64(time.Second))}
+		},
+	})
+
+	Register(Descriptor{
+		Type:     "output.lamp",
+		Category: "output",
+		Title:    "Lamp",
+		Inputs:   []Port{{Name: "set", Kind: Bool}},
+		New:      func(map[string]Value) Node { return &lamp{} },
+	})
+}
+
+// manual is an externally-driven boolean source. It is a placeholder
+// for a real Source (doorbell, NFC, MQTT, ...): SetInput sets val and
+// Eval mirrors it onto the "out" port.
+type manual struct {
+	val bool
+}
+
+func (n *manual) Eval(ctx *EvalContext, in Inputs, out Outputs) {
+	out.SetBool("out", n.val)
+}
+
+func (n *manual) setExternal(port string, v Value) {
+	if port == "out" {
+		n.val = v.B
+	}
+}
+
+// staircase is a retriggerable staircase-light timer. A rising edge
+// on "trig" turns "q" on for duration; another rising edge restarts
+// the full duration from now (so 2000 + 3000 = 5000, never 3300). It
+// is a delay boundary and uses WakeAfter for the turn-off.
+//
+// It is Stateful: only "until" is remanent (a restart survives a
+// reboot); prevTrig is live state, rebuilt from the next trig sample.
+type staircase struct {
+	duration time.Duration
+	until    time.Time // q stays on until this logical time (zero = off)
+	prevTrig bool      // last sampled trig level, for edge detection
+}
+
+func (n *staircase) Eval(ctx *EvalContext, in Inputs, out Outputs) {
+	now := ctx.Now()
+	trig := in.Bool("trig")
+	rising := trig && !n.prevTrig
+	n.prevTrig = trig
+
+	if rising {
+		n.until = now.Add(n.duration)
+		ctx.WakeAfter(n.duration)
+	}
+
+	on := !n.until.IsZero() && now.Before(n.until)
+	if !on && !n.until.IsZero() {
+		n.until = time.Time{} // timer expired; disarm
+	}
+	out.SetBool("q", on)
+}
+
+func (n *staircase) Snapshot() any {
+	return staircaseState{Until: n.until}
+}
+
+func (n *staircase) Restore(data json.RawMessage) error {
+	var s staircaseState
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	n.until = s.Until
+	return nil
+}
+
+// staircaseState is the remanent slice of a staircase persisted by
+// S1-03. prevTrig is deliberately absent - it is live state.
+type staircaseState struct {
+	Until time.Time `json:"until"`
+}
+
+// lamp is a boolean sink that records every state transition of its
+// "set" input. It is a placeholder for a real Sink (relay, FCM,
+// routing). Its known state starts off, so a leading "off" is not
+// recorded as a spurious transition.
+type lamp struct {
+	state   bool
+	changes []LampChange
+}
+
+// LampChange is one recorded on/off transition with its logical time.
+type LampChange struct {
+	At time.Time
+	On bool
+}
+
+func (n *lamp) Eval(ctx *EvalContext, in Inputs, out Outputs) {
+	set := in.Bool("set")
+	if set == n.state {
+		return
+	}
+	n.state = set
+	n.changes = append(n.changes, LampChange{At: ctx.Now(), On: set})
+	ctx.Emit(Event{Node: ctx.nodeID, Type: "lamp", At: ctx.Now(), Value: BoolVal(set)})
+}
+
+// Changes returns the recorded on/off transitions in order.
+func (n *lamp) Changes() []LampChange { return n.changes }
