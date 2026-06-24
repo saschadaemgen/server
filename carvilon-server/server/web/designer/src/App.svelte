@@ -15,6 +15,9 @@
   let viewport = $state({ x: 0, y: 0, zoom: 1 });
   let pane;            // flow wrapper element (for drop coords)
   let idc = 0;
+  let gridOn = $state(true);
+  let snapOn = $state(true);
+  const GRID = 26;
 
   loadCatalog();
 
@@ -60,6 +63,8 @@
     <button class="tbtn toggle" class:on={ui.signalFlow} onclick={() => (ui.signalFlow = !ui.signalFlow)}>
       Signal flow<span class="sw"><i></i></span>
     </button>
+    <button class="tbtn" class:on={snapOn} onclick={() => (snapOn = !snapOn)} title="Snap to grid">⊞ Snap</button>
+    <button class="tbtn" class:on={gridOn} onclick={() => (gridOn = !gridOn)} title="Show grid">▦ Grid</button>
     <span class="sep2"></span>
     <button class="tbtn" disabled={!history.canUndo} onclick={undo} title="Undo (Ctrl+Z)">↶</button>
     <button class="tbtn" disabled={!history.canRedo} onclick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
@@ -80,9 +85,9 @@
     <BgCanvas />
     <SvelteFlow bind:nodes={flow.nodes} bind:edges={flow.edges} bind:viewport
                 {nodeTypes} {edgeTypes} {isValidConnection} {onconnect}
-                defaultEdgeOptions={{ type: 'signal' }}
+                defaultEdgeOptions={{ type: 'signal' }} snapGrid={[GRID, GRID]} snapToGrid={snapOn}
                 onnodedragstop={commit} fitView proOptions={{ hideAttribution: true }}>
-      <Background />
+      {#if gridOn}<Background gap={GRID} />{/if}
       <Controls showLock={false} />
       <MiniMap pannable zoomable nodeColor={(n) => (CATEGORY[blocksByType[n.data.blockType]?.category]?.color) ?? '#3B82F6'} />
     </SvelteFlow>

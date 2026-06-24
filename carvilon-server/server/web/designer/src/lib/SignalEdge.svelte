@@ -4,7 +4,13 @@
   import { KIND } from './categories.js';
 
   let { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition } = $props();
-  const path = $derived(getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })[0]);
+  // FX-01: always softly rounded, hangs (sags) by distance.
+  const path = $derived.by(() => {
+    const dx = Math.max(24, Math.abs(targetX - sourceX) * 0.5);
+    const dist = Math.hypot(targetX - sourceX, targetY - sourceY);
+    const sag = Math.min(70, Math.max(0, (dist - 70) * 0.18));
+    return `M ${sourceX} ${sourceY} C ${sourceX + dx} ${sourceY + sag}, ${targetX - dx} ${targetY + sag}, ${targetX} ${targetY}`;
+  });
 
   // FX-08: each wire takes the colour of its source port's kind.
   const color = $derived.by(() => {
