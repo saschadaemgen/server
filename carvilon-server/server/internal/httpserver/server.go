@@ -449,6 +449,15 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/turn", s.requireAdminSession(http.HandlerFunc(s.handleAdminTurn)))
 	s.mux.Handle("GET /a/turn/stats.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminTurnStatsJSON)))
 
+	// Logic editor (visual designer). The host page renders the admin
+	// chrome with a full-bleed iframe; the iframe loads the
+	// self-contained editor bundle served verbatim from the embedded FS
+	// under /a/designer/ (exact /a/designer is the host page, the
+	// /a/designer/ subtree is the bundle). Both are admin-gated. Demo
+	// data only; live engine/SSE feeds are a later ticket.
+	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
+	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
+
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
 	// auth happens at the /webviewer/* tree; here we just CRUD
 	// the viewers-row + the one-shot token reveal.

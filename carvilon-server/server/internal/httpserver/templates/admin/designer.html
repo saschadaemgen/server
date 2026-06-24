@@ -1,0 +1,27 @@
+{{define "title"}}Logik-Editor{{end}}
+
+{{define "head-extra"}}
+<style>
+  /* The logic editor is a full application rendered inside the iframe
+     below. Drop the default .page max-width/padding so the editor sits
+     flush and fills the whole viewport under the 58px topbar. Scoped to
+     this page only — the rule ships in this page's document, not the
+     shared layout. */
+  body.admin-shell .page { max-width: none; margin: 0; padding: 0; gap: 0; }
+  .designer-frame {
+    display: block;
+    width: 100%;
+    height: calc(100vh - 58px);
+    border: 0;
+    background: #050506;
+  }
+</style>
+{{end}}
+
+{{define "content"}}
+<!-- The editor is served verbatim from the embedded FS at /a/designer/
+     (see handler_admin_designer.go). The iframe isolates its document,
+     CSS and JS from the admin shell. Demo/placeholder feeds for now;
+     live engine/SSE wiring is a later ticket. -->
+<iframe class="designer-frame" src="/a/designer/" title="CARVILON Logik-Editor"></iframe>
+{{end}}

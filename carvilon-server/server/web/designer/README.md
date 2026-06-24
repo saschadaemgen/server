@@ -1,82 +1,55 @@
 # CARVILON Logic Editor — `web/designer/`
 
-A standalone **Vite + Svelte Flow (`@xyflow/svelte`)** app that reproduces the
-approved cyber-look logic editor as a real, runnable project (no static HTML).
+The CARVILON visual logic editor, shipped as a **single self-contained
+`index.html`** (the full editor: project dropdown, 111-block palette + favorites,
+module cards, sagging cyan wires, align/distribute toolbar, minimap, log dock).
+No build step, no `dist/`, no framework toolchain — the file runs by double-click
+and is served verbatim by the carvilon server.
 
-```bash
-cd web/designer
-npm install
-npm run dev        # http://localhost:5173/a/designer/
-npm run build      # -> web/designer/dist/ (base = /a/designer/)
-```
-
-Later the built `dist/` is served by the carvilon server under `/a/designer/`
-(go:embed) and embedded via iframe in the admin — **separate CC ticket.** The
-only requirement that touches us is `vite.config.js` → `base: '/a/designer/'`.
+> The earlier Vite + Svelte Flow scaffold (`src/`, `package.json`,
+> `vite.config.mjs`) was the slim variant and has been **retired** in favour of
+> this full version (decision confirmed by CD). It remains recoverable from git
+> history and from the retired tree at
+> `carvilon-server/server/design/web/designer/`.
 
 ## Layout
 
 ```
-src/
-  main.js               mount App
-  app.css               theme tokens + Svelte Flow overrides
-  App.svelte            shell: topbar, palette, <SvelteFlow>, issues panel, DnD, undo/redo
-  lib/
-    catalog.json        DATA CONTRACT — 111 blocks (server delivers this later)
-    graph.json          DATA CONTRACT — canonical demo graph (ParseGraph/Build shape)
-    categories.js       category labels/colours + port-kind colour/shape
-    store.svelte.js     reactive state, catalog load, isValidConnection, undo/redo, toCanonical()
-    BlockNode.svelte    custom node (typed ports, category header, params)
-    SignalEdge.svelte   custom edge (cyan, drop-shadow glow, signal-flow dashes)
-    BgCanvas.svelte     background on its own GPU canvas, own rAF, decoupled from re-render
-    Palette.svelte      data-driven palette (grouped by category, collapsible, draggable)
+index.html            the full editor — one file, self-contained
+vendor/               locally vendored assets (local-first; see below)
+  lucide.min.js       Lucide icons, pinned 0.460.0
+  fonts.css           @font-face for Inter + JetBrains Mono (rewritten to ./fonts/)
+  fonts/*.woff2       the webfont subsets
+embed.go              //go:embed index.html vendor  → designer.FS
 ```
 
-## Data contracts (must stay 1:1 with the Go descriptor)
+## Local-first (no external requests)
 
-- **`catalog.json`** — `{ schema, blocks:[{ type, category, title, inputs[], outputs[], params[], delay_boundary }] }`.
-  `kind ∈ bool|float|text`. The four canonical types (`input.manual`, `logic.or`,
-  `time.staircase`, `output.lamp`) are byte-exact; the rest fill the palette
-  (design-phase only). Loaded via `fetch(BASE_URL + 'catalog.json')` with the
-  bundled import as fallback (`loadCatalog()`).
-- **`graph.json`** — `{ schema, nodes:[{id,type,params,ui}], edges:[{from:"node:port",to:"node:port"}] }`.
-  `ui` is position-only. `toCanonical()` in the store re-emits exactly this shape
-  for a future editor → server export. I1/Q3/DALI-1 bindings are modelled as a
-  `point` param on input/output blocks, not a hardware address.
+The editor must work inside the building with no internet. Every asset the page
+references is vendored under `vendor/` and the HTML points at relative paths:
 
-## Implemented (beyond the preview)
+- Lucide → `./vendor/lucide.min.js` (was `unpkg.com/lucide@0.460.0/...`).
+- Fonts → `./vendor/fonts.css` (was the Google Fonts `css2` stylesheet + the two
+  `preconnect` hints, which are removed). `fonts.css` `@font-face` `src` URLs were
+  rewritten from `fonts.gstatic.com/...` to `./fonts/<file>.woff2`.
 
-- **Typed ports** — colour + shape per `kind` (bool=circle/blue, float=diamond/amber, text=square/violet).
-- **`isValidConnection`** — kind must match **and** an input accepts at most one
-  wire (fan-in forbidden); invalid drags are rejected by Svelte Flow.
-- **Validation surface** — issues panel bound to a placeholder `issues` array
-  (`{severity,node_id?,edge_id?,code,message}`); wire the real server validator into it.
-- **Run vs Activate** — Run = simulate/monitor toggle; Activate = deploy
-  affordance + revision counter (editing is never live). UI-state only.
-- **Signal-flow toggle** drives the edge animation and defaults **off** under
-  `prefers-reduced-motion`.
-- **Undo/Redo** — snapshot history (`commit()` on connect / node-drag-stop / create), Ctrl+Z / Ctrl+Shift+Z.
-- Drag a block from the palette onto the canvas to create a node.
+Loading the page issues **zero** requests to any external host. To re-vendor or
+bump a version, download the resource, drop it under `vendor/`, and rewrite the
+reference to a relative path — do not reintroduce a CDN URL.
 
-## Performance rules (honoured)
+## How it is served
 
-1. Glow is CSS `drop-shadow` on the edge group — never `feGaussianBlur` per edge.
-2. Background is its own `<canvas>` GPU layer with its own rAF, decoupled from Svelte state.
-3. `prefers-reduced-motion` disables drift + signal flow.
-4. Targets fluid behaviour at 100+ nodes (custom node/edge are lightweight; no per-frame Svelte churn).
+`embed.go` bakes `index.html` + `vendor/` into the binary via `go:embed`. The
+http surface serves it under `/a/designer/` behind the admin session gate, and
+the admin page `/a/designer` embeds it in a full-bleed `<iframe>` for clean
+isolation from the admin shell (see `internal/httpserver/handler_admin_designer.go`
+and `templates/admin/designer.html`).
 
-## Out of scope (later CC tickets)
+- `GET /a/designer`  → host page (admin chrome + iframe)
+- `GET /a/designer/` → the editor bundle (`index.html` is the directory index)
 
-Real engine/SSE live values, real Activate/Deploy backend, `go:embed`/iframe mount,
-server-side persistence. The graph stays the hardcoded demo.
+## Out of scope (later tickets)
 
-## Notes for the next dev
-
-- Built against **Svelte 5 (runes)** + **`@xyflow/svelte` v1**. If you pin a
-  different xyflow major, re-check these API touch-points: `SvelteFlow`
-  `bind:nodes/edges/viewport`, `onconnect`, `onnodedragstop`, `addEdge`,
-  `getBezierPath`, and the `nodeTypes`/`edgeTypes` records. They are isolated in
-  `App.svelte`, `store.svelte.js`, `BlockNode.svelte`, `SignalEdge.svelte`.
-- I could not run `npm install`/`dev` in the authoring environment, so treat the
-  first `npm run dev` as the smoke test; the data contracts, component structure
-  and styling are the load-bearing deliverable.
+The log dock shows **demo/placeholder feeds** (SSH/MQTT/System/Engine, "Miniserver
+online"). Real engine/SSE feeds, persistence, and the editor → server graph
+binding are separate tickets. The graph stays the hardcoded demo for now.

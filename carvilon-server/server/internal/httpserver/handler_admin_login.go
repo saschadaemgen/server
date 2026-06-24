@@ -188,6 +188,8 @@ func navSlotFor(name string) string {
 		return "streams"
 	case "turn":
 		return "turn"
+	case "designer":
+		return "designer"
 	case "settings":
 		return "settings"
 	case "viewer-detail":
