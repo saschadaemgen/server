@@ -50,6 +50,17 @@
 
   // node/edge issue lookup for colouring
   const issueFor = (id, kind) => issues.find((i) => (kind === 'node' ? i.node_id : i.edge_id) === id);
+
+  // FX-02 part 2: implode nodes on delete, cut-flash edges, before they're removed.
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  async function beforeDelete({ nodes: dn, edges: de }) {
+    if (!reduce) {
+      dn.forEach(n => document.querySelector(`.svelte-flow__node[data-id="${n.id}"]`)?.classList.add('imploding'));
+      de.forEach(e => document.querySelector(`.svelte-flow__edge[data-id="${e.id}"] .wire`)?.classList.add('cutflash'));
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return { nodes: dn, edges: de };
+  }
 </script>
 
 <svelte:window onkeydown={onkey} />
@@ -86,7 +97,7 @@
     <SvelteFlow bind:nodes={flow.nodes} bind:edges={flow.edges} bind:viewport
                 {nodeTypes} {edgeTypes} {isValidConnection} {onconnect}
                 defaultEdgeOptions={{ type: 'signal' }} snapGrid={[GRID, GRID]} snapToGrid={snapOn}
-                onnodedragstop={commit} fitView proOptions={{ hideAttribution: true }}>
+                onnodedragstop={commit} onbeforedelete={beforeDelete} fitView proOptions={{ hideAttribution: true }}>
       {#if gridOn}<Background gap={GRID} />{/if}
       <Controls showLock={false} />
       <MiniMap pannable zoomable nodeColor={(n) => (CATEGORY[blocksByType[n.data.blockType]?.category]?.color) ?? '#3B82F6'} />
@@ -143,4 +154,9 @@
   .meta{font:500 10px/1 var(--mono);color:var(--faint);margin-top:3px}
   :global(.svelte-flow__controls button){background:var(--panel-2);border-bottom:1px solid var(--border);fill:var(--muted)}
   :global(.svelte-flow__minimap){background:rgba(10,11,14,.85);border:1px solid var(--border);border-radius:10px}
+  :global(.svelte-flow__node.imploding){pointer-events:none}
+  :global(.svelte-flow__node.imploding .node){animation:nodeImplode .3s ease forwards}
+  @keyframes nodeImplode{to{transform:scale(.2) rotate(8deg);opacity:0;filter:blur(4px)}}
+  :global(.svelte-flow__edge .wire.cutflash){animation:wireCut .3s ease forwards}
+  @keyframes wireCut{0%{filter:drop-shadow(0 0 7px #fff) drop-shadow(0 0 16px var(--wire))}100%{opacity:0}}
 </style>
