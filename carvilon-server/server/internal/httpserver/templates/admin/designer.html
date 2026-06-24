@@ -3,16 +3,21 @@
 {{define "head-extra"}}
 <style>
   /* The logic editor is a full application rendered inside the iframe
-     below. Drop the default .page max-width/padding so the editor sits
-     flush and fills the whole viewport under the 58px topbar. Scoped to
-     this page only — the rule ships in this page's document, not the
-     shared layout. */
+     below. Drop the default .page max-width/padding so the editor fills
+     the viewport under the 58px topbar. Scoped to this page only — the
+     rule ships in this page's document, not the shared layout. */
   body.admin-shell .page { max-width: none; margin: 0; padding: 0; gap: 0; }
+  /* Near-black to match the editor canvas; via background propagation this
+     also paints the gap below the iframe, so it reads as the editor's own
+     breathing room rather than a stray band. */
+  body.admin-shell { background: #050506; }
   .designer-frame {
     display: block;
     width: 100%;
-    /* topbar (58px) + the global admin footer strip */
-    height: calc(100vh - 58px - var(--admin-footer-h, 28px));
+    /* topbar (58px) + footer + a gap to the footer that mirrors the inset
+       the footer keeps around its own text, so the editor does not sit
+       flush on the footer line. */
+    height: calc(100vh - 58px - var(--admin-footer-h, 28px) - var(--editor-footer-gap, 12px));
     border: 0;
     background: #050506;
   }
