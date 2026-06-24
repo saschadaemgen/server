@@ -8,6 +8,20 @@
   <link rel="stylesheet" href="{{asset "/static/admin-components.css"}}">
   {{if .AccentColor}}<style>{{printf ":root{ --accent: %s; --color-accent: %s; }" .AccentColor .AccentColor | safeCSS}}</style>{{end}}
   {{block "head-extra" .}}{{end}}
+  <style>
+    /* Global admin copyright footer — bottom-right, subtle, click-through
+       (pointer-events:none) so it never blocks page or editor content.
+       Pages that fill the viewport (e.g. the logic editor) reserve
+       var(--admin-footer-h) at the bottom so the footer is not covered. */
+    .admin-shell { --admin-footer-h: 28px; }
+    .admin-footer {
+      position: fixed; right: 16px; bottom: 8px; z-index: 150;
+      font-family: var(--font-sans, system-ui, sans-serif);
+      font-size: 11px; font-weight: 500; letter-spacing: .01em;
+      color: var(--color-text-tertiary, #7b848f);
+      pointer-events: none; user-select: none;
+    }
+  </style>
 </head>
 <body class="admin-shell">
   {{template "admin-topbar" .}}
@@ -15,6 +29,7 @@
   <main class="page" role="main">
     {{block "content" .}}{{end}}
   </main>
+  <footer class="admin-footer">© Sascha Dämgen · IT and More Systems</footer>
   <script src="{{asset "/static/interactions.js"}}"></script>
   {{block "scripts" .}}{{end}}
 </body>
