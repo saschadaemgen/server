@@ -61,6 +61,29 @@
     }
     return { nodes: dn, edges: de };
   }
+
+  // FX-05: tools, align/distribute (on selected nodes), zoom.
+  let tool = $state('select');
+  const selNodes = () => flow.nodes.filter(n => n.selected);
+  const dim = (n) => ({ w: n.measured?.width ?? 212, h: n.measured?.height ?? 92 });
+  function moveSel(map) { flow.nodes = flow.nodes.map(n => map.has(n.id) ? { ...n, position: map.get(n.id) } : n); commit(); }
+  function align(type) {
+    const ns = selNodes(); if (ns.length < 2) return;
+    const r = ns.map(n => { const d = dim(n); return { id:n.id, x:n.position.x, y:n.position.y, w:d.w, h:d.h }; });
+    const minX=Math.min(...r.map(o=>o.x)), maxR=Math.max(...r.map(o=>o.x+o.w)), cX=(minX+maxR)/2;
+    const minY=Math.min(...r.map(o=>o.y)), maxB=Math.max(...r.map(o=>o.y+o.h)), cY=(minY+maxB)/2;
+    const m = new Map(r.map(o => [o.id, { x:o.x, y:o.y }]));
+    for (const o of r) { const p = m.get(o.id);
+      if(type==='left')p.x=minX; else if(type==='right')p.x=maxR-o.w; else if(type==='hcenter')p.x=cX-o.w/2;
+      else if(type==='top')p.y=minY; else if(type==='bottom')p.y=maxB-o.h; else if(type==='vcenter')p.y=cY-o.h/2; }
+    if (type==='dh'||type==='dv') { const k=type==='dh'?'x':'y', dk=type==='dh'?'w':'h';
+      const s=[...r].sort((a,b)=>(a[k]+a[dk]/2)-(b[k]+b[dk]/2));
+      const c0=s[0][k]+s[0][dk]/2, c1=s[s.length-1][k]+s[s.length-1][dk]/2, step=(c1-c0)/(s.length-1);
+      s.forEach((o,i)=>{ const p=m.get(o.id); if(type==='dh')p.x=c0+step*i-o.w/2; else p.y=c0+step*i-o.h/2; }); }
+    moveSel(m);
+  }
+  function zoomBy(f) { if(!pane)return; const z=Math.min(2.4,Math.max(.3,viewport.zoom*f)), r=pane.getBoundingClientRect(), cx=r.width/2, cy=r.height/2, k=z/viewport.zoom;
+    viewport = { x: cx-(cx-viewport.x)*k, y: cy-(cy-viewport.y)*k, zoom: z }; }
 </script>
 
 <svelte:window onkeydown={onkey} />
@@ -97,11 +120,32 @@
     <SvelteFlow bind:nodes={flow.nodes} bind:edges={flow.edges} bind:viewport
                 {nodeTypes} {edgeTypes} {isValidConnection} {onconnect}
                 defaultEdgeOptions={{ type: 'signal' }} snapGrid={[GRID, GRID]} snapToGrid={snapOn}
+                selectionOnDrag={tool === 'select'} panOnDrag={tool === 'hand'}
                 onnodedragstop={commit} onbeforedelete={beforeDelete} fitView proOptions={{ hideAttribution: true }}>
       {#if gridOn}<Background gap={GRID} />{/if}
       <Controls showLock={false} />
       <MiniMap pannable zoomable nodeColor={(n) => (CATEGORY[blocksByType[n.data.blockType]?.category]?.color) ?? '#3B82F6'} />
     </SvelteFlow>
+
+    <!-- FX-05: right tool / align / distribute / zoom bar -->
+    <div class="rtools">
+      <button class="rt" class:on={tool === 'select'} onclick={() => (tool = 'select')} title="Select tool">⌖</button>
+      <button class="rt" class:on={tool === 'hand'} onclick={() => (tool = 'hand')} title="Move tool">✋</button>
+      <div class="rsep"></div><div class="rlbl">ALIGN</div>
+      <button class="rt" onclick={() => align('left')} title="Align left">⇤</button>
+      <button class="rt" onclick={() => align('hcenter')} title="Center horizontal">⇔</button>
+      <button class="rt" onclick={() => align('right')} title="Align right">⇥</button>
+      <button class="rt" onclick={() => align('top')} title="Align top">⤒</button>
+      <button class="rt" onclick={() => align('vcenter')} title="Center vertical">↕</button>
+      <button class="rt" onclick={() => align('bottom')} title="Align bottom">⤓</button>
+      <div class="rsep"></div><div class="rlbl">DIST</div>
+      <button class="rt" onclick={() => align('dh')} title="Distribute horizontally">⇿</button>
+      <button class="rt" onclick={() => align('dv')} title="Distribute vertically">⇳</button>
+      <div class="rsep"></div><div class="rlbl">ZOOM</div>
+      <button class="rt" onclick={() => zoomBy(1.2)} title="Zoom in">+</button>
+      <button class="rt" onclick={() => zoomBy(1/1.2)} title="Zoom out">−</button>
+      <div class="rzv">{Math.round(viewport.zoom * 100)}%</div>
+    </div>
 
     <!-- validation / issues panel -->
     <div class="issues">
@@ -153,7 +197,15 @@
   .msg{font-size:12px;color:var(--text)}
   .meta{font:500 10px/1 var(--mono);color:var(--faint);margin-top:3px}
   :global(.svelte-flow__controls button){background:var(--panel-2);border-bottom:1px solid var(--border);fill:var(--muted)}
-  :global(.svelte-flow__minimap){background:rgba(10,11,14,.85);border:1px solid var(--border);border-radius:10px}
+  :global(.svelte-flow__minimap){background:rgba(10,11,14,.85);border:1px solid var(--border);border-radius:10px;right:64px !important}
+  .rtools{position:absolute;top:0;right:0;bottom:0;width:52px;z-index:6;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0;overflow-y:auto;background:linear-gradient(180deg,rgba(8,9,11,.8),rgba(6,7,9,.62));border-left:1px solid var(--border);backdrop-filter:blur(14px)}
+  .rtools::-webkit-scrollbar{width:0}
+  .rt{width:32px;height:32px;border:1px solid transparent;background:transparent;color:var(--muted);border-radius:8px;cursor:pointer;font-size:14px;display:grid;place-items:center;flex:none}
+  .rt:hover{background:rgba(120,150,180,.12);color:var(--text)}
+  .rt.on{background:var(--accent);color:#fff}
+  .rsep{width:22px;height:1px;background:var(--border);margin:3px 0;flex:none}
+  .rlbl{font:600 7px/1 var(--mono);letter-spacing:.08em;color:var(--faint)}
+  .rzv{font:600 9px/1 var(--mono);color:var(--muted);margin-top:2px}
   :global(.svelte-flow__node.imploding){pointer-events:none}
   :global(.svelte-flow__node.imploding .node){animation:nodeImplode .3s ease forwards}
   @keyframes nodeImplode{to{transform:scale(.2) rotate(8deg);opacity:0;filter:blur(4px)}}
