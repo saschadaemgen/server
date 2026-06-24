@@ -84,6 +84,42 @@
   }
   function zoomBy(f) { if(!pane)return; const z=Math.min(2.4,Math.max(.3,viewport.zoom*f)), r=pane.getBoundingClientRect(), cx=r.width/2, cy=r.height/2, k=z/viewport.zoom;
     viewport = { x: cx-(cx-viewport.x)*k, y: cy-(cy-viewport.y)*k, zoom: z }; }
+
+  // FX-07: magnetic auto-wiring (kind-matched, fan-in-free); snaps Y-aligned on stop.
+  const typeOf = (id) => flow.nodes.find(n => n.id === id)?.data.blockType;
+  const hCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+  let magnet = null;
+  function autoWireDrag(node) {
+    if (!node) return; magnet = null;
+    const mine = [...document.querySelectorAll(`.svelte-flow__handle[data-nodeid="${node.id}"]`)];
+    const others = [...document.querySelectorAll('.svelte-flow__handle')].filter(h => h.getAttribute('data-nodeid') !== node.id);
+    let best = null, bestD = 48;
+    for (const dh of mine) {
+      const dOut = dh.classList.contains('source'), dHid = dh.getAttribute('data-handleid'), dc = hCenter(dh);
+      for (const oh of others) {
+        const oOut = oh.classList.contains('source'); if (oOut === dOut) continue;
+        const oNid = oh.getAttribute('data-nodeid'), oHid = oh.getAttribute('data-handleid');
+        const out = dOut ? { node: node.id, h: dHid } : { node: oNid, h: oHid };
+        const inn = dOut ? { node: oNid, h: oHid } : { node: node.id, h: dHid };
+        if (flow.edges.some(e => e.target === inn.node && e.targetHandle === inn.h)) continue;
+        const op = blocksByType[typeOf(out.node)]?.outputs.find(o => o.name === out.h);
+        const ip = blocksByType[typeOf(inn.node)]?.inputs.find(i => i.name === inn.h);
+        if (!op || !ip || op.kind !== ip.kind) continue;
+        const oc = hCenter(oh), d = Math.hypot(dc.x - oc.x, dc.y - oc.y);
+        if (d < bestD) { bestD = d; best = { out, inn, dy: (dc.y - oc.y) / viewport.zoom }; }
+      }
+    }
+    magnet = best;
+  }
+  function autoWireStop(node) {
+    if (magnet && node) { const { out, inn, dy } = magnet;
+      flow.nodes = flow.nodes.map(n => n.id === node.id ? { ...n, position: { x: n.position.x, y: n.position.y - dy } } : n);
+      if (!flow.edges.some(e => e.source===out.node && e.sourceHandle===out.h && e.target===inn.node && e.targetHandle===inn.h))
+        flow.edges = addEdge({ source: out.node, sourceHandle: out.h, target: inn.node, targetHandle: inn.h, type: 'signal', id: 'e' + Date.now() }, flow.edges);
+      magnet = null;
+    }
+    commit();
+  }
 </script>
 
 <svelte:window onkeydown={onkey} />
@@ -121,7 +157,7 @@
                 {nodeTypes} {edgeTypes} {isValidConnection} {onconnect}
                 defaultEdgeOptions={{ type: 'signal' }} snapGrid={[GRID, GRID]} snapToGrid={snapOn}
                 selectionOnDrag={tool === 'select'} panOnDrag={tool === 'hand'}
-                onnodedragstop={commit} onbeforedelete={beforeDelete} fitView proOptions={{ hideAttribution: true }}>
+                onnodedrag={(e, n) => autoWireDrag(n)} onnodedragstop={(e, n) => autoWireStop(n)} onbeforedelete={beforeDelete} fitView proOptions={{ hideAttribution: true }}>
       {#if gridOn}<Background gap={GRID} />{/if}
       <Controls showLock={false} />
       <MiniMap pannable zoomable nodeColor={(n) => (CATEGORY[blocksByType[n.data.blockType]?.category]?.color) ?? '#3B82F6'} />
