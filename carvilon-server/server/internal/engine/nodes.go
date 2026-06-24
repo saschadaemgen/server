@@ -28,12 +28,31 @@ func init() {
 	})
 
 	Register(Descriptor{
+		Type:     "logic.or",
+		Category: "logic",
+		Title:    "OR",
+		Inputs:   []Port{{Name: "a", Kind: Bool}, {Name: "b", Kind: Bool}},
+		Outputs:  []Port{{Name: "out", Kind: Bool}},
+		New:      func(map[string]Value) Node { return orGate{} },
+	})
+
+	Register(Descriptor{
 		Type:     "output.lamp",
 		Category: "output",
 		Title:    "Lamp",
 		Inputs:   []Port{{Name: "set", Kind: Bool}},
 		New:      func(map[string]Value) Node { return &lamp{} },
 	})
+}
+
+// orGate is a stateless boolean OR (out = a || b). It is NOT a delay
+// boundary, so a feedback loop closed purely through OR gates is a
+// combinational cycle, while a loop that also passes a delay boundary
+// (e.g. a staircase) is legal.
+type orGate struct{}
+
+func (orGate) Eval(ctx *EvalContext, in Inputs, out Outputs) {
+	out.SetBool("out", in.Bool("a") || in.Bool("b"))
 }
 
 // manual is an externally-driven boolean source. It is a placeholder
