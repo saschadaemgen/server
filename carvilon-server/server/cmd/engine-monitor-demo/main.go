@@ -31,20 +31,30 @@ func main() {
 	flag.Parse()
 
 	const tick = 100 * time.Millisecond
-	eng := engine.New(tick)
-	if _, err := eng.AddType("btn", "input.manual", nil); err != nil {
-		log.Fatalf("add btn: %v", err)
+
+	// The graph is declarative JSON - the format the editor will emit -
+	// run through the S1-06 validate-then-build path rather than wired
+	// programmatically.
+	const graphJSON = `{
+      "schema": 1,
+      "nodes": [
+        {"id": "btn",   "type": "input.manual"},
+        {"id": "stair", "type": "time.staircase", "params": {"duration": 3}},
+        {"id": "lamp",  "type": "output.lamp"}
+      ],
+      "edges": [
+        {"from": "btn:out", "to": "stair:trig"},
+        {"from": "stair:q", "to": "lamp:set"}
+      ]
+    }`
+	g, err := engine.ParseGraph([]byte(graphJSON))
+	if err != nil {
+		log.Fatalf("parse graph: %v", err)
 	}
-	if _, err := eng.AddType("stair", "time.staircase", map[string]engine.Value{
-		"duration": engine.FloatVal(3), // seconds
-	}); err != nil {
-		log.Fatalf("add staircase: %v", err)
+	eng, err := engine.Build(g, engine.DefaultRegistry(), tick)
+	if err != nil {
+		log.Fatalf("build graph: %v", err)
 	}
-	if _, err := eng.AddType("lamp", "output.lamp", nil); err != nil {
-		log.Fatalf("add lamp: %v", err)
-	}
-	eng.Connect("btn", "out", "stair", "trig")
-	eng.Connect("stair", "q", "lamp", "set")
 
 	// Drive the engine on the wall clock. Inject button events just
 	// before the matching tick, mirroring the deterministic test. The
