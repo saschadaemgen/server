@@ -3,6 +3,7 @@ package engine
 import (
 	"container/heap"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,6 +31,7 @@ type Engine struct {
 	outs     map[string]storeMap     // id -> port -> last output value
 	inEdge   map[string]edgeMap      // dst id -> dst port -> source endpoint
 	wires    map[endpoint][]endpoint // source endpoint -> driven dst endpoints
+	boundary map[string]bool         // id -> is a delay boundary (cuts feedback)
 
 	order     []string // cached topological order of node ids
 	topoStale bool     // order needs recompute
@@ -59,13 +61,14 @@ func New(tick time.Duration) *Engine {
 		panic("engine: tick must be > 0")
 	}
 	e := &Engine{
-		tick:   tick,
-		nodes:  map[string]Node{},
-		outs:   map[string]storeMap{},
-		inEdge: map[string]edgeMap{},
-		wires:  map[endpoint][]endpoint{},
-		dirty:  map[string]bool{},
-		subs:   map[chan Frame]struct{}{},
+		tick:     tick,
+		nodes:    map[string]Node{},
+		outs:     map[string]storeMap{},
+		inEdge:   map[string]edgeMap{},
+		wires:    map[endpoint][]endpoint{},
+		boundary: map[string]bool{},
+		dirty:    map[string]bool{},
+		subs:     map[chan Frame]struct{}{},
 	}
 	heap.Init(&e.timers)
 	return e
@@ -105,6 +108,9 @@ func (e *Engine) AddType(id, typ string, params map[string]Value) (Node, error) 
 		return nil, err
 	}
 	e.Add(id, n)
+	if d, ok := Lookup(typ); ok {
+		e.boundary[id] = d.DelayBoundary
+	}
 	return n, nil
 }
 
@@ -228,57 +234,28 @@ func (e *Engine) evalNode(id string) {
 	}
 }
 
-// topo returns the cached topological order, recomputing it via
-// Kahn's algorithm when the graph changed. The graph is assumed
-// acyclic (the validator's job); a residual cycle panics, since it
-// violates the kernel's precondition.
+// topo returns the cached evaluation order, recomputing it with the
+// shared delay-boundary cut (see topoCut) when the graph changed. A
+// residual combinational cycle panics: it violates the kernel's
+// precondition, which Build/Validate guarantee for any graph that
+// reaches the engine. A legal feedback loop through a delay boundary
+// does not panic - the cut breaks it.
 func (e *Engine) topo() []string {
 	if !e.topoStale {
 		return e.order
 	}
 
-	indeg := make(map[string]int, len(e.nodes))
-	adj := make(map[string]map[string]bool, len(e.nodes))
-	for id := range e.nodes {
-		indeg[id] = 0
-	}
+	deps := make([]depEdge, 0, len(e.inEdge))
 	for dst, edges := range e.inEdge {
 		for _, src := range edges {
-			set := adj[src.node]
-			if set == nil {
-				set = map[string]bool{}
-				adj[src.node] = set
-			}
-			if !set[dst] { // collapse parallel edges to one dependency
-				set[dst] = true
-				indeg[dst]++
-			}
+			deps = append(deps, depEdge{src: src.node, dst: dst})
 		}
 	}
 
-	// Seed the queue in insertion order for a deterministic result.
-	queue := make([]string, 0, len(e.nodes))
-	for _, id := range e.addOrder {
-		if indeg[id] == 0 {
-			queue = append(queue, id)
-		}
-	}
-
-	order := make([]string, 0, len(e.nodes))
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		order = append(order, id)
-		for dst := range adj[id] {
-			indeg[dst]--
-			if indeg[dst] == 0 {
-				queue = append(queue, dst)
-			}
-		}
-	}
-
-	if len(order) != len(e.nodes) {
-		panic("engine: graph has a cycle - kernel requires a validated acyclic graph")
+	order, cyclic := topoCut(e.addOrder, deps, func(id string) bool { return e.boundary[id] })
+	if len(cyclic) > 0 {
+		panic("engine: combinational cycle through " + strings.Join(cyclic, ", ") +
+			" - kernel requires a validated graph")
 	}
 
 	e.order = order
