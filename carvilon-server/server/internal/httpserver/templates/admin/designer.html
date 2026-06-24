@@ -2,32 +2,35 @@
 
 {{define "head-extra"}}
 <style>
-  /* The logic editor is a full application rendered inside the iframe
-     below. Drop the default .page max-width/padding so the editor fills
-     the viewport under the 58px topbar. Scoped to this page only — the
-     rule ships in this page's document, not the shared layout. */
-  body.admin-shell .page { max-width: none; margin: 0; padding: 0; gap: 0; }
-  /* Near-black to match the editor canvas; via background propagation this
-     also paints the gap below the iframe, so it reads as the editor's own
-     breathing room rather than a stray band. */
-  body.admin-shell { background: #050506; }
-  .designer-frame {
-    display: block;
-    width: 100%;
-    /* topbar (58px) + footer + a gap to the footer that mirrors the inset
-       the footer keeps around its own text, so the editor does not sit
-       flush on the footer line. */
-    height: calc(100vh - 58px - var(--admin-footer-h, 28px) - var(--editor-footer-gap, 12px));
-    border: 0;
+  /* The logic editor renders inside the iframe as a rounded card, inset in
+     a single uniform surround colour (#14171c). The page background, the
+     inset around the card and the footer all share that one colour, so
+     there are no stray colour seams — just the deliberate contrast between
+     the near-black editor card and its slightly lighter frame, which makes
+     the rounded corners read. Scoped to this page only. */
+  body.admin-shell { background: #14171c; }
+  body.admin-shell .page {
+    height: calc(100vh - 58px - var(--admin-footer-h, 28px));
+    max-width: none; margin: 0; padding: 14px; gap: 0;
+    box-sizing: border-box; background: #14171c;
+  }
+  body.admin-shell .admin-footer { background: #14171c; } /* same surround → no colour diff */
+  .designer-stage {
+    width: 100%; height: 100%;
+    border-radius: 14px; overflow: hidden;            /* clips the iframe to a rounded card */
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     background: #050506;
   }
+  .designer-frame { display: block; width: 100%; height: 100%; border: 0; background: #050506; }
 </style>
 {{end}}
 
 {{define "content"}}
 <!-- The editor is served verbatim from the embedded FS at /a/designer/
-     (see handler_admin_designer.go). The iframe isolates its document,
-     CSS and JS from the admin shell. Demo/placeholder feeds for now;
-     live engine/SSE wiring is a later ticket. -->
-<iframe class="designer-frame" src="/a/designer/" title="CARVILON Logik-Editor"></iframe>
+     (see handler_admin_designer.go), wrapped in a rounded stage that clips
+     it to a card. Demo feeds for now; live engine/SSE wiring is later. -->
+<div class="designer-stage">
+  <iframe class="designer-frame" src="/a/designer/" title="CARVILON Logik-Editor"></iframe>
+</div>
 {{end}}
