@@ -7,7 +7,7 @@ import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduce
 import { selectOnly, clearSel } from './selection.js';
 import { renderMinimap } from './minimap.js';
 import { recomputeEndpoints } from './wires.js';
-import { NAME_ICON, NAME_CAT } from './palette.js';
+import { NAME_ICON, NAME_CAT, NAME_TYPE } from './palette.js';
 
 let idc=0;
 
@@ -50,7 +50,18 @@ export function buildNode(n){
   if(window.lucide)lucide.createIcons();return el;
 }
 GRAPH.nodes.forEach(buildNode);
-function defFor(name,cat){if(CATALOG[name])return CATALOG[name];const c=cat||NAME_CAT[name]||'logic',icon=NAME_ICON[name]||CAT[c].icon,base={cat:c,icon,title:name};
+function defFor(name,cat){
+  // GPIO blocks (and any future engine-backed I/O block) are typed to the
+  // engine's source.channel / sink.channel nodes with their engine port
+  // names and an editable "Line" prop that serializes as the channel param
+  // (a physical ref like gpio:gpiochip0:17). Only these are typed for Run;
+  // the other library blocks stay inert (general node-typing is a follow-up).
+  const t=NAME_TYPE[name];
+  if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
+    return {cat:gc,icon:NAME_ICON[name]||(CAT[gc]&&CAT[gc].icon)||'cpu',title:name,type:t,implemented:true,
+      props:[{k:'Line',v:'gpio:gpiochip0:0',param:'channel'}],
+      ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};}
+  if(CATALOG[name])return CATALOG[name];const c=cat||NAME_CAT[name]||'logic',icon=NAME_ICON[name]||CAT[c].icon,base={cat:c,icon,title:name};
   if(c==='input')return{...base,props:[{k:'Input',v:'I?',accent:true}],ports:{in:[],out:['Q']},control:'switch',on:false};
   if(c==='logic')return{...base,props:[],ports:{in:['A','B'],out:['Q']}};
   if(c==='time')return{...base,props:[{k:'Mode',v:'—'}],ports:{in:['Tr'],out:['Q']},control:'slider',value:3,min:.5,max:30,step:.5,unit:'s',vlabel:'Time'};

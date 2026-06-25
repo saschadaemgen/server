@@ -31,8 +31,9 @@ import (
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
-	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/fcm"
+	"carvilon.local/server/internal/featuregate"
+	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
 	"carvilon.local/server/internal/platformconfig"
@@ -88,6 +89,11 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	if cfg.ServerIPv4 == "" {
 		log.Warn("CARVILON_SERVER_IPV4 not set (legacy alias UNIFIX_SERVER_IPV4 also accepted); mock viewers will not be reachable by UDM")
 	}
+
+	// Detect usable GPIO once at startup (GPIO track T2). On a GPIO host
+	// it registers the gpio: driver surface; elsewhere it stays silent and
+	// nothing GPIO appears in the editor palette or runs.
+	gpio.Probe(log)
 
 	secretsSvc, err := secrets.New()
 	if err != nil {

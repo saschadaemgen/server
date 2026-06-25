@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/web/designer"
 )
 
@@ -36,7 +37,9 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog()})
+	// includeGPIO follows runtime detection: the GPIO category appears in
+	// the palette only on hosts with usable GPIO.
+	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog(gpio.Enabled())})
 }
 
 // designerStaticHandler serves the embedded editor bundle under

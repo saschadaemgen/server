@@ -42,14 +42,20 @@ type CatalogBlock struct {
 	Implemented   bool           `json:"implemented"`
 }
 
-// Catalog returns the 111 building-block descriptors the editor palette
-// renders, in the five-category order the editor expects (input, logic,
-// time, memory, output). The four implemented blocks have their ports,
-// params and delay-boundary filled from the engine registry; the other
-// 107 are catalog-only (empty ports/params) until their engine nodes
-// land. The httpserver serializes this to /a/designer/catalog.json.
-func Catalog() []CatalogBlock {
+// Catalog returns the building-block descriptors the editor palette
+// renders: the 111 base blocks in the five-category order (input, logic,
+// time, memory, output), plus - when includeGPIO is set (the host has
+// usable GPIO, detected at runtime) - a sixth "gpio" category with two
+// generic blocks. The implemented blocks have their ports, params and
+// delay-boundary filled from the engine registry; the catalog-only ones
+// have empty ports/params until their engine nodes land. The httpserver
+// passes the runtime GPIO flag and serializes this to
+// /a/designer/catalog.json.
+func Catalog(includeGPIO bool) []CatalogBlock {
 	blocks := rawBlocks()
+	if includeGPIO {
+		blocks = append(blocks, gpioBlocks()...)
+	}
 	for i := range blocks {
 		b := &blocks[i]
 		if b.Implemented {
@@ -71,6 +77,20 @@ func Catalog() []CatalogBlock {
 		}
 	}
 	return blocks
+}
+
+// gpioBlocks are the two generic GPIO palette blocks, appended to the
+// catalog only on GPIO-capable hosts (Catalog's includeGPIO, driven by
+// runtime detection). They are typed to the engine's source.channel /
+// sink.channel nodes, so the implemented-fill loop derives their ports
+// and params from the registry; the concrete line (chip:offset) is the
+// user-set "channel" param, bound to a gpio: address at run time. Not
+// per-pin: one generic input and one generic output, host-agnostic.
+func gpioBlocks() []CatalogBlock {
+	return []CatalogBlock{
+		{Type: engine.TypeSourceChannel, Category: "gpio", Title: "GPIO Eingang", Icon: "import", Implemented: true},
+		{Type: engine.TypeSinkChannel, Category: "gpio", Title: "GPIO Ausgang", Icon: "plug-zap", Implemented: true},
+	}
 }
 
 // rawBlocks builds the catalog skeleton (type/category/title/icon, and

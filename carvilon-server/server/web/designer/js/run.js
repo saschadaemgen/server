@@ -12,7 +12,7 @@ import { firePulse, setNodeOn } from './sim.js';
 import { engineLine, setEngineLive, focusEngine } from './dock.js';
 
 // The four engine-backed block types; only these participate in a run.
-const IMPL = new Set(['input.manual', 'time.staircase', 'logic.or', 'output.lamp']);
+const IMPL = new Set(['input.manual', 'time.staircase', 'logic.or', 'output.lamp', 'source.channel', 'sink.channel']);
 // A press is a short true/false pulse so the engine sees a rising edge
 // (and a later press re-triggers). >1 tick (100ms) so a tick samples true.
 const PULSE_MS = 170;
@@ -34,7 +34,12 @@ function serializeGraph(){
   for(const n of GRAPH.nodes){
     if(!n.type || !IMPL.has(n.type)) continue;
     const node={id:n.id, type:n.type};
-    if(n.type==='time.staircase') node.params={duration: Number(n.value)||0};
+    const params={};
+    if(n.type==='time.staircase') params.duration=Number(n.value)||0;
+    // props tagged with `param` (e.g. a GPIO block's Line -> channel)
+    // become engine params.
+    for(const p of (n.props||[])) if(p.param) params[p.param]=p.v;
+    if(Object.keys(params).length) node.params=params;
     out.push(node); ids.add(n.id);
   }
   const edges=[];
@@ -127,7 +132,7 @@ function applyChanges(changes){
     const o=findWireTo(c.node+':'+c.port);
     if(o){ const key=o.from+'>'+o.to; const was=!!liveByEdge[key]; liveByEdge[key]=on; if(on && !was) firePulse(key); }
     const def=nodes[c.node] && nodes[c.node].def;
-    if(def && def.type==='output.lamp') setNodeOn(c.node,on,'engine');
+    if(def && (def.type==='output.lamp'||def.type==='sink.channel')) setNodeOn(c.node,on,'engine');
   }
   refreshLive();
 }
@@ -135,7 +140,7 @@ function refreshLive(){
   for(const o of wires) o.g.classList.toggle('live', !!liveByEdge[o.from+'>'+o.to]);
   for(const id in nodes){
     const def=nodes[id].def;
-    if(def.type==='output.lamp') continue; // lamp lit handled by setNodeOn
+    if(def.type==='output.lamp'||def.type==='sink.channel') continue; // lit handled by setNodeOn
     let lit=false;
     for(const o of wires){ if(o.from.split(':')[0]===id && liveByEdge[o.from+'>'+o.to]){ lit=true; break; } }
     nodes[id].el.classList.toggle('lit',lit);
@@ -148,7 +153,7 @@ function engineFrameLine(f){
 function resetVisuals(){
   liveByEdge={};
   for(const o of wires) o.g.classList.remove('live');
-  for(const id in nodes){ nodes[id].el.classList.remove('lit'); const def=nodes[id].def; if(def.type==='output.lamp') setNodeOn(id,false,'engine'); }
+  for(const id in nodes){ nodes[id].el.classList.remove('lit'); const def=nodes[id].def; if(def.type==='output.lamp'||def.type==='sink.channel') setNodeOn(id,false,'engine'); }
 }
 
 if(btnRun) btnRun.onclick=()=>{ running ? stopRun() : startRun(); };

@@ -121,3 +121,17 @@ build does not import them - verified with `go list -deps`.
 - pion/webrtc and sub-modules: MIT
 - bluenviron/gortsplib, bluenviron/mediacommon: MIT
 - Linked only in the commercial build; never in the public build.
+
+## warthog618/go-gpiocdev (Linux build only)
+
+The runtime GPIO driver (`server/internal/gpio`, GPIO track T2)
+talks to the kernel GPIO character device (`/dev/gpiochip*`) through
+this pure-Go library - no CGO, native edge-event handling. It is
+imported ONLY from the `//go:build linux` files, so it is linked
+into the Linux/RPi build and never compiled on the dev machine or
+any non-Linux host; the package degrades to "no GPIO" there.
+
+- Project:    https://github.com/warthog618/go-gpiocdev
+- License:    MIT
+- Linked:     Linux builds only (the GPIO host); absent elsewhere.
+- Note:       the older `warthog618/gpio` (sysfs) is NOT used.

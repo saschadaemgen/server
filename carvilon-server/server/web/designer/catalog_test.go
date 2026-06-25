@@ -10,9 +10,9 @@ import (
 // renders: 111 blocks across exactly the five categories, in the
 // counts the former inline list had.
 func TestCatalog_CountsAndCategories(t *testing.T) {
-	blocks := Catalog()
+	blocks := Catalog(false)
 	if len(blocks) != 111 {
-		t.Fatalf("Catalog() has %d blocks, want 111", len(blocks))
+		t.Fatalf("Catalog(false) has %d blocks, want 111", len(blocks))
 	}
 	want := map[string]int{"input": 26, "logic": 26, "time": 22, "memory": 13, "output": 24}
 	got := map[string]int{}
@@ -35,7 +35,7 @@ func TestCatalog_CountsAndCategories(t *testing.T) {
 func TestCatalog_Shape(t *testing.T) {
 	validKind := map[string]bool{"bool": true, "float": true, "text": true}
 	seen := map[string]bool{}
-	for _, b := range Catalog() {
+	for _, b := range Catalog(true) { // superset: also covers the GPIO blocks
 		if b.Type == "" || b.Category == "" || b.Title == "" || b.Icon == "" {
 			t.Errorf("block %+v has an empty identity field", b)
 		}
@@ -71,7 +71,7 @@ func TestCatalog_Implemented(t *testing.T) {
 		"output.lamp":    true,
 	}
 	implCount := 0
-	for _, b := range Catalog() {
+	for _, b := range Catalog(false) {
 		if !b.Implemented {
 			if len(b.Inputs) != 0 || len(b.Outputs) != 0 || len(b.Params) != 0 {
 				t.Errorf("catalog-only block %q unexpectedly carries ports/params", b.Type)
@@ -105,6 +105,46 @@ func TestCatalog_Implemented(t *testing.T) {
 	}
 	if implCount != len(wantImpl) {
 		t.Errorf("implemented count = %d, want %d", implCount, len(wantImpl))
+	}
+}
+
+// TestCatalog_GPIO verifies the GPIO category is gated on the runtime
+// flag: absent without GPIO, and present (two engine-backed blocks typed
+// to source.channel / sink.channel, with a user-set line param) with it.
+func TestCatalog_GPIO(t *testing.T) {
+	for _, b := range Catalog(false) {
+		if b.Category == "gpio" {
+			t.Fatalf("gpio category present without GPIO: %+v", b)
+		}
+	}
+	byType := map[string]CatalogBlock{}
+	count := 0
+	for _, b := range Catalog(true) {
+		if b.Category != "gpio" {
+			continue
+		}
+		count++
+		byType[b.Type] = b
+		if !b.Implemented {
+			t.Errorf("gpio block %q must be implemented (engine-backed)", b.Type)
+		}
+	}
+	if count != 2 {
+		t.Fatalf("gpio category has %d blocks, want 2", count)
+	}
+	src, ok := byType[engine.TypeSourceChannel]
+	if !ok || len(src.Outputs) != 1 || src.Outputs[0].Kind != "bool" {
+		t.Errorf("GPIO Eingang must be a %s with a bool output: %+v", engine.TypeSourceChannel, src)
+	}
+	if len(src.Params) != 1 || src.Params[0].Name != "channel" {
+		t.Errorf("GPIO Eingang must expose the channel (line) param: %+v", src.Params)
+	}
+	snk, ok := byType[engine.TypeSinkChannel]
+	if !ok || len(snk.Inputs) != 1 || snk.Inputs[0].Kind != "bool" {
+		t.Errorf("GPIO Ausgang must be a %s with a bool input: %+v", engine.TypeSinkChannel, snk)
+	}
+	if a, b := len(Catalog(false)), len(Catalog(true)); b != a+2 {
+		t.Errorf("Catalog(true) = %d blocks, want Catalog(false)+2 = %d", b, a+2)
 	}
 }
 

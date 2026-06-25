@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/engine"
+	"carvilon.local/server/internal/gpio"
 )
 
 // designerRunTick is the wall-clock period the editor's live run advances
@@ -20,19 +21,26 @@ const designerRunTick = 100 * time.Millisecond
 // engine driven by a wall-clock ticker. done stops both the ticker and
 // the monitor SSE; closing it is idempotent.
 type designerRun struct {
-	eng  *engine.Engine
-	done chan struct{}
-	once sync.Once
+	eng     *engine.Engine
+	done    chan struct{}
+	once    sync.Once
+	cleanup func() // release bound driver I/O (e.g. GPIO lines) on teardown
 }
 
 func (r *designerRun) stop() { r.once.Do(func() { close(r.done) }) }
 
 // loop drives the engine on the wall clock until the run is stopped. The
 // editor injects input out-of-band (SetInput) between ticks; each tick
-// then settles the graph and fans a Frame out to the monitor SSE.
+// then settles the graph and fans a Frame out to the monitor SSE. On
+// exit it releases any bound driver I/O: cleanup runs once, in this
+// goroutine, after the final tick, so it never overlaps a Tick (a driver
+// Write during eval and the cleanup's Close can't race).
 func (r *designerRun) loop(tick time.Duration) {
 	t := time.NewTicker(tick)
 	defer t.Stop()
+	if r.cleanup != nil {
+		defer r.cleanup()
+	}
 	for {
 		select {
 		case <-r.done:
@@ -67,8 +75,8 @@ func newDesignerRunSet() *designerRunSet {
 	return &designerRunSet{byUser: map[string]*designerRun{}}
 }
 
-func (s *designerRunSet) start(user string, eng *engine.Engine, tick time.Duration) *designerRun {
-	run := &designerRun{eng: eng, done: make(chan struct{})}
+func (s *designerRunSet) start(user string, eng *engine.Engine, tick time.Duration, cleanup func()) *designerRun {
+	run := &designerRun{eng: eng, done: make(chan struct{}), cleanup: cleanup}
 	s.mu.Lock()
 	old := s.byUser[user]
 	s.byUser[user] = run
@@ -135,8 +143,72 @@ func (s *Server) handleDesignerRun(w http.ResponseWriter, r *http.Request) {
 		designerJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	s.designerRuns.start(user, eng, designerRunTick)
+	cleanup, err := s.bindRunIO(eng, g)
+	if err != nil {
+		designerJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	s.designerRuns.start(user, eng, designerRunTick, cleanup)
 	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// buildBindingTable derives the run's logical->physical binding table from
+// its I/O nodes (source.channel / sink.channel). Each such node's
+// "channel" param is a physical reference "prefix:addr" (e.g.
+// "gpio:gpiochip0:17"), which the table maps through to its PhysicalAddr.
+func buildBindingTable(g engine.Graph) (engine.BindingTable, error) {
+	table := engine.BindingTable{}
+	usedBy := map[string]string{} // physical line -> the node that bound it
+	for _, n := range g.Nodes {
+		if n.Type != engine.TypeSourceChannel && n.Type != engine.TypeSinkChannel {
+			continue
+		}
+		ref, _ := n.Params["channel"].(string)
+		pa, ok := engine.ParsePhysical(ref)
+		if !ok {
+			return nil, fmt.Errorf("node %q: invalid channel %q (want prefix:addr, e.g. gpio:gpiochip0:17)", n.ID, ref)
+		}
+		// One physical line maps to one node. Binding the same line as both
+		// an input and an output (or to two nodes at all) would request it
+		// twice / write an input line and fail silently - reject it loudly.
+		if prev, dup := usedBy[pa.String()]; dup {
+			return nil, fmt.Errorf("physical line %s is bound by both node %q and node %q (one line per node)", pa, prev, n.ID)
+		}
+		usedBy[pa.String()] = n.ID
+		table[ref] = pa
+	}
+	return table, nil
+}
+
+// bindRunIO wires a freshly built run's I/O nodes to their drivers. When
+// the graph has GPIO nodes and the host has GPIO, it registers the gpio
+// driver (which requests the lines through BindGraph) and returns a
+// cleanup that releases them on teardown. A graph with no I/O nodes (the
+// demo: input.manual/output.lamp) binds nothing and runs as before.
+func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
+	table, err := buildBindingTable(g)
+	if err != nil {
+		return nil, err
+	}
+	if len(table) == 0 {
+		return func() {}, nil
+	}
+	reg := engine.NewDriverRegistry()
+	cleanup := func() {}
+	if gpio.Enabled() {
+		drv, err := gpio.NewDriver()
+		if err != nil {
+			return nil, fmt.Errorf("gpio driver: %w", err)
+		}
+		reg.RegisterSource(engine.PrefixGPIO, drv)
+		reg.RegisterSink(engine.PrefixGPIO, drv)
+		cleanup = func() { _ = drv.Close() }
+	}
+	if err := engine.BindGraph(eng, g, table, reg); err != nil {
+		cleanup() // release any lines opened before the failure
+		return nil, err
+	}
+	return cleanup, nil
 }
 
 // handleDesignerRunMonitor streams the user's running engine as SSE: a

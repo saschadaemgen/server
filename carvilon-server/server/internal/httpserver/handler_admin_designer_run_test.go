@@ -140,3 +140,72 @@ func TestDesignerRun_DemoGraphStreamsLamp(t *testing.T) {
 		t.Errorf("frame after press did not light the lamp: %+v", f.Changes)
 	}
 }
+
+// TestBuildBindingTable: I/O nodes' channel params (physical refs) map
+// through to PhysicalAddr; non-I/O nodes are skipped; a malformed ref
+// errors.
+func TestBuildBindingTable(t *testing.T) {
+	g := engine.Graph{Nodes: []engine.GraphNode{
+		{ID: "btn", Type: "input.manual"}, // not an I/O node -> skipped
+		{ID: "in", Type: engine.TypeSourceChannel, Params: map[string]any{"channel": "gpio:gpiochip0:17"}},
+		{ID: "out", Type: engine.TypeSinkChannel, Params: map[string]any{"channel": "virtual:lamp0"}},
+	}}
+	table, err := buildBindingTable(g)
+	if err != nil {
+		t.Fatalf("buildBindingTable: %v", err)
+	}
+	if len(table) != 2 {
+		t.Fatalf("table has %d entries, want 2: %+v", len(table), table)
+	}
+	if pa := table["gpio:gpiochip0:17"]; pa.Prefix != "gpio" || pa.Addr != "gpiochip0:17" {
+		t.Errorf("gpio binding = %+v, want {gpio, gpiochip0:17}", pa)
+	}
+	if pa := table["virtual:lamp0"]; pa.Prefix != "virtual" || pa.Addr != "lamp0" {
+		t.Errorf("virtual binding = %+v, want {virtual, lamp0}", pa)
+	}
+
+	if _, err := buildBindingTable(engine.Graph{Nodes: []engine.GraphNode{
+		{ID: "in", Type: engine.TypeSourceChannel, Params: map[string]any{"channel": "noseparator"}},
+	}}); err == nil {
+		t.Errorf("a channel ref without a prefix:addr separator must error")
+	}
+
+	if table, err := buildBindingTable(engine.Graph{Nodes: []engine.GraphNode{{ID: "x", Type: "logic.or"}}}); err != nil || len(table) != 0 {
+		t.Errorf("non-IO graph: table=%v err=%v, want empty/nil", table, err)
+	}
+
+	// the same physical line bound by two nodes (here an input and an
+	// output) must be rejected, not silently collide on the hardware.
+	if _, err := buildBindingTable(engine.Graph{Nodes: []engine.GraphNode{
+		{ID: "in", Type: engine.TypeSourceChannel, Params: map[string]any{"channel": "gpio:gpiochip0:5"}},
+		{ID: "out", Type: engine.TypeSinkChannel, Params: map[string]any{"channel": "gpio:gpiochip0:5"}},
+	}}); err == nil {
+		t.Errorf("one physical line bound by two nodes must error")
+	}
+}
+
+// TestDesignerRun_GPIONodeWithoutDriver: on a host with no GPIO, a graph
+// containing a GPIO node fails to bind (no gpio driver registered) and the
+// run does not start - the dev-machine guard from the briefing.
+func TestDesignerRun_GPIONodeWithoutDriver(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	graph := `{"schema":1,
+	  "nodes":[
+	    {"id":"in","type":"source.channel","params":{"channel":"gpio:gpiochip0:17"}},
+	    {"id":"lamp","type":"output.lamp"}
+	  ],
+	  "edges":[{"from":"in:out","to":"lamp:set"}]}`
+	resp, err := env.client.Post(env.ts.URL+"/a/designer/run", "application/json", strings.NewReader(graph))
+	if err != nil {
+		t.Fatalf("POST run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (no gpio driver on this host)", resp.StatusCode)
+	}
+	if env.srv.designerRuns.get(adminTestUser) != nil {
+		t.Errorf("a GPIO graph must not start a run without a gpio driver")
+	}
+}

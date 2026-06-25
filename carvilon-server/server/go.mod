@@ -15,6 +15,7 @@ require (
 	github.com/hashicorp/mdns v1.0.6
 	github.com/pion/webrtc/v4 v4.2.12
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/warthog618/go-gpiocdev v0.9.1
 	golang.org/x/crypto v0.51.0
 	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.50.1
@@ -46,6 +47,7 @@ require (
 	github.com/pion/srtp/v3 v3.0.10 // indirect
 	github.com/pion/stun/v3 v3.1.2 // indirect
 	github.com/pion/transport/v4 v4.0.1 // indirect
+	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/pion/turn/v5 v5.0.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
