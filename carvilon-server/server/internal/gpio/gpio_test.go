@@ -63,6 +63,22 @@ func TestParseLine(t *testing.T) {
 	}
 }
 
+// TestLineAddress pins the binding-address form the picker writes and the
+// run-strecke parses.
+func TestLineAddress(t *testing.T) {
+	if got := lineAddress("gpiochip0", 17); got != "gpio:gpiochip0:17" {
+		t.Errorf("lineAddress = %q, want gpio:gpiochip0:17", got)
+	}
+}
+
+// TestLinesEmptyWithoutGPIO: on a host with no GPIO the line list is empty
+// (nothing GPIO surfaces in the picker).
+func TestLinesEmptyWithoutGPIO(t *testing.T) {
+	if lines := Lines(); len(lines) != 0 {
+		t.Errorf("Lines() without GPIO = %v, want empty", lines)
+	}
+}
+
 // TestProbeAvailability checks Probe caches availability per outcome.
 // Forbidden must NOT count as available (chip present but no access).
 func TestProbeAvailability(t *testing.T) {

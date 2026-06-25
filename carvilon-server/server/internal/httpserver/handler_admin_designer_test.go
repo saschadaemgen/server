@@ -150,6 +150,43 @@ func TestDesignerCatalogEndpoint_HappyPath(t *testing.T) {
 	}
 }
 
+// TestDesignerGPIOLinesEndpoint: the pin-picker endpoint is admin-gated
+// and, on a host without GPIO, returns an empty (non-null) list.
+func TestDesignerGPIOLinesEndpoint(t *testing.T) {
+	env := newTestServer(t)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/designer/gpio/lines")
+	if err != nil {
+		t.Fatalf("GET gpio/lines: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("unauthenticated status = %d, want 303 (redirect to login)", resp.StatusCode)
+	}
+
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	r2, err := env.client.Get(env.ts.URL + "/a/designer/gpio/lines")
+	if err != nil {
+		t.Fatalf("GET gpio/lines (auth): %v", err)
+	}
+	defer r2.Body.Close()
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want 200", r2.StatusCode)
+	}
+	var payload struct {
+		Lines []map[string]any `json:"lines"`
+	}
+	if err := json.NewDecoder(r2.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode lines: %v", err)
+	}
+	if payload.Lines == nil {
+		t.Errorf("lines must be an empty array, not null")
+	}
+	if len(payload.Lines) != 0 {
+		t.Errorf("no-GPIO host should return 0 lines, got %d", len(payload.Lines))
+	}
+}
+
 // TestDesignerStaticHandler_VendorContentTypes verifies the vendored
 // JS and woff2 assets are served with usable content types (woff2 is
 // set explicitly because Go's mime table does not always carry it).

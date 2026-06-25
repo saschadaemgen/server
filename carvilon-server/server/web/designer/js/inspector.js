@@ -7,6 +7,7 @@ import { findWireTo, findWireFrom, applyEdgeColor } from './wires.js';
 import { renderMinimap } from './minimap.js';
 import { clearSel } from './selection.js';
 import { deleteSelected } from './nodes.js';
+import { loadLines, claimedLines } from './gpiolines.js';
 
 export function openInspector(id){
   const n=nodes[id].def;document.getElementById('insp-cat').textContent=CAT[n.cat].label.toUpperCase();
@@ -19,10 +20,31 @@ export function openInspector(id){
     s.onclick=()=>{n.color=col;nodes[id].el.style.setProperty('--cat',col);[...cc.children].forEach(x=>x.classList.remove('sel'));s.classList.add('sel');renderMinimap();};cc.appendChild(s);});
   // props
   const pc=document.getElementById('insp-props');pc.innerHTML='';
-  n.props.forEach((p,idx)=>{const row=document.createElement('div');row.className='iprop';
+  n.props.forEach((p,idx)=>{const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${p.k}</label>`;
+    const setBody=v=>{const pv=nodes[id].el.querySelectorAll('[data-body] .pv')[idx];if(pv)pv.textContent=v;};
+    if(p.kind==='gpio-line'){
+      // Pick the physical line from the detected list (Node-RED-style edit
+      // panel). A line claimed by another GPIO block, or used by the
+      // system, is disabled - each physical line is used at most once.
+      const sel=document.createElement('select');sel.className='iprop-sel';
+      sel.onchange=()=>{p.v=sel.value;setBody(sel.value);};
+      row.appendChild(sel);pc.appendChild(row);
+      loadLines().then(lines=>{
+        const claimed=claimedLines(id),cur=p.v;sel.innerHTML='';
+        const ph=document.createElement('option');ph.value='';ph.textContent='— Line wählen —';sel.appendChild(ph);
+        for(const ln of lines){const o=document.createElement('option');o.value=ln.address;
+          const takenByOther=claimed.has(ln.address)&&ln.address!==cur;
+          o.textContent=`${ln.chip} · ${ln.offset}${ln.name?' · '+ln.name:''}`+(ln.inUse?' (System)':'')+(takenByOther?' (vergeben)':'');
+          if((ln.inUse||takenByOther)&&ln.address!==cur)o.disabled=true;
+          sel.appendChild(o);}
+        if(cur&&!lines.some(l=>l.address===cur)){const o=document.createElement('option');o.value=cur;o.textContent=cur;sel.appendChild(o);}
+        sel.value=cur||'';
+      });
+      return;
+    }
     const inp=document.createElement('input');inp.value=p.v;
-    inp.oninput=()=>{p.v=inp.value;const pv=nodes[id].el.querySelectorAll('[data-body] .pv')[idx];if(pv)pv.textContent=inp.value;};
-    row.innerHTML=`<label>${p.k}</label>`;row.appendChild(inp);pc.appendChild(row);});
+    inp.oninput=()=>{p.v=inp.value;setBody(inp.value);};
+    row.appendChild(inp);pc.appendChild(row);});
   if(n.control==='slider'){const row=document.createElement('div');row.className='iprop';
     const inp=document.createElement('input');inp.value=n.value.toFixed(1);
     inp.oninput=()=>{const v=parseFloat(inp.value);if(!isNaN(v)){n.value=Math.min(n.max,Math.max(n.min,v));setSlider(id,n.value);}};

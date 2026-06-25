@@ -43,6 +43,35 @@ type IODriver interface {
 	io.Closer
 }
 
+// LineInfo describes one GPIO line for the editor's pin picker: the
+// binding address the graph stores, the chip + offset, the kernel line
+// name (may be empty), and whether the line is already consumed by the
+// system / another process (so the picker can exclude it).
+type LineInfo struct {
+	Address string `json:"address"` // "gpio:gpiochipN:offset"
+	Chip    string `json:"chip"`
+	Offset  int    `json:"offset"`
+	Name    string `json:"name"`
+	InUse   bool   `json:"inUse"`
+}
+
+// lineAddress builds the binding address for a chip line. It is the
+// single place the "gpio:chip:offset" form is produced, and matches what
+// the run-strecke parses (ParsePhysical + the driver's parseLine).
+func lineAddress(chip string, offset int) string {
+	return "gpio:" + chip + ":" + strconv.Itoa(offset)
+}
+
+// Lines returns the detected GPIO lines (offset, kernel name, in-use) for
+// the editor's pin picker, read read-only via go-gpiocdev. Empty on a
+// non-GPIO host. It is read LIVE per call, not cached: the in-use bit is
+// runtime-mutable (a line a run currently holds reads as used), so a
+// frozen snapshot would mislead the picker. The endpoint is admin-only
+// and infrequent, so the per-call chip enumeration is cheap enough.
+func Lines() []LineInfo {
+	return platformLines(detectedChips())
+}
+
 // classify turns candidate device paths plus an opener into a Status and
 // the openable chip names. It is pure and platform-independent so the
 // detection logic is unit-testable without real hardware: open returns a

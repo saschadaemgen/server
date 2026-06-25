@@ -59,7 +59,7 @@ function defFor(name,cat){
   const t=NAME_TYPE[name];
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
     return {cat:gc,icon:NAME_ICON[name]||(CAT[gc]&&CAT[gc].icon)||'cpu',title:name,type:t,implemented:true,
-      props:[{k:'Line',v:'gpio:gpiochip0:0',param:'channel'}],
+      props:[{k:'Line',v:'',param:'channel',kind:'gpio-line'}],
       ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};}
   if(CATALOG[name])return CATALOG[name];const c=cat||NAME_CAT[name]||'logic',icon=NAME_ICON[name]||CAT[c].icon,base={cat:c,icon,title:name};
   if(c==='input')return{...base,props:[{k:'Input',v:'I?',accent:true}],ports:{in:[],out:['Q']},control:'switch',on:false};

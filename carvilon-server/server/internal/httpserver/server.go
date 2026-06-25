@@ -464,6 +464,7 @@ func (s *Server) routes() {
 	// data only; live engine/SSE feeds are a later ticket.
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
+	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))
 	// Run: execute the posted graph in the engine, stream live values back
 	// over the monitor SSE, inject the editor's button press, and tear the
 	// run down on stop/disconnect. One run per admin session.

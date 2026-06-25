@@ -42,6 +42,19 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog(gpio.Enabled())})
 }
 
+// handleDesignerGPIOLines serves the detected GPIO lines (offset, name,
+// in-use) for the editor's pin picker. Route: GET /a/designer/gpio/lines
+// (requireAdminSession). Empty on a non-GPIO host.
+func (s *Server) handleDesignerGPIOLines(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	lines := gpio.Lines()
+	if lines == nil {
+		lines = []gpio.LineInfo{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"lines": lines})
+}
+
 // designerStaticHandler serves the embedded editor bundle under
 // /a/designer/. index.html is the directory index; the ES modules under
 // js/, the css/, and the vendored Lucide/font assets are served verbatim

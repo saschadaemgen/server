@@ -28,6 +28,34 @@ func platformProbe() (Status, []string) {
 	})
 }
 
+// platformLines reads each detected chip's lines (offset, kernel name,
+// in-use flag) read-only via go-gpiocdev, for the editor's pin picker.
+func platformLines(chips []string) []LineInfo {
+	var out []LineInfo
+	for _, name := range chips {
+		c, err := gpiocdev.NewChip(name)
+		if err != nil {
+			continue
+		}
+		n := c.Lines()
+		for off := 0; off < n; off++ {
+			li := LineInfo{Address: lineAddress(name, off), Chip: name, Offset: off}
+			if info, err := c.LineInfo(off); err == nil {
+				li.Name = info.Name
+				li.InUse = info.Used
+			} else {
+				// Fail closed: a line we cannot inspect is treated as
+				// in-use so the picker renders it unavailable rather than
+				// offering a possibly system-held line.
+				li.InUse = true
+			}
+			out = append(out, li)
+		}
+		_ = c.Close()
+	}
+	return out
+}
+
 // Driver is the live GPIO driver: input lines are requested with edge
 // detection and feed the engine's async queue via the bound callback;
 // output lines are driven on change. All lines are Bool (digital pins -

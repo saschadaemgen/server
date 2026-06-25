@@ -9,6 +9,9 @@ import "errors"
 // on the dev machine (Windows/macOS) or any non-Linux host.
 func platformProbe() (Status, []string) { return Unavailable, nil }
 
+// platformLines has no lines to enumerate off Linux.
+func platformLines([]string) []LineInfo { return nil }
+
 // newDriver is unreachable off Linux (Available() is false there), but
 // must exist for the package to compile; it errors loudly if ever called.
 func newDriver([]string) (IODriver, error) {
