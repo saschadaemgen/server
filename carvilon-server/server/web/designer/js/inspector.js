@@ -8,6 +8,11 @@ import { renderMinimap } from './minimap.js';
 import { clearSel } from './selection.js';
 import { deleteSelected } from './nodes.js';
 import { loadLines, claimedLines } from './gpiolines.js';
+import { makeDropdown } from './dropdown.js';
+
+// Custom dropdowns created for the current inspector render; destroyed on
+// the next render so none leaves a document listener dangling.
+let liveDropdowns=[];
 
 export function openInspector(id){
   const n=nodes[id].def;document.getElementById('insp-cat').textContent=CAT[n.cat].label.toUpperCase();
@@ -18,29 +23,57 @@ export function openInspector(id){
   const cc=document.getElementById('insp-colors');cc.innerHTML='';
   PALETTE.forEach(col=>{const s=document.createElement('div');s.className='sw'+(col===n.color?' sel':'');s.style.background=col;s.style.setProperty('--swc',col);
     s.onclick=()=>{n.color=col;nodes[id].el.style.setProperty('--cat',col);[...cc.children].forEach(x=>x.classList.remove('sel'));s.classList.add('sel');renderMinimap();};cc.appendChild(s);});
-  // props
-  const pc=document.getElementById('insp-props');pc.innerHTML='';
-  n.props.forEach((p,idx)=>{const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${p.k}</label>`;
-    const setBody=v=>{const pv=nodes[id].el.querySelectorAll('[data-body] .pv')[idx];if(pv)pv.textContent=v;};
+  // props. inspectorOnly props (the GPIO pin options) are edited here but
+  // not shown on the node card, so the body .pv index only advances for the
+  // props that DO render on the card.
+  const pc=document.getElementById('insp-props');
+  liveDropdowns.forEach(d=>{try{d.destroy();}catch(e){}});liveDropdowns=[];
+  pc.innerHTML='';
+  let bodyIdx=-1;
+  n.props.forEach(p=>{
+    if(!p.inspectorOnly)bodyIdx++;
+    const myBody=p.inspectorOnly?-1:bodyIdx;
+    const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${p.k}</label>`;
+    const setBody=v=>{if(myBody<0)return;const pv=nodes[id].el.querySelectorAll('[data-body] .pv')[myBody];if(pv)pv.textContent=v;};
     if(p.kind==='gpio-line'){
-      // Pick the physical line from the detected list (Node-RED-style edit
-      // panel). A line claimed by another GPIO block, or used by the
-      // system, is disabled - each physical line is used at most once.
-      const sel=document.createElement('select');sel.className='iprop-sel';
-      sel.onchange=()=>{p.v=sel.value;setBody(sel.value);};
-      row.appendChild(sel);pc.appendChild(row);
+      // Pick the physical line from the detected list via the custom
+      // dropdown: usable GPIOs up front, system/peripheral lines collapsed
+      // behind "Alle anzeigen", search to type instead of scroll. A line
+      // another GPIO block claims, or one the system holds, is disabled -
+      // each physical line is used at most once.
+      const slot=document.createElement('div');slot.className='cv-dd-slot';row.appendChild(slot);pc.appendChild(row);
       loadLines().then(lines=>{
-        const claimed=claimedLines(id),cur=p.v;sel.innerHTML='';
-        const ph=document.createElement('option');ph.value='';ph.textContent='— Line wählen —';sel.appendChild(ph);
-        for(const ln of lines){const o=document.createElement('option');o.value=ln.address;
-          const takenByOther=claimed.has(ln.address)&&ln.address!==cur;
-          o.textContent=`${ln.chip} · ${ln.offset}${ln.name?' · '+ln.name:''}`+(ln.inUse?' (System)':'')+(takenByOther?' (vergeben)':'');
-          if((ln.inUse||takenByOther)&&ln.address!==cur)o.disabled=true;
-          sel.appendChild(o);}
-        if(cur&&!lines.some(l=>l.address===cur)){const o=document.createElement('option');o.value=cur;o.textContent=cur;sel.appendChild(o);}
-        sel.value=cur||'';
+        const claimed=claimedLines(id),cur=p.v,multiChip=new Set(lines.map(l=>l.chip)).size>1;
+        const items=lines.map(l=>{
+          const takenByOther=claimed.has(l.address)&&l.address!==cur;
+          const hint=l.inUse?'belegt':(takenByOther?'vergeben':'');
+          return {value:l.address,label:l.name||('Line '+l.offset),
+            sub:(multiChip?l.chip:'')+(multiChip&&hint?' · ':'')+hint,
+            disabled:(l.inUse||takenByOther)&&l.address!==cur,
+            muted:!l.usable&&l.address!==cur};
+        });
+        // A saved line the host no longer exposes still shows its raw
+        // address (and reads as bound) rather than the placeholder, like the
+        // old <select> fallback - the value is preserved, only the label was
+        // missing.
+        if(cur&&!items.some(i=>i.value===cur))items.unshift({value:cur,label:cur,sub:'nicht erkannt'});
+        const dd=makeDropdown({value:cur,items,search:true,placeholder:'— Line wählen —',moreLabel:'Alle anzeigen',
+          onChange:v=>{p.v=v;const it=items.find(i=>i.value===v);setBody(it?it.label:v);}});
+        slot.appendChild(dd.el);liveDropdowns.push(dd);
       });
       return;
+    }
+    if(p.kind==='enum'){
+      const dd=makeDropdown({value:p.v,items:(p.opts||[]).map(o=>({value:o.v,label:o.l})),
+        onChange:v=>{p.v=v;setBody(v);}});
+      row.appendChild(dd.el);liveDropdowns.push(dd);pc.appendChild(row);return;
+    }
+    if(p.kind==='number'){
+      const wrap=document.createElement('div');wrap.className='iprop-num';
+      const inp=document.createElement('input');inp.type='number';inp.min='0';inp.value=p.v;inp.className='iprop-numin';
+      inp.oninput=()=>{p.v=inp.value;setBody(inp.value);};wrap.appendChild(inp);
+      if(p.suffix){const s=document.createElement('span');s.className='iprop-suffix';s.textContent=p.suffix;wrap.appendChild(s);}
+      row.appendChild(wrap);pc.appendChild(row);return;
     }
     const inp=document.createElement('input');inp.value=p.v;
     inp.oninput=()=>{p.v=inp.value;setBody(inp.value);};

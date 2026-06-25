@@ -42,7 +42,7 @@ func buildAdapterGraph(t *testing.T, tick time.Duration) (*Engine, *VirtualDrive
 		"door":  {Prefix: PrefixVirtual, Addr: "btn0"},
 		"relay": {Prefix: PrefixVirtual, Addr: "lamp0"},
 	}
-	if err := BindGraph(eng, g, table, reg); err != nil {
+	if err := BindGraph(eng, g, table, nil, reg); err != nil {
 		t.Fatalf("bind adapter graph: %v", err)
 	}
 	return eng, vd
@@ -218,11 +218,101 @@ func TestBindReservedPrefixRejected(t *testing.T) {
 		"door":  {Prefix: PrefixGPIO, Addr: "17"},
 		"relay": {Prefix: PrefixVirtual, Addr: "lamp0"},
 	}
-	err = BindGraph(eng, g, table, reg)
+	err = BindGraph(eng, g, table, nil, reg)
 	if err == nil {
 		t.Fatalf("BindGraph must error on a reserved prefix with no driver")
 	}
 	if !strings.Contains(err.Error(), PrefixGPIO) {
 		t.Errorf("error should name the %q prefix, got: %v", PrefixGPIO, err)
+	}
+}
+
+// configurableVD is a VirtualDriver that also records the per-line options
+// BindGraph hands it, to prove the config seam routes them to the right
+// address and direction - and that a bound graph stays deterministic
+// regardless of what options ride along.
+type configurableVD struct {
+	*VirtualDriver
+	inCfg  map[string]ChannelConfig
+	outCfg map[string]ChannelConfig
+}
+
+func newConfigurableVD(chans ...Channel) *configurableVD {
+	return &configurableVD{
+		VirtualDriver: NewVirtualDriver(chans...),
+		inCfg:         map[string]ChannelConfig{},
+		outCfg:        map[string]ChannelConfig{},
+	}
+}
+
+func (d *configurableVD) ConfigureInput(addr string, cfg ChannelConfig) error {
+	d.inCfg[addr] = cfg
+	return nil
+}
+
+func (d *configurableVD) ConfigureOutput(addr string, cfg ChannelConfig) error {
+	d.outCfg[addr] = cfg
+	return nil
+}
+
+// TestBindGraphRoutesChannelConfig proves BindGraph carries each logical
+// channel's options to the driver: ConfigureInput for the source line,
+// ConfigureOutput for the sink line, keyed by the PHYSICAL address and
+// never crossed - and that the bound graph still evaluates deterministically.
+func TestBindGraphRoutesChannelConfig(t *testing.T) {
+	g := Graph{
+		Schema: SchemaVersion,
+		Nodes: []GraphNode{
+			{ID: "src", Type: TypeSourceChannel, Params: map[string]any{"channel": "door"}},
+			{ID: "snk", Type: TypeSinkChannel, Params: map[string]any{"channel": "relay"}},
+		},
+		Edges: []GraphEdge{{From: "src:out", To: "snk:in"}},
+	}
+	eng, err := Build(g, DefaultRegistry(), 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	vd := newConfigurableVD(
+		Channel{Address: "btn0", Label: "button", Kind: Bool},
+		Channel{Address: "lamp0", Label: "relay", Kind: Bool},
+	)
+	reg := NewDriverRegistry()
+	reg.RegisterSource(PrefixVirtual, vd)
+	reg.RegisterSink(PrefixVirtual, vd)
+	table := BindingTable{
+		"door":  {Prefix: PrefixVirtual, Addr: "btn0"},
+		"relay": {Prefix: PrefixVirtual, Addr: "lamp0"},
+	}
+	configs := map[string]ChannelConfig{
+		"door":  {"bias": "pulldown", "active_level": "high"},
+		"relay": {"initial": "high"},
+	}
+	if err := BindGraph(eng, g, table, configs, reg); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+
+	// Input options went to ConfigureInput, keyed by the physical address.
+	if got := vd.inCfg["btn0"]; got["bias"] != "pulldown" || got["active_level"] != "high" {
+		t.Errorf("ConfigureInput(btn0) = %v, want bias=pulldown active_level=high", got)
+	}
+	if _, leaked := vd.outCfg["btn0"]; leaked {
+		t.Errorf("input line btn0 must not be configured as an output")
+	}
+	// Output options went to ConfigureOutput, not crossed into the input map.
+	if got := vd.outCfg["lamp0"]; got["initial"] != "high" {
+		t.Errorf("ConfigureOutput(lamp0) = %v, want initial=high", got)
+	}
+	if _, leaked := vd.inCfg["lamp0"]; leaked {
+		t.Errorf("output line lamp0 must not be configured as an input")
+	}
+
+	// Determinism: the config is advisory to the driver; the engine still
+	// passes each input edge straight through to the sink.
+	vd.SetSource("btn0", BoolVal(true))
+	eng.Tick()
+	vd.SetSource("btn0", BoolVal(false))
+	eng.Tick()
+	if got := vd.SinkWrites("lamp0"); len(got) != 2 || !got[0].B || got[1].B {
+		t.Errorf("sink writes = %v, want [true false]", got)
 	}
 }

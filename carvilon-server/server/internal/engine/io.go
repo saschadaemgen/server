@@ -54,6 +54,27 @@ type Sink interface {
 	Write(addr string, v Value) error
 }
 
+// ChannelConfig is an opaque, per-line option bag carried from the graph
+// to the driver at bind time. The engine does not interpret it - GPIO
+// bias / active level / debounce / initial state mean nothing to the core
+// - it only routes it to drivers that opt in via Configurable. A nil or
+// empty config means "driver defaults", so a binding without options
+// behaves exactly as before this seam existed.
+type ChannelConfig map[string]string
+
+// Configurable is an optional driver capability. BindGraph hands a
+// Configurable driver each bound line's options BEFORE it wires the line,
+// so the driver can apply them when it requests the physical line:
+// ConfigureInput precedes Subscribe, ConfigureOutput precedes the first
+// Write (and may pre-acquire the output at its initial state). A driver
+// that takes no options simply does not implement this interface, and the
+// config is ignored. The driver owns the interpretation of the map - the
+// engine only carries it.
+type Configurable interface {
+	ConfigureInput(addr string, cfg ChannelConfig) error
+	ConfigureOutput(addr string, cfg ChannelConfig) error
+}
+
 // Driver namespace prefixes. virtual is active now; the rest are reserved
 // seams - a future driver registers under its prefix with no engine
 // change. The prefix is the first colon-delimited segment of a physical
@@ -146,7 +167,12 @@ type BindingTable map[string]PhysicalAddr
 // unregistered prefix (e.g. a reserved gpio: with no driver yet), a
 // channel the driver does not expose, a channel/port kind mismatch, or a
 // driver that rejects the address.
-func BindGraph(eng *Engine, g Graph, table BindingTable, reg *DriverRegistry) error {
+//
+// configs carries each logical channel's per-line options (same key as
+// the table - the node's "channel" param). For a driver that implements
+// Configurable, BindGraph applies the options before wiring the line; for
+// any other driver, or a nil/empty configs, binding is exactly as before.
+func BindGraph(eng *Engine, g Graph, table BindingTable, configs map[string]ChannelConfig, reg *DriverRegistry) error {
 	for _, n := range g.Nodes {
 		switch n.Type {
 		case TypeSourceChannel:
@@ -166,6 +192,13 @@ func BindGraph(eng *Engine, g Graph, table BindingTable, reg *DriverRegistry) er
 			}
 			if err := checkChannelKind(src.Channels(), pa, n, false); err != nil {
 				return err
+			}
+			// Options precede Subscribe so the driver requests the line with
+			// the right bias/active level/debounce (defaults if unset).
+			if c, ok := src.(Configurable); ok {
+				if err := c.ConfigureInput(pa.Addr, configs[logicalName(n)]); err != nil {
+					return fmt.Errorf("engine: configure input %s for node %q: %w", pa, n.ID, err)
+				}
 			}
 			id := n.ID
 			if err := src.Subscribe(pa.Addr, func(v Value) { eng.EnqueueInput(id, "out", v) }); err != nil {
@@ -187,11 +220,25 @@ func BindGraph(eng *Engine, g Graph, table BindingTable, reg *DriverRegistry) er
 			if err := checkChannelKind(snk.Channels(), pa, n, true); err != nil {
 				return err
 			}
+			// Options precede the first Write; a Configurable sink may
+			// pre-acquire the output at its initial state here.
+			if c, ok := snk.(Configurable); ok {
+				if err := c.ConfigureOutput(pa.Addr, configs[logicalName(n)]); err != nil {
+					return fmt.Errorf("engine: configure output %s for node %q: %w", pa, n.ID, err)
+				}
+			}
 			addr := pa.Addr
 			node.onWrite = func(v Value) { _ = snk.Write(addr, v) }
 		}
 	}
 	return nil
+}
+
+// logicalName is the node's "channel" param - the key into both the
+// binding table and the configs map.
+func logicalName(n GraphNode) string {
+	s, _ := n.Params["channel"].(string)
+	return s
 }
 
 // checkChannelKind verifies the driver actually exposes pa.Addr and that

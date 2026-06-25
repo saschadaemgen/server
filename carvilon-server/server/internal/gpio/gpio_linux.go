@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/warthog618/go-gpiocdev"
 
@@ -49,6 +51,7 @@ func platformLines(chips []string) []LineInfo {
 				// offering a possibly system-held line.
 				li.InUse = true
 			}
+			li.Usable = usableLine(li.Name, li.InUse)
 			out = append(out, li)
 		}
 		_ = c.Close()
@@ -64,12 +67,17 @@ func platformLines(chips []string) []LineInfo {
 type Driver struct {
 	mu    sync.Mutex
 	lines map[string]*gpiocdev.Line
+	cfgs  map[string]engine.ChannelConfig // per-line options from BindGraph
 	chans []engine.Channel
 	log   *slog.Logger
 }
 
 func newDriver(chips []string) (IODriver, error) {
-	d := &Driver{lines: map[string]*gpiocdev.Line{}, log: currentLogger()}
+	d := &Driver{
+		lines: map[string]*gpiocdev.Line{},
+		cfgs:  map[string]engine.ChannelConfig{},
+		log:   currentLogger(),
+	}
 	for _, name := range chips {
 		c, err := gpiocdev.NewChip(name)
 		if err != nil {
@@ -92,15 +100,51 @@ func newDriver(chips []string) (IODriver, error) {
 // Channels lists every line of every detected chip as a Bool channel.
 func (d *Driver) Channels() []engine.Channel { return d.chans }
 
+// ConfigureInput records an input line's options (bias / active level /
+// debounce) so the subsequent Subscribe requests the line with them. It
+// only stores; Subscribe does the request (it owns the edge callback).
+func (d *Driver) ConfigureInput(addr string, cfg engine.ChannelConfig) error {
+	d.mu.Lock()
+	d.cfgs[addr] = cfg
+	d.mu.Unlock()
+	return nil
+}
+
+// ConfigureOutput records an output line's options and PRE-ACQUIRES the
+// line at its configured initial state, so the pin holds that level from
+// run start until the engine first drives it (the engine writes only on
+// transitions, so without this an unchanged output would never be
+// requested). Idempotent if the line is already held.
+func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
+	chip, off, err := parseLine(addr)
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.cfgs[addr] = cfg
+	if _, ok := d.lines[addr]; ok {
+		return nil
+	}
+	l, err := gpiocdev.RequestLine(chip, off, outputOptions(cfg, initialValue(cfg))...)
+	if err != nil {
+		d.log.Warn("gpio output request failed", "line", addr, "err", err)
+		return fmt.Errorf("gpio: request output %s: %w", addr, err)
+	}
+	d.lines[addr] = l
+	return nil
+}
+
 // Subscribe requests an input line with both-edge detection. The edge
 // handler (a go-gpiocdev goroutine) reports the new logical level through
 // cb, which routes to Engine.EnqueueInput - the value lands at the next
 // tick, never concurrently with eval. The handler is intentionally tiny.
 //
-// The line is pull-up + active-LOW, matching the common button-to-ground
-// wiring: idle reads false (so a run does not boot "on") and pressed reads
-// true (a rising edge that triggers downstream logic). A different wiring
-// is a later, per-line config option.
+// Bias / active level / debounce come from the line's config (set by
+// ConfigureInput); with nothing set the defaults are pull-up + active-LOW,
+// the common button-to-ground wiring where idle reads false (a run does
+// not boot "on") and pressed reads true. Edges are reported against the
+// active level, so rising == logical-active regardless of polarity.
 func (d *Driver) Subscribe(addr string, cb func(engine.Value)) error {
 	chip, off, err := parseLine(addr)
 	if err != nil {
@@ -111,15 +155,12 @@ func (d *Driver) Subscribe(addr string, cb func(engine.Value)) error {
 		d.mu.Unlock()
 		return fmt.Errorf("gpio: line %s already requested", addr)
 	}
-	l, err := gpiocdev.RequestLine(chip, off,
-		gpiocdev.AsInput,
-		gpiocdev.AsActiveLow,
-		gpiocdev.WithPullUp,
-		gpiocdev.WithBothEdges,
+	opts := append(inputOptions(d.cfgs[addr]),
 		gpiocdev.WithEventHandler(func(ev gpiocdev.LineEvent) {
 			cb(engine.BoolVal(ev.Type == gpiocdev.LineEventRisingEdge))
 		}),
 	)
+	l, err := gpiocdev.RequestLine(chip, off, opts...)
 	if err != nil {
 		d.mu.Unlock()
 		return fmt.Errorf("gpio: request input %s: %w", addr, err)
@@ -135,15 +176,11 @@ func (d *Driver) Subscribe(addr string, cb func(engine.Value)) error {
 	return nil
 }
 
-// Write drives an output line, requesting it as output (with the initial
-// value) on first use and SetValue-ing it thereafter. Called from inside
-// a tick under the engine lock, so it never blocks or re-enters the
-// engine.
+// Write drives an output line, requesting it (with its options + this
+// value as the initial level) on first use if ConfigureOutput has not
+// already acquired it, and SetValue-ing it thereafter. Called from inside
+// a tick under the engine lock, so it never blocks or re-enters the engine.
 func (d *Driver) Write(addr string, v engine.Value) error {
-	chip, off, err := parseLine(addr)
-	if err != nil {
-		return err
-	}
 	val := 0
 	if v.B {
 		val = 1
@@ -157,13 +194,62 @@ func (d *Driver) Write(addr string, v engine.Value) error {
 		}
 		return nil
 	}
-	l, err := gpiocdev.RequestLine(chip, off, gpiocdev.AsOutput(val))
+	chip, off, err := parseLine(addr)
+	if err != nil {
+		return err
+	}
+	l, err := gpiocdev.RequestLine(chip, off, outputOptions(d.cfgs[addr], val)...)
 	if err != nil {
 		d.log.Warn("gpio output request failed", "line", addr, "err", err)
 		return fmt.Errorf("gpio: request output %s: %w", addr, err)
 	}
 	d.lines[addr] = l
 	return nil
+}
+
+// inputOptions builds the go-gpiocdev request options for an input line
+// from its config, defaulting to pull-up + active-low (the established
+// button-to-ground default) when a key is unset.
+func inputOptions(cfg engine.ChannelConfig) []gpiocdev.LineReqOption {
+	opts := []gpiocdev.LineReqOption{gpiocdev.AsInput, gpiocdev.WithBothEdges}
+	switch cfg["bias"] {
+	case "pulldown":
+		opts = append(opts, gpiocdev.WithPullDown)
+	case "none":
+		opts = append(opts, gpiocdev.WithBiasDisabled)
+	default: // "pullup" or unset
+		opts = append(opts, gpiocdev.WithPullUp)
+	}
+	if cfg["active_level"] == "high" {
+		opts = append(opts, gpiocdev.AsActiveHigh)
+	} else { // "low" or unset
+		opts = append(opts, gpiocdev.AsActiveLow)
+	}
+	if ms, err := strconv.Atoi(cfg["debounce_ms"]); err == nil && ms > 0 {
+		opts = append(opts, gpiocdev.WithDebounce(time.Duration(ms)*time.Millisecond))
+	}
+	return opts
+}
+
+// outputOptions builds the request options for an output line: the given
+// initial LOGICAL value plus the active level (default active-high, the
+// established output default).
+func outputOptions(cfg engine.ChannelConfig, initial int) []gpiocdev.LineReqOption {
+	opts := []gpiocdev.LineReqOption{gpiocdev.AsOutput(initial)}
+	if cfg["active_level"] == "low" {
+		opts = append(opts, gpiocdev.AsActiveLow)
+	} else { // "high" or unset
+		opts = append(opts, gpiocdev.AsActiveHigh)
+	}
+	return opts
+}
+
+// initialValue is the configured initial output level (default low).
+func initialValue(cfg engine.ChannelConfig) int {
+	if cfg["initial"] == "high" {
+		return 1
+	}
+	return 0
 }
 
 // Close releases every requested line (stopping the edge watchers) and

@@ -79,6 +79,34 @@ func TestLinesEmptyWithoutGPIO(t *testing.T) {
 	}
 }
 
+// TestUsableLine pins the picker's usable-vs-system heuristic: a generic
+// GPIOnn name (or no name) that is free is usable; a dedicated-function
+// name or an in-use line is not. Not board-specific - name + in-use only.
+func TestUsableLine(t *testing.T) {
+	cases := []struct {
+		name   string
+		inUse  bool
+		usable bool
+	}{
+		{"GPIO17", false, true},      // generic header GPIO
+		{"gpio3", false, true},       // case-insensitive
+		{"", false, true},            // unnamed line - treat as usable
+		{"GPIO17", true, false},      // generic but occupied
+		{"RGMII_MDIO", false, false}, // Ethernet
+		{"SD1_CLK", false, false},    // SD card
+		{"WL_ON", false, false},      // WLAN enable
+		{"STATUS_LED", false, false},
+		{"PWM0", false, false},
+		{"GPIO", false, false},  // "GPIO" with no number is not generic
+		{"GPIOA", false, false}, // letters after GPIO are not generic
+	}
+	for _, c := range cases {
+		if got := usableLine(c.name, c.inUse); got != c.usable {
+			t.Errorf("usableLine(%q, inUse=%v) = %v, want %v", c.name, c.inUse, got, c.usable)
+		}
+	}
+}
+
 // TestProbeAvailability checks Probe caches availability per outcome.
 // Forbidden must NOT count as available (chip present but no access).
 func TestProbeAvailability(t *testing.T) {

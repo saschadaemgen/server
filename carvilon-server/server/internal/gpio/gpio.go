@@ -35,24 +35,60 @@ const (
 )
 
 // IODriver is a live GPIO driver instance: both a Source and a Sink over
-// the engine adapter layer, plus a Closer that releases every requested
-// line on teardown.
+// the engine adapter layer, Configurable (it applies per-line bias /
+// active level / debounce / initial-state options at bind time), plus a
+// Closer that releases every requested line on teardown.
 type IODriver interface {
 	engine.Source
 	engine.Sink
+	engine.Configurable
 	io.Closer
 }
 
 // LineInfo describes one GPIO line for the editor's pin picker: the
 // binding address the graph stores, the chip + offset, the kernel line
-// name (may be empty), and whether the line is already consumed by the
-// system / another process (so the picker can exclude it).
+// name (may be empty), whether the line is already consumed by the
+// system / another process (so the picker can exclude it), and whether it
+// is a usable general-purpose GPIO (vs a system/peripheral line the
+// picker hides by default).
 type LineInfo struct {
 	Address string `json:"address"` // "gpio:gpiochipN:offset"
 	Chip    string `json:"chip"`
 	Offset  int    `json:"offset"`
 	Name    string `json:"name"`
 	InUse   bool   `json:"inUse"`
+	Usable  bool   `json:"usable"`
+}
+
+// usableLine reports whether a line is a general-purpose GPIO suitable for
+// the picker's default view, as opposed to a system/peripheral line. The
+// signal is the kernel line name plus the in-use flag - NOT a hardcoded
+// board map: a line in use by the system/another process, or one with a
+// dedicated-function name (RGMII_*, SD_*, WL_ON, STATUS_LED, ...), is not
+// a free general GPIO; a generic "GPIOnn" name, or no name at all, is.
+func usableLine(name string, inUse bool) bool {
+	if inUse {
+		return false
+	}
+	return name == "" || genericGPIOName(name)
+}
+
+// genericGPIOName matches the kernel's generic GPIO line naming ("GPIO17",
+// "gpio3") - "GPIO" followed by digits - as opposed to a dedicated
+// peripheral function name.
+func genericGPIOName(name string) bool {
+	if len(name) < 5 { // "GPIO" + at least one digit
+		return false
+	}
+	if !strings.EqualFold(name[:4], "GPIO") {
+		return false
+	}
+	for _, r := range name[4:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // lineAddress builds the binding address for a chip line. It is the

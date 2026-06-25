@@ -180,6 +180,38 @@ func buildBindingTable(g engine.Graph) (engine.BindingTable, error) {
 	return table, nil
 }
 
+// buildChannelConfigs collects each I/O node's per-line options (every
+// param except "channel": bias / active_level / debounce_ms / initial)
+// into a ChannelConfig keyed by the same logical ref as the binding
+// table, so BindGraph hands them to the driver. A node with no options
+// yields no entry and the driver applies its defaults (input: pull-up +
+// active-low) - no regression for graphs from before this ticket.
+func buildChannelConfigs(g engine.Graph) map[string]engine.ChannelConfig {
+	configs := map[string]engine.ChannelConfig{}
+	for _, n := range g.Nodes {
+		if n.Type != engine.TypeSourceChannel && n.Type != engine.TypeSinkChannel {
+			continue
+		}
+		ref, _ := n.Params["channel"].(string)
+		if ref == "" {
+			continue
+		}
+		cfg := engine.ChannelConfig{}
+		for k, v := range n.Params {
+			if k == "channel" {
+				continue
+			}
+			if s, ok := v.(string); ok && s != "" {
+				cfg[k] = s
+			}
+		}
+		if len(cfg) > 0 {
+			configs[ref] = cfg
+		}
+	}
+	return configs
+}
+
 // bindRunIO wires a freshly built run's I/O nodes to their drivers. When
 // the graph has GPIO nodes and the host has GPIO, it registers the gpio
 // driver (which requests the lines through BindGraph) and returns a
@@ -193,6 +225,7 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 	if len(table) == 0 {
 		return func() {}, nil
 	}
+	configs := buildChannelConfigs(g)
 	reg := engine.NewDriverRegistry()
 	cleanup := func() {}
 	if gpio.Enabled() {
@@ -204,7 +237,7 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		reg.RegisterSink(engine.PrefixGPIO, drv)
 		cleanup = func() { _ = drv.Close() }
 	}
-	if err := engine.BindGraph(eng, g, table, reg); err != nil {
+	if err := engine.BindGraph(eng, g, table, configs, reg); err != nil {
 		cleanup() // release any lines opened before the failure
 		return nil, err
 	}
