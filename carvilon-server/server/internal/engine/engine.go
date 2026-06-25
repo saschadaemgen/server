@@ -39,6 +39,16 @@ type Engine struct {
 
 	timers timerHeap // min-heap of pending wakeups, keyed by fire time
 
+	// pending is the async input queue: external values staged by
+	// EnqueueInput (driver Source callbacks from other goroutines),
+	// drained and applied at the start of the next Tick. It keeps async
+	// I/O off the eval path so the engine stays single-threaded. T1
+	// applies all staged events FIFO each tick; repeated writes to the
+	// same port collapse to last-wins at eval (level semantics). A
+	// high-rate driver wanting an enqueue bound or coalescing is a
+	// follow-up.
+	pending []inputEvent
+
 	events []Event // collected Emit stub output
 
 	// Monitor fan-out (S1-02). mu guards the fields below plus the
@@ -138,15 +148,51 @@ func (e *Engine) Connect(srcNode, srcPort, dstNode, dstPort string) {
 	e.topoStale = true
 }
 
+// inputEvent is one staged external input in the async tick queue.
+type inputEvent struct {
+	node string
+	port string
+	v    Value
+}
+
 // SetInput injects an external value into a source node and marks it
-// dirty, simulating a real Source (doorbell, NFC, MQTT, ...). The
-// node must accept external input (e.g. input.manual).
+// dirty, simulating a real Source (doorbell, NFC, MQTT, ...). The node
+// must accept external input (e.g. input.manual). It applies the value
+// immediately (under e.mu); the effect is observed on the next Tick,
+// exactly as before. Driver callbacks from other goroutines use
+// EnqueueInput instead.
 func (e *Engine) SetInput(nodeID, port string, v Value) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.applyExternal(nodeID, port, v)
+}
+
+// EnqueueInput stages an external value to be applied at the start of the
+// next Tick. It is the async entry point for driver Source callbacks:
+// safe to call from any goroutine, it validates and appends under e.mu
+// and never evaluates. The value reaches the graph through the dirty set
+// on the next tick - off the eval path - so the engine stays
+// single-threaded and deterministic.
+func (e *Engine) EnqueueInput(nodeID, port string, v Value) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	n, ok := e.nodes[nodeID]
 	if !ok {
-		panic("engine: SetInput on unknown node " + nodeID)
+		panic("engine: EnqueueInput on unknown node " + nodeID)
+	}
+	if _, ok := n.(externalSetter); !ok {
+		panic("engine: node " + nodeID + " does not accept external input")
+	}
+	e.pending = append(e.pending, inputEvent{node: nodeID, port: port, v: v})
+}
+
+// applyExternal applies one external value to a source node and marks it
+// dirty. The caller must hold e.mu. It is the shared apply path behind
+// the synchronous SetInput and the drained async EnqueueInput.
+func (e *Engine) applyExternal(nodeID, port string, v Value) {
+	n, ok := e.nodes[nodeID]
+	if !ok {
+		panic("engine: external input on unknown node " + nodeID)
 	}
 	if es, ok := n.(externalSetter); ok {
 		es.setExternal(port, v)
@@ -184,6 +230,20 @@ func (e *Engine) Tick() {
 	e.tickCount++
 	e.now = e.now.Add(e.tick)
 	e.frameChanges = nil
+
+	// Drain the async input queue at the tick boundary, before anything
+	// evaluates: each staged driver value is applied (sets the source's
+	// value and marks it dirty) so it reaches eval only through this
+	// tick's dirty set, never concurrently with the topo walk. Drain and
+	// the timer pop both only stage dirtiness; evaluation is purely
+	// topological over the order-insensitive dirty set, so the trace is
+	// the same regardless of which marks a node dirty first.
+	if len(e.pending) > 0 {
+		for _, ev := range e.pending {
+			e.applyExternal(ev.node, ev.port, ev.v)
+		}
+		e.pending = e.pending[:0]
+	}
 
 	for e.timers.Len() > 0 && !e.timers[0].at.After(e.now) {
 		w := heap.Pop(&e.timers).(wakeup)
