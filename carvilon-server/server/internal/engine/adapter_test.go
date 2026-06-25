@@ -316,3 +316,128 @@ func TestBindGraphRoutesChannelConfig(t *testing.T) {
 		t.Errorf("sink writes = %v, want [true false]", got)
 	}
 }
+
+// buildKindGraph wires source.channel.<kind> -> sink.channel.<kind> direct,
+// bound to a fresh virtual driver, for a typed end-to-end path test. The
+// virtual driver is already kind-agnostic (it carries Value), so the same
+// helper backs Float and Text.
+func buildKindGraph(t *testing.T, srcType, snkType string, kind Kind, tick time.Duration) (*Engine, *VirtualDriver) {
+	t.Helper()
+	g := Graph{
+		Schema: SchemaVersion,
+		Nodes: []GraphNode{
+			{ID: "src", Type: srcType, Params: map[string]any{"channel": "in"}},
+			{ID: "snk", Type: snkType, Params: map[string]any{"channel": "out"}},
+		},
+		Edges: []GraphEdge{{From: "src:out", To: "snk:in"}},
+	}
+	eng, err := Build(g, DefaultRegistry(), tick)
+	if err != nil {
+		t.Fatalf("build %s->%s: %v", srcType, snkType, err)
+	}
+	vd := NewVirtualDriver(
+		Channel{Address: "vin", Label: "in", Kind: kind},
+		Channel{Address: "vout", Label: "out", Kind: kind},
+	)
+	reg := NewDriverRegistry()
+	reg.RegisterSource(PrefixVirtual, vd)
+	reg.RegisterSink(PrefixVirtual, vd)
+	table := BindingTable{
+		"in":  {Prefix: PrefixVirtual, Addr: "vin"},
+		"out": {Prefix: PrefixVirtual, Addr: "vout"},
+	}
+	if err := BindGraph(eng, g, table, nil, reg); err != nil {
+		t.Fatalf("bind %s->%s: %v", srcType, snkType, err)
+	}
+	return eng, vd
+}
+
+// TestAdapterFloatPath proves the whole adapter path now carries Float:
+// async source set -> tick queue -> eval -> float sink, with the leading
+// zero-of-kind suppressed and the same input sequence reproduced.
+func TestAdapterFloatPath(t *testing.T) {
+	const tick = 100 * time.Millisecond
+	collect := func() []Value {
+		eng, vd := buildKindGraph(t, TypeSourceChannelFloat, TypeSinkChannelFloat, Float, tick)
+		vd.SetSource("vin", FloatVal(0)) // leading zero-of-kind: not a write
+		eng.Tick()
+		vd.SetSource("vin", FloatVal(42.5))
+		eng.Tick()
+		vd.SetSource("vin", FloatVal(-3.25))
+		eng.Tick()
+		return vd.SinkWrites("vout")
+	}
+	got := collect()
+	want := []float64{42.5, -3.25} // the leading 0 is suppressed
+	if len(got) != len(want) {
+		t.Fatalf("float sink writes = %+v, want %v (leading zero suppressed)", got, want)
+	}
+	for i, w := range want {
+		if got[i].Kind != Float || got[i].F != w {
+			t.Errorf("write[%d] = %+v, want FloatVal(%v)", i, got[i], w)
+		}
+	}
+	if !reflect.DeepEqual(got, collect()) {
+		t.Errorf("non-deterministic float path: %+v vs second run", got)
+	}
+}
+
+// TestAdapterTextPath proves the same path carries Text, leading empty
+// string suppressed.
+func TestAdapterTextPath(t *testing.T) {
+	const tick = 100 * time.Millisecond
+	eng, vd := buildKindGraph(t, TypeSourceChannelText, TypeSinkChannelText, Text, tick)
+	vd.SetSource("vin", TextVal("")) // leading empty: not a write
+	eng.Tick()
+	vd.SetSource("vin", TextVal("hello"))
+	eng.Tick()
+	vd.SetSource("vin", TextVal("world"))
+	eng.Tick()
+	got := vd.SinkWrites("vout")
+	want := []string{"hello", "world"}
+	if len(got) != len(want) {
+		t.Fatalf("text sink writes = %+v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i].Kind != Text || got[i].S != w {
+			t.Errorf("write[%d] = %+v, want TextVal(%q)", i, got[i], w)
+		}
+	}
+}
+
+// TestAdapterTypedAsyncLandsNextTick proves a Float Source callback fired
+// from a real goroutine only STAGES the typed value (nothing evaluates),
+// and one Tick applies it - the same async->queue->tick contract as Bool,
+// now carrying a typed Value. Under -race it guards the typed async path
+// never touches eval.
+func TestAdapterTypedAsyncLandsNextTick(t *testing.T) {
+	const tick = 100 * time.Millisecond
+	eng, vd := buildKindGraph(t, TypeSourceChannelFloat, TypeSinkChannelFloat, Float, tick)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		vd.SetSource("vin", FloatVal(7.5)) // from another goroutine
+	}()
+	wg.Wait()
+
+	if got := len(eng.pending); got != 1 {
+		t.Fatalf("expected 1 typed value staged in the tick queue, got %d", got)
+	}
+	if v := eng.nodes["src"].(*sourceChannel).val; v.F != 0 {
+		t.Fatalf("async value reached the source node before any Tick (val=%+v); it must defer", v)
+	}
+	if w := vd.SinkWrites("vout"); len(w) != 0 {
+		t.Fatalf("sink wrote before any Tick: %+v", w)
+	}
+
+	eng.Tick()
+
+	if got := len(eng.pending); got != 0 {
+		t.Errorf("tick queue not drained after one Tick: %d left", got)
+	}
+	if w := vd.SinkWrites("vout"); len(w) != 1 || w[0].Kind != Float || w[0].F != 7.5 {
+		t.Fatalf("after one Tick, float sink writes = %+v; want [FloatVal(7.5)]", w)
+	}
+}

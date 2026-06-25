@@ -175,7 +175,7 @@ type BindingTable map[string]PhysicalAddr
 func BindGraph(eng *Engine, g Graph, table BindingTable, configs map[string]ChannelConfig, reg *DriverRegistry) error {
 	for _, n := range g.Nodes {
 		switch n.Type {
-		case TypeSourceChannel:
+		case TypeSourceChannel, TypeSourceChannelFloat, TypeSourceChannelText:
 			pa, err := resolveBinding(n, table)
 			if err != nil {
 				return err
@@ -204,7 +204,7 @@ func BindGraph(eng *Engine, g Graph, table BindingTable, configs map[string]Chan
 			if err := src.Subscribe(pa.Addr, func(v Value) { eng.EnqueueInput(id, "out", v) }); err != nil {
 				return fmt.Errorf("engine: subscribe %s for node %q: %w", pa, n.ID, err)
 			}
-		case TypeSinkChannel:
+		case TypeSinkChannel, TypeSinkChannelFloat, TypeSinkChannelText:
 			pa, err := resolveBinding(n, table)
 			if err != nil {
 				return err
