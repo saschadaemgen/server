@@ -11,12 +11,13 @@ import { CAT, PALETTE, nodes, S, dragghost } from './store.js';
 import { attachDrag, moveGhost, dropNew } from './nodes.js';
 import { renderMinimap } from './minimap.js';
 
-export const NAME_ICON={},NAME_CAT={},NAME_TYPE={};
+export const NAME_ICON={},NAME_CAT={},NAME_TYPE={},NAME_CHANNEL={},NAME_UNIT={};
 
 // Categories beyond the five base ones (input/logic/time/memory/output)
-// surface only when the runtime catalog includes them - e.g. "gpio" on a
-// GPIO host. Their display metadata lives here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'}};
+// surface only when the runtime catalog includes them - "gpio" on a GPIO
+// host, "system" where telemetry is readable. Their display metadata lives
+// here; CAT carries the base five.
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of
@@ -32,6 +33,8 @@ export async function initPalette(){
    for(const b of (data.blocks||[])){
      if(!CAT[b.category])CAT[b.category]=EXTRA_CATS[b.category]||{color:'#7f8c99',label:b.category.toUpperCase(),icon:'box'};
      NAME_TYPE[b.title]=b.type;
+     if(b.channel)NAME_CHANNEL[b.title]=b.channel;
+     if(b.unit)NAME_UNIT[b.title]=b.unit;
      (LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);
    }
  }catch(err){console.error('designer: block catalog load failed',err);}

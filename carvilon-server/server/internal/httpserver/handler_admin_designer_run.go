@@ -11,6 +11,7 @@ import (
 
 	"carvilon.local/server/internal/engine"
 	"carvilon.local/server/internal/gpio"
+	"carvilon.local/server/internal/sysmetrics"
 )
 
 // designerRunTick is the wall-clock period the editor's live run advances
@@ -152,15 +153,27 @@ func (s *Server) handleDesignerRun(w http.ResponseWriter, r *http.Request) {
 	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// isChannelNode reports whether a node type is one of the engine's I/O
+// channel nodes (Bool/Float/Text source + sink) that the binding table
+// resolves to a driver.
+func isChannelNode(typ string) bool {
+	switch typ {
+	case engine.TypeSourceChannel, engine.TypeSourceChannelFloat, engine.TypeSourceChannelText,
+		engine.TypeSinkChannel, engine.TypeSinkChannelFloat, engine.TypeSinkChannelText:
+		return true
+	}
+	return false
+}
+
 // buildBindingTable derives the run's logical->physical binding table from
-// its I/O nodes (source.channel / sink.channel). Each such node's
-// "channel" param is a physical reference "prefix:addr" (e.g.
-// "gpio:gpiochip0:17"), which the table maps through to its PhysicalAddr.
+// its I/O channel nodes (any kind). Each such node's "channel" param is a
+// physical reference "prefix:addr" (e.g. "gpio:gpiochip0:17",
+// "sys:cpu_temp"), which the table maps through to its PhysicalAddr.
 func buildBindingTable(g engine.Graph) (engine.BindingTable, error) {
 	table := engine.BindingTable{}
-	usedBy := map[string]string{} // physical line -> the node that bound it
+	usedBy := map[string]string{} // physical channel -> the node that bound it
 	for _, n := range g.Nodes {
-		if n.Type != engine.TypeSourceChannel && n.Type != engine.TypeSinkChannel {
+		if !isChannelNode(n.Type) {
 			continue
 		}
 		ref, _ := n.Params["channel"].(string)
@@ -168,11 +181,12 @@ func buildBindingTable(g engine.Graph) (engine.BindingTable, error) {
 		if !ok {
 			return nil, fmt.Errorf("node %q: invalid channel %q (want prefix:addr, e.g. gpio:gpiochip0:17)", n.ID, ref)
 		}
-		// One physical line maps to one node. Binding the same line as both
-		// an input and an output (or to two nodes at all) would request it
-		// twice / write an input line and fail silently - reject it loudly.
+		// One physical channel maps to one node. Binding the same address to
+		// two nodes would request a GPIO line twice, or fan one telemetry
+		// metric to two callbacks where only the last survives - reject it
+		// loudly rather than fail silently.
 		if prev, dup := usedBy[pa.String()]; dup {
-			return nil, fmt.Errorf("physical line %s is bound by both node %q and node %q (one line per node)", pa, prev, n.ID)
+			return nil, fmt.Errorf("physical channel %s is bound by both node %q and node %q (one channel per node)", pa, prev, n.ID)
 		}
 		usedBy[pa.String()] = n.ID
 		table[ref] = pa
@@ -189,7 +203,7 @@ func buildBindingTable(g engine.Graph) (engine.BindingTable, error) {
 func buildChannelConfigs(g engine.Graph) map[string]engine.ChannelConfig {
 	configs := map[string]engine.ChannelConfig{}
 	for _, n := range g.Nodes {
-		if n.Type != engine.TypeSourceChannel && n.Type != engine.TypeSinkChannel {
+		if !isChannelNode(n.Type) {
 			continue
 		}
 		ref, _ := n.Params["channel"].(string)
@@ -212,11 +226,14 @@ func buildChannelConfigs(g engine.Graph) map[string]engine.ChannelConfig {
 	return configs
 }
 
-// bindRunIO wires a freshly built run's I/O nodes to their drivers. When
-// the graph has GPIO nodes and the host has GPIO, it registers the gpio
-// driver (which requests the lines through BindGraph) and returns a
-// cleanup that releases them on teardown. A graph with no I/O nodes (the
-// demo: input.manual/output.lamp) binds nothing and runs as before.
+// bindRunIO wires a freshly built run's I/O nodes to their drivers. It
+// registers a driver for each namespace the graph's channels actually use
+// and the host exposes: gpio: (source+sink, requests the lines) and sys:
+// (source-only telemetry, starts a poller). It returns a cleanup that
+// Close()s every registered driver on teardown (releasing GPIO lines,
+// stopping the poller). A graph with no I/O channels (the demo:
+// input.manual/output.lamp) binds nothing and runs as before. A channel
+// whose prefix has no driver here is rejected loudly by BindGraph.
 func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 	table, err := buildBindingTable(g)
 	if err != nil {
@@ -226,19 +243,39 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		return func() {}, nil
 	}
 	configs := buildChannelConfigs(g)
+	prefixes := map[string]bool{}
+	for _, pa := range table {
+		prefixes[pa.Prefix] = true
+	}
+
 	reg := engine.NewDriverRegistry()
-	cleanup := func() {}
-	if gpio.Enabled() {
+	var closers []io.Closer
+	cleanup := func() {
+		for _, c := range closers {
+			_ = c.Close()
+		}
+	}
+
+	if prefixes[engine.PrefixGPIO] && gpio.Enabled() {
 		drv, err := gpio.NewDriver()
 		if err != nil {
 			return nil, fmt.Errorf("gpio driver: %w", err)
 		}
 		reg.RegisterSource(engine.PrefixGPIO, drv)
 		reg.RegisterSink(engine.PrefixGPIO, drv)
-		cleanup = func() { _ = drv.Close() }
+		closers = append(closers, drv)
+	}
+	if prefixes[engine.PrefixSys] && sysmetrics.Enabled() {
+		drv, err := sysmetrics.NewDriver()
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("sys driver: %w", err)
+		}
+		reg.RegisterSource(engine.PrefixSys, drv) // telemetry is read-only
+		closers = append(closers, drv)
 	}
 	if err := engine.BindGraph(eng, g, table, configs, reg); err != nil {
-		cleanup() // release any lines opened before the failure
+		cleanup() // release any I/O opened before the failure
 		return nil, err
 	}
 	return cleanup, nil

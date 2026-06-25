@@ -82,6 +82,7 @@ type Configurable interface {
 const (
 	PrefixVirtual = "virtual"
 	PrefixGPIO    = "gpio"
+	PrefixSys     = "sys"
 	PrefixMQTT    = "mqtt"
 	PrefixESP     = "esp"
 )

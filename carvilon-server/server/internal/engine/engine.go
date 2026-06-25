@@ -287,6 +287,11 @@ func (e *Engine) evalNode(id string) {
 
 	for _, port := range changed {
 		v := e.outs[id][port]
+		// Report the value at the node's OWN output port too, so a source's
+		// value is observable on its card even with no downstream wire (an
+		// unconnected telemetry source must still show its number). The
+		// destination changes below remain what drives wire/lit rendering.
+		e.frameChanges = append(e.frameChanges, Change{Node: id, Port: port, Value: v})
 		for _, dst := range e.wires[endpoint{id, port}] {
 			e.markDirty(dst.node)
 			e.frameChanges = append(e.frameChanges, Change{Node: dst.node, Port: dst.port, Value: v})

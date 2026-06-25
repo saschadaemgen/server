@@ -67,6 +67,11 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .node-cat{font:600 9.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--cat);opacity:.92;margin-bottom:4px}
 .node-title{font:600 13.5px/1.15 var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node-body{padding:11px 14px 13px;border-top:1px solid rgba(255,255,255,.05);margin-top:2px}
+/* live float/text value on a card during a run (system telemetry etc.):
+   dim placeholder idle, the category colour once a value ticks in. */
+.node-live{position:relative;z-index:1;margin:6px 14px 2px;font:800 16px/1.15 var(--mono);color:var(--faint);letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-live:empty{display:none}
+.node.haslive .node-live{color:var(--cat)}
 .prow{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .prow + .prow{margin-top:7px}
 .pk{font:500 11px/1 var(--font);color:var(--muted)}

@@ -43,6 +43,7 @@ import (
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
+	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
@@ -94,6 +95,11 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	// it registers the gpio: driver surface; elsewhere it stays silent and
 	// nothing GPIO appears in the editor palette or runs.
 	gpio.Probe(log)
+
+	// Detect readable system-telemetry metrics once at startup (sys: float
+	// driver). Only the metrics this host can actually read surface as
+	// "system" source blocks; on a non-Linux host the category is absent.
+	sysmetrics.Probe(log)
 
 	secretsSvc, err := secrets.New()
 	if err != nil {

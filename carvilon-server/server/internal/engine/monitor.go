@@ -57,6 +57,15 @@ func (e *Engine) Snapshot() []Change {
 	defer e.mu.Unlock()
 
 	out := make([]Change, 0, len(e.wires))
+	// Each node's own output values, so a freshly connected observer sees a
+	// source's present value even when it drives no wire (the card display).
+	for node, ports := range e.outs {
+		for port, v := range ports {
+			out = append(out, Change{Node: node, Port: port, Value: v})
+		}
+	}
+	// The destination (consuming) value on every wire - the live-on-the-line
+	// coordinate the editor highlights.
 	for src, dsts := range e.wires {
 		v := e.outs[src.node][src.port]
 		for _, dst := range dsts {

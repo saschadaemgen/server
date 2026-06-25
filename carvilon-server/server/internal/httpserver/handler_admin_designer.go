@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/gpio"
+	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/web/designer"
 )
 
@@ -37,9 +38,21 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	// includeGPIO follows runtime detection: the GPIO category appears in
-	// the palette only on hosts with usable GPIO.
-	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog(gpio.Enabled())})
+	// GPIO and the system category both follow runtime detection: each
+	// appears in the palette only on hosts that actually expose it.
+	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog())})
+}
+
+// sysMetricsForCatalog bridges the sys: driver's available metrics to the
+// designer catalog's neutral type, so the catalog package stays unaware of
+// the driver.
+func sysMetricsForCatalog() []designer.SysMetric {
+	ms := sysmetrics.Metrics()
+	out := make([]designer.SysMetric, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, designer.SysMetric{Address: m.Address, Label: m.Label, Unit: m.Unit})
+	}
+	return out
 }
 
 // handleDesignerGPIOLines serves the detected GPIO lines (offset, name,

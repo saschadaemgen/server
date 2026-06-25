@@ -40,6 +40,19 @@ type CatalogBlock struct {
 	Params        []CatalogParam `json:"params"`
 	DelayBoundary bool           `json:"delay_boundary"`
 	Implemented   bool           `json:"implemented"`
+	// Channel and Unit are set on the data-driven system blocks: Channel
+	// is the fixed physical ref (e.g. "sys:cpu_temp") the editor bakes into
+	// the dropped node, Unit the display suffix (°C, %). Omitted elsewhere.
+	Channel string `json:"channel,omitempty"`
+	Unit    string `json:"unit,omitempty"`
+}
+
+// SysMetric is one available system-telemetry metric the catalog turns
+// into a source block (data-driven from the sys: driver).
+type SysMetric struct {
+	Address string // full physical ref, e.g. "sys:cpu_temp"
+	Label   string
+	Unit    string
 }
 
 // Catalog returns the building-block descriptors the editor palette
@@ -51,10 +64,13 @@ type CatalogBlock struct {
 // have empty ports/params until their engine nodes land. The httpserver
 // passes the runtime GPIO flag and serializes this to
 // /a/designer/catalog.json.
-func Catalog(includeGPIO bool) []CatalogBlock {
+func Catalog(includeGPIO bool, sysMetrics []SysMetric) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
+	}
+	if len(sysMetrics) > 0 {
+		blocks = append(blocks, sysBlocks(sysMetrics)...)
 	}
 	for i := range blocks {
 		b := &blocks[i]
@@ -90,6 +106,43 @@ func gpioBlocks() []CatalogBlock {
 	return []CatalogBlock{
 		{Type: engine.TypeSourceChannel, Category: "gpio", Title: "GPIO Eingang", Icon: "import", Implemented: true},
 		{Type: engine.TypeSinkChannel, Category: "gpio", Title: "GPIO Ausgang", Icon: "plug-zap", Implemented: true},
+	}
+}
+
+// sysBlocks turns the available system metrics into one source block each
+// (data-driven, appended only when the host exposes telemetry). Every
+// block is the engine's source.channel.float node with its physical ref
+// baked into Channel - the editor drops a ready-to-run telemetry source,
+// no picker. Unit drives the live-value display (°C, %).
+func sysBlocks(metrics []SysMetric) []CatalogBlock {
+	out := make([]CatalogBlock, 0, len(metrics))
+	for _, m := range metrics {
+		out = append(out, CatalogBlock{
+			Type:        engine.TypeSourceChannelFloat,
+			Category:    "system",
+			Title:       m.Label,
+			Icon:        sysIcon(m.Address),
+			Channel:     m.Address,
+			Unit:        m.Unit,
+			Implemented: true,
+		})
+	}
+	return out
+}
+
+// sysIcon maps a metric ref to a lucide icon; a generic gauge otherwise.
+func sysIcon(addr string) string {
+	switch addr {
+	case "sys:cpu_temp":
+		return "thermometer"
+	case "sys:cpu_load":
+		return "cpu"
+	case "sys:ram":
+		return "memory-stick"
+	case "sys:disk_root":
+		return "hard-drive"
+	default:
+		return "gauge"
 	}
 }
 

@@ -11,8 +11,10 @@ import { findWireTo } from './wires.js';
 import { firePulse, setNodeOn } from './sim.js';
 import { engineLine, setEngineLive, focusEngine } from './dock.js';
 
-// The four engine-backed block types; only these participate in a run.
-const IMPL = new Set(['input.manual', 'time.staircase', 'logic.or', 'output.lamp', 'source.channel', 'sink.channel']);
+// The engine-backed block types; only these participate in a run.
+const IMPL = new Set(['input.manual', 'time.staircase', 'logic.or', 'output.lamp',
+  'source.channel', 'sink.channel',
+  'source.channel.float', 'source.channel.text', 'sink.channel.float', 'sink.channel.text']);
 // A press is a short true/false pulse so the engine sees a rising edge
 // (and a later press re-triggers). >1 tick (100ms) so a tick samples true.
 const PULSE_MS = 170;
@@ -123,18 +125,41 @@ function openStream(){
 }
 function closeStream(){ if(es){ es.close(); es=null; } }
 
-// applyChanges maps engine signal changes (reported at the destination
-// input port) onto the editor: light the feeding wire, pulse it on a
-// rising edge, and set the lamp card. Then recompute node-lit state.
+// applyChanges maps engine signal changes onto the editor. A change is
+// reported at the destination input port AND (engine monitor extension) at
+// the producing node's own output port, so a source shows on its own card.
+// Bool: light the feeding wire, pulse on a rising edge, set the lamp card.
+// Float/Text: show the number/text on the card (its live value) and mark
+// the feeding wire as carrying a value.
 function applyChanges(changes){
   for(const c of changes){
-    const on=!!(c.value && c.value.b);
+    const def=nodes[c.node] && nodes[c.node].def;
+    if(!def) continue;
+    const v=c.value||{};
+    if(v.kind===1 || v.kind===2){ // Float | Text
+      setNodeLive(c.node, formatLive(def, v));
+      const o=findWireTo(c.node+':'+c.port);
+      if(o) liveByEdge[o.from+'>'+o.to]=true;
+      continue;
+    }
+    const on=!!v.b;
     const o=findWireTo(c.node+':'+c.port);
     if(o){ const key=o.from+'>'+o.to; const was=!!liveByEdge[key]; liveByEdge[key]=on; if(on && !was) firePulse(key); }
-    const def=nodes[c.node] && nodes[c.node].def;
-    if(def && (def.type==='output.lamp'||def.type==='sink.channel')) setNodeOn(c.node,on,'engine');
+    if(def.type==='output.lamp'||def.type==='sink.channel') setNodeOn(c.node,on,'engine');
   }
   refreshLive();
+}
+// formatLive renders a Float/Text value for the card: text verbatim, a
+// float tidied to a couple of significant places plus the block's unit.
+function formatLive(def,v){
+  if(v.kind===2) return esc(String(v.s||''));
+  const n=Number(v.f||0), s=Math.abs(n)>=100?n.toFixed(0):n.toFixed(1);
+  return esc(s)+(def.unit?(' '+esc(def.unit)):'');
+}
+function setNodeLive(nodeId,html){
+  const nd=nodes[nodeId]; if(!nd) return;
+  const el=nd.el.querySelector('[data-live]');
+  if(el){ el.innerHTML=html; nd.el.classList.add('haslive'); }
 }
 function refreshLive(){
   for(const o of wires) o.g.classList.toggle('live', !!liveByEdge[o.from+'>'+o.to]);
@@ -147,13 +172,25 @@ function refreshLive(){
   }
 }
 function engineFrameLine(f){
-  const parts=(f.changes||[]).map(c=>esc(c.node)+':'+esc(c.port)+'=<span class="'+(c.value&&c.value.b?'ok':'dim')+'">'+(c.value&&c.value.b)+'</span>').join(' · ');
+  const parts=(f.changes||[]).map(c=>{
+    const v=c.value||{}; let val;
+    if(v.kind===1) val='<span class="blue">'+esc(fmtNum(v.f))+'</span>';
+    else if(v.kind===2) val='<span class="blue">"'+esc(String(v.s||''))+'"</span>';
+    else val='<span class="'+(v.b?'ok':'dim')+'">'+(!!v.b)+'</span>';
+    return esc(c.node)+':'+esc(c.port)+'='+val;
+  }).join(' · ');
   engineLine('<span class="blue">tick '+f.tick+'</span> <span class="dim">'+f.time_ms+' ms</span>'+(parts?' '+parts:''));
 }
+function fmtNum(n){ n=Number(n||0); return Math.abs(n)>=100?n.toFixed(0):n.toFixed(2); }
 function resetVisuals(){
   liveByEdge={};
   for(const o of wires) o.g.classList.remove('live');
-  for(const id in nodes){ nodes[id].el.classList.remove('lit'); const def=nodes[id].def; if(def.type==='output.lamp'||def.type==='sink.channel') setNodeOn(id,false,'engine'); }
+  for(const id in nodes){
+    const el=nodes[id].el, def=nodes[id].def;
+    el.classList.remove('lit','haslive');
+    const lv=el.querySelector('[data-live]'); if(lv) lv.textContent=def.live?(def.unit?('— '+def.unit):'—'):'';
+    if(def.type==='output.lamp'||def.type==='sink.channel') setNodeOn(id,false,'engine');
+  }
 }
 
 if(btnRun) btnRun.onclick=()=>{ running ? stopRun() : startRun(); };

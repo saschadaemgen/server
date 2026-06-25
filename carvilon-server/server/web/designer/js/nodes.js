@@ -7,7 +7,7 @@ import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduce
 import { selectOnly, clearSel } from './selection.js';
 import { renderMinimap } from './minimap.js';
 import { recomputeEndpoints } from './wires.js';
-import { NAME_ICON, NAME_CAT, NAME_TYPE } from './palette.js';
+import { NAME_ICON, NAME_CAT, NAME_TYPE, NAME_CHANNEL, NAME_UNIT } from './palette.js';
 
 let idc=0;
 
@@ -47,8 +47,12 @@ export function buildNode(n){
   el.innerHTML=`<div class="node-accent"></div>
     <div class="node-head"><div class="node-icon"><i data-lucide="${n.icon}"></i></div>
     <div class="node-titles"><div class="node-cat" data-catlabel>${c.label}</div><div class="node-title" data-titletext>${n.title}</div></div></div>
+    <div class="node-live" data-live></div>
     <div class="node-body" data-body>${renderNodeBody(n)}</div>
     ${insH?`<div class="ports ports-in">${insH}</div>`:''}${outH?`<div class="ports ports-out">${outH}</div>`:''}`;
+  // idle live-value placeholder via textContent (never innerHTML) so a unit
+  // is inert markup-wise regardless of where it came from.
+  if(n.live)el.querySelector('[data-live]').textContent=n.unit?('— '+n.unit):'—';
   world.appendChild(el);nodes[n.id]={def:n,el};
   if(window.lucide)lucide.createIcons();return el;
 }
@@ -75,6 +79,14 @@ function defFor(name,cat){
       {k:'Startwert',param:'initial',kind:'enum',v:'low',opts:[{v:'low',l:'Low'},{v:'high',l:'High'}]},
       {k:'Pegel',param:'active_level',kind:'enum',v:'high',opts:[{v:'high',l:'Active-High'},{v:'low',l:'Active-Low'}]}];
     return {cat:gc,icon:NAME_ICON[name]||(CAT[gc]&&CAT[gc].icon)||'cpu',title:name,type:t,implemented:true,props,
+      ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};}
+  if(t==='source.channel.float'||t==='source.channel.text'||t==='sink.channel.float'||t==='sink.channel.text'){
+    // Float/Text channel blocks (e.g. system telemetry): the channel is
+    // fixed by the catalog (no picker), kept as an inspector-only param so
+    // it serializes; the card shows the live value (with its unit) in a run.
+    const isSrc=t.indexOf('source')===0,gc=NAME_CAT[name]||'system',unit=NAME_UNIT[name]||'';
+    return {cat:gc,icon:NAME_ICON[name]||(CAT[gc]&&CAT[gc].icon)||'gauge',title:name,type:t,implemented:true,unit,live:true,
+      props:[{k:'Kanal',v:NAME_CHANNEL[name]||'',param:'channel',inspectorOnly:true}],
       ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};}
   if(CATALOG[name])return CATALOG[name];const c=cat||NAME_CAT[name]||'logic',icon=NAME_ICON[name]||CAT[c].icon,base={cat:c,icon,title:name};
   if(c==='input')return{...base,props:[{k:'Input',v:'I?',accent:true}],ports:{in:[],out:['Q']},control:'switch',on:false};
