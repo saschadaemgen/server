@@ -18,16 +18,20 @@ export const CAT={input:{color:'#2DD4EF',label:'Input',icon:'log-in'},logic:{col
   time:{color:'#F6B23C',label:'Timing',icon:'timer'},memory:{color:'#5B9DFF',label:'Memory',icon:'database'},output:{color:'#43E08A',label:'Output',icon:'zap'}};
 export const PALETTE=['#2DD4EF','#43E08A','#F6B23C','#A78BFA','#5B9DFF','#FF6B8B','#EAF1F5'];
 
+// Port ids are the engine port names (out/trig/q/set) so the graph maps
+// straight onto the engine when Run executes it; the labels (Q/Tr/AI)
+// keep the display unchanged. type/implemented tag the engine-backed
+// blocks the run serializer includes.
 export const GRAPH={
   nodes:[
-    {id:'btn1',cat:'input',icon:'circle-dot',title:'Push-button',ui:{x:78,y:156},
-      props:[{k:'Input',v:'I1',accent:true}],ports:{in:[],out:[{id:'Q',label:'Q'}]},control:'press'},
-    {id:'stair1',cat:'time',icon:'timer',title:'Staircase light',ui:{x:442,y:208},
-      props:[{k:'Mode',v:'Pulse'}],ports:{in:[{id:'Tr',label:'Tr'}],out:[{id:'Q',label:'Q'}]},control:'slider',value:3,min:1,max:10,step:.5,unit:'s',vlabel:'Hold time'},
-    {id:'lamp1',cat:'output',icon:'lightbulb',title:'Lamp',ui:{x:806,y:166},
-      props:[{k:'Output',v:'Q3',accent:true},{k:'Channel',v:'DALI 1'}],ports:{in:[{id:'AI',label:'AI'}],out:[]},control:'switch',on:false}
+    {id:'btn1',cat:'input',type:'input.manual',implemented:true,icon:'circle-dot',title:'Push-button',ui:{x:78,y:156},
+      props:[{k:'Input',v:'I1',accent:true}],ports:{in:[],out:[{id:'out',label:'Q'}]},control:'press'},
+    {id:'stair1',cat:'time',type:'time.staircase',implemented:true,icon:'timer',title:'Staircase light',ui:{x:442,y:208},
+      props:[{k:'Mode',v:'Pulse'}],ports:{in:[{id:'trig',label:'Tr'}],out:[{id:'q',label:'Q'}]},control:'slider',value:3,min:1,max:10,step:.5,unit:'s',vlabel:'Hold time'},
+    {id:'lamp1',cat:'output',type:'output.lamp',implemented:true,icon:'lightbulb',title:'Lamp',ui:{x:806,y:166},
+      props:[{k:'Output',v:'Q3',accent:true},{k:'Channel',v:'DALI 1'}],ports:{in:[{id:'set',label:'AI'}],out:[]},control:'switch',on:false}
   ],
-  edges:[{from:'btn1:Q',to:'stair1:Tr'},{from:'stair1:Q',to:'lamp1:AI'}]
+  edges:[{from:'btn1:out',to:'stair1:trig'},{from:'stair1:q',to:'lamp1:set'}]
 };
 
 // Live collections, mutated in place by the canvas modules.

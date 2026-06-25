@@ -189,6 +189,11 @@ type Server struct {
 	mux          *http.ServeMux
 	tpl          *adminTemplates
 
+	// designerRuns holds the live logic-editor engine runs, one per
+	// admin user (Run executes the posted graph on a wall-clock ticker;
+	// the editor streams it back via the monitor SSE).
+	designerRuns *designerRunSet
+
 	espStateMu sync.RWMutex
 	espState   map[string]ESPState
 }
@@ -256,6 +261,7 @@ func New(deps Deps) (*Server, error) {
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
 	}
+	srv.designerRuns = newDesignerRunSet()
 	srv.routes()
 	return srv, nil
 }
@@ -458,6 +464,13 @@ func (s *Server) routes() {
 	// data only; live engine/SSE feeds are a later ticket.
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
+	// Run: execute the posted graph in the engine, stream live values back
+	// over the monitor SSE, inject the editor's button press, and tear the
+	// run down on stop/disconnect. One run per admin session.
+	s.mux.Handle("POST /a/designer/run", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRun)))
+	s.mux.Handle("GET /a/designer/run/monitor", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunMonitor)))
+	s.mux.Handle("POST /a/designer/run/input", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunInput)))
+	s.mux.Handle("POST /a/designer/run/stop", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunStop)))
 	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
 
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-

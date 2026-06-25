@@ -19,6 +19,7 @@ import './sim.js';
 import './interactions.js';
 import './toolbar.js';
 import './dock.js';
+import './run.js';
 
 /* ===== left-rail block palette ===== */
 initPalette();

@@ -5,6 +5,22 @@
 
 import { reduceMotion, nodes } from './store.js';
 
+// ---- live engine feed (driven by run.js during a real run) ----
+// While live, the Engine tab shows real stream lines instead of the
+// demo POOL feed.
+let engineLive=false;
+export function setEngineLive(on){engineLive=!!on;}
+function dockNow(){const d=new Date(),p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+// engineLine appends one real line to every column of the Engine tab,
+// honouring each column's search filter and the 200-line cap.
+export function engineLine(inner){
+  const host=document.getElementById('term-engine');if(!host)return;
+  const html=`<div><span class="t">${dockNow()}</span> ${inner}</div>`;
+  host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',html);const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});
+}
+// focusEngine activates the Engine dock tab so a run's lines are visible.
+export function focusEngine(){const tab=document.querySelector('.dock-tab[data-tab="engine"]');if(tab)tab.click();}
+
 (function(){
   const dock=document.getElementById('dock');if(!dock)return;
   const tabs=[...document.querySelectorAll('.dock-tab')];
@@ -81,6 +97,6 @@ import { reduceMotion, nodes } from './store.js';
     engine:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">SIM</span> tick · btn=0 stair=0 lamp=0','<span class="blue">SIM</span> waiting for input…','<span class="ok">BUILD</span> graph ok · boundaries 1','<span class="dim">editing not live — Activate to deploy</span>'])}</div>`,
   };
   function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
-  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');addLine(a?a.dataset.tab:'ssh');},2600);
+  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';if(name==='engine'&&engineLive)return;addLine(name);},2600);
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
 })();

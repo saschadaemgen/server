@@ -410,3 +410,13 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 #dragghost .gi{width:18px;height:18px;display:grid;place-items:center;color:var(--gc)}
 #dragghost .gi svg{width:16px;height:16px}
 @media (max-width:980px){.rail{display:none}}
+
+/* ===== live run (Run): only wires carrying a true signal glow/flow,
+   and the Run button turns into a Stop button ===== */
+body.running .wire-flow{opacity:0;animation:none}
+body.running .wire.live .wire-flow{opacity:.55;animation:flow 2.6s linear infinite}
+body.running .wire.live{filter:drop-shadow(0 0 3px var(--wire-soft)) drop-shadow(0 0 10px var(--wire-soft))}
+body.running .wire:not(.live) .spark{opacity:0!important}
+.tbtn.running{background:rgba(244,80,80,.16);border-color:rgba(244,120,120,.5);color:#ffd9d9}
+.tbtn.running:hover{background:rgba(244,80,80,.24);border-color:rgba(244,140,140,.65);color:#fff}
+.tbtn.running .lead{color:#ff7a7a}
