@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"io"
 	"io/fs"
 	"net/http"
@@ -95,6 +96,57 @@ func TestDesignerBundle_ModuleEntry(t *testing.T) {
 			t.Errorf("GET %s content-type = %q, want substring %q", c.path, ct, c.wantSubstr)
 		}
 		_, _ = io.Copy(io.Discard, r.Body)
+	}
+}
+
+// TestDesignerCatalogEndpoint_RequiresSession is the auth guard: the
+// catalog must sit behind the admin session like the rest of /a/designer.
+func TestDesignerCatalogEndpoint_RequiresSession(t *testing.T) {
+	env := newTestServer(t)
+	resp, err := env.client.Get(env.ts.URL + "/a/designer/catalog.json")
+	if err != nil {
+		t.Fatalf("GET catalog.json: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("status = %d, want 303 (redirect to login)", resp.StatusCode)
+	}
+}
+
+// TestDesignerCatalogEndpoint_HappyPath verifies the admin-gated catalog
+// serves all 111 blocks as JSON, with the engine-backed blocks carrying
+// their derived ports/delay-boundary.
+func TestDesignerCatalogEndpoint_HappyPath(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/designer/catalog.json")
+	if err != nil {
+		t.Fatalf("GET catalog.json: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("content-type = %q, want application/json", ct)
+	}
+	var payload struct {
+		Blocks []designer.CatalogBlock `json:"blocks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	if len(payload.Blocks) != 111 {
+		t.Errorf("blocks = %d, want 111", len(payload.Blocks))
+	}
+	var stair *designer.CatalogBlock
+	for i := range payload.Blocks {
+		if payload.Blocks[i].Type == "time.staircase" {
+			stair = &payload.Blocks[i]
+		}
+	}
+	if stair == nil || !stair.Implemented || !stair.DelayBoundary || len(stair.Outputs) == 0 {
+		t.Fatalf("time.staircase missing/not implemented/not a delay boundary: %+v", stair)
 	}
 }
 

@@ -13,24 +13,29 @@ import { renderMinimap } from './minimap.js';
 
 export const NAME_ICON={},NAME_CAT={};
 
-export function initPalette(){
- /* library */
- const LIBRARY={
-  input:[['Push-button','circle-dot'],['Dual button','copy'],['Motion sensor','radar'],['Presence sensor','user-check'],['Switch','toggle-left'],['Wall switch','square-mouse-pointer'],['Door sensor','door-open'],['Window contact','app-window'],['Smoke detector','flame'],['Water sensor','droplets'],['Temperature','thermometer'],['Brightness','sun'],['Wind sensor','wind'],['Rain sensor','cloud-rain'],['Touch','fingerprint'],['NFC reader','radio'],['Key switch','key-round'],['Doorbell','bell'],['Analog input','sliders-horizontal'],['Counter input','hash'],['CO₂ sensor','wind'],['Humidity','droplet'],['Vibration','vibrate'],['Frost guard','snowflake'],['Dew point','thermometer-snowflake'],['Motion Air','radar']],
-  logic:[['AND','ampersand'],['OR','git-merge'],['NOT','slash'],['XOR','shuffle'],['NAND','ampersand'],['NOR','git-merge'],['Flip-flop','toggle-right'],['Comparator','equal'],['Multiplexer','split'],['Formula','function-square'],['Status select','list-checks'],['Counter','hash'],['Threshold','gauge'],['Hysteresis','activity'],['Min/Max','arrow-up-down'],['Limiter','brackets'],['Gate','door-closed'],['Interlock','lock'],['State machine','workflow'],['Edge','triangle'],['Math','calculator'],['Constant','pi'],['Adder','plus'],['Multiplier','x'],['Selector','list'],['Binary decoder','binary']],
-  time:[['Staircase light','timer'],['On-delay','timer-reset'],['Off-delay','timer-off'],['Pulse','activity'],['Clock gen.','square-activity'],['Weekly timer','calendar-days'],['Yearly timer','calendar'],['Astro clock','sunrise'],['Timer','timer'],['Countdown','timer'],['Blinker','zap'],['Sequencer','list-ordered'],['Interval','repeat'],['Schedule','clock'],['Sun position','sun'],['Wipe relay','zap'],['Run-on','history'],['Stopwatch','timer'],['Delay','hourglass'],['Pulse width','audio-waveform'],['Daylight','sun-medium'],['Holiday mode','plane']],
-  memory:[['Flag','bookmark'],['Status block','database'],['Memory','save'],['Buffer','layers'],['Counter value','hash'],['Value store','box'],['Shift register','move-horizontal'],['Stack','layers'],['Logbook','scroll-text'],['Variable','variable'],['Buffer store','container'],['Ring buffer','rotate-cw'],['Constant store','lock']],
-  output:[['Lamp','lightbulb'],['Dimmer','sun-dim'],['Relay','toggle-right'],['Blind','blinds'],['Shutter','panel-top'],['Awning','umbrella'],['Valve','git-commit-vertical'],['Socket','plug'],['Heating','flame'],['Fan','fan'],['RGB light','palette'],['RGBW light','palette'],['Door opener','door-open'],['Siren','siren'],['Motor','cog'],['Pump','droplets'],['Garage door','warehouse'],['Audio zone','volume-2'],['Scene','clapperboard'],['Analog output','sliders-horizontal'],['Constant light','sun'],['Wallbox','plug-zap'],['Boiler','flame'],['Gate','fence']]
- };
+export async function initPalette(){
+ /* library — sourced from the Go block catalog (the single source of
+    truth). The blocks come back in the catalog's order; we group them
+    into [title, icon, implemented] tuples per category so the rest of
+    the rail (counts, favourites, filter, drag) renders exactly as
+    before. */
+ const LIBRARY={input:[],logic:[],time:[],memory:[],output:[]};
+ try{
+   const res=await fetch('catalog.json',{credentials:'same-origin'});
+   if(!res.ok)throw new Error('catalog '+res.status);
+   const data=await res.json();
+   for(const b of (data.blocks||[])){(LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);}
+ }catch(err){console.error('designer: block catalog load failed',err);}
  const libEl=document.getElementById('lib');
- function mkItem(name,icon,cat,c){const it=document.createElement('div');it.className='lib-item';it.dataset.name=name;it.dataset.cat=cat;it.style.setProperty('--gc',c.color);
+ function mkItem(name,icon,cat,c,implemented){const it=document.createElement('div');it.className='lib-item';it.dataset.name=name;it.dataset.cat=cat;it.dataset.impl=implemented?'1':'0';it.style.setProperty('--gc',c.color);
+   if(!implemented)it.title=name+' · Katalog-Eintrag — Engine-Node folgt';
    it.innerHTML=`<span class="li-ic" title="Activate / deactivate"><i data-lucide="${icon}"></i></span><span class="li-name">${name}</span>`;return it;}
  for(const [cat,items] of Object.entries(LIBRARY)){
    const c=CAT[cat],g=document.createElement('div');g.className='lib-group';g.dataset.cat=cat;
    g.dataset.view='active';
    g.innerHTML=`<div class="lib-glabel"><span class="gd" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div><div class="lib-items"></div>`;
    const iw=g.querySelector('.lib-items');
-   for(const [name,icon] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c));}
+   for(const [name,icon,implemented] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c,implemented));}
    g.querySelector('.lib-glabel').addEventListener('click',()=>g.classList.toggle('collapsed'));
    g.querySelector('.lib-glabel .gd').addEventListener('click',e=>{e.stopPropagation();openCatColor(cat,e.currentTarget);});
    g.querySelector('.gcount').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'active');});

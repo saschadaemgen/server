@@ -453,9 +453,11 @@ func (s *Server) routes() {
 	// chrome with a full-bleed iframe; the iframe loads the
 	// self-contained editor bundle served verbatim from the embedded FS
 	// under /a/designer/ (exact /a/designer is the host page, the
-	// /a/designer/ subtree is the bundle). Both are admin-gated. Demo
+	// /a/designer/ subtree is the bundle). The palette is fed from the
+	// Go block catalog at /a/designer/catalog.json. All admin-gated. Demo
 	// data only; live engine/SSE feeds are a later ticket.
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
+	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
 	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
 
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-

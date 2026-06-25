@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -24,6 +25,18 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 	s.renderAdminPage(w, "designer", designerData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 	})
+}
+
+// handleDesignerCatalog serves the designer building-block catalog as
+// JSON for the editor palette. Route: GET /a/designer/catalog.json
+// (requireAdminSession) — the more specific pattern wins over the
+// /a/designer/ static subtree. The catalog is the single source of
+// truth for the 111 palette blocks; the four implemented ones derive
+// their ports/params from the engine registry.
+func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog()})
 }
 
 // designerStaticHandler serves the embedded editor bundle under
