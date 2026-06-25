@@ -27,19 +27,26 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 }
 
 // designerStaticHandler serves the embedded editor bundle under
-// /a/designer/. index.html is the directory index; the vendored
-// Lucide/font assets are served verbatim from the same FS. A request to
-// /a/designer/ resolves to index.html.
+// /a/designer/. index.html is the directory index; the ES modules under
+// js/, the css/, and the vendored Lucide/font assets are served verbatim
+// from the same FS. A request to /a/designer/ resolves to index.html.
 //
-// Content-Type for woff2 is set explicitly because Go's mime table does
-// not always carry it (same reason the /static/ asset gate does so).
-// The bundle is small and changes only on deploy, so a plain no-cache
-// keeps it simple without a cache-busting token.
+// Content-Type is set explicitly per extension because Go's mime table
+// is OS-dependent (the Windows registry can map .js to text/plain, which
+// browsers reject for module scripts under strict MIME checking). woff2
+// is set for the same reason the /static/ asset gate does. The bundle is
+// small and changes only on deploy, so a plain no-cache keeps it simple
+// without a cache-busting token.
 func designerStaticHandler() http.Handler {
 	file := http.FileServer(http.FS(designer.FS))
 	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".woff2") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, ".woff2"):
 			w.Header().Set("Content-Type", "font/woff2")
+		case strings.HasSuffix(r.URL.Path, ".js"):
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		case strings.HasSuffix(r.URL.Path, ".css"):
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		}
 		w.Header().Set("Cache-Control", "no-cache")
 		file.ServeHTTP(w, r)

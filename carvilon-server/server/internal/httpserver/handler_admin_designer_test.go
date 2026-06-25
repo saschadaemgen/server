@@ -2,10 +2,13 @@ package httpserver
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"carvilon.local/server/web/designer"
 )
 
 // TestDesignerStaticHandler_ServesEditorIndex verifies the embedded
@@ -28,25 +31,70 @@ func TestDesignerStaticHandler_ServesEditorIndex(t *testing.T) {
 }
 
 // TestDesignerBundle_LocalFirst is the load-bearing guard: the editor
-// must make no external request when it loads. Any reintroduced CDN /
-// Google-Fonts reference (in the HTML or the vendored CSS) fails here.
+// must make no external request when it loads. It walks every embedded
+// file (HTML shell, css/, the js/ ES modules, vendored CSS) so any
+// reintroduced CDN / Google-Fonts reference anywhere in the bundle fails
+// here.
 func TestDesignerBundle_LocalFirst(t *testing.T) {
-	h := designerStaticHandler()
-
-	banned := []string{"unpkg.com", "fonts.googleapis.com", "fonts.gstatic.com"}
-	for _, p := range []string{"/a/designer/", "/a/designer/vendor/fonts.css"} {
-		req := httptest.NewRequest(http.MethodGet, p, nil)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s = %d, want 200", p, rec.Code)
+	banned := []string{"unpkg.com", "fonts.googleapis.com", "fonts.gstatic.com", "cdn.jsdelivr.net", "cdnjs.cloudflare.com"}
+	err := fs.WalkDir(designer.FS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		body := rec.Body.String()
+		if d.IsDir() || strings.HasSuffix(path, ".woff2") {
+			return nil
+		}
+		data, err := fs.ReadFile(designer.FS, path)
+		if err != nil {
+			return err
+		}
+		body := string(data)
 		for _, b := range banned {
 			if strings.Contains(body, b) {
-				t.Errorf("%s references external host %q — local-first violated", p, b)
+				t.Errorf("%s references external host %q — local-first violated", path, b)
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking designer FS: %v", err)
+	}
+}
+
+// TestDesignerBundle_ModuleEntry verifies the thin index.html shell loads
+// the CSS + ES-module entry, and that both are served with a usable
+// content type (set explicitly so module scripts pass strict MIME checks
+// regardless of the host OS mime table).
+func TestDesignerBundle_ModuleEntry(t *testing.T) {
+	h := designerStaticHandler()
+
+	idx := httptest.NewRequest(http.MethodGet, "/a/designer/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, idx)
+	body := rec.Body.String()
+	for _, want := range []string{`href="./css/editor.css"`, `type="module" src="./js/main.js"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html shell missing %q", want)
+		}
+	}
+
+	cases := []struct{ path, wantSubstr string }{
+		{"/a/designer/js/main.js", "javascript"},
+		{"/a/designer/js/store.js", "javascript"},
+		{"/a/designer/css/editor.css", "text/css"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, c.path, nil)
+		r := httptest.NewRecorder()
+		h.ServeHTTP(r, req)
+		if r.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", c.path, r.Code)
+			continue
+		}
+		if ct := r.Header().Get("Content-Type"); !strings.Contains(ct, c.wantSubstr) {
+			t.Errorf("GET %s content-type = %q, want substring %q", c.path, ct, c.wantSubstr)
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
 	}
 }
 
