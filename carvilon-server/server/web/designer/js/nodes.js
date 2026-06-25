@@ -33,7 +33,10 @@ function ctlHTML(n){
   if(n.control==='slider') return `<div class="node-ctl" data-noselectdrag><div class="ctl-slider"><div class="slhead"><span class="k">${n.vlabel}</span><span class="v" data-vval>${n.value.toFixed(1)} ${n.unit}</span></div><input type="range" min="${n.min}" max="${n.max}" step="${n.step}" value="${n.value}" data-act="slider"><div class="ctl-prog"><i data-prog></i></div></div></div>`;
   return '';
 }
-function renderNodeBody(n){const rows=n.props.filter(p=>!p.inspectorOnly).map(p=>`<div class="prow"><span class="pk">${p.k}</span><span class="pv ${p.accent?'accent':''}">${p.v}</span></div>`).join('');return rows+ctlHTML(n);}
+// pvDisp renders a prop's card value: enums show their friendly label
+// (not the raw 'pullup'), everything else its value verbatim.
+function pvDisp(p){return p.opts?((p.opts.find(o=>o.v===p.v)||{}).l||p.v):p.v;}
+function renderNodeBody(n){const rows=n.props.filter(p=>!p.inspectorOnly).map(p=>`<div class="prow"><span class="pk">${p.k}</span><span class="pv ${p.accent?'accent':''}">${pvDisp(p)}</span></div>`).join('');return rows+ctlHTML(n);}
 function normPorts(n){n.ports.in=(n.ports.in||[]).map(p=>typeof p==='string'?{id:p,label:p}:p);n.ports.out=(n.ports.out||[]).map(p=>typeof p==='string'?{id:p,label:p}:p);}
 export function buildNode(n){
   if(n.color==null)n.color=CAT[n.cat].color;normPorts(n);
@@ -58,18 +61,19 @@ function defFor(name,cat){
   // the other library blocks stay inert (general node-typing is a follow-up).
   const t=NAME_TYPE[name];
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
-    // Line shows on the card; the pin options live in the inspector (the
-    // block's config panel) so the node stays compact. Defaults match the
-    // driver's prior fixed behaviour (input: pull-up + active-low; output:
-    // active-high, initial low) so an untouched block does not regress.
+    // Like the other blocks (staircase shows Mode/Hold, lamp shows
+    // Output/Channel), the GPIO card shows its pin options; they stay
+    // editable in the inspector. Defaults match the driver's prior fixed
+    // behaviour (input: pull-up + active-low; output: active-high, initial
+    // low) so an untouched block does not regress.
     const line={k:'Line',v:'',param:'channel',kind:'gpio-line'};
     const props=isSrc?[line,
-      {k:'Bias',param:'bias',kind:'enum',v:'pullup',inspectorOnly:true,opts:[{v:'pullup',l:'Pull-up'},{v:'pulldown',l:'Pull-down'},{v:'none',l:'Kein'}]},
-      {k:'Pegel',param:'active_level',kind:'enum',v:'low',inspectorOnly:true,opts:[{v:'low',l:'Active-Low'},{v:'high',l:'Active-High'}]},
-      {k:'Entprellung',param:'debounce_ms',kind:'number',v:'0',suffix:'ms',inspectorOnly:true}]
+      {k:'Bias',param:'bias',kind:'enum',v:'pullup',opts:[{v:'pullup',l:'Pull-up'},{v:'pulldown',l:'Pull-down'},{v:'none',l:'Kein'}]},
+      {k:'Pegel',param:'active_level',kind:'enum',v:'low',opts:[{v:'low',l:'Active-Low'},{v:'high',l:'Active-High'}]},
+      {k:'Entprellung',param:'debounce_ms',kind:'number',v:'0',suffix:'ms'}]
     :[line,
-      {k:'Startwert',param:'initial',kind:'enum',v:'low',inspectorOnly:true,opts:[{v:'low',l:'Low'},{v:'high',l:'High'}]},
-      {k:'Pegel',param:'active_level',kind:'enum',v:'high',inspectorOnly:true,opts:[{v:'high',l:'Active-High'},{v:'low',l:'Active-Low'}]}];
+      {k:'Startwert',param:'initial',kind:'enum',v:'low',opts:[{v:'low',l:'Low'},{v:'high',l:'High'}]},
+      {k:'Pegel',param:'active_level',kind:'enum',v:'high',opts:[{v:'high',l:'Active-High'},{v:'low',l:'Active-Low'}]}];
     return {cat:gc,icon:NAME_ICON[name]||(CAT[gc]&&CAT[gc].icon)||'cpu',title:name,type:t,implemented:true,props,
       ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};}
   if(CATALOG[name])return CATALOG[name];const c=cat||NAME_CAT[name]||'logic',icon=NAME_ICON[name]||CAT[c].icon,base={cat:c,icon,title:name};

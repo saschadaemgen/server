@@ -65,7 +65,7 @@ export function openInspector(id){
     }
     if(p.kind==='enum'){
       const dd=makeDropdown({value:p.v,items:(p.opts||[]).map(o=>({value:o.v,label:o.l})),
-        onChange:v=>{p.v=v;setBody(v);}});
+        onChange:v=>{p.v=v;const o=(p.opts||[]).find(x=>x.v===v);setBody(o?o.l:v);}});
       row.appendChild(dd.el);liveDropdowns.push(dd);pc.appendChild(row);return;
     }
     if(p.kind==='number'){
