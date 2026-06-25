@@ -40,12 +40,14 @@ export async function initPalette(){
    if(!implemented)it.title=name+' · Katalog-Eintrag — Engine-Node folgt';
    it.innerHTML=`<span class="li-ic" title="Activate / deactivate"><i data-lucide="${icon}"></i></span><span class="li-name">${name}</span>`;return it;}
  for(const [cat,items] of Object.entries(LIBRARY)){
-   const c=CAT[cat],g=document.createElement('div');g.className='lib-group';g.dataset.cat=cat;
+   const c=CAT[cat],g=document.createElement('div');g.className='lib-group collapsed';g.dataset.cat=cat;
    g.dataset.view='active';
    g.innerHTML=`<div class="lib-glabel"><span class="gd" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div><div class="lib-items"></div>`;
    const iw=g.querySelector('.lib-items');
    for(const [name,icon,implemented] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c,implemented));}
-   g.querySelector('.lib-glabel').addEventListener('click',()=>g.classList.toggle('collapsed'));
+   // Accordion: at most one category open at a time. Clicking a closed
+   // group closes the others and opens it; clicking the open one closes it.
+   g.querySelector('.lib-glabel').addEventListener('click',()=>{const willOpen=g.classList.contains('collapsed');libEl.querySelectorAll('.lib-group').forEach(x=>x.classList.add('collapsed'));if(willOpen)g.classList.remove('collapsed');});
    g.querySelector('.lib-glabel .gd').addEventListener('click',e=>{e.stopPropagation();openCatColor(cat,e.currentTarget);});
    g.querySelector('.gcount').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'active');});
    g.querySelector('.gcount-off').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'off');});
