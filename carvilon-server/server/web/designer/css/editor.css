@@ -37,7 +37,7 @@ body{font-family:var(--font);color:var(--text);overflow:hidden;-webkit-font-smoo
 .wire{filter:drop-shadow(0 0 2px var(--wire-soft)) drop-shadow(0 0 8px var(--wire-soft));}
 .wire-base{fill:none;stroke:var(--wire);stroke-width:2.4;stroke-linecap:round;}
 .wire-flow{fill:none;stroke:#EAFEFF;stroke-width:2.1;stroke-linecap:round;stroke-dasharray:1 13;opacity:0;}
-body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
+body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 .spark{filter:drop-shadow(0 0 4px rgba(166,248,251,.95)) drop-shadow(0 0 9px var(--wire-soft))}
 .pulse{filter:drop-shadow(0 0 6px #fff) drop-shadow(0 0 14px var(--wire))}
 @keyframes flow{to{stroke-dashoffset:-28}}
@@ -411,12 +411,11 @@ body.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinite}
 #dragghost .gi svg{width:16px;height:16px}
 @media (max-width:980px){.rail{display:none}}
 
-/* ===== live run (Run): only wires carrying a true signal glow/flow,
-   and the Run button turns into a Stop button ===== */
-body.running .wire-flow{opacity:0;animation:none}
-body.running .wire.live .wire-flow{opacity:.55;animation:flow 2.6s linear infinite}
+/* ===== live run (Run): the wires flow while the engine runs (the
+   Signal Flow toggle gates it); wires carrying a true signal glow
+   brighter. Idle / after Stop = static. The Run button becomes Stop. ===== */
+body.running.signals-on .wire.live .wire-flow{opacity:.8}
 body.running .wire.live{filter:drop-shadow(0 0 3px var(--wire-soft)) drop-shadow(0 0 10px var(--wire-soft))}
-body.running .wire:not(.live) .spark{opacity:0!important}
 .tbtn.running{background:rgba(244,80,80,.16);border-color:rgba(244,120,120,.5);color:#ffd9d9}
 .tbtn.running:hover{background:rgba(244,80,80,.24);border-color:rgba(244,140,140,.65);color:#fff}
 .tbtn.running .lead{color:#ff7a7a}

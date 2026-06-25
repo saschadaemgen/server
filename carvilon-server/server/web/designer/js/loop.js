@@ -6,7 +6,9 @@ import { stepPhysics, renderWires } from './wires.js';
 import { drawBG } from './background.js';
 
 export function tick(now){
-  const boost=document.body.classList.contains('signals-on');
+  // Wires flow only while the engine is running (and the Signal Flow
+  // toggle is on); idle/stopped wires are static.
+  const boost=document.body.classList.contains('signals-on')&&document.body.classList.contains('running');
   if(!reduceMotion)drawBG();
   for(const o of wires)stepPhysics(o);
   renderWires();
