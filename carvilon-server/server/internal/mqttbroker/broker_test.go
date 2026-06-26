@@ -43,6 +43,24 @@ func newStore(t *testing.T) *mqttstore.Store {
 	return mqttstore.New(d.DB, func(context.Context) (string, error) { return "pep", nil })
 }
 
+func startManagerC(t *testing.T, store *mqttstore.Store, console *Console) (*Manager, int, int) {
+	t.Helper()
+	tcpPort, tlsPort := freePort(t), freePort(t)
+	m := New(store, console, discardLogger(), t.TempDir(), Settings{
+		Enabled: true,
+		LANHost: "127.0.0.1",
+		TCPPort: tcpPort,
+		TLSHost: "127.0.0.1",
+		TLSPort: tlsPort,
+	})
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(m.Stop)
+	time.Sleep(100 * time.Millisecond)
+	return m, tcpPort, tlsPort
+}
+
 func startManager(t *testing.T, store *mqttstore.Store) (*Manager, int, int) {
 	t.Helper()
 	tcpPort, tlsPort := freePort(t), freePort(t)
@@ -146,6 +164,51 @@ func TestBrokerPublishDeliveryWithinSubtree(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("message within own subtree was not delivered")
+	}
+}
+
+// TestBrokerConsoleReceivesRealTraffic closes the full loop: a real
+// client connect + publish flows through the mochi console hook into
+// the Console hub (what the live SSE console renders).
+func TestBrokerConsoleReceivesRealTraffic(t *testing.T) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateDevice(ctx, "dev1", "password123", ""); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	console := NewConsole(100)
+	events, cancel := console.Subscribe(64)
+	defer cancel()
+
+	_, tcpPort, _ := startManagerC(t, store, console)
+	c := connect(t, fmt.Sprintf("tcp://127.0.0.1:%d", tcpPort), "dev1", "password123", nil)
+	if c == nil {
+		t.Fatal("connect failed")
+	}
+	defer c.Disconnect(100)
+	c.Publish("carvilon/dev1/state", 0, false, "on").WaitTimeout(2 * time.Second)
+
+	sawConnect, sawPublish := false, false
+	deadline := time.After(3 * time.Second)
+	for !sawPublish {
+		select {
+		case ev := <-events:
+			switch ev.Kind {
+			case "connect", "auth":
+				if ev.User == "dev1" {
+					sawConnect = true
+				}
+			case "publish":
+				if ev.Topic == "carvilon/dev1/state" && ev.User == "dev1" {
+					sawPublish = true
+				}
+			}
+		case <-deadline:
+			t.Fatalf("console did not observe real traffic (connect=%v publish=%v)", sawConnect, sawPublish)
+		}
+	}
+	if !sawConnect {
+		t.Error("console missed the connect/auth event")
 	}
 }
 

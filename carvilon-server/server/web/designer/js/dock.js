@@ -21,6 +21,47 @@ export function engineLine(inner){
 // focusEngine activates the Engine dock tab so a run's lines are visible.
 export function focusEngine(){const tab=document.querySelector('.dock-tab[data-tab="engine"]');if(tab)tab.click();}
 
+// ---- live MQTT feed (driven by the broker monitor SSE) ----
+// Once the broker stream connects, the MQTT tab shows real connect/
+// publish/subscribe traffic instead of the demo POOL feed.
+let mqttLive=false;
+// escHtml neutralises device-controlled strings (topics, payload
+// previews, usernames) before they touch innerHTML — the console
+// renders untrusted broker input, so this is a hard requirement.
+function escHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// mqttPush appends one real line to every column of the MQTT tab,
+// honouring each column's search filter and the 200-line cap.
+function mqttPush(inner){
+  const host=document.getElementById('term-mqtt');if(!host)return;
+  const html=`<div><span class="t">${dockNow()}</span> ${inner}</div>`;
+  host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',html);const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});
+}
+// mqttInner renders one broker Event to colour-coded inner HTML.
+function mqttInner(ev){
+  const u=ev.user?` <span class="dim">${escHtml(ev.user)}</span>`:'';
+  const topic=ev.topic?`<span>${escHtml(ev.topic)}</span>`:'';
+  switch(ev.kind){
+    case 'connect':    return `<span class="ok">CONNECT</span>${u} <span class="dim">${escHtml(ev.remote||'')}${ev.detail?(' · '+escHtml(ev.detail)):''}</span>`;
+    case 'auth':       return `<span class="ok">AUTH</span>${u} <span class="dim">${escHtml(ev.detail||'')}</span>`;
+    case 'disconnect': return `<span class="amber">DISCONNECT</span>${u} <span class="dim">${escHtml(ev.detail||'clean')}</span>`;
+    case 'subscribe':  return `<span class="blue">SUB</span> ${topic} <span class="dim">qos${ev.qos||0}</span>${u}`;
+    case 'publish':    return `<span class="amber">▸</span> ${topic} <span class="dim">${escHtml(ev.detail||'')}${ev.size?(' · '+ev.size+'B'):''}</span>${u}`;
+    default:           return `<span class="dim">${escHtml(ev.kind)}</span>`;
+  }
+}
+// openMqttStream connects to the broker monitor SSE (relative to the
+// /a/designer/ document -> /a/mqtt/monitor). On the first frame it
+// switches the tab live (demo POOL stops). EventSource auto-reconnects
+// on transient errors; while the broker is disabled the endpoint 503s
+// and the demo feed simply keeps running.
+function openMqttStream(){
+  if(!document.getElementById('term-mqtt'))return;
+  let es;
+  try{ es=new EventSource('../mqtt/monitor'); }catch(_){ return; }
+  es.addEventListener('backlog',e=>{try{const d=JSON.parse(e.data);if(!mqttLive){mqttLive=true;document.querySelectorAll('#term-mqtt .tcol-body').forEach(b=>b.innerHTML='');}(d.events||[]).forEach(ev=>mqttPush(mqttInner(ev)));}catch(_){}});
+  es.addEventListener('event',e=>{try{if(!mqttLive){mqttLive=true;document.querySelectorAll('#term-mqtt .tcol-body').forEach(b=>b.innerHTML='');}mqttPush(mqttInner(JSON.parse(e.data)));}catch(_){}});
+}
+
 (function(){
   const dock=document.getElementById('dock');if(!dock)return;
   const tabs=[...document.querySelectorAll('.dock-tab')];
@@ -33,9 +74,7 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
         `<div class="dim">tree bus <span class="ok">ok</span> · 42 devices · 0 errors</div>`+
         `<div class="dim">air bus <span class="ok">ok</span> · 18 devices · rssi −61 dBm</div>`+
         `<div><span class="pr">carvilon@eg-flur</span>:<span class="blue">~</span>$ tail -f /var/log/logic.log</div>`,
-    mqtt:`<div><span class="t">${nowt()}</span> <span class="ok">CONNACK</span> broker tcp://10.0.0.4:1883 · keepalive 60s</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="blue">SUB</span> carvilon/eg/flur/# · qos1</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="amber">▸</span> carvilon/eg/flur/button/btn <span class="dim">{"state":"released"}</span></div>`,
+    mqtt:`<div><span class="t">${nowt()}</span> <span class="dim">MQTT-Konsole — warte auf Broker-Verkehr …</span></div>`,
     tcp:`<div><span class="ok">●</span> tcp listener <span class="dim">0.0.0.0:9090</span> · accepting</div>`+
         `<div><span class="t">${nowt()}</span> <span class="blue">SYN</span> 10.0.0.21:54122 → :9090</div>`+
         `<div><span class="t">${nowt()}</span> <span class="ok">EST</span> conn #4 · mss 1460 · rtt 6ms</div>`+
@@ -97,7 +136,9 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
     engine:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">SIM</span> tick · btn=0 stair=0 lamp=0','<span class="blue">SIM</span> waiting for input…','<span class="ok">BUILD</span> graph ok · boundaries 1','<span class="dim">editing not live — Activate to deploy</span>'])}</div>`,
   };
   function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
-  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';if(name==='engine'&&engineLive)return;addLine(name);},2600);
+  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';if(name==='engine'&&engineLive)return;if(name==='mqtt'&&mqttLive)return;addLine(name);},2600);
+  // Connect the live MQTT console once the panes exist.
+  openMqttStream();
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
   // Replace the placeholder host label with the real host (Pi model / distro),
   // fetched once on load. The status dot stays as the connection indicator;
