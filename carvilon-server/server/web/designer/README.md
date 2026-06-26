@@ -50,6 +50,7 @@ and `templates/admin/designer.html`).
 
 ## Out of scope (later tickets)
 
-The log dock shows **demo/placeholder feeds** (SSH/MQTT/System/Engine, "Miniserver
-online"). Real engine/SSE feeds, persistence, and the editor → server graph
-binding are separate tickets. The graph stays the hardcoded demo for now.
+The log dock shows **demo/placeholder feeds** (SSH/MQTT/System/Engine). Real
+engine/SSE feeds, persistence, and the editor → server graph binding are
+separate tickets. The graph stays the hardcoded demo for now. (The status bar's
+host label is real — fetched from `GET /a/designer/host`.)

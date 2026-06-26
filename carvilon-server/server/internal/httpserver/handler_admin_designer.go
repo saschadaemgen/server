@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/gpio"
+	"carvilon.local/server/internal/hostinfo"
 	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/web/designer"
 )
@@ -66,6 +67,16 @@ func (s *Server) handleDesignerGPIOLines(w http.ResponseWriter, r *http.Request)
 		lines = []gpio.LineInfo{}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"lines": lines})
+}
+
+// handleDesignerHost serves a human description of the host the server
+// runs on (Pi model / distro / kernel / arch) for the editor's status bar,
+// replacing the former "Miniserver online" placeholder. Route:
+// GET /a/designer/host (requireAdminSession).
+func (s *Server) handleDesignerHost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_ = json.NewEncoder(w).Encode(hostinfo.Detect())
 }
 
 // designerStaticHandler serves the embedded editor bundle under

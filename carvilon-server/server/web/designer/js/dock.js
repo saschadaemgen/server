@@ -99,4 +99,13 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
   function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
   if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';if(name==='engine'&&engineLive)return;addLine(name);},2600);
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
+  // Replace the placeholder host label with the real host (Pi model / distro),
+  // fetched once on load. The status dot stays as the connection indicator;
+  // the kernel goes into a tooltip.
+  fetch('host',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(h=>{
+    const el=document.getElementById('st-host'); if(!el||!h) return;
+    const parts=h.model?[h.model,h.os]:[h.os,h.arch];
+    const label=parts.filter(Boolean).join(' · ');
+    if(label){el.textContent=label;if(h.kernel)el.title='Kernel '+h.kernel;}
+  }).catch(()=>{});
 })();
