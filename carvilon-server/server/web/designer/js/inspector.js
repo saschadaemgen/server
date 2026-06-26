@@ -68,6 +68,22 @@ export function openInspector(id){
         onChange:v=>{p.v=v;const o=(p.opts||[]).find(x=>x.v===v);setBody(o?o.l:v);}});
       row.appendChild(dd.el);liveDropdowns.push(dd);pc.appendChild(row);return;
     }
+    if(p.kind==='mqtt-topic'){
+      // Free-text topic. p.v holds the raw topic (no prefix); run.js
+      // prefixes "mqtt:" at serialize time, and the card shows the topic.
+      const inp=document.createElement('input');inp.value=p.v;inp.placeholder='z.B. haus/eg/flur/taster';inp.spellcheck=false;
+      inp.oninput=()=>{p.v=inp.value.trim();setBody(p.v);};
+      row.appendChild(inp);pc.appendChild(row);return;
+    }
+    if(p.kind==='mqtt-kind'){
+      // Value-type selector: switching it re-types the engine node to
+      // source/sink.channel.<kind> (bool has no suffix), so the run binds
+      // the right channel kind. Cosmetic port/live changes are left as-is.
+      const dd=makeDropdown({value:p.v,items:(p.opts||[]).map(o=>({value:o.v,label:o.l})),
+        onChange:v=>{p.v=v;const o=(p.opts||[]).find(x=>x.v===v);setBody(o?o.l:v);
+          const suffix=v==='bool'?'':('.'+v);nodes[id].def.type=p.base+suffix;}});
+      row.appendChild(dd.el);liveDropdowns.push(dd);pc.appendChild(row);return;
+    }
     if(p.kind==='number'){
       const wrap=document.createElement('div');wrap.className='iprop-num';
       const inp=document.createElement('input');inp.type='number';inp.min='0';inp.value=p.v;inp.className='iprop-numin';

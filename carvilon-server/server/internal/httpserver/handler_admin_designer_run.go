@@ -11,6 +11,8 @@ import (
 
 	"carvilon.local/server/internal/engine"
 	"carvilon.local/server/internal/gpio"
+	"carvilon.local/server/internal/mqttbroker"
+	"carvilon.local/server/internal/mqttdriver"
 	"carvilon.local/server/internal/sysmetrics"
 )
 
@@ -226,6 +228,54 @@ func buildChannelConfigs(g engine.Graph) map[string]engine.ChannelConfig {
 	return configs
 }
 
+// buildMQTTChannels derives the mqtt: driver's channel set from the
+// graph's MQTT I/O nodes: each such node's "channel" param is
+// "mqtt:<topic>", and its node type fixes the value Kind. The topic is
+// the driver-local address. Topics are free text (no host discovery),
+// so the channel list IS whatever the graph binds.
+func buildMQTTChannels(g engine.Graph) ([]engine.Channel, error) {
+	var out []engine.Channel
+	for _, n := range g.Nodes {
+		if !isChannelNode(n.Type) {
+			continue
+		}
+		ref, _ := n.Params["channel"].(string)
+		pa, ok := engine.ParsePhysical(ref)
+		if !ok || pa.Prefix != engine.PrefixMQTT {
+			continue
+		}
+		kind, ok := channelKindForType(n.Type)
+		if !ok {
+			return nil, fmt.Errorf("node %q: cannot derive value kind from type %q", n.ID, n.Type)
+		}
+		out = append(out, engine.Channel{Address: pa.Addr, Label: pa.Addr, Kind: kind})
+	}
+	return out, nil
+}
+
+// channelKindForType maps an I/O channel node type to the value Kind it
+// carries (bool variant has no suffix; float/text are suffixed).
+func channelKindForType(typ string) (engine.Kind, bool) {
+	switch typ {
+	case engine.TypeSourceChannel, engine.TypeSinkChannel:
+		return engine.Bool, true
+	case engine.TypeSourceChannelFloat, engine.TypeSinkChannelFloat:
+		return engine.Float, true
+	case engine.TypeSourceChannelText, engine.TypeSinkChannelText:
+		return engine.Text, true
+	}
+	return 0, false
+}
+
+// mqttInline returns the broker's in-process pub/sub client when the
+// broker is wired and running, for the mqtt: driver to bind to.
+func (s *Server) mqttInline() (mqttbroker.InlineClient, bool) {
+	if s.mqtt == nil {
+		return nil, false
+	}
+	return s.mqtt.Inline()
+}
+
 // bindRunIO wires a freshly built run's I/O nodes to their drivers. It
 // registers a driver for each namespace the graph's channels actually use
 // and the host exposes: gpio: (source+sink, requests the lines) and sys:
@@ -272,6 +322,27 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 			return nil, fmt.Errorf("sys driver: %w", err)
 		}
 		reg.RegisterSource(engine.PrefixSys, drv) // telemetry is read-only
+		closers = append(closers, drv)
+	}
+	if prefixes[engine.PrefixMQTT] {
+		// MQTT topics ride on the broker's in-process inline client; a
+		// graph that binds mqtt: channels needs the broker actually
+		// running (the editor only offers the category when it is). The
+		// channels (topic + kind) come from the graph nodes themselves -
+		// topics are free text, so there is no fixed discovery list.
+		client, ok := s.mqttInline()
+		if !ok {
+			cleanup()
+			return nil, fmt.Errorf("mqtt driver: broker is not running (enable it on /a/mqtt)")
+		}
+		chans, err := buildMQTTChannels(g)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		drv := mqttdriver.NewDriver(client, chans, s.log)
+		reg.RegisterSource(engine.PrefixMQTT, drv)
+		reg.RegisterSink(engine.PrefixMQTT, drv)
 		closers = append(closers, drv)
 	}
 	if err := engine.BindGraph(eng, g, table, configs, reg); err != nil {

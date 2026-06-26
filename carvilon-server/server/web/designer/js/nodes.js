@@ -64,6 +64,21 @@ function defFor(name,cat){
   // (a physical ref like gpio:gpiochip0:17). Only these are typed for Run;
   // the other library blocks stay inert (general node-typing is a follow-up).
   const t=NAME_TYPE[name];
+  // MQTT blocks: free-text Topic + a value-type selector that re-types
+  // the node (source/sink.channel.<kind>) and, on the sink, a Retain
+  // switch. The Topic prop holds the raw topic; run.js prefixes "mqtt:"
+  // when it serializes the channel param. Seed type is the float variant
+  // (the catalog's), matching the default value-type "float".
+  if(NAME_CAT[name]==='mqtt'){
+    const isSrc=t.indexOf('source')===0,base=isSrc?'source.channel':'sink.channel';
+    const topic={k:'Topic',v:'',param:'channel',kind:'mqtt-topic'};
+    const kindp={k:'Werttyp',v:'float',kind:'mqtt-kind',base,
+      opts:[{v:'bool',l:'Bool (an/aus)'},{v:'float',l:'Float (Zahl)'},{v:'text',l:'Text'}]};
+    const props=isSrc?[topic,kindp]
+      :[topic,kindp,{k:'Retain',v:'false',param:'retain',kind:'enum',opts:[{v:'false',l:'Aus'},{v:'true',l:'Ein'}]}];
+    return {cat:'mqtt',icon:NAME_ICON[name]||'radio',title:name,type:t,implemented:true,live:isSrc,props,
+      ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};
+  }
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
     // Like the other blocks (staircase shows Mode/Hold, lamp shows
     // Output/Channel), the GPIO card shows its pin options; they stay

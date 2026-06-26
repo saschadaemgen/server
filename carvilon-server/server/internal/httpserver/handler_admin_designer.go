@@ -39,9 +39,20 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	// GPIO and the system category both follow runtime detection: each
-	// appears in the palette only on hosts that actually expose it.
-	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog())})
+	// GPIO, the system category and MQTT all follow runtime detection:
+	// each appears in the palette only when the host/broker exposes it.
+	// MQTT needs the broker actually running (the mqtt: driver binds to
+	// its in-process inline client).
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.mqttBrokerRunning()),
+	})
+}
+
+// mqttBrokerRunning reports whether the embedded broker is wired and up,
+// gating the editor's MQTT palette category (the mqtt: driver can only
+// bind when the broker's inline client is available).
+func (s *Server) mqttBrokerRunning() bool {
+	return s.mqtt != nil && s.mqtt.Status().Running
 }
 
 // sysMetricsForCatalog bridges the sys: driver's available metrics to the

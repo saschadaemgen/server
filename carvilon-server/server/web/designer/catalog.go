@@ -64,13 +64,16 @@ type SysMetric struct {
 // have empty ports/params until their engine nodes land. The httpserver
 // passes the runtime GPIO flag and serializes this to
 // /a/designer/catalog.json.
-func Catalog(includeGPIO bool, sysMetrics []SysMetric) []CatalogBlock {
+func Catalog(includeGPIO bool, sysMetrics []SysMetric, includeMQTT bool) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
 	}
 	if len(sysMetrics) > 0 {
 		blocks = append(blocks, sysBlocks(sysMetrics)...)
+	}
+	if includeMQTT {
+		blocks = append(blocks, mqttBlocks()...)
 	}
 	for i := range blocks {
 		b := &blocks[i]
@@ -106,6 +109,21 @@ func gpioBlocks() []CatalogBlock {
 	return []CatalogBlock{
 		{Type: engine.TypeSourceChannel, Category: "gpio", Title: "GPIO Eingang", Icon: "import", Implemented: true},
 		{Type: engine.TypeSinkChannel, Category: "gpio", Title: "GPIO Ausgang", Icon: "plug-zap", Implemented: true},
+	}
+}
+
+// mqttBlocks are the two generic MQTT palette blocks, appended only when
+// the broker is running (Catalog's includeMQTT). Unlike GPIO (a finite
+// line pool) or sys (fixed metrics), MQTT topics are free text, so these
+// are two generic blocks: the editor adds a Topic field, a value-type
+// selector (which re-types the node to source/sink.channel.<kind>), and
+// a Retain switch on the sink. The seed type is the float variant; the
+// editor switches it from the value-type selector. Channel is set by the
+// editor to "mqtt:<topic>" and bound to the mqtt: driver at run time.
+func mqttBlocks() []CatalogBlock {
+	return []CatalogBlock{
+		{Type: engine.TypeSourceChannelFloat, Category: "mqtt", Title: "MQTT In", Icon: "import", Implemented: true},
+		{Type: engine.TypeSinkChannelFloat, Category: "mqtt", Title: "MQTT Out", Icon: "send", Implemented: true},
 	}
 }
 

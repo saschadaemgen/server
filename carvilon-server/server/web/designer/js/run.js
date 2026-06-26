@@ -39,8 +39,10 @@ function serializeGraph(){
     const params={};
     if(n.type==='time.staircase') params.duration=Number(n.value)||0;
     // props tagged with `param` (e.g. a GPIO block's Line -> channel)
-    // become engine params.
-    for(const p of (n.props||[])) if(p.param) params[p.param]=p.v;
+    // become engine params. An MQTT Topic field holds the raw topic; the
+    // "mqtt:" namespace prefix is added here so the channel resolves to
+    // the mqtt: driver (matching gpio:/sys: physical refs).
+    for(const p of (n.props||[])) if(p.param) params[p.param]=(p.kind==='mqtt-topic')?('mqtt:'+(p.v||'')):p.v;
     if(Object.keys(params).length) node.params=params;
     out.push(node); ids.add(n.id);
   }
