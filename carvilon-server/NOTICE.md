@@ -135,3 +135,31 @@ any non-Linux host; the package degrades to "no GPIO" there.
 - License:    MIT
 - Linked:     Linux builds only (the GPIO host); absent elsewhere.
 - Note:       the older `warthog618/gpio` (sysfs) is NOT used.
+
+## mochi-mqtt/server (and its rs/xid dependency)
+
+The embedded MQTT broker (`server/internal/mqttbroker`, MQTT track
+step 1) is the mochi-mqtt v2 broker, run in-process with custom
+hooks for device authentication (Argon2id), per-topic ACLs, and the
+live admin console. We do not implement an MQTT broker ourselves;
+the wire protocol, session handling, and TLS listeners are mochi's.
+`rs/xid` is mochi's transitive dependency for client-id generation.
+
+- Project:    https://github.com/mochi-mqtt/server
+- License:    MIT
+- Copyright:  (c) 2022 mochi-mqtt, mochi-co
+- Imports:    github.com/mochi-mqtt/server/v2
+              github.com/mochi-mqtt/server/v2/listeners
+              github.com/mochi-mqtt/server/v2/packets
+- Transitive: github.com/rs/xid (MIT, (c) 2015 Olivier Poitrey)
+
+## eclipse/paho.mqtt.golang (test only)
+
+The Eclipse Paho Go MQTT client drives the broker integration tests
+(`internal/mqttbroker/broker_test.go`): a real client connects with
+valid/invalid credentials over plaintext and TLS and exercises a
+publish round-trip. It is not part of the shipped server runtime.
+
+- Project:    https://github.com/eclipse/paho.mqtt.golang
+- License:    EPL-2.0 / EDL-1.0 (dual)
+- Linked:     test binaries only.

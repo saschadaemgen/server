@@ -12,7 +12,9 @@ require (
 	carvilon.local/mock v0.0.0-00010101000000-000000000000
 	carvilon.local/stream v0.0.0-00010101000000-000000000000
 	github.com/coder/websocket v1.8.14
+	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/hashicorp/mdns v1.0.6
+	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pion/webrtc/v4 v4.2.12
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/warthog618/go-gpiocdev v0.9.1
@@ -27,7 +29,6 @@ require (
 	github.com/bluenviron/gortsplib/v5 v5.5.3 // indirect
 	github.com/bluenviron/mediacommon/v2 v2.8.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -50,6 +51,7 @@ require (
 	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/pion/turn/v5 v5.0.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rs/xid v1.4.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.54.0 // indirect

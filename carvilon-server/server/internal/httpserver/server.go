@@ -42,6 +42,8 @@ import (
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/featuregate"
+	"carvilon.local/server/internal/mqttbroker"
+	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
@@ -143,7 +145,13 @@ type Deps struct {
 	// /webviewer/settings.json on their plain Resolve*() values with no
 	// additive gating block - fully backwards compatible.
 	Features *featuregate.Store
-	Log      *slog.Logger
+	// MQTT is the embedded broker's lifecycle manager (step 1). Nil
+	// leaves the MQTT admin page and live console inert ("disabled").
+	MQTT *mqttbroker.Manager
+	// MQTTStore is the device-credential + ACL persistence the MQTT
+	// admin page reads and writes. Nil disables the credential UI.
+	MQTTStore *mqttstore.Store
+	Log       *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -185,6 +193,8 @@ type Server struct {
 	// side-channel client exists; nil when the cloud link is unconfigured.
 	iceRequester ICERequester
 	features     *featuregate.Store
+	mqtt         *mqttbroker.Manager
+	mqttStore    *mqttstore.Store
 	log          *slog.Logger
 	mux          *http.ServeMux
 	tpl          *adminTemplates
@@ -257,6 +267,8 @@ func New(deps Deps) (*Server, error) {
 		weather:         deps.Weather,
 		egressIssuer:    deps.EgressIssuer,
 		features:        deps.Features,
+		mqtt:            deps.MQTT,
+		mqttStore:       deps.MQTTStore,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,

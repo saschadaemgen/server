@@ -29,6 +29,16 @@ const (
 	// One stored value drives the whole admin --accent; the later
 	// setup wizard writes the same key. Empty/unset -> orange default.
 	KeyAdminAccentColor = "admin_accent_color"
+	// MQTT broker (step 1): admin-tunable broker on/off + ports + an
+	// optional operator TLS cert/key path. Default-off: no listener
+	// binds until the admin enables it. The LAN bind host is derived
+	// from the server's IPv4 (not stored here); these keys hold only
+	// what the admin page edits.
+	KeyMQTTEnabled  = "mqtt_broker_enabled" // "1" / "0"
+	KeyMQTTTCPPort  = "mqtt_tcp_port"        // default 1883
+	KeyMQTTTLSPort  = "mqtt_tls_port"        // default 8883
+	KeyMQTTCertFile = "mqtt_tls_cert"        // empty -> self-signed
+	KeyMQTTKeyFile  = "mqtt_tls_key"         // empty -> self-signed
 )
 
 // Service combines the DB and the secrets service.

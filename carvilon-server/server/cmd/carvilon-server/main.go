@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,6 +37,8 @@ import (
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/mdns"
+	"carvilon.local/server/internal/mqttbroker"
+	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/secrets"
@@ -135,6 +138,26 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 	viewerLimiter := ratelimit.New()
 	adminLimiter := ratelimit.New()
 	historyStore := doorhistory.NewSQLStore(database.DB)
+
+	// MQTT broker (step 1). Device credentials + ACL rules live in
+	// their own tables (migration 030); passwords are Argon2id-hashed
+	// with the platform pepper, same as the admin/viewer accounts. The
+	// broker is default-off and admin-toggled: no listener binds until
+	// the operator enables it on /a/mqtt. The plaintext listener is
+	// pinned to the LAN IP (never 0.0.0.0); TLS may face untrusted nets.
+	mqttPepper := func(c context.Context) (string, error) {
+		return platformCfg.GetSecret(c, platformconfig.KeyViewerPwPepper)
+	}
+	mqttStore := mqttstore.New(database.DB, mqttPepper)
+	mqttSettings := loadMQTTSettings(ctx, platformCfg, cfg, log)
+	mqttBroker := mqttbroker.New(mqttStore, mqttbroker.NewConsole(500), log,
+		filepath.Dir(cfg.DBPath), mqttSettings)
+	if err := mqttBroker.Start(ctx); err != nil {
+		// A bind/cert failure must not abort the host; the admin page
+		// surfaces the error and the operator can fix ports/TLS live.
+		log.Error("mqtt broker start failed (continuing; fix via /a/mqtt)", "err", err)
+	}
+	defer mqttBroker.Stop()
 
 	// Saison 18-10: TURN/STUN/ICE telemetry. The writer serialises all
 	// SQLite writes (TURN events forwarded from the cloud over the
@@ -320,6 +343,8 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		Weather:         weatherClient,
 		EgressIssuer:    egressIssuer,
 		Features:        featuregate.NewStore(database.DB),
+		MQTT:            mqttBroker,
+		MQTTStore:       mqttStore,
 		Log:             log,
 	})
 	if err != nil {
@@ -824,6 +849,39 @@ func ensurePepper(ctx context.Context, cfg *platformconfig.Service, log *slog.Lo
 	}
 	log.Info("viewer password pepper generated and stored")
 	return nil
+}
+
+// loadMQTTSettings assembles the broker's runtime settings from the
+// admin-tunable platform_config keys, with safe defaults: broker
+// off, plaintext 1883 bound to the LAN IPv4 (never 0.0.0.0), TLS
+// 8883. A read error degrades to the default rather than failing the
+// boot - the admin page can correct it live.
+func loadMQTTSettings(ctx context.Context, pc *platformconfig.Service, cfg config.Config, log *slog.Logger) mqttbroker.Settings {
+	get := func(key string) string {
+		v, err := pc.Get(ctx, key)
+		if err != nil {
+			log.Warn("mqtt setting read failed; using default", "key", key, "err", err)
+			return ""
+		}
+		return v
+	}
+	port := func(key string, def int) int {
+		if v := get(key); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n < 65536 {
+				return n
+			}
+		}
+		return def
+	}
+	return mqttbroker.Settings{
+		Enabled:  get(platformconfig.KeyMQTTEnabled) == "1",
+		LANHost:  cfg.ServerIPv4, // LAN-only plaintext bind; empty -> loopback
+		TCPPort:  port(platformconfig.KeyMQTTTCPPort, 1883),
+		TLSHost:  "", // all interfaces: TLS may face untrusted networks
+		TLSPort:  port(platformconfig.KeyMQTTTLSPort, 8883),
+		CertFile: get(platformconfig.KeyMQTTCertFile),
+		KeyFile:  get(platformconfig.KeyMQTTKeyFile),
+	}
 }
 
 // startMDNSIfPossible parses listenAddr (":8080" or "0.0.0.0:8080")
