@@ -188,7 +188,10 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	}
 
 	srv := mqtt.New(&mqtt.Options{
-		InlineClient: false,
+		// The inline client is the in-process pub/sub seam the engine's
+		// mqtt: driver rides on (step 2): first-party, server-side, and
+		// exempt from the device auth/ACL by design (cl.Net.Inline).
+		InlineClient: true,
 		Logger:       m.log,
 	})
 	if err := srv.AddHook(authz, nil); err != nil {
