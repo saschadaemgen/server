@@ -188,6 +188,10 @@ func (s *Server) handleAdminMQTTDeviceSetPassword(w http.ResponseWriter, r *http
 	err := s.mqttStore.SetPassword(r.Context(), username, password)
 	switch {
 	case err == nil:
+		// The live broker verifies against the in-memory snapshot, so a
+		// rotated password only takes effect after a reload - without
+		// this, the old password keeps working and the new one fails.
+		s.reloadMQTTAuthz(r)
 		s.redirectMQTT(w, r, "pw-set")
 	case errors.Is(err, mqttstore.ErrPasswordTooShort):
 		s.redirectMQTT(w, r, "err-password")

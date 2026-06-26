@@ -212,6 +212,42 @@ func TestBrokerConsoleReceivesRealTraffic(t *testing.T) {
 	}
 }
 
+// TestReloadAuthzRotatesPassword proves a password change takes effect
+// on the LIVE broker after ReloadAuthz: the old password stops being
+// accepted and the new one starts, without a restart.
+func TestReloadAuthzRotatesPassword(t *testing.T) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateDevice(ctx, "dev1", "oldpassword1", ""); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	m, tcpPort, _ := startManager(t, store)
+	url := fmt.Sprintf("tcp://127.0.0.1:%d", tcpPort)
+
+	if c := connect(t, url, "dev1", "oldpassword1", nil); c == nil {
+		t.Fatal("old password should connect before rotation")
+	} else {
+		c.Disconnect(100)
+	}
+
+	if err := store.SetPassword(ctx, "dev1", "newpassword2"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if err := m.ReloadAuthz(ctx); err != nil {
+		t.Fatalf("ReloadAuthz: %v", err)
+	}
+
+	if c := connect(t, url, "dev1", "oldpassword1", nil); c != nil {
+		c.Disconnect(100)
+		t.Fatal("old password must be refused after rotation+reload")
+	}
+	if c := connect(t, url, "dev1", "newpassword2", nil); c == nil {
+		t.Fatal("new password must be accepted after rotation+reload")
+	} else {
+		c.Disconnect(100)
+	}
+}
+
 // TestACLHookDeny exercises the enforcement glue directly: the hook
 // reads the snapshot and denies an out-of-subtree publish.
 func TestACLHookDeny(t *testing.T) {

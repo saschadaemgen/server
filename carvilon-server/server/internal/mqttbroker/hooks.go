@@ -40,6 +40,11 @@ func (h *authzHook) OnConnectAuthenticate(cl *mqtt.Client, pk packets.Packet) bo
 	user := string(pk.Connect.Username)
 	pass := string(pk.Connect.Password)
 	if user == "" {
+		// An empty username is never a valid device (the store's
+		// username regex forbids it), so rejecting it early leaks no
+		// enumeration signal - it only reveals that "" is invalid, which
+		// is universally true. Real valid-vs-invalid username timing is
+		// equalised by the dummy verify inside Authenticate below.
 		return false
 	}
 	if !az.Authenticate(user, pass) {

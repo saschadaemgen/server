@@ -59,6 +59,12 @@ func TestFilterCovers(t *testing.T) {
 		{"a/+", "a/#", false}, // + cannot cover #
 		{"a/b", "a/+", false},
 		{"a/b", "a/b/c", false},
+		// $-topic guard on the subscribe path: a leading wildcard ACL
+		// filter must not cover a $SYS subscription request.
+		{"#", "$SYS/#", false},
+		{"#", "$SYS/broker/uptime", false},
+		{"+", "$SYS/x", false},
+		{"$SYS/#", "$SYS/broker/uptime", true}, // explicit $SYS rule still works
 	}
 	for _, c := range cases {
 		if got := FilterCovers(c.acl, c.req); got != c.want {
@@ -97,5 +103,26 @@ func TestAllowedDefaultSubtreeAndDeny(t *testing.T) {
 	// Unknown device denied.
 	if az.Allowed("ghost", "carvilon/ghost/x", true) {
 		t.Error("unknown device must be denied")
+	}
+}
+
+// TestAllowedSysGuard: even a device explicitly granted "#" cannot
+// reach $SYS via subscribe or publish; an explicit $SYS rule can.
+func TestAllowedSysGuard(t *testing.T) {
+	hashAll := &Authz{Devices: map[string]DeviceAuthz{
+		"wide": {Rules: []ACLRule{{Action: "both", TopicFilter: "#", Allow: true}}},
+		"sys":  {Rules: []ACLRule{{Action: "subscribe", TopicFilter: "$SYS/#", Allow: true}}},
+	}}
+	if hashAll.Allowed("wide", "$SYS/#", false) {
+		t.Error(`"#" subscribe rule must NOT authorize $SYS subscription`)
+	}
+	if hashAll.Allowed("wide", "$SYS/broker/uptime", true) {
+		t.Error(`"#" publish rule must NOT authorize $SYS publish`)
+	}
+	if !hashAll.Allowed("wide", "carvilon/anything/x", true) {
+		t.Error(`"#" rule should still grant a normal (non-$) topic`)
+	}
+	if !hashAll.Allowed("sys", "$SYS/broker/uptime", false) {
+		t.Error("explicit $SYS/# rule must authorize $SYS subscription")
 	}
 }

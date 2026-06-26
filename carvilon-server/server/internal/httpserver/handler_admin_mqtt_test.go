@@ -131,6 +131,43 @@ func TestAdminMQTT_DeviceAndACLLifecycle(t *testing.T) {
 	}
 }
 
+// TestAdminMQTT_SetPasswordReloadsAuthz guards the rotation bug: after
+// a password change the broker's in-memory snapshot must reflect the
+// new hash (old password stops working, new one starts).
+func TestAdminMQTT_SetPasswordReloadsAuthz(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	create := url.Values{}
+	create.Set("username", "rot")
+	create.Set("password", "oldpassword1")
+	mqttPost(t, env, "/a/mqtt/devices", create).Body.Close()
+
+	// Start the broker so a live snapshot exists to reload.
+	if err := env.mqttBroker.ReloadAuthz(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	pw := url.Values{}
+	pw.Set("password", "newpassword2")
+	resp := mqttPost(t, env, "/a/mqtt/devices/rot/set-password", pw)
+	resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Location"), "flash=pw-set") {
+		t.Fatalf("set-password -> %q", resp.Header.Get("Location"))
+	}
+
+	az, err := env.mqttStore.LoadAuthz(context.Background())
+	if err != nil {
+		t.Fatalf("LoadAuthz: %v", err)
+	}
+	if az.Authenticate("rot", "oldpassword1") {
+		t.Error("old password must stop working after rotation")
+	}
+	if !az.Authenticate("rot", "newpassword2") {
+		t.Error("new password must work after rotation")
+	}
+}
+
 func TestAdminMQTT_BrokerConfigPersists(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)

@@ -63,9 +63,20 @@ func MatchTopicFilter(filter, topic string) bool {
 // subscription filter b: every concrete topic that b could match is
 // also matched by a. Used on the SUBSCRIBE path, where the requested
 // topic is itself a filter and may contain wildcards.
+//
+// As on the publish path, a leading '+' or '#' wildcard in the ACL
+// filter does not cover a requested filter that targets a $-topic
+// (e.g. $SYS): a device granted "#" still cannot subscribe to broker
+// internals by accident. Reaching $SYS requires an explicit
+// "$SYS/..."-prefixed ACL filter.
 func FilterCovers(a, b string) bool {
 	as := strings.Split(a, "/")
 	bs := strings.Split(b, "/")
+	if len(bs) > 0 && strings.HasPrefix(bs[0], "$") {
+		if as[0] == "#" || as[0] == "+" {
+			return false
+		}
+	}
 	i := 0
 	for ; i < len(as); i++ {
 		if as[i] == "#" {
