@@ -146,6 +146,7 @@ function openMqttStream(){
   fetch('host',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(h=>{
     const el=document.getElementById('st-host'); if(!el||!h) return;
     const parts=h.model?[h.model,h.os]:[h.os,h.arch];
+    if(h.ram)parts.push(h.ram+' RAM');
     const label=parts.filter(Boolean).join(' · ');
     if(label){el.textContent=label;if(h.kernel)el.title='Kernel '+h.kernel;}
   }).catch(()=>{});

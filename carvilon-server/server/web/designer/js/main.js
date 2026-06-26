@@ -18,6 +18,7 @@ import './inspector.js';
 import './sim.js';
 import './interactions.js';
 import './toolbar.js';
+import './settings.js';
 import './dock.js';
 import './run.js';
 

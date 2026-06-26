@@ -45,13 +45,14 @@ export async function initPalette(){
  for(const [cat,items] of Object.entries(LIBRARY)){
    const c=CAT[cat],g=document.createElement('div');g.className='lib-group collapsed';g.dataset.cat=cat;
    g.dataset.view='active';
-   g.innerHTML=`<div class="lib-glabel"><span class="gd" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div><div class="lib-items"></div>`;
+   g.innerHTML=`<div class="lib-glabel"><div class="glabel-track"><div class="glabel-colors" role="listbox" aria-label="Kategoriefarbe wählen"></div><div class="glabel-main"><span class="gd" title="Farbe ändern" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div></div></div><div class="lib-items"></div>`;
    const iw=g.querySelector('.lib-items');
    for(const [name,icon,implemented] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c,implemented));}
    // Accordion: at most one category open at a time. Clicking a closed
    // group closes the others and opens it; clicking the open one closes it.
-   g.querySelector('.lib-glabel').addEventListener('click',()=>{const willOpen=g.classList.contains('collapsed');libEl.querySelectorAll('.lib-group').forEach(x=>x.classList.add('collapsed'));if(willOpen)g.classList.remove('collapsed');});
-   g.querySelector('.lib-glabel .gd').addEventListener('click',e=>{e.stopPropagation();openCatColor(cat,e.currentTarget);});
+   g.querySelector('.lib-glabel').addEventListener('click',()=>{if(g.classList.contains('coloring'))return;const willOpen=g.classList.contains('collapsed');libEl.querySelectorAll('.lib-group').forEach(x=>x.classList.add('collapsed'));if(willOpen)g.classList.remove('collapsed');});
+   buildCatColors(g,cat);
+   g.querySelector('.lib-glabel .gd').addEventListener('click',e=>{e.stopPropagation();openColoring(g,cat);});
    g.querySelector('.gcount').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'active');});
    g.querySelector('.gcount-off').addEventListener('click',e=>{e.stopPropagation();setGroupView(g,'off');});
    libEl.appendChild(g);
@@ -79,15 +80,35 @@ export async function initPalette(){
    else if(a==='ren'){const nm=prompt('Rename project',curProj);if(nm){const p=curParent(PROJ);if(p){const it=p.find(x=>x.name===curProj);if(it)it.name=nm;}setCurrent(nm);}}
    else if(a==='del'){const p=curParent(PROJ);if(p){const i=p.findIndex(x=>x.name===curProj);if(i>=0)p.splice(i,1);}let first=null;(function f(ns){for(const n of ns){if(n.type==='proj'&&!first)first=n.name;if(n.children)f(n.children);}})(PROJ);setCurrent(first||'—');}
  });
- function openCatColor(cat,anchor){let pop=document.getElementById('cat-pop');if(!pop){pop=document.createElement('div');pop.id='cat-pop';pop.className='cat-pop';document.body.appendChild(pop);}pop.innerHTML='';
-   PALETTE.forEach(col=>{const s=document.createElement('div');s.className='sw'+(col===CAT[cat].color?' sel':'');s.style.background=col;s.style.setProperty('--swc',col);s.onclick=()=>{setCategoryColor(cat,col);pop.remove();};pop.appendChild(s);});
-   const r=anchor.getBoundingClientRect();pop.style.left=r.left+'px';pop.style.top=(r.bottom+6)+'px';pop.classList.add('show');
-   setTimeout(()=>document.addEventListener('pointerdown',function h(e){if(!e.target.closest('#cat-pop')){pop.remove();document.removeEventListener('pointerdown',h);}}),0);}
+ /* Category colour picker, "conveyor belt" style: the header label rides
+    off to the right and the full palette (PALETTE + a custom-colour chip)
+    rides in from the left; picking a colour drives it back. The two panes
+    live on one .glabel-track that translates between -50% (label) and 0
+    (palette); the slide is pure CSS, this just toggles the .coloring flag.
+    buildCatColors fills a group's palette pane once at build time. */
+ function buildCatColors(g,cat){const host=g.querySelector('.glabel-colors');if(!host)return;host.innerHTML='';
+   const cur=CAT[cat].color.toLowerCase();
+   PALETTE.forEach(col=>{const s=document.createElement('button');s.type='button';s.className='gsw'+(col.toLowerCase()===cur?' sel':'');s.style.setProperty('--swc',col);s.dataset.col=col;s.title=col;host.appendChild(s);});
+   const cu=document.createElement('button');cu.type='button';cu.className='gsw gsw-custom';cu.title='Eigene Farbe…';cu.setAttribute('aria-label','Eigene Farbe wählen');
+   cu.innerHTML='<i data-lucide="pipette"></i>';
+   const inp=document.createElement('input');inp.type='color';inp.className='gsw-input';inp.value=/^#[0-9a-f]{6}$/i.test(CAT[cat].color)?CAT[cat].color:'#2dd4ef';cu.appendChild(inp);
+   inp.addEventListener('input',()=>setCategoryColor(cat,inp.value));
+   inp.addEventListener('change',()=>{setCategoryColor(cat,inp.value);closeColoring();});
+   host.appendChild(cu);
+   host.addEventListener('click',e=>{const sw=e.target.closest('.gsw');if(!sw||sw.classList.contains('gsw-custom'))return;const col=sw.dataset.col;if(col){setCategoryColor(cat,col);closeColoring();}});
+ }
+ let coloringGroup=null;
+ function openColoring(g,cat){if(coloringGroup&&coloringGroup!==g)closeColoring();buildCatColors(g,cat);g.classList.add('coloring');coloringGroup=g;if(window.lucide)lucide.createIcons();}
+ function closeColoring(){if(coloringGroup){coloringGroup.classList.remove('coloring');coloringGroup=null;}}
+ // click outside the open palette (and not on the dot that opened it) drives it back; Esc too.
+ document.addEventListener('pointerdown',e=>{if(!coloringGroup)return;if(e.target.closest('.glabel-colors'))return;if(coloringGroup.contains(e.target)&&e.target.closest('.gd'))return;closeColoring();},true);
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeColoring();});
  function setCategoryColor(cat,col){CAT[cat].color=col;
    document.querySelectorAll(`.lib-group[data-cat="${cat}"] .gd`).forEach(d=>d.style.setProperty('--gc',col));
    document.querySelectorAll(`.lib-item[data-cat="${cat}"]`).forEach(it=>it.style.setProperty('--gc',col));
    for(const id in nodes){if(nodes[id].def.cat===cat){nodes[id].def.color=col;nodes[id].el.style.setProperty('--cat',col);}}
    const fp=document.querySelector(`#filter-pop .fp-row[data-cat="${cat}"]`);if(fp)fp.style.setProperty('--c',col);
+   const cg=document.querySelector(`.lib-group[data-cat="${cat}"] .glabel-colors`);if(cg)cg.querySelectorAll('.gsw[data-col]').forEach(s=>s.classList.toggle('sel',s.dataset.col.toLowerCase()===col.toLowerCase()));
    if(typeof renderMinimap==='function')renderMinimap();}
  const FAV_DEFAULT=['Push-button','Switch','Motion sensor','AND','OR','Staircase light','Timer','Lamp','Relay','Dimmer'];
  const favorites=FAV_DEFAULT.filter(n=>NAME_CAT[n]);

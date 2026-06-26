@@ -16,7 +16,17 @@ export function hexRgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),
 
 export const CAT={input:{color:'#2DD4EF',label:'Input',icon:'log-in'},logic:{color:'#A78BFA',label:'Logic',icon:'git-fork'},
   time:{color:'#F6B23C',label:'Timing',icon:'timer'},memory:{color:'#5B9DFF',label:'Memory',icon:'database'},output:{color:'#43E08A',label:'Output',icon:'zap'}};
-export const PALETTE=['#2DD4EF','#43E08A','#F6B23C','#A78BFA','#5B9DFF','#FF6B8B','#EAF1F5'];
+export const PALETTE=['#2DD4EF','#43E08A','#5BE0C8','#B8E04A','#F6B23C','#FF8A5B','#FF6B8B','#A78BFA','#5B9DFF','#EAF1F5'];
+
+// Background grid "neuron" animation settings, read live by background.js
+// and edited from the toolbar settings popover (settings.js). Persisted to
+// localStorage so the choice survives reloads. enabled=off stops the FX;
+// beatMs is the tick interval, the others are multipliers (see FX_DEFAULTS).
+export const FX_DEFAULTS={enabled:true,rate:6,speed:7,length:12,intensity:0.7,blur:1,gridSize:GRID,twinkle:true,twinkleRate:1,tickEnabled:true,tickRate:0.2,tickIntensity:2.2};
+// Preset grid sizes the settings slider snaps between (px, world units).
+export const GRID_SIZES=[16,20,26,32,40,52];
+export const FX=(function(){const d=Object.assign({},FX_DEFAULTS);try{const s=JSON.parse(localStorage.getItem('cv_grid_fx2')||'null');if(s&&typeof s==='object')for(const k in d)if(typeof s[k]===typeof d[k])d[k]=s[k];}catch(e){}return d;})();
+export function saveFX(){try{localStorage.setItem('cv_grid_fx2',JSON.stringify(FX));}catch(e){}}
 
 // Port ids are the engine port names (out/trig/q/set) so the graph maps
 // straight onto the engine when Run executes it; the labels (Q/Tr/AI)
@@ -43,9 +53,11 @@ export const selection=new Set();
 // Cross-module view/interaction state. These are reassigned from more
 // than one module, so they must be object properties (imported value
 // bindings are read-only).
-export const S={scale:1,tx:0,ty:0,userAdjusted:false,snapOn:true,gridOn:true,newDrag:null};
+// grid is the live world grid pitch (snap step + background dot spacing);
+// seeded from the persisted FX.gridSize, edited via the settings popover.
+export const S={scale:1,tx:0,ty:0,userAdjusted:false,snapOn:true,gridOn:true,newDrag:null,grid:GRID_SIZES.includes(FX.gridSize)?FX.gridSize:GRID};
 
-export function snap(v){return S.snapOn?Math.round(v/GRID)*GRID:v;}
+export function snap(v){return S.snapOn?Math.round(v/S.grid)*S.grid:v;}
 
 // Shared DOM roots. The module scripts are deferred, so these elements
 // already exist in index.html by the time this module evaluates.
