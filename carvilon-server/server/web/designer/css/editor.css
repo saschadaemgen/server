@@ -411,11 +411,13 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 /* split-count badge (×2..×4) shown when a terminal tab is split into columns */
 .dock-tab[data-split]:not([data-split="1"])::after{content:"×" attr(data-split);margin-left:3px;font:600 10px/1 var(--mono);color:var(--accent);opacity:.9}
 .dock-spacer{flex:1}
-.dock-status{display:flex;align-items:center;gap:14px;padding-right:4px}
-.dock-status .st{display:flex;align-items:center;gap:6px;font:500 10.5px/1 var(--font);color:var(--faint)}
+.dock-status{display:flex;align-items:center;padding-right:4px}
+.dock-status .st{display:flex;align-items:center;gap:6px;padding:3px 13px;font:500 10.5px/1 var(--font);color:var(--faint)}
+.dock-status .st:first-child{padding-left:0}
+.dock-status .st + .st{border-left:1px solid var(--border)}
 .dock-status .st b{color:var(--muted);font-family:var(--mono);font-weight:600}
 .dock-status .st.mono{font-family:var(--mono);color:var(--muted);letter-spacing:.04em}
-.dock-status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.dock-status .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok);position:relative;top:1px}
 .dock-toggle{width:26px;height:26px;border-radius:7px;border:none;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center}
 .dock-toggle:hover{background:rgba(120,150,180,.1);color:var(--text)}
 .dock-toggle svg{width:15px;height:15px;transition:transform .2s}
