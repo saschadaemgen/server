@@ -61,6 +61,37 @@ func startManagerC(t *testing.T, store *mqttstore.Store, console *Console) (*Man
 	return m, tcpPort, tlsPort
 }
 
+// TestBrokerAuthWebsocket proves the WebSocket listener enforces the
+// same auth as the TCP listeners (the browser console's transport).
+func TestBrokerAuthWebsocket(t *testing.T) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateDevice(ctx, "dev1", "password123", ""); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	wsPort := freePort(t)
+	m := New(store, NewConsole(50), discardLogger(), t.TempDir(), Settings{
+		Enabled: true, LANHost: "127.0.0.1", TCPPort: freePort(t), TLSHost: "127.0.0.1", TLSPort: freePort(t),
+		WSEnabled: true, WSPort: wsPort, WSUseTLS: false,
+	})
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(m.Stop)
+	time.Sleep(200 * time.Millisecond) // WS binds inside Serve (async)
+
+	url := fmt.Sprintf("ws://127.0.0.1:%d/", wsPort)
+	if c := connect(t, url, "dev1", "password123", nil); c == nil {
+		t.Fatal("valid credentials over websocket should connect")
+	} else {
+		c.Disconnect(100)
+	}
+	if bad := connect(t, url, "dev1", "wrongpass", nil); bad != nil {
+		bad.Disconnect(100)
+		t.Fatal("bad password over websocket must be refused (no transport is a bypass)")
+	}
+}
+
 func startManager(t *testing.T, store *mqttstore.Store) (*Manager, int, int) {
 	t.Helper()
 	tcpPort, tlsPort := freePort(t), freePort(t)

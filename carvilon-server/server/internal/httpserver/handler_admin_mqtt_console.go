@@ -3,9 +3,42 @@ package httpserver
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 )
+
+// handleAdminMQTTWSInfo tells the in-editor MQTT console how to reach
+// the broker's WebSocket listener: the ws(s):// URL, derived from the
+// admin request's scheme (wss when the admin page is HTTPS, to avoid a
+// mixed-content block) and host, plus the configured WS port. The
+// console prefills its connect form from this. Returns enabled:false
+// when the broker is down or the WS listener is off.
+func (s *Server) handleAdminMQTTWSInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	resp := map[string]any{"enabled": false}
+	if s.mqtt != nil {
+		st := s.mqtt.Status()
+		set := s.mqtt.SettingsSnapshot()
+		if st.Running && set.WSEnabled {
+			scheme := "ws"
+			if st.WSSecure {
+				scheme = "wss"
+			}
+			host := r.Host
+			if h, _, err := net.SplitHostPort(r.Host); err == nil {
+				host = h
+			}
+			resp = map[string]any{
+				"enabled": true,
+				"secure":  st.WSSecure,
+				"url":     fmt.Sprintf("%s://%s:%d", scheme, host, set.WSPort),
+			}
+		}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
 
 // handleAdminMQTTMonitor streams live broker activity (connects,
 // disconnects, publishes, subscribes) to the designer's MQTT console

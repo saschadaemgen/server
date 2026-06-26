@@ -39,6 +39,9 @@ const (
 	KeyMQTTTLSPort  = "mqtt_tls_port"        // default 8883
 	KeyMQTTCertFile = "mqtt_tls_cert"        // empty -> self-signed
 	KeyMQTTKeyFile  = "mqtt_tls_key"         // empty -> self-signed
+	// WebSocket listener for the browser MQTT console.
+	KeyMQTTWSEnabled = "mqtt_ws_enabled" // "1" / "0"
+	KeyMQTTWSPort    = "mqtt_ws_port"    // default 8083
 )
 
 // Service combines the DB and the secrets service.

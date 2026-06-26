@@ -92,6 +92,7 @@
     <div class="mq-status-grid">
       <div class="mq-stat"><div class="k">Klartext (LAN)</div><div class="v">{{if .Page.Status.TCPAddr}}{{.Page.Status.TCPAddr}}{{else}}—{{end}}</div></div>
       <div class="mq-stat"><div class="k">TLS</div><div class="v">{{if .Page.Status.TLSAddr}}{{.Page.Status.TLSAddr}}{{else}}—{{end}}</div></div>
+      <div class="mq-stat"><div class="k">WebSocket (Konsole)</div><div class="v">{{if .Page.Status.WSAddr}}{{.Page.Status.WSAddr}}{{if .Page.Status.WSSecure}} · wss{{else}} · ws{{end}}{{else}}aus{{end}}</div></div>
       <div class="mq-stat"><div class="k">Zertifikat</div><div class="v">{{if .Page.Status.CertSource}}{{.Page.Status.CertSource}}{{else}}—{{end}}</div></div>
       <div class="mq-stat"><div class="k">Fehler</div><div class="v {{if .Page.Status.Error}}mq-err{{end}}">{{if .Page.Status.Error}}{{.Page.Status.Error}}{{else}}keiner{{end}}</div></div>
     </div>
@@ -113,6 +114,13 @@
       <div class="mq-row">
         <div class="mq-field"><label>TLS-Zertifikat (PEM, optional)</label><input type="text" name="cert_file" value="{{.Page.Settings.CertFile}}" placeholder="leer = selbstsigniert"></div>
         <div class="mq-field"><label>TLS-Key (PEM, optional)</label><input type="text" name="key_file" value="{{.Page.Settings.KeyFile}}" placeholder="leer = selbstsigniert"></div>
+      </div>
+      <label class="mq-check">
+        <input type="checkbox" name="ws_enabled" {{if .Page.Settings.WSEnabled}}checked{{end}}>
+        <span>WebSocket-Listener (für die Browser-Konsole)</span>
+      </label>
+      <div class="mq-row">
+        <div class="mq-field"><label>WebSocket-Port (LAN)</label><input type="number" name="ws_port" min="1" max="65535" value="{{.Page.Settings.WSPort}}"></div>
       </div>
       <button class="mq-btn" type="submit">Speichern &amp; anwenden</button>
     </form>

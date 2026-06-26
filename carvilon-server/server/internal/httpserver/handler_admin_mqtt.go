@@ -107,6 +107,8 @@ func (s *Server) handleAdminMQTTBrokerPost(w http.ResponseWriter, r *http.Reques
 	tlsPort := parsePortDefault(r.PostForm.Get("tls_port"), cur.TLSPort)
 	certFile := strings.TrimSpace(r.PostForm.Get("cert_file"))
 	keyFile := strings.TrimSpace(r.PostForm.Get("key_file"))
+	wsEnabled := r.PostForm.Get("ws_enabled") == "on"
+	wsPort := parsePortDefault(r.PostForm.Get("ws_port"), cur.WSPort)
 
 	// Persist the admin-tunable values first, then apply at runtime.
 	set := func(key, val string) bool {
@@ -120,11 +122,17 @@ func (s *Server) handleAdminMQTTBrokerPost(w http.ResponseWriter, r *http.Reques
 	if enabled {
 		enabledStr = "1"
 	}
+	wsEnabledStr := "0"
+	if wsEnabled {
+		wsEnabledStr = "1"
+	}
 	if !set(platformconfig.KeyMQTTEnabled, enabledStr) ||
 		!set(platformconfig.KeyMQTTTCPPort, strconv.Itoa(tcpPort)) ||
 		!set(platformconfig.KeyMQTTTLSPort, strconv.Itoa(tlsPort)) ||
 		!set(platformconfig.KeyMQTTCertFile, certFile) ||
-		!set(platformconfig.KeyMQTTKeyFile, keyFile) {
+		!set(platformconfig.KeyMQTTKeyFile, keyFile) ||
+		!set(platformconfig.KeyMQTTWSEnabled, wsEnabledStr) ||
+		!set(platformconfig.KeyMQTTWSPort, strconv.Itoa(wsPort)) {
 		s.redirectMQTT(w, r, "err-internal")
 		return
 	}
@@ -135,6 +143,9 @@ func (s *Server) handleAdminMQTTBrokerPost(w http.ResponseWriter, r *http.Reques
 	next.TLSPort = tlsPort
 	next.CertFile = certFile
 	next.KeyFile = keyFile
+	next.WSEnabled = wsEnabled
+	next.WSPort = wsPort
+	// next.WSUseTLS stays as cur (deployment-derived: wss iff admin is HTTPS).
 	if err := s.mqtt.Reconfigure(ctx, next); err != nil {
 		// Settings are saved; the listener just failed to come up. The
 		// status panel shows the concrete error.

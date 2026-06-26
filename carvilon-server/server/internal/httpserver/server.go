@@ -497,6 +497,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/mqtt/acl", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTACLAdd)))
 	s.mux.Handle("POST /a/mqtt/acl/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTACLDelete)))
 	s.mux.Handle("GET /a/mqtt/monitor", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTMonitor)))
+	s.mux.Handle("GET /a/mqtt/ws-info", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTWSInfo)))
 
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
 	// auth happens at the /webviewer/* tree; here we just CRUD

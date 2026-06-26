@@ -881,6 +881,12 @@ func loadMQTTSettings(ctx context.Context, pc *platformconfig.Service, cfg confi
 		TLSPort:  port(platformconfig.KeyMQTTTLSPort, 8883),
 		CertFile: get(platformconfig.KeyMQTTCertFile),
 		KeyFile:  get(platformconfig.KeyMQTTKeyFile),
+		// WebSocket listener for the browser console: LAN-bound (uses the
+		// same LANHost). wss when the admin surface is served over TLS
+		// (not DevMode), so an HTTPS admin page has no mixed-content block.
+		WSEnabled: get(platformconfig.KeyMQTTWSEnabled) == "1",
+		WSPort:    port(platformconfig.KeyMQTTWSPort, 8083),
+		WSUseTLS:  !cfg.DevMode,
 	}
 }
 

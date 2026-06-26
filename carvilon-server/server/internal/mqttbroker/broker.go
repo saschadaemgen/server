@@ -47,6 +47,16 @@ type Settings struct {
 	// self-signed cert is generated once under the state dir.
 	CertFile string
 	KeyFile  string
+
+	// WSEnabled adds a WebSocket listener so a browser MQTT client (the
+	// in-editor console) can connect - a browser cannot speak raw TCP.
+	// It is LAN-bound exactly like the plaintext listener and runs the
+	// same auth+ACL hooks. WSUseTLS makes it wss (required when the admin
+	// page is served over HTTPS, to avoid mixed content), reusing the
+	// broker's resolved cert; otherwise plain ws on the LAN.
+	WSEnabled bool
+	WSPort    int // WebSocket port, default 8083
+	WSUseTLS  bool
 }
 
 // Status is a read snapshot for the admin UI.
@@ -55,6 +65,8 @@ type Status struct {
 	Running    bool
 	TCPAddr    string
 	TLSAddr    string
+	WSAddr     string
+	WSSecure   bool
 	CertSource string
 	Error      string
 }
@@ -73,6 +85,8 @@ type Manager struct {
 	authz    *authzHook
 	tcpAddr  string
 	tlsAddr  string
+	wsAddr   string
+	wsSecure bool
 	certSrc  string
 	lastErr  string
 }
@@ -108,6 +122,8 @@ func (m *Manager) Status() Status {
 		Running:    m.running,
 		TCPAddr:    m.tcpAddr,
 		TLSAddr:    m.tlsAddr,
+		WSAddr:     m.wsAddr,
+		WSSecure:   m.wsSecure,
 		CertSource: m.certSrc,
 		Error:      m.lastErr,
 	}
@@ -164,6 +180,8 @@ func (m *Manager) stopLocked() {
 	m.running = false
 	m.tcpAddr = ""
 	m.tlsAddr = ""
+	m.wsAddr = ""
+	m.wsSecure = false
 	m.certSrc = ""
 }
 
@@ -232,6 +250,23 @@ func (m *Manager) startLocked(ctx context.Context) error {
 		return m.fail(fmt.Errorf("bind tls %s: %w", tlsAddr, err))
 	}
 
+	// --- WebSocket listener (browser MQTT console): LAN-only, same auth
+	// + ACL hooks. wss reuses the broker cert when the admin page is
+	// HTTPS; plain ws otherwise. Its actual bind happens inside Serve
+	// (http.Server), so a port conflict surfaces in the log, not here.
+	var wsAddr string
+	if m.settings.WSEnabled {
+		wsAddr = net.JoinHostPort(lanHost, strconv.Itoa(m.settings.WSPort))
+		wsCfg := listeners.Config{Type: "ws", ID: "ws", Address: wsAddr}
+		if m.settings.WSUseTLS {
+			wsCfg.TLSConfig = tlsCfg
+		}
+		if err := srv.AddListener(listeners.NewWebsocket(wsCfg)); err != nil {
+			_ = srv.Close()
+			return m.fail(fmt.Errorf("bind websocket %s: %w", wsAddr, err))
+		}
+	}
+
 	if err := srv.Serve(); err != nil {
 		_ = srv.Close()
 		return m.fail(fmt.Errorf("serve: %w", err))
@@ -242,8 +277,10 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	m.running = true
 	m.tcpAddr = tcpAddr
 	m.tlsAddr = tlsAddr
+	m.wsAddr = wsAddr
+	m.wsSecure = m.settings.WSEnabled && m.settings.WSUseTLS
 	m.certSrc = certSrc
-	m.log.Info("mqtt broker started", "plaintext", tcpAddr, "tls", tlsAddr, "cert", certSrc)
+	m.log.Info("mqtt broker started", "plaintext", tcpAddr, "tls", tlsAddr, "ws", wsAddr, "cert", certSrc)
 	return nil
 }
 
