@@ -152,6 +152,14 @@ the wire protocol, session handling, and TLS listeners are mochi's.
               github.com/mochi-mqtt/server/v2/listeners
               github.com/mochi-mqtt/server/v2/packets
 - Transitive: github.com/rs/xid (MIT, (c) 2015 Olivier Poitrey)
+              github.com/gorilla/websocket (BSD-2-Clause; linked once
+              the broker's WebSocket listener is enabled for the
+              browser MQTT console)
+
+The in-editor MQTT console's client (server/web/designer/vendor/
+mqtt-ws.js) is a first-party minimal MQTT-3.1.1-over-WebSocket
+implementation - no third-party JS library is vendored or loaded for
+it (local-first, no CDN).
 
 ## eclipse/paho.mqtt.golang (test only)
 
