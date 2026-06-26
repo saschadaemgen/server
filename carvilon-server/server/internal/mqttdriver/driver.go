@@ -42,6 +42,21 @@ type Driver struct {
 	subID  map[string]int  // subscribed topic -> inline subscription id
 	nextID int
 	closed bool
+
+	// pub decouples Write from the actual inline publish. Write runs
+	// inside the engine tick (under the engine lock); the inline
+	// publish delivers synchronously to inline subscribers, so a
+	// publish that loops back to a same-topic source would re-enter
+	// EnqueueInput and deadlock the non-reentrant tick. A single worker
+	// drains pub and publishes off the tick goroutine, in order, so
+	// Write only ever stages - exactly what the Sink contract requires.
+	pub chan pubMsg
+}
+
+type pubMsg struct {
+	topic   string
+	payload []byte
+	retain  bool
 }
 
 // NewDriver builds a driver for the given channels (each a topic +
@@ -63,7 +78,19 @@ func NewDriver(client mqttbroker.InlineClient, channels []engine.Channel, log *s
 	for _, c := range channels {
 		d.kinds[c.Address] = c.Kind
 	}
+	d.pub = make(chan pubMsg, 256)
+	go d.publishLoop()
 	return d
+}
+
+// publishLoop drains the outbound queue and publishes off the engine
+// tick goroutine, preserving order. It exits when Close closes pub.
+func (d *Driver) publishLoop() {
+	for m := range d.pub {
+		if err := d.client.Publish(m.topic, m.payload, m.retain, 0); err != nil {
+			d.log.Debug("mqtt publish failed", "topic", m.topic, "err", err)
+		}
+	}
 }
 
 // Channels lists the topics this run binds, as engine channels.
@@ -129,18 +156,28 @@ func (d *Driver) Subscribe(addr string, cb func(engine.Value)) error {
 	return nil
 }
 
-// Write publishes an engine output value to a topic, formatted per the
-// channel's Kind, honouring the sink's retain option at QoS 0. Called
-// from inside a tick (single-threaded), so it must not block; the
-// inline publish hands off to the broker and returns.
+// Write stages an engine output value for publishing to a topic,
+// formatted per the channel's Kind, honouring the sink's retain option
+// at QoS 0. Called from inside a tick (single-threaded, under the
+// engine lock), so it only enqueues and returns - the worker performs
+// the actual inline publish off the tick goroutine. On a full queue it
+// drops with a debug log rather than block the tick.
 func (d *Driver) Write(addr string, v engine.Value) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if _, ok := d.kinds[addr]; !ok {
 		return fmt.Errorf("mqttdriver: unknown channel %q", addr)
 	}
-	d.mu.Lock()
-	retain := d.retain[addr]
-	d.mu.Unlock()
-	return d.client.Publish(addr, formatPayload(v), retain, 0)
+	if d.closed {
+		return nil // run tearing down; drop
+	}
+	msg := pubMsg{topic: addr, payload: formatPayload(v), retain: d.retain[addr]}
+	select {
+	case d.pub <- msg:
+	default:
+		d.log.Debug("mqtt publish queue full; dropping", "topic", addr)
+	}
+	return nil
 }
 
 // Close unsubscribes every source topic. Idempotent.
@@ -156,6 +193,7 @@ func (d *Driver) Close() error {
 		subs[addr] = id
 	}
 	d.subID = map[string]int{}
+	close(d.pub) // stop the publish worker
 	d.mu.Unlock()
 	for addr, id := range subs {
 		if err := d.client.Unsubscribe(addr, id); err != nil {

@@ -51,6 +51,55 @@ func startBroker(t *testing.T) mqttbroker.InlineClient {
 	return cli
 }
 
+// TestMQTTDriver_SameTopicNoDeadlock guards the re-entrancy hazard:
+// inline delivery is synchronous, so a sink Write that loops back to a
+// same-topic source must NOT re-enter the engine inside the tick (the
+// driver publishes off the tick goroutine). A graph that binds one
+// topic to both a source and a sink, wired together, must keep ticking.
+func TestMQTTDriver_SameTopicNoDeadlock(t *testing.T) {
+	cli := startBroker(t)
+	const topic = "loop/x"
+
+	g := engine.Graph{
+		Schema: 1,
+		Nodes: []engine.GraphNode{
+			{ID: "in", Type: engine.TypeSourceChannelFloat, Params: map[string]any{"channel": "mqtt:" + topic}},
+			{ID: "out", Type: engine.TypeSinkChannelFloat, Params: map[string]any{"channel": "mqtt:" + topic}},
+		},
+		Edges: []engine.GraphEdge{{From: "in:out", To: "out:in"}},
+	}
+	eng, err := engine.Build(g, engine.DefaultRegistry(), 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	drv := NewDriver(cli, []engine.Channel{{Address: topic, Label: topic, Kind: engine.Float}}, nil)
+	t.Cleanup(func() { drv.Close() })
+	reg := engine.NewDriverRegistry()
+	reg.RegisterSource(engine.PrefixMQTT, drv)
+	reg.RegisterSink(engine.PrefixMQTT, drv)
+	table := engine.BindingTable{"mqtt:" + topic: {Prefix: engine.PrefixMQTT, Addr: topic}}
+	if err := engine.BindGraph(eng, g, table, nil, reg); err != nil {
+		t.Fatalf("BindGraph: %v", err)
+	}
+
+	// Inject a changing value, then tick repeatedly. If Write re-entered
+	// the engine synchronously this would deadlock and time out.
+	_ = cli.Publish(topic, []byte("1.0"), false, 0)
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			eng.Tick()
+			time.Sleep(2 * time.Millisecond)
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("engine deadlocked ticking a same-topic mqtt loop")
+	}
+}
+
 func typesFor(kind engine.Kind) (src, sink string) {
 	switch kind {
 	case engine.Bool:
