@@ -30,6 +30,8 @@ import (
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/featuregate"
+	"carvilon.local/server/internal/mqttbroker"
+	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/secrets"
@@ -85,6 +87,8 @@ type testEnv struct {
 	history     *doorhistory.SQLStore
 	audit       *loginaudit.Service
 	userStore   *fakeUserStore
+	mqttStore   *mqttstore.Store
+	mqttBroker  *mqttbroker.Manager
 	d           *db.DB
 	clock       *testClock
 }
@@ -235,6 +239,13 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 
 	historyStore := doorhistory.NewSQLStore(d.DB)
 	callsSvc := doorbellcalls.NewWithClock(d.DB, clock.Now)
+
+	// MQTT broker, wired but DISABLED so no listener binds in tests.
+	mqttStore := mqttstore.New(d.DB, func(c context.Context) (string, error) {
+		return platformCfg.GetSecret(c, platformconfig.KeyViewerPwPepper)
+	})
+	mqttBroker := mqttbroker.New(mqttStore, mqttbroker.NewConsole(50), quietLogger(),
+		t.TempDir(), mqttbroker.Settings{Enabled: false, TCPPort: 1883, TLSPort: 8883})
 	hubBus := eventbus.New()
 	hub := doorbellhub.NewWithOptions(viewerMgr, historyStore, quietLogger(), doorbellhub.Options{
 		Bus:   hubBus,
@@ -269,6 +280,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		DoorbellCalls:   callsSvc,
 		EventsHeartbeat: 50 * time.Millisecond,
 		Features:        featuregate.NewStore(d.DB),
+		MQTT:            mqttBroker,
+		MQTTStore:       mqttStore,
 		Log:             quietLogger(),
 	})
 	if err != nil {
@@ -299,9 +312,11 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		platformCfg: platformCfg, viewerMgr: viewerMgr,
 		hub:       hub,
 		history:   historyStore,
-		audit:     auditSvc,
-		userStore: userStore,
-		d:         d, clock: clock,
+		audit:      auditSvc,
+		userStore:  userStore,
+		mqttStore:  mqttStore,
+		mqttBroker: mqttBroker,
+		d:          d, clock: clock,
 	}
 }
 

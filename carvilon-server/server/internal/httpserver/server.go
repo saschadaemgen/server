@@ -487,6 +487,16 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/designer/run/stop", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunStop)))
 	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
 
+	// MQTT broker admin (step 1): device credentials + ACL rules +
+	// broker on/off/ports/TLS, plus the live console SSE feed.
+	s.mux.Handle("GET /a/mqtt", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTGet)))
+	s.mux.Handle("POST /a/mqtt/broker", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTBrokerPost)))
+	s.mux.Handle("POST /a/mqtt/devices", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTDeviceCreate)))
+	s.mux.Handle("POST /a/mqtt/devices/{username}/set-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTDeviceSetPassword)))
+	s.mux.Handle("POST /a/mqtt/devices/{username}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTDeviceDelete)))
+	s.mux.Handle("POST /a/mqtt/acl", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTACLAdd)))
+	s.mux.Handle("POST /a/mqtt/acl/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTACLDelete)))
+
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
 	// auth happens at the /webviewer/* tree; here we just CRUD
 	// the viewers-row + the one-shot token reveal.

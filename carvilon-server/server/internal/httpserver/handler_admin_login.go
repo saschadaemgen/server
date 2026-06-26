@@ -190,6 +190,8 @@ func navSlotFor(name string) string {
 		return "turn"
 	case "designer":
 		return "designer"
+	case "mqtt":
+		return "mqtt"
 	case "settings":
 		return "settings"
 	case "viewer-detail":
@@ -234,6 +236,8 @@ func extractUser(data any) adminUser {
 	case turnPageData:
 		return v.User
 	case designerData:
+		return v.User
+	case mqttPageData:
 		return v.User
 	case placeholderData:
 		return v.User

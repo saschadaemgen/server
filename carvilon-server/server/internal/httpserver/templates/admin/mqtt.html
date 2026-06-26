@@ -1,0 +1,206 @@
+{{define "title"}}MQTT-Broker{{end}}
+
+{{define "head-extra"}}
+<style>
+  /* MQTT admin (step 1). Reuses the Saison-20 admin tokens
+     (admin-tokens.css / admin-components.css): surfaces, spacing,
+     type, accent. Layout-only rules live here. */
+  .mq-wrap { max-width:980px; margin:0 auto; display:flex; flex-direction:column; gap:var(--space-8); }
+  .mq-head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-6); flex-wrap:wrap; padding-bottom:var(--space-7); border-bottom:1px solid var(--divider); }
+  .mq-head h1 { margin:0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); }
+  .mq-head .mq-ico { width:34px; height:34px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
+  .mq-pill { display:inline-flex; align-items:center; gap:var(--space-4); padding:5px 12px; border-radius:999px; font:var(--type-label); }
+  .mq-pill.on { background:color-mix(in srgb, #2ecc71 16%, transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
+  .mq-pill.off { background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .mq-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+  .mq-card { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-8); display:flex; flex-direction:column; gap:var(--space-6); }
+  .mq-card h2 { margin:0; font:var(--type-subheading); color:var(--text-primary); }
+  .mq-card .mq-sub { font:var(--type-data); color:var(--text-tertiary); margin-top:-2px; }
+
+  .mq-status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-5); }
+  .mq-stat { background:var(--surface-cell); border-radius:var(--radius-md); padding:var(--space-5) var(--space-6); box-shadow:var(--elev-1); }
+  .mq-stat .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .mq-stat .v { font:var(--type-value); color:var(--text-primary); font-family:var(--font-mono); margin-top:3px; word-break:break-all; }
+  .mq-err { color:#ff8a8a; }
+
+  .mq-form { display:flex; flex-direction:column; gap:var(--space-5); }
+  .mq-row { display:flex; gap:var(--space-5); flex-wrap:wrap; }
+  .mq-field { display:flex; flex-direction:column; gap:4px; flex:1 1 180px; min-width:0; }
+  .mq-field label { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .mq-field input, .mq-field select { background:var(--field-bg); border:none; box-shadow:var(--well); border-radius:var(--radius-sm); padding:9px 11px; color:var(--text-primary); font:var(--type-value); }
+  .mq-field input:focus, .mq-field select:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .mq-check { display:flex; align-items:center; gap:var(--space-5); }
+
+  .mq-btn { align-self:flex-start; padding:9px 16px; border-radius:var(--radius-md); border:none; cursor:pointer; font:var(--type-label); background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:#06121f; box-shadow:var(--elev-1); }
+  .mq-btn:hover { filter:brightness(1.07); }
+  .mq-btn.ghost { background:var(--surface-raised); color:var(--text-primary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .mq-btn.danger { background:var(--surface-raised); color:#ff8a8a; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 40%,transparent); }
+  .mq-btn.sm { padding:6px 11px; font:var(--type-data); }
+
+  .mq-dev { background:var(--surface-cell); border-radius:var(--radius-md); box-shadow:var(--elev-1); padding:var(--space-6); display:flex; flex-direction:column; gap:var(--space-5); }
+  .mq-dev-top { display:flex; align-items:center; justify-content:space-between; gap:var(--space-5); flex-wrap:wrap; }
+  .mq-dev-name { font:var(--type-label); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-4); }
+  .mq-dev-name .mono { font-family:var(--font-mono); }
+  .mq-dev-meta { font:var(--type-data); color:var(--text-tertiary); display:flex; gap:var(--space-5); flex-wrap:wrap; }
+  .mq-dev-actions { display:flex; gap:var(--space-4); align-items:center; flex-wrap:wrap; }
+
+  .mq-acl { display:flex; flex-direction:column; gap:var(--space-4); border-top:1px solid var(--divider); padding-top:var(--space-5); }
+  .mq-acl-row { display:flex; align-items:center; gap:var(--space-5); flex-wrap:wrap; font:var(--type-data); }
+  .mq-tag { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); padding:2px 8px; border-radius:999px; }
+  .mq-tag.allow { background:color-mix(in srgb,#2ecc71 16%,transparent); color:#7be0a4; }
+  .mq-tag.deny { background:color-mix(in srgb,#ff6b6b 16%,transparent); color:#ff9a9a; }
+  .mq-tag.act { background:var(--surface-raised); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .mq-acl-row .filt { font-family:var(--font-mono); color:var(--text-primary); }
+  .mq-acl-default { font:var(--type-data); color:var(--text-tertiary); }
+  .mq-acl-default .mono { font-family:var(--font-mono); color:var(--text-secondary); }
+  .mq-aclform { display:flex; gap:var(--space-4); flex-wrap:wrap; align-items:flex-end; }
+  .mq-inline { display:inline; }
+  .mq-flash { padding:10px 14px; border-radius:var(--radius-md); font:var(--type-label); }
+  .mq-flash.green { background:color-mix(in srgb,#2ecc71 14%,transparent); color:#9be8b8; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 40%,transparent); }
+  .mq-flash.red { background:color-mix(in srgb,#ff6b6b 14%,transparent); color:#ffb0b0; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 40%,transparent); }
+  .mq-empty { font:var(--type-data); color:var(--text-tertiary); padding:var(--space-5) 0; }
+  @media (max-width:680px){ .mq-status-grid{ grid-template-columns:1fr; } }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="mq-wrap">
+  <div class="mq-head">
+    <h1>
+      <span class="mq-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3" cy="21" r="1.4" fill="currentColor" stroke="none"/></svg></span>
+      MQTT-Broker
+    </h1>
+    {{if .Page.Status.Running}}
+      <span class="mq-pill on"><span class="mq-dot"></span>aktiv</span>
+    {{else if .Page.Status.Enabled}}
+      <span class="mq-pill off"><span class="mq-dot"></span>aktiviert, nicht gestartet</span>
+    {{else}}
+      <span class="mq-pill off"><span class="mq-dot"></span>deaktiviert</span>
+    {{end}}
+  </div>
+
+  {{if .Page.Flash}}<div class="mq-flash {{.Page.FlashType}}">{{.Page.Flash}}</div>{{end}}
+
+  {{if not .Page.Available}}
+    <div class="mq-card"><div class="mq-empty">Das MQTT-Subsystem ist in diesem Build nicht eingebunden.</div></div>
+  {{else}}
+
+  <!-- Status -->
+  <div class="mq-card">
+    <h2>Status</h2>
+    <div class="mq-status-grid">
+      <div class="mq-stat"><div class="k">Klartext (LAN)</div><div class="v">{{if .Page.Status.TCPAddr}}{{.Page.Status.TCPAddr}}{{else}}—{{end}}</div></div>
+      <div class="mq-stat"><div class="k">TLS</div><div class="v">{{if .Page.Status.TLSAddr}}{{.Page.Status.TLSAddr}}{{else}}—{{end}}</div></div>
+      <div class="mq-stat"><div class="k">Zertifikat</div><div class="v">{{if .Page.Status.CertSource}}{{.Page.Status.CertSource}}{{else}}—{{end}}</div></div>
+      <div class="mq-stat"><div class="k">Fehler</div><div class="v {{if .Page.Status.Error}}mq-err{{end}}">{{if .Page.Status.Error}}{{.Page.Status.Error}}{{else}}keiner{{end}}</div></div>
+    </div>
+  </div>
+
+  <!-- Broker config -->
+  <div class="mq-card">
+    <h2>Broker-Einstellungen</h2>
+    <div class="mq-sub">Klartext bindet nur ans LAN-Interface (nie ans Internet); TLS ist authentifiziert und verschlüsselt. Ohne Zertifikatspfad wird einmalig ein selbstsigniertes erzeugt.</div>
+    <form class="mq-form" method="post" action="/a/mqtt/broker">
+      <label class="mq-check">
+        <input type="checkbox" name="enabled" {{if .Page.Settings.Enabled}}checked{{end}}>
+        <span>Broker aktiv</span>
+      </label>
+      <div class="mq-row">
+        <div class="mq-field"><label>Klartext-Port (LAN)</label><input type="number" name="tcp_port" min="1" max="65535" value="{{.Page.Settings.TCPPort}}"></div>
+        <div class="mq-field"><label>TLS-Port</label><input type="number" name="tls_port" min="1" max="65535" value="{{.Page.Settings.TLSPort}}"></div>
+      </div>
+      <div class="mq-row">
+        <div class="mq-field"><label>TLS-Zertifikat (PEM, optional)</label><input type="text" name="cert_file" value="{{.Page.Settings.CertFile}}" placeholder="leer = selbstsigniert"></div>
+        <div class="mq-field"><label>TLS-Key (PEM, optional)</label><input type="text" name="key_file" value="{{.Page.Settings.KeyFile}}" placeholder="leer = selbstsigniert"></div>
+      </div>
+      <button class="mq-btn" type="submit">Speichern &amp; anwenden</button>
+    </form>
+  </div>
+
+  <!-- New device -->
+  <div class="mq-card">
+    <h2>Neues Gerät</h2>
+    <div class="mq-sub">Das Passwort wird beim Speichern Argon2id-gehasht und danach nie wieder angezeigt. Notiere es jetzt.</div>
+    <form class="mq-form" method="post" action="/a/mqtt/devices">
+      <div class="mq-row">
+        <div class="mq-field"><label>Benutzername</label><input type="text" name="username" required autocomplete="off" placeholder="z.B. flur-eg" pattern="[A-Za-z0-9._-]+"></div>
+        <div class="mq-field"><label>Passwort (min. 8)</label><input type="text" name="password" required autocomplete="off" minlength="8"></div>
+        <div class="mq-field"><label>Bezeichnung (optional)</label><input type="text" name="label" autocomplete="off" placeholder="Flur-Taster EG"></div>
+      </div>
+      <button class="mq-btn" type="submit">Gerät anlegen</button>
+    </form>
+  </div>
+
+  <!-- Device list -->
+  <div class="mq-card">
+    <h2>Geräte &amp; ACL</h2>
+    {{if not .Page.Devices}}
+      <div class="mq-empty">Noch keine Geräte angelegt.</div>
+    {{end}}
+    {{range .Page.Devices}}
+      <div class="mq-dev">
+        <div class="mq-dev-top">
+          <div>
+            <div class="mq-dev-name"><span class="mono">{{.Username}}</span>{{if .Label}}<span class="mq-tag act">{{.Label}}</span>{{end}}</div>
+            <div class="mq-dev-meta">
+              <span>{{len .Rules}} ACL-Regel(n)</span>
+              <span>{{if .LastConnectAt}}zuletzt verbunden{{else}}noch nie verbunden{{end}}</span>
+            </div>
+          </div>
+          <div class="mq-dev-actions">
+            <form class="mq-inline" method="post" action="/a/mqtt/devices/{{.Username}}/set-password" onsubmit="return mqPw(this);">
+              <input type="hidden" name="password" value="">
+              <button class="mq-btn ghost sm" type="submit">Passwort setzen</button>
+            </form>
+            <form class="mq-inline" method="post" action="/a/mqtt/devices/{{.Username}}/delete" onsubmit="return confirm('Gerät {{.Username}} wirklich löschen? Alle ACL-Regeln werden mitgelöscht.');">
+              <button class="mq-btn danger sm" type="submit">Löschen</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="mq-acl">
+          <div class="mq-acl-default">Standard (ohne Regel): eigener Teilbaum <span class="mono">{{.DefaultSubtree}}</span> erlaubt, alles andere verboten.</div>
+          {{range .Rules}}
+            <div class="mq-acl-row">
+              {{if .Allow}}<span class="mq-tag allow">erlaubt</span>{{else}}<span class="mq-tag deny">verboten</span>{{end}}
+              <span class="mq-tag act">{{.Action}}</span>
+              <span class="filt">{{.TopicFilter}}</span>
+              <form class="mq-inline" method="post" action="/a/mqtt/acl/{{.ID}}/delete">
+                <button class="mq-btn ghost sm" type="submit" title="Regel löschen">×</button>
+              </form>
+            </div>
+          {{end}}
+          <form class="mq-aclform" method="post" action="/a/mqtt/acl">
+            <input type="hidden" name="username" value="{{.Username}}">
+            <div class="mq-field" style="flex:0 0 130px"><label>Aktion</label>
+              <select name="action"><option value="both">beide</option><option value="publish">publish</option><option value="subscribe">subscribe</option></select>
+            </div>
+            <div class="mq-field" style="flex:0 0 130px"><label>Regel</label>
+              <select name="allow"><option value="allow">erlauben</option><option value="deny">verbieten</option></select>
+            </div>
+            <div class="mq-field" style="flex:1 1 200px"><label>Topic-Filter</label><input type="text" name="topic_filter" placeholder="carvilon/+/sensor/#" required></div>
+            <button class="mq-btn ghost sm" type="submit">Regel hinzufügen</button>
+          </form>
+        </div>
+      </div>
+    {{end}}
+  </div>
+
+  {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+  // Password reset: prompt once, fill the hidden field, submit. The
+  // value is never pre-rendered into the page.
+  function mqPw(form){
+    var p = window.prompt('Neues Passwort (mindestens 8 Zeichen):');
+    if(p === null) return false;
+    if(p.length < 8){ alert('Passwort zu kurz.'); return false; }
+    form.password.value = p;
+    return true;
+  }
+</script>
+{{end}}

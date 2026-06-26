@@ -67,6 +67,7 @@ var adminLibraryFor = map[string][]string{
 	"android-viewers": {},
 	"viewer-detail":   {},
 	"designer":        {},
+	"mqtt":            {},
 }
 
 // newDesignPages are the admin pages rebuilt on the Saison-20 design.
@@ -78,6 +79,7 @@ var adminLibraryFor = map[string][]string{
 var newDesignPages = map[string]bool{
 	"viewer-detail": true,
 	"designer":      true,
+	"mqtt":          true,
 }
 
 func newAdminTemplates() (*adminTemplates, error) {
