@@ -1,0 +1,213 @@
+{{define "title"}}Telegram-Bot{{end}}
+
+{{define "head-extra"}}
+<style>
+  /* Telegram admin. Reuses the Saison-20 admin tokens
+     (admin-tokens.css / admin-components.css) and mirrors the MQTT
+     page's layout vocabulary; layout-only rules live here. */
+  .tg-wrap { max-width:980px; margin:0 auto; display:flex; flex-direction:column; gap:var(--space-8); }
+  .tg-head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-6); flex-wrap:wrap; padding-bottom:var(--space-7); border-bottom:1px solid var(--divider); }
+  .tg-head h1 { margin:0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); }
+  .tg-head .tg-ico { width:34px; height:34px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
+  .tg-pill { display:inline-flex; align-items:center; gap:var(--space-4); padding:5px 12px; border-radius:999px; font:var(--type-label); }
+  .tg-pill.on { background:color-mix(in srgb, #2ecc71 16%, transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
+  .tg-pill.off { background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .tg-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+  .tg-card { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-8); display:flex; flex-direction:column; gap:var(--space-6); }
+  .tg-card h2 { margin:0; font:var(--type-subheading); color:var(--text-primary); }
+  .tg-card .tg-sub { font:var(--type-data); color:var(--text-tertiary); margin-top:-2px; }
+
+  .tg-status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-5); }
+  .tg-stat { background:var(--surface-cell); border-radius:var(--radius-md); padding:var(--space-5) var(--space-6); box-shadow:var(--elev-1); }
+  .tg-stat .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .tg-stat .v { font:var(--type-value); color:var(--text-primary); font-family:var(--font-mono); margin-top:3px; word-break:break-all; }
+  .tg-err { color:#ff8a8a; }
+
+  .tg-form { display:flex; flex-direction:column; gap:var(--space-5); }
+  .tg-row { display:flex; gap:var(--space-5); flex-wrap:wrap; }
+  .tg-field { display:flex; flex-direction:column; gap:4px; flex:1 1 180px; min-width:0; }
+  .tg-field label { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .tg-field input, .tg-field select { background:var(--field-bg); border:none; box-shadow:var(--well); border-radius:var(--radius-sm); padding:9px 11px; color:var(--text-primary); font:var(--type-value); }
+  .tg-field input:focus, .tg-field select:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .tg-check { display:flex; align-items:center; gap:var(--space-5); }
+
+  .tg-btn { align-self:flex-start; padding:9px 16px; border-radius:var(--radius-md); border:none; cursor:pointer; font:var(--type-label); background:linear-gradient(180deg,var(--accent-bright),var(--accent)); color:#06121f; box-shadow:var(--elev-1); }
+  .tg-btn:hover { filter:brightness(1.07); }
+  .tg-btn.ghost { background:var(--surface-raised); color:var(--text-primary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .tg-btn.danger { background:var(--surface-raised); color:#ff8a8a; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 40%,transparent); }
+  .tg-btn.sm { padding:6px 11px; font:var(--type-data); }
+
+  .tg-chat { background:var(--surface-cell); border-radius:var(--radius-md); box-shadow:var(--elev-1); padding:var(--space-5) var(--space-6); display:flex; align-items:center; justify-content:space-between; gap:var(--space-5); flex-wrap:wrap; }
+  .tg-chat-name { font:var(--type-label); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-4); flex-wrap:wrap; }
+  .tg-chat-name .mono { font-family:var(--font-mono); }
+  .tg-tag { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); padding:2px 8px; border-radius:999px; background:var(--surface-raised); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .tg-tag.wait { background:color-mix(in srgb,#f2a65a 16%,transparent); color:#f2c08a; box-shadow:inset 0 0 0 1px color-mix(in srgb,#f2a65a 40%,transparent); }
+  .tg-inline { display:inline; }
+  .tg-approve { display:flex; gap:var(--space-4); align-items:center; flex-wrap:wrap; }
+  .tg-approve input { background:var(--field-bg); border:none; box-shadow:var(--well); border-radius:var(--radius-sm); padding:6px 10px; color:var(--text-primary); font:var(--type-data); }
+  .tg-flash { padding:10px 14px; border-radius:var(--radius-md); font:var(--type-label); }
+  .tg-flash.green { background:color-mix(in srgb,#2ecc71 14%,transparent); color:#9be8b8; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 40%,transparent); }
+  .tg-flash.red { background:color-mix(in srgb,#ff6b6b 14%,transparent); color:#ffb0b0; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 40%,transparent); }
+  .tg-empty { font:var(--type-data); color:var(--text-tertiary); padding:var(--space-5) 0; }
+  @media (max-width:680px){ .tg-status-grid{ grid-template-columns:1fr; } }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="tg-wrap">
+  <div class="tg-head">
+    <h1>
+      <span class="tg-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></span>
+      Telegram-Bot
+    </h1>
+    {{if .Page.Status.Running}}
+      <span class="tg-pill on"><span class="tg-dot"></span>aktiv{{if .Page.Status.BotUsername}} · @{{.Page.Status.BotUsername}}{{end}}</span>
+    {{else if .Page.Status.Enabled}}
+      <span class="tg-pill off"><span class="tg-dot"></span>aktiviert, nicht gestartet</span>
+    {{else}}
+      <span class="tg-pill off"><span class="tg-dot"></span>deaktiviert</span>
+    {{end}}
+  </div>
+
+  {{if .Page.Flash}}<div class="tg-flash {{.Page.FlashType}}">{{.Page.Flash}}</div>{{end}}
+
+  {{if not .Page.Available}}
+    <div class="tg-card"><div class="tg-empty">Das Telegram-Subsystem ist in diesem Build nicht eingebunden.</div></div>
+  {{else}}
+
+  <!-- Status -->
+  <div class="tg-card">
+    <h2>Status</h2>
+    <div class="tg-status-grid">
+      <div class="tg-stat"><div class="k">Bot</div><div class="v">{{if .Page.Status.BotUsername}}@{{.Page.Status.BotUsername}}{{else}}—{{end}}</div></div>
+      <div class="tg-stat"><div class="k">Fehler</div><div class="v {{if .Page.Status.Error}}tg-err{{end}}">{{if .Page.Status.Error}}{{.Page.Status.Error}}{{else}}keiner{{end}}</div></div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="tg-card">
+    <h2>Bot-Einstellungen</h2>
+    <div class="tg-sub">Der Bot verbindet sich ausschließlich zu api.telegram.org (Long-Polling, kein eingehender Port). Der Token wird AES-256-GCM-verschlüsselt gespeichert und nie wieder angezeigt; zum Austausch hier neu eintragen.</div>
+    <form class="tg-form" method="post" action="/a/telegram/settings">
+      <label class="tg-check">
+        <input type="checkbox" name="enabled" {{if .Page.Enabled}}checked{{end}}>
+        <span>Bot aktiv</span>
+      </label>
+      <div class="tg-row">
+        <div class="tg-field"><label>Bot-Token (BotFather)</label>
+          <input type="password" name="token" value="" autocomplete="off"
+                 placeholder="{{if .Page.HasToken}}* * * (gesetzt) – leer lassen zum Behalten{{else}}noch nicht gesetzt{{end}}">
+        </div>
+      </div>
+      <button class="tg-btn" type="submit">Speichern &amp; anwenden</button>
+    </form>
+  </div>
+
+  <!-- Pending chats -->
+  <div class="tg-card" id="tg-pending" data-waiting-count="{{len .Page.Waiting}}">
+    <h2>Wartende Chats (<span data-waiting>{{len .Page.Waiting}}</span>)</h2>
+    <div class="tg-sub">Schreibe dem Bot eine Nachricht – der Chat erscheint hier zur Freigabe. Eine Freigabe erlaubt Empfang UND Befehle (bei Gruppen für alle Mitglieder).</div>
+    {{if not .Page.Waiting}}
+      <div class="tg-empty">Keine wartenden Chats.</div>
+    {{end}}
+    {{range .Page.Waiting}}
+      <div class="tg-chat">
+        <div class="tg-chat-name">
+          <span class="mono">{{.ChatID}}</span>
+          {{if .Username}}<span class="tg-tag">@{{.Username}}</span>{{end}}
+          {{if .FirstName}}<span class="tg-tag">{{.FirstName}}</span>{{end}}
+          <span class="tg-tag wait">wartet</span>
+        </div>
+        <div class="tg-approve">
+          <form class="tg-inline tg-approve" method="post" action="/a/telegram/pending/{{.ChatID}}/approve">
+            <input type="text" name="label" placeholder="Bezeichnung (z.B. Sascha)" value="{{if .FirstName}}{{.FirstName}}{{else}}{{.Username}}{{end}}">
+            <button class="tg-btn sm" type="submit">Freigeben</button>
+          </form>
+          <form class="tg-inline" method="post" action="/a/telegram/pending/{{.ChatID}}/reject">
+            <button class="tg-btn danger sm" type="submit">Ablehnen</button>
+          </form>
+        </div>
+      </div>
+    {{end}}
+    {{if .Page.Rejected}}
+      <div class="tg-sub">Abgelehnt (tauchen nicht wieder als „wartend" auf):
+        {{range .Page.Rejected}}<span class="tg-tag" style="margin-left:6px">{{.ChatID}}{{if .Username}} · @{{.Username}}{{end}}</span>{{end}}
+      </div>
+    {{end}}
+  </div>
+
+  <!-- Allowlist -->
+  <div class="tg-card">
+    <h2>Freigegebene Chats</h2>
+    <div class="tg-sub">Nur diese Chats können Befehle auslösen und Nachrichten empfangen (default-deny). Sie stehen im Editor als Ziel-Chats zur Auswahl.</div>
+    {{if not .Page.Allowed}}
+      <div class="tg-empty">Noch keine Chats freigegeben.</div>
+    {{end}}
+    {{range .Page.Allowed}}
+      <div class="tg-chat">
+        <div class="tg-chat-name">
+          <span class="mono">{{.ChatID}}</span>
+          {{if .Label}}<span class="tg-tag">{{.Label}}</span>{{end}}
+        </div>
+        <form class="tg-inline" method="post" action="/a/telegram/chats/{{.ChatID}}/delete" onsubmit="return confirm('Chat {{.ChatID}} wirklich entfernen? Er kann dann weder Befehle senden noch Nachrichten empfangen.');">
+          <button class="tg-btn danger sm" type="submit">Entfernen</button>
+        </form>
+      </div>
+    {{end}}
+    <form class="tg-form" method="post" action="/a/telegram/chats">
+      <div class="tg-row">
+        <div class="tg-field" style="flex:0 1 220px"><label>Chat-ID (manuell)</label><input type="text" name="chat_id" required autocomplete="off" placeholder="z.B. 123456789" pattern="-?[0-9]+"></div>
+        <div class="tg-field"><label>Bezeichnung</label><input type="text" name="label" autocomplete="off" placeholder="z.B. Sascha"></div>
+      </div>
+      <button class="tg-btn ghost" type="submit">Chat manuell freigeben</button>
+    </form>
+  </div>
+
+  <!-- Test send -->
+  <div class="tg-card">
+    <h2>Test-Senden</h2>
+    <div class="tg-sub">Schickt sofort eine Nachricht an einen freigegebenen Chat – der schnelle Beweis, dass Token und Freigabe stimmen.</div>
+    {{if not .Page.Allowed}}
+      <div class="tg-empty">Erst einen Chat freigeben.</div>
+    {{else}}
+    <form class="tg-form" method="post" action="/a/telegram/test">
+      <div class="tg-row">
+        <div class="tg-field" style="flex:0 1 260px"><label>Chat</label>
+          <select name="chat_id">
+            {{range .Page.Allowed}}<option value="{{.ChatID}}">{{if .Label}}{{.Label}} ({{.ChatID}}){{else}}{{.ChatID}}{{end}}</option>{{end}}
+          </select>
+        </div>
+        <div class="tg-field"><label>Nachricht</label><input type="text" name="text" placeholder="Testnachricht von Carvilon." autocomplete="off"></div>
+      </div>
+      <button class="tg-btn" type="submit">Jetzt senden</button>
+    </form>
+    {{end}}
+  </div>
+
+  {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+  // Auto-refresh: poll the waiting/allowed counters and reload only on
+  // change (ESP-viewers pattern), so a chat that just messaged the bot
+  // appears without a manual reload - and typing in a form is never
+  // interrupted by a needless refresh.
+  (function () {
+    var card = document.getElementById('tg-pending');
+    if (!card) return;
+    var lastWaiting = parseInt(card.getAttribute('data-waiting-count') || '0', 10);
+    setInterval(function () {
+      if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(document.activeElement.tagName) >= 0) return;
+      fetch('/a/telegram.json', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && typeof d.waiting === 'number' && d.waiting !== lastWaiting) location.reload();
+        })
+        .catch(function () {});
+    }, 5000);
+  })();
+</script>
+{{end}}

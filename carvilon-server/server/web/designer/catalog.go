@@ -64,7 +64,7 @@ type SysMetric struct {
 // have empty ports/params until their engine nodes land. The httpserver
 // passes the runtime GPIO flag and serializes this to
 // /a/designer/catalog.json.
-func Catalog(includeGPIO bool, sysMetrics []SysMetric, includeMQTT bool) []CatalogBlock {
+func Catalog(includeGPIO bool, sysMetrics []SysMetric, includeMQTT, includeTelegram bool) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
@@ -74,6 +74,9 @@ func Catalog(includeGPIO bool, sysMetrics []SysMetric, includeMQTT bool) []Catal
 	}
 	if includeMQTT {
 		blocks = append(blocks, mqttBlocks()...)
+	}
+	if includeTelegram {
+		blocks = append(blocks, telegramBlocks()...)
 	}
 	for i := range blocks {
 		b := &blocks[i]
@@ -124,6 +127,24 @@ func mqttBlocks() []CatalogBlock {
 	return []CatalogBlock{
 		{Type: engine.TypeSourceChannelFloat, Category: "mqtt", Title: "MQTT In", Icon: "import", Implemented: true},
 		{Type: engine.TypeSinkChannelFloat, Category: "mqtt", Title: "MQTT Out", Icon: "send", Implemented: true},
+	}
+}
+
+// telegramBlocks are the four Telegram palette blocks, appended only
+// when the bot is running (Catalog's includeTelegram: enabled + token
+// set). All four are typed to the generic engine channel nodes, so the
+// implemented-fill loop derives their ports/params from the registry;
+// the editor adds the chat picker (fed by the allowlist), the command
+// word, and the fixed message, and serializes the channel param as
+// "telegram:<role>:<payload>#<node-id>" - bound to the telegram:
+// driver at run time. The two demo flows ride on the first two blocks:
+// doorbell -> phone (Senden) and phone -> lamp (Befehl).
+func telegramBlocks() []CatalogBlock {
+	return []CatalogBlock{
+		{Type: engine.TypeSinkChannel, Category: "telegram", Title: "Telegram Senden", Icon: "send", Implemented: true},
+		{Type: engine.TypeSourceChannel, Category: "telegram", Title: "Telegram Befehl", Icon: "message-circle", Implemented: true},
+		{Type: engine.TypeSourceChannelText, Category: "telegram", Title: "Telegram Empfangen", Icon: "import", Implemented: true},
+		{Type: engine.TypeSinkChannelText, Category: "telegram", Title: "Telegram Text senden", Icon: "send", Implemented: true},
 	}
 }
 

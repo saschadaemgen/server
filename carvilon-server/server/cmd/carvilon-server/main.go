@@ -47,6 +47,8 @@ import (
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
 	"carvilon.local/server/internal/sysmetrics"
+	"carvilon.local/server/internal/telegrambot"
+	"carvilon.local/server/internal/telegramstore"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
@@ -158,6 +160,18 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		log.Error("mqtt broker start failed (continuing; fix via /a/mqtt)", "err", err)
 	}
 	defer mqttBroker.Stop()
+
+	// Telegram bot: the first, deliberately fenced-in cloud function.
+	// Default-off, outbound only to api.telegram.org, chat allowlist in
+	// its own tables (migration 031), the bot token encrypted in
+	// platform_config. A Telegram failure never touches the engine or
+	// any other subsystem - start is non-fatal, the admin page shows why.
+	telegramStore := telegramstore.New(database.DB)
+	telegramBot := telegrambot.New(telegramStore, log, loadTelegramSettings(ctx, platformCfg, log))
+	if err := telegramBot.Start(ctx); err != nil {
+		log.Error("telegram bot start failed (continuing; fix via /a/telegram)", "err", err)
+	}
+	defer telegramBot.Stop()
 
 	// Saison 18-10: TURN/STUN/ICE telemetry. The writer serialises all
 	// SQLite writes (TURN events forwarded from the cloud over the
@@ -345,6 +359,8 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		Features:        featuregate.NewStore(database.DB),
 		MQTT:            mqttBroker,
 		MQTTStore:       mqttStore,
+		Telegram:        telegramBot,
+		TelegramStore:   telegramStore,
 		Log:             log,
 	})
 	if err != nil {
@@ -887,6 +903,28 @@ func loadMQTTSettings(ctx context.Context, pc *platformconfig.Service, cfg confi
 		WSEnabled: get(platformconfig.KeyMQTTWSEnabled) == "1",
 		WSPort:    port(platformconfig.KeyMQTTWSPort, 8083),
 		WSUseTLS:  !cfg.DevMode,
+	}
+}
+
+// loadTelegramSettings assembles the bot's runtime settings from the
+// admin-tunable platform_config keys: enabled flag (plaintext) and the
+// bot token (encrypted, GetSecret). Safe defaults: bot off, no token.
+// A read error degrades to the default rather than failing the boot -
+// the admin page can correct it live. The API base is never
+// configurable in production (api.telegram.org is the one permitted
+// outbound target); tests construct the Manager directly.
+func loadTelegramSettings(ctx context.Context, pc *platformconfig.Service, log *slog.Logger) telegrambot.Settings {
+	enabled, err := pc.Get(ctx, platformconfig.KeyTelegramEnabled)
+	if err != nil {
+		log.Warn("telegram setting read failed; using default (off)", "key", platformconfig.KeyTelegramEnabled, "err", err)
+	}
+	token, err := pc.GetSecret(ctx, platformconfig.KeyTelegramBotToken)
+	if err != nil {
+		log.Warn("telegram token read failed; bot stays down until re-set", "err", err)
+	}
+	return telegrambot.Settings{
+		Enabled: enabled == "1",
+		Token:   token,
 	}
 }
 

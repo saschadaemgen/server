@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttdriver"
 	"carvilon.local/server/internal/sysmetrics"
+	"carvilon.local/server/internal/telegrambot"
+	"carvilon.local/server/internal/telegramdriver"
 )
 
 // designerRunTick is the wall-clock period the editor's live run advances
@@ -276,6 +279,85 @@ func (s *Server) mqttInline() (mqttbroker.InlineClient, bool) {
 	return s.mqtt.Inline()
 }
 
+// buildTelegramChannels derives the telegram: driver's channel set from
+// the graph's telegram I/O nodes: each such node's "channel" param is
+// "telegram:<role>:<payload>[#slot]" and its node type fixes the value
+// Kind. The address grammar (send:/cmd:/chat:, see telegramdriver) and
+// the role/direction/kind fit are validated here so a bad block fails
+// the run with a clear message instead of a driver surprise.
+func buildTelegramChannels(g engine.Graph) ([]engine.Channel, error) {
+	var out []engine.Channel
+	for _, n := range g.Nodes {
+		if !isChannelNode(n.Type) {
+			continue
+		}
+		ref, _ := n.Params["channel"].(string)
+		pa, ok := engine.ParsePhysical(ref)
+		if !ok || pa.Prefix != engine.PrefixTelegram {
+			continue
+		}
+		kind, ok := channelKindForType(n.Type)
+		if !ok {
+			return nil, fmt.Errorf("node %q: cannot derive value kind from type %q", n.ID, n.Type)
+		}
+		a, err := telegramdriver.ParseAddr(pa.Addr)
+		if err != nil {
+			return nil, fmt.Errorf("node %q: %w", n.ID, err)
+		}
+		isSource := strings.HasPrefix(n.Type, "source.")
+		switch a.Role {
+		case telegramdriver.RoleSend:
+			if isSource {
+				return nil, fmt.Errorf("node %q: telegram send:%d ist eine Senke, kein Eingang", n.ID, a.ChatID)
+			}
+			if kind != engine.Bool && kind != engine.Text {
+				return nil, fmt.Errorf("node %q: telegram send erwartet Bool oder Text, nicht %q", n.ID, n.Type)
+			}
+		case telegramdriver.RoleCmd:
+			if !isSource || kind != engine.Bool {
+				return nil, fmt.Errorf("node %q: telegram cmd ist eine Bool-Quelle (Befehls-Puls)", n.ID)
+			}
+		case telegramdriver.RoleChat:
+			if !isSource || kind != engine.Text {
+				return nil, fmt.Errorf("node %q: telegram chat ist eine Text-Quelle (empfangener Text)", n.ID)
+			}
+		}
+		out = append(out, engine.Channel{Address: pa.Addr, Label: pa.Addr, Kind: kind})
+	}
+	return out, nil
+}
+
+// validateTelegramChats enforces the allowlist at bind time: a send or
+// chat channel naming a chat off the allowlist fails the run start with
+// a pointer to /a/telegram (the runtime gate in the manager stays as
+// defense in depth - the list can change mid-run). Command channels
+// have no chat dimension: any allowlisted chat may trigger them.
+func validateTelegramChats(chans []engine.Channel, allowed map[int64]string) error {
+	for _, c := range chans {
+		a, err := telegramdriver.ParseAddr(c.Address)
+		if err != nil {
+			return err // already validated; belt and braces
+		}
+		if a.Role == telegramdriver.RoleCmd {
+			continue
+		}
+		if _, ok := allowed[a.ChatID]; !ok {
+			return fmt.Errorf("telegram: chat %d ist nicht freigegeben (auf /a/telegram freigeben)", a.ChatID)
+		}
+	}
+	return nil
+}
+
+// telegramConn returns the bot manager's in-process send/listen
+// surface when the bot is wired and running, for the telegram: driver
+// to bind to.
+func (s *Server) telegramConn() (telegrambot.Conn, bool) {
+	if s.telegram == nil || !s.telegram.Status().Running {
+		return nil, false
+	}
+	return s.telegram, true
+}
+
 // bindRunIO wires a freshly built run's I/O nodes to their drivers. It
 // registers a driver for each namespace the graph's channels actually use
 // and the host exposes: gpio: (source+sink, requests the lines) and sys:
@@ -343,6 +425,36 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		drv := mqttdriver.NewDriver(client, chans, s.log)
 		reg.RegisterSource(engine.PrefixMQTT, drv)
 		reg.RegisterSink(engine.PrefixMQTT, drv)
+		closers = append(closers, drv)
+	}
+	if prefixes[engine.PrefixTelegram] {
+		// Telegram chats ride on the bot manager's in-process Conn; a
+		// graph that binds telegram: channels needs the bot actually
+		// running (the editor only offers the category when it is). The
+		// channels (chat/command + kind) come from the graph nodes
+		// themselves; the allowlist is enforced at bind time AND per
+		// message in the manager.
+		conn, ok := s.telegramConn()
+		if !ok {
+			cleanup()
+			return nil, fmt.Errorf("telegram driver: bot ist nicht aktiv (auf /a/telegram aktivieren)")
+		}
+		chans, err := buildTelegramChannels(g)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		if err := validateTelegramChats(chans, s.telegram.AllowedChats()); err != nil {
+			cleanup()
+			return nil, err
+		}
+		drv, err := telegramdriver.NewDriver(conn, chans, s.log)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		reg.RegisterSource(engine.PrefixTelegram, drv)
+		reg.RegisterSink(engine.PrefixTelegram, drv)
 		closers = append(closers, drv)
 	}
 	if err := engine.BindGraph(eng, g, table, configs, reg); err != nil {

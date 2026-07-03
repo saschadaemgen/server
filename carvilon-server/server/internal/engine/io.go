@@ -80,11 +80,12 @@ type Configurable interface {
 // change. The prefix is the first colon-delimited segment of a physical
 // address ("virtual:btn0", "gpio:17").
 const (
-	PrefixVirtual = "virtual"
-	PrefixGPIO    = "gpio"
-	PrefixSys     = "sys"
-	PrefixMQTT    = "mqtt"
-	PrefixESP     = "esp"
+	PrefixVirtual  = "virtual"
+	PrefixGPIO     = "gpio"
+	PrefixSys      = "sys"
+	PrefixMQTT     = "mqtt"
+	PrefixTelegram = "telegram"
+	PrefixESP      = "esp"
 )
 
 // DriverRegistry maps a namespace prefix to its Source/Sink driver. A

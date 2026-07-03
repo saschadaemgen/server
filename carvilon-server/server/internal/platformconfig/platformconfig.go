@@ -42,6 +42,12 @@ const (
 	// WebSocket listener for the browser MQTT console.
 	KeyMQTTWSEnabled = "mqtt_ws_enabled" // "1" / "0"
 	KeyMQTTWSPort    = "mqtt_ws_port"    // default 8083
+	// Telegram bot: admin-toggled on/off + the bot token. The token is
+	// a secret (Set/GetSecret, AES-256-GCM in value_encrypted) and is
+	// never rendered back into any page - the UI only sees "gesetzt".
+	// Default-off: no outbound connection until the admin enables it.
+	KeyTelegramEnabled  = "telegram_enabled"   // "1" / "0"
+	KeyTelegramBotToken = "telegram_bot_token" // secret (SetSecret/GetSecret)
 )
 
 // Service combines the DB and the secrets service.

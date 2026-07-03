@@ -3,6 +3,7 @@ package httpserver
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"carvilon.local/server/internal/gpio"
@@ -39,12 +40,14 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	// GPIO, the system category and MQTT all follow runtime detection:
-	// each appears in the palette only when the host/broker exposes it.
-	// MQTT needs the broker actually running (the mqtt: driver binds to
-	// its in-process inline client).
+	// GPIO, the system category, MQTT and Telegram all follow runtime
+	// detection: each appears in the palette only when the host/broker/
+	// bot exposes it. MQTT needs the broker actually running (the mqtt:
+	// driver binds to its in-process inline client); Telegram needs the
+	// bot enabled with a token set (the telegram: driver binds to the
+	// manager's Conn).
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.mqttBrokerRunning()),
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.mqttBrokerRunning(), s.telegramRunning()),
 	})
 }
 
@@ -53,6 +56,13 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 // bind when the broker's inline client is available).
 func (s *Server) mqttBrokerRunning() bool {
 	return s.mqtt != nil && s.mqtt.Status().Running
+}
+
+// telegramRunning reports whether the bot is wired and its poll loop is
+// up (enabled + token set - a boot-time fact, not cloud reachability),
+// gating the editor's Telegram palette category.
+func (s *Server) telegramRunning() bool {
+	return s.telegram != nil && s.telegram.Status().Running
 }
 
 // sysMetricsForCatalog bridges the sys: driver's available metrics to the
@@ -78,6 +88,31 @@ func (s *Server) handleDesignerGPIOLines(w http.ResponseWriter, r *http.Request)
 		lines = []gpio.LineInfo{}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"lines": lines})
+}
+
+// handleDesignerTelegramChats serves the allowlisted Telegram chats
+// for the editor's chat picker. Route: GET /a/designer/telegram/chats
+// (requireAdminSession). Chat ids travel as strings - int64 chat ids
+// can exceed JavaScript's safe-integer range. Empty when the bot is
+// not wired.
+func (s *Server) handleDesignerTelegramChats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	type chatItem struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	chats := []chatItem{}
+	if s.telegramStore != nil {
+		list, err := s.telegramStore.ListAllowed(r.Context())
+		if err != nil {
+			s.log.Error("telegram chats for picker", "err", err)
+		}
+		for _, c := range list {
+			chats = append(chats, chatItem{ID: strconv.FormatInt(c.ChatID, 10), Label: c.Label})
+		}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"chats": chats})
 }
 
 // handleDesignerHost serves a human description of the host the server

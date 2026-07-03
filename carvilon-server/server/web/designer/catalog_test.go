@@ -10,9 +10,9 @@ import (
 // renders: 111 blocks across exactly the five categories, in the
 // counts the former inline list had.
 func TestCatalog_CountsAndCategories(t *testing.T) {
-	blocks := Catalog(false, nil, false)
+	blocks := Catalog(false, nil, false, false)
 	if len(blocks) != 111 {
-		t.Fatalf("Catalog(false, nil, false) has %d blocks, want 111", len(blocks))
+		t.Fatalf("Catalog(false, nil, false, false) has %d blocks, want 111", len(blocks))
 	}
 	want := map[string]int{"input": 26, "logic": 26, "time": 22, "memory": 13, "output": 24}
 	got := map[string]int{}
@@ -35,7 +35,7 @@ func TestCatalog_CountsAndCategories(t *testing.T) {
 func TestCatalog_Shape(t *testing.T) {
 	validKind := map[string]bool{"bool": true, "float": true, "text": true}
 	seen := map[string]bool{}
-	for _, b := range Catalog(true, nil, false) { // superset: also covers the GPIO blocks
+	for _, b := range Catalog(true, nil, false, false) { // superset: also covers the GPIO blocks
 		if b.Type == "" || b.Category == "" || b.Title == "" || b.Icon == "" {
 			t.Errorf("block %+v has an empty identity field", b)
 		}
@@ -71,7 +71,7 @@ func TestCatalog_Implemented(t *testing.T) {
 		"output.lamp":    true,
 	}
 	implCount := 0
-	for _, b := range Catalog(false, nil, false) {
+	for _, b := range Catalog(false, nil, false, false) {
 		if !b.Implemented {
 			if len(b.Inputs) != 0 || len(b.Outputs) != 0 || len(b.Params) != 0 {
 				t.Errorf("catalog-only block %q unexpectedly carries ports/params", b.Type)
@@ -112,14 +112,14 @@ func TestCatalog_Implemented(t *testing.T) {
 // flag: absent without GPIO, and present (two engine-backed blocks typed
 // to source.channel / sink.channel, with a user-set line param) with it.
 func TestCatalog_GPIO(t *testing.T) {
-	for _, b := range Catalog(false, nil, false) {
+	for _, b := range Catalog(false, nil, false, false) {
 		if b.Category == "gpio" {
 			t.Fatalf("gpio category present without GPIO: %+v", b)
 		}
 	}
 	byType := map[string]CatalogBlock{}
 	count := 0
-	for _, b := range Catalog(true, nil, false) {
+	for _, b := range Catalog(true, nil, false, false) {
 		if b.Category != "gpio" {
 			continue
 		}
@@ -143,7 +143,7 @@ func TestCatalog_GPIO(t *testing.T) {
 	if !ok || len(snk.Inputs) != 1 || snk.Inputs[0].Kind != "bool" {
 		t.Errorf("GPIO Ausgang must be a %s with a bool input: %+v", engine.TypeSinkChannel, snk)
 	}
-	if a, b := len(Catalog(false, nil, false)), len(Catalog(true, nil, false)); b != a+2 {
+	if a, b := len(Catalog(false, nil, false, false)), len(Catalog(true, nil, false, false)); b != a+2 {
 		t.Errorf("Catalog(true) = %d blocks, want Catalog(false)+2 = %d", b, a+2)
 	}
 }
@@ -152,13 +152,13 @@ func TestCatalog_GPIO(t *testing.T) {
 // running: absent when off, two generic blocks (one source, one sink)
 // when on.
 func TestCatalog_MQTT(t *testing.T) {
-	for _, b := range Catalog(false, nil, false) {
+	for _, b := range Catalog(false, nil, false, false) {
 		if b.Category == "mqtt" {
 			t.Fatalf("mqtt category present while broker off: %+v", b)
 		}
 	}
 	var mqtt []CatalogBlock
-	for _, b := range Catalog(false, nil, true) {
+	for _, b := range Catalog(false, nil, true, false) {
 		if b.Category == "mqtt" {
 			mqtt = append(mqtt, b)
 		}
@@ -180,6 +180,48 @@ func TestCatalog_MQTT(t *testing.T) {
 	}
 }
 
+// TestCatalog_Telegram verifies the Telegram category is gated on the
+// bot running (enabled + token set): absent when off, four blocks -
+// the bool send sink and command source for the two demo flows, plus
+// the raw text source and text sink - when on, all engine-backed via
+// the generic channel node types.
+func TestCatalog_Telegram(t *testing.T) {
+	for _, b := range Catalog(false, nil, false, false) {
+		if b.Category == "telegram" {
+			t.Fatalf("telegram category present while bot off: %+v", b)
+		}
+	}
+	byTitle := map[string]CatalogBlock{}
+	for _, b := range Catalog(false, nil, false, true) {
+		if b.Category != "telegram" {
+			continue
+		}
+		byTitle[b.Title] = b
+		if !b.Implemented {
+			t.Errorf("telegram block %q must be implemented (engine-backed)", b.Title)
+		}
+	}
+	if len(byTitle) != 4 {
+		t.Fatalf("telegram category has %d blocks, want 4: %v", len(byTitle), byTitle)
+	}
+	wantTypes := map[string]string{
+		"Telegram Senden":      engine.TypeSinkChannel,
+		"Telegram Befehl":      engine.TypeSourceChannel,
+		"Telegram Empfangen":   engine.TypeSourceChannelText,
+		"Telegram Text senden": engine.TypeSinkChannelText,
+	}
+	for title, typ := range wantTypes {
+		b, ok := byTitle[title]
+		if !ok {
+			t.Errorf("telegram block %q missing", title)
+			continue
+		}
+		if b.Type != typ {
+			t.Errorf("telegram block %q type = %q, want %q", title, b.Type, typ)
+		}
+	}
+}
+
 // sampleSysMetrics is a fixed metric set for the system-category test.
 func sampleSysMetrics() []SysMetric {
 	return []SysMetric{
@@ -193,14 +235,14 @@ func sampleSysMetrics() []SysMetric {
 // block per metric (with its physical ref baked into Channel and a unit)
 // when present.
 func TestCatalog_System(t *testing.T) {
-	for _, b := range Catalog(true, nil, false) {
+	for _, b := range Catalog(true, nil, false, false) {
 		if b.Category == "system" {
 			t.Fatalf("system category present without metrics: %+v", b)
 		}
 	}
 	metrics := sampleSysMetrics()
 	var sys []CatalogBlock
-	for _, b := range Catalog(false, metrics, false) {
+	for _, b := range Catalog(false, metrics, false, false) {
 		if b.Category == "system" {
 			sys = append(sys, b)
 		}

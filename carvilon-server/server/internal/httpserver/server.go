@@ -48,6 +48,8 @@ import (
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
+	"carvilon.local/server/internal/telegrambot"
+	"carvilon.local/server/internal/telegramstore"
 	"carvilon.local/server/internal/turnstore"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewermanager"
@@ -151,7 +153,13 @@ type Deps struct {
 	// MQTTStore is the device-credential + ACL persistence the MQTT
 	// admin page reads and writes. Nil disables the credential UI.
 	MQTTStore *mqttstore.Store
-	Log       *slog.Logger
+	// Telegram is the bot's lifecycle manager. Nil leaves the Telegram
+	// admin page inert ("disabled") and the palette category absent.
+	Telegram *telegrambot.Manager
+	// TelegramStore is the chat allowlist + pending-chat persistence
+	// the Telegram admin page and the editor's chat picker read.
+	TelegramStore *telegramstore.Store
+	Log           *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -193,8 +201,10 @@ type Server struct {
 	// side-channel client exists; nil when the cloud link is unconfigured.
 	iceRequester ICERequester
 	features     *featuregate.Store
-	mqtt         *mqttbroker.Manager
-	mqttStore    *mqttstore.Store
+	mqtt          *mqttbroker.Manager
+	mqttStore     *mqttstore.Store
+	telegram      *telegrambot.Manager
+	telegramStore *telegramstore.Store
 	log          *slog.Logger
 	mux          *http.ServeMux
 	tpl          *adminTemplates
@@ -269,6 +279,8 @@ func New(deps Deps) (*Server, error) {
 		features:        deps.Features,
 		mqtt:            deps.MQTT,
 		mqttStore:       deps.MQTTStore,
+		telegram:        deps.Telegram,
+		telegramStore:   deps.TelegramStore,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -477,6 +489,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
 	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))
+	s.mux.Handle("GET /a/designer/telegram/chats", s.requireAdminSession(http.HandlerFunc(s.handleDesignerTelegramChats)))
 	s.mux.Handle("GET /a/designer/host", s.requireAdminSession(http.HandlerFunc(s.handleDesignerHost)))
 	// Run: execute the posted graph in the engine, stream live values back
 	// over the monitor SSE, inject the editor's button press, and tear the
@@ -498,6 +511,18 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/mqtt/acl/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTACLDelete)))
 	s.mux.Handle("GET /a/mqtt/monitor", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTMonitor)))
 	s.mux.Handle("GET /a/mqtt/ws-info", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTWSInfo)))
+
+	// Telegram bot admin: on/off + write-only token, chat allowlist,
+	// pending-chat approval (in-product chat-id discovery), test send,
+	// and the counter endpoint the page's auto-refresh polls.
+	s.mux.Handle("GET /a/telegram", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramGet)))
+	s.mux.Handle("GET /a/telegram.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramJSON)))
+	s.mux.Handle("POST /a/telegram/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramSettingsPost)))
+	s.mux.Handle("POST /a/telegram/chats", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramChatAdd)))
+	s.mux.Handle("POST /a/telegram/chats/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramChatDelete)))
+	s.mux.Handle("POST /a/telegram/pending/{id}/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramApprove)))
+	s.mux.Handle("POST /a/telegram/pending/{id}/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramReject)))
+	s.mux.Handle("POST /a/telegram/test", s.requireAdminSession(http.HandlerFunc(s.handleAdminTelegramTestSend)))
 
 	// Android-Viewer admin tab (Saison 16 Etappe 1). Bearer-
 	// auth happens at the /webviewer/* tree; here we just CRUD
