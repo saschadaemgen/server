@@ -22,8 +22,32 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// syncBuffer is a concurrency-safe slog sink. The stream proxy's
+// streaming goroutine keeps emitting Debug lines (client
+// disconnected / backend closed) after the client's Do call has
+// returned, so the test goroutine reading the captured log races
+// the handler writing to it. Guarding the bytes.Buffer with a
+// mutex makes both sides safe under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func TestBuildBackendStreamURL(t *testing.T) {
 	tests := []struct {
@@ -201,7 +225,7 @@ func TestESPStreamHandler_LogsRequestSummary(t *testing.T) {
 	tok := adoptESPForTest(t, env, espTestMAC, "Wohnung A")
 	env.srv.cfg.StreamBackendURL = backend.URL
 
-	var logBuf bytes.Buffer
+	var logBuf syncBuffer
 	env.srv.log = slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	req, _ := http.NewRequest(http.MethodGet, env.ts.URL+"/esp/stream.mjpeg", nil)

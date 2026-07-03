@@ -103,7 +103,7 @@ func TestMieterStreamHandler_LogsRequestSummary(t *testing.T) {
 	env := loginMieterForStream(t)
 	env.srv.cfg.StreamBackendURL = backend.URL
 
-	var logBuf bytes.Buffer
+	var logBuf syncBuffer
 	env.srv.log = slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	resp, err := env.client.Get(env.ts.URL + "/webviewer/stream.mjpeg")
