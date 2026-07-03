@@ -120,7 +120,7 @@ function doPublish(host) {
 }
 
 function prefillUrl(host) {
-  fetch('mqtt/ws-info', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(info => {
+  fetch('/a/mqtt/ws-info', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(info => {
     const urlEl = host.querySelector('[data-url]'); if (!urlEl) return;
     if (info && info.enabled && info.url) urlEl.value = info.url;
     else { urlEl.placeholder = 'WebSocket-Listener aus — in den Einstellungen aktivieren'; }
