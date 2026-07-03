@@ -79,6 +79,29 @@ function defFor(name,cat){
     return {cat:'mqtt',icon:NAME_ICON[name]||'radio',title:name,type:t,implemented:true,live:isSrc,props,
       ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};
   }
+  // Telegram blocks. MUST come before the generic source.channel /
+  // sink.channel branches below - the four blocks reuse those engine
+  // types and would otherwise render as GPIO/system cards. The Chat
+  // prop holds the raw chat id (picked from the allowlist); run.js
+  // serializes the channel param as telegram:<mode>:<id>#<node-id>
+  // (the #slot keeps two blocks on the same chat bindable). The
+  // command word serializes as telegram:cmd:<wort>#<node-id>.
+  if(NAME_CAT[name]==='telegram'){
+    const isSrc=t.indexOf('source')===0;
+    const chat={k:'Chat',v:'',param:'channel',kind:'tg-chat',mode:isSrc?'chat':'send'};
+    let props,live=false;
+    if(t==='sink.channel'){ // Telegram Senden: Flanke -> feste Nachricht
+      props=[chat,{k:'Nachricht',v:'Es hat geklingelt!',param:'message'}];
+    }else if(t==='source.channel'){ // Telegram Befehl: Wort -> Bool-Puls
+      props=[{k:'Befehl',v:'licht an',param:'channel',kind:'tg-cmd'}];
+    }else if(t==='source.channel.text'){ // Telegram Empfangen: roher Text
+      props=[chat];live=true;
+    }else{ // sink.channel.text - Telegram Text senden: Text-Eingang -> Nachricht
+      props=[chat];
+    }
+    return {cat:'telegram',icon:NAME_ICON[name]||'send',title:name,type:t,implemented:true,live,props,
+      ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};
+  }
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
     // Like the other blocks (staircase shows Mode/Hold, lamp shows
     // Output/Channel), the GPIO card shows its pin options; they stay

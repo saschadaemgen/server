@@ -8,6 +8,7 @@ import { renderMinimap } from './minimap.js';
 import { clearSel } from './selection.js';
 import { deleteSelected } from './nodes.js';
 import { loadLines, claimedLines } from './gpiolines.js';
+import { loadChats } from './telegramchats.js';
 import { makeDropdown } from './dropdown.js';
 
 // Custom dropdowns created for the current inspector render; destroyed on
@@ -67,6 +68,32 @@ export function openInspector(id){
       const dd=makeDropdown({value:p.v,items:(p.opts||[]).map(o=>({value:o.v,label:o.l})),
         onChange:v=>{p.v=v;const o=(p.opts||[]).find(x=>x.v===v);setBody(o?o.l:v);}});
       row.appendChild(dd.el);liveDropdowns.push(dd);pc.appendChild(row);return;
+    }
+    if(p.kind==='tg-chat'){
+      // Pick the target/source chat from the allowlist (fetched fresh
+      // on every inspector open - a chat approved on /a/telegram a
+      // moment ago must appear without an editor reload). No claim
+      // pool: several blocks may address the same chat.
+      const slot=document.createElement('div');slot.className='cv-dd-slot';row.appendChild(slot);pc.appendChild(row);
+      loadChats().then(chats=>{
+        const cur=p.v;
+        const items=chats.map(c=>({value:c.id,label:c.label||c.id,sub:c.label?c.id:''}));
+        // A saved chat that is no longer on the allowlist stays visible
+        // (the value is preserved), flagged - the run will refuse it.
+        if(cur&&!items.some(i=>i.value===cur))items.unshift({value:cur,label:cur,sub:'nicht freigegeben'});
+        const dd=makeDropdown({value:cur,items,search:true,placeholder:'— Chat wählen —',
+          onChange:v=>{p.v=v;const it=items.find(i=>i.value===v);setBody(it?it.label:v);}});
+        slot.appendChild(dd.el);liveDropdowns.push(dd);
+      });
+      return;
+    }
+    if(p.kind==='tg-cmd'){
+      // Command word, matched trimmed + case-insensitive at runtime.
+      // '#' is stripped as typed: it is the channel-ref slot delimiter,
+      // and a word containing it would silently bind shorter than shown.
+      const inp=document.createElement('input');inp.value=p.v;inp.placeholder='z.B. licht an';inp.spellcheck=false;
+      inp.oninput=()=>{if(inp.value.indexOf('#')>=0)inp.value=inp.value.replace(/#/g,'');p.v=inp.value;setBody(p.v);};
+      row.appendChild(inp);pc.appendChild(row);return;
     }
     if(p.kind==='mqtt-topic'){
       // Free-text topic. p.v holds the raw topic (no prefix); run.js

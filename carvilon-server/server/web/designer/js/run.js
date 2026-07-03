@@ -41,8 +41,20 @@ function serializeGraph(){
     // props tagged with `param` (e.g. a GPIO block's Line -> channel)
     // become engine params. An MQTT Topic field holds the raw topic; the
     // "mqtt:" namespace prefix is added here so the channel resolves to
-    // the mqtt: driver (matching gpio:/sys: physical refs).
-    for(const p of (n.props||[])) if(p.param) params[p.param]=(p.kind==='mqtt-topic')?('mqtt:'+(p.v||'')):p.v;
+    // the mqtt: driver (matching gpio:/sys: physical refs). Telegram
+    // props hold the raw chat id / command word; the full ref
+    // telegram:<role>:<payload>#<node-id> is composed here - the #slot
+    // keeps refs unique per block (the run path enforces one physical
+    // channel per node, but two send blocks to one chat are the normal
+    // case; the driver ignores the slot for routing).
+    for(const p of (n.props||[])){
+      if(!p.param) continue;
+      let v=p.v;
+      if(p.kind==='mqtt-topic') v='mqtt:'+(v||'');
+      else if(p.kind==='tg-chat') v='telegram:'+(p.mode||'chat')+':'+(v||'')+'#'+n.id;
+      else if(p.kind==='tg-cmd') v='telegram:cmd:'+String(v||'').trim()+'#'+n.id;
+      params[p.param]=v;
+    }
     if(Object.keys(params).length) node.params=params;
     out.push(node); ids.add(n.id);
   }
