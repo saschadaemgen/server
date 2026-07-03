@@ -118,6 +118,15 @@ func Validate(g Graph, reg *Registry) []Issue {
 		}
 		for name := range n.Params {
 			if _, ok := known[name]; !ok {
+				// The generic I/O channel nodes carry opaque per-channel
+				// driver config alongside "channel" (bias / active_level /
+				// debounce_ms / initial / message ... - the ChannelConfig
+				// contract, see io.go): the engine never interprets those
+				// keys, so it cannot enumerate them here. Everything else
+				// keeps the strict check.
+				if IsChannelType(n.Type) {
+					continue
+				}
 				add(Error, id, "", CodeUnknownParam, fmt.Sprintf("unknown param %q on type %q", name, n.Type))
 			}
 		}

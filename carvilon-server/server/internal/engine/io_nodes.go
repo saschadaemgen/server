@@ -28,6 +28,20 @@ func init() {
 	registerSinkChannel(TypeSinkChannelText, "Channel output (text)", Text)
 }
 
+// IsChannelType reports whether typ is one of the generic I/O channel
+// node types above. Their non-"channel" params are opaque per-channel
+// driver config (the ChannelConfig contract, see io.go) rather than
+// engine params - the validator skips the unknown-param check for them,
+// and the run layer routes them to the bound driver.
+func IsChannelType(typ string) bool {
+	switch typ {
+	case TypeSourceChannel, TypeSourceChannelFloat, TypeSourceChannelText,
+		TypeSinkChannel, TypeSinkChannelFloat, TypeSinkChannelText:
+		return true
+	}
+	return false
+}
+
 func registerSourceChannel(typ, title string, kind Kind) {
 	Register(Descriptor{
 		Type:     typ,

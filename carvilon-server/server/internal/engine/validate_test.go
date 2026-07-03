@@ -244,3 +244,44 @@ func TestValidateMissingRequired(t *testing.T) {
 		t.Errorf("expected missing_required, got %+v", issues)
 	}
 }
+
+// TestValidateChannelConfigParamsAllowed: the generic I/O channel nodes
+// carry opaque per-channel driver config (ChannelConfig) alongside
+// "channel" - bias/debounce on a GPIO block, message on a Telegram send
+// block. The engine never interprets those keys, so the unknown-param
+// check must not reject them; a non-channel node keeps the strict check.
+func TestValidateChannelConfigParamsAllowed(t *testing.T) {
+	g := mustParse(t, `{
+      "schema":1,
+      "nodes":[
+        {"id":"btn","type":"input.manual"},
+        {"id":"snk","type":"sink.channel","params":{"channel":"telegram:send:123#snk","message":"hi"}},
+        {"id":"src","type":"source.channel","params":{"channel":"gpio:gpiochip0:17","bias":"pulldown","debounce_ms":"5"}},
+        {"id":"lamp","type":"output.lamp"}
+      ],
+      "edges":[
+        {"from":"btn:out","to":"snk:in"},
+        {"from":"src:out","to":"lamp:set"}
+      ]
+    }`)
+	issues := Validate(g, DefaultRegistry())
+	if hasCode(issues, CodeUnknownParam) {
+		t.Errorf("channel-node config params must not flag unknown_param: %+v", issues)
+	}
+
+	bad := mustParse(t, `{
+      "schema":1,
+      "nodes":[
+        {"id":"b","type":"input.manual"},
+        {"id":"stair","type":"time.staircase","params":{"duration":1,"nonsense":true}},
+        {"id":"lamp","type":"output.lamp"}
+      ],
+      "edges":[
+        {"from":"b:out","to":"stair:trig"},
+        {"from":"stair:q","to":"lamp:set"}
+      ]
+    }`)
+	if issues := Validate(bad, DefaultRegistry()); !hasCode(issues, CodeUnknownParam) {
+		t.Errorf("non-channel node keeps the strict unknown-param check, got %+v", issues)
+	}
+}
