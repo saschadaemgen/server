@@ -1,23 +1,22 @@
-// Bottom dock: the SSH/MQTT/TCP/UDP/System/Engine log terminals with
-// double-click column splitting and per-column search. The feeds are
-// demo/placeholder content; wiring the real engine/SSE feeds is a later
-// ticket.
+// Bottom dock: the log terminals. MQTT is a real broker client, System
+// Log streams the server's real journal (syslog.js), and the Engine tab
+// shows only real engine events (build/validation/run lines fed by
+// run.js). SSH/TCP/UDP still carry demo content until the terminal
+// track lands. System Log and Engine are single-instance panes — no
+// column splitting.
 
 import { reduceMotion, nodes } from './store.js';
 import { mountMqttConsole } from './mqttconsole.js';
+import { mountSysLog, startSysLog } from './syslog.js';
 
-// ---- live engine feed (driven by run.js during a real run) ----
-// While live, the Engine tab shows real stream lines instead of the
-// demo POOL feed.
-let engineLive=false;
-export function setEngineLive(on){engineLive=!!on;}
 function dockNow(){const d=new Date(),p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
-// engineLine appends one real line to every column of the Engine tab,
-// honouring each column's search filter and the 200-line cap.
+// engineLine appends one real line to the Engine tab, honouring the
+// column's search filter and the 200-line cap. The first real line
+// replaces the idle placeholder.
 export function engineLine(inner){
   const host=document.getElementById('term-engine');if(!host)return;
   const html=`<div><span class="t">${dockNow()}</span> ${inner}</div>`;
-  host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',html);const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});
+  host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const idle=el.querySelector('.idle-note');if(idle)idle.remove();const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',html);const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});
 }
 // focusEngine activates the Engine dock tab so a run's lines are visible.
 export function focusEngine(){const tab=document.querySelector('.dock-tab[data-tab="engine"]');if(tab)tab.click();}
@@ -41,12 +40,7 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
     udp:`<div><span class="ok">●</span> udp socket <span class="dim">:9091</span> · bound</div>`+
         `<div><span class="t">${nowt()}</span> <span class="blue">RECV</span> 10.0.0.33:5353 · len 142</div>`+
         `<div><span class="t">${nowt()}</span> <span class="amber">▸</span> datagram · discovery beacon</div>`,
-    sys:`<div><span class="t">${nowt()}</span> <span class="ok">INFO</span> designer · graph loaded · nodes=3 edges=2</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="ok">INFO</span> catalog · 111 blocks · schema 1</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="amber">WARN</span> validate · W_DEFAULT_DURATION on 'stair'</div>`,
-    engine:`<div><span class="t">${nowt()}</span> <span class="ok">BUILD</span> parse graph … ok (3 nodes, 2 edges)</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="ok">BUILD</span> topo sort … ok · boundaries: 1 (time.staircase)</div>`+
-        `<div><span class="dim">idle · editing is not live — Activate to deploy</span></div>`,
+    engine:`<div class="dim idle-note">idle — kein Run aktiv</div>`,
   };
   const MAXCOLS=4;
   const TLABEL={ssh:'SSH',mqtt:'MQTT',tcp:'TCP',udp:'UDP',sys:'System',engine:'Engine'};
@@ -58,9 +52,11 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
   // as the tab's ×N badge.
   function renderPanes(name){
     const host=document.getElementById('term-'+name);if(!host)return;
-    // The MQTT tab is a full MQTT client (its own toolbar + live list),
-    // not a generic split-column terminal.
+    // The MQTT tab is a full MQTT client, the System Log tab a live
+    // server-journal console — each its own single pane, not a generic
+    // split-column terminal.
     if(name==='mqtt'){mountMqttConsole(host);const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split='1';return;}
+    if(name==='sys'){mountSysLog(host);const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split='1';return;}
     const n=splits[name]||1,lbl=TLABEL[name]||name;let h='';
     for(let i=0;i<n;i++){
       const cap=n>1?`${lbl} · ${i+1}`:lbl, tip=n>1?`${lbl}-Terminal ${i+1} von ${n}`:`${lbl}-Terminal`;
@@ -75,13 +71,15 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
     const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split=String(n);
   }
   tabs.forEach(t=>renderPanes(t.dataset.tab));
-  function setTab(name){tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.querySelectorAll('.term').forEach(p=>p.classList.toggle('active',p.dataset.pane===name));dock.classList.remove('collapsed');const a=document.getElementById('term-'+name);if(a)a.querySelectorAll('.tcol-body').forEach(c=>{c.scrollTop=c.scrollHeight;});}
+  function setTab(name){tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===name));document.querySelectorAll('.term').forEach(p=>p.classList.toggle('active',p.dataset.pane===name));dock.classList.remove('collapsed');if(name==='sys')startSysLog();const a=document.getElementById('term-'+name);if(a)a.querySelectorAll('.tcol-body').forEach(c=>{c.scrollTop=c.scrollHeight;});}
   // double-click a tab title adds a side-by-side column (up to 4); a single
   // click just activates the tab. Columns are removed with the × in their
-  // header (delegated below) — no wrap-around.
+  // header (delegated below) — no wrap-around. MQTT, System Log and
+  // Engine are single-instance panes and never split.
+  const SINGLE=new Set(['mqtt','sys','engine']);
   tabs.forEach(t=>{
     t.onclick=()=>setTab(t.dataset.tab);
-    t.ondblclick=()=>{const name=t.dataset.tab;if(name==='mqtt')return;if(splits[name]>=MAXCOLS)return;splits[name]=(splits[name]||1)+1;renderPanes(name);setTab(name);};
+    t.ondblclick=()=>{const name=t.dataset.tab;if(SINGLE.has(name))return;if(splits[name]>=MAXCOLS)return;splits[name]=(splits[name]||1)+1;renderPanes(name);setTab(name);};
   });
   const dockBody=document.getElementById('dock-body');
   // × closes one column of its tab (never below 1).
@@ -93,11 +91,12 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
     ssh:()=>`<div><span class="t">[${nowt()}]</span> ${pick(['input.manual <span class="blue">btn:out</span> = <span class="amber">'+rb()+'</span>','time.staircase q=<span class="ok">true</span> · hold 3.0s','output.lamp set=<span class="ok">true</span> · ch DALI 1','heartbeat ok · tree 42/42','keepalive · rtt 7ms'])}</div>`,
     tcp:()=>`<div><span class="t">[${nowt()}]</span> ${pick(['<span class="blue">SYN</span> 10.0.0.'+(20+ri(40))+':'+(49152+ri(16000))+' → :9090','<span class="ok">EST</span> conn #'+(1+ri(9))+' · rtt '+(3+ri(12))+'ms','RX '+(64+ri(1400))+' B · frame ok','TX '+(64+ri(1400))+' B · ack','<span class="amber">FIN</span> conn #'+(1+ri(9))+' · closed'])}</div>`,
     udp:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">RECV</span> 10.0.0.'+(20+ri(40))+' · len '+(40+ri(460)),'<span class="ok">SEND</span> broadcast · len '+(40+ri(200)),'<span class="amber">▸</span> datagram <span class="dim">discovery</span>','<span class="err">drop</span> · checksum mismatch'])}</div>`,
-    sys:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">DBG</span> render · 60 fps · nodes '+Object.keys(nodes).length,'<span class="ok">INFO</span> designer · autosave draft','<span class="ok">INFO</span> catalog · 111 blocks','<span class="amber">WARN</span> validate · W_DEFAULT_DURATION on stair'])}</div>`,
-    engine:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">SIM</span> tick · btn=0 stair=0 lamp=0','<span class="blue">SIM</span> waiting for input…','<span class="ok">BUILD</span> graph ok · boundaries 1','<span class="dim">editing not live — Activate to deploy</span>'])}</div>`,
   };
+  // Demo feed for the not-yet-real tabs only (SSH/TCP/UDP — terminal
+  // track). MQTT, System Log and Engine have no POOL entry: they show
+  // exclusively real events.
   function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
-  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';if(name==='engine'&&engineLive)return;addLine(name);},2600);
+  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';addLine(name);},2600);
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
   // Replace the placeholder host label with the real host (Pi model / distro),
   // fetched once on load. The status dot stays as the connection indicator;

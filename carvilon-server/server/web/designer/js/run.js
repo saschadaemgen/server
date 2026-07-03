@@ -9,7 +9,7 @@
 import { GRAPH, nodes, wires } from './store.js';
 import { findWireTo } from './wires.js';
 import { firePulse, setNodeOn } from './sim.js';
-import { engineLine, setEngineLive, focusEngine } from './dock.js';
+import { engineLine, focusEngine } from './dock.js';
 
 // The engine-backed block types; only these participate in a run.
 const IMPL = new Set(['input.manual', 'time.staircase', 'logic.or', 'output.lamp',
@@ -121,13 +121,13 @@ export async function stopRun(){
 function enterRunning(){
   running=true; liveByEdge={};
   document.body.classList.add('running');
-  setEngineLive(true); paintRunBtn();
+  paintRunBtn();
   engineLine('<span class="ok">RUN</span> graph started · 100 ms tick');
 }
 function exitRunning(){
   running=false;
   document.body.classList.remove('running');
-  setEngineLive(false); paintRunBtn(); resetVisuals();
+  paintRunBtn(); resetVisuals();
   engineLine('<span class="dim">— run stopped —</span>');
 }
 
