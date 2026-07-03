@@ -109,7 +109,9 @@ async function startRun(){
   openStream();
 }
 
-async function stopRun(){
+// Exported so the project tree can stop a run cleanly before switching
+// graphs (no silent loss of run state on a graph change).
+export async function stopRun(){
   if(!running) return;
   closeStream();
   exitRunning();

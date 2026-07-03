@@ -36,6 +36,7 @@ import (
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
@@ -159,6 +160,10 @@ type Deps struct {
 	// TelegramStore is the chat allowlist + pending-chat persistence
 	// the Telegram admin page and the editor's chat picker read.
 	TelegramStore *telegramstore.Store
+	// DesignerStore persists the logic editor's folder tree and its
+	// graphs (migration 032). Nil returns 503 on the designer
+	// persistence API; the editor keeps an unsaved in-memory canvas.
+	DesignerStore *designerstore.Store
 	Log           *slog.Logger
 }
 
@@ -199,15 +204,16 @@ type Server struct {
 	// iceRequester pulls subscriber ICE from the cloud for the stream-start
 	// bundle. Set post-construction by main (SetICERequester) once the
 	// side-channel client exists; nil when the cloud link is unconfigured.
-	iceRequester ICERequester
-	features     *featuregate.Store
+	iceRequester  ICERequester
+	features      *featuregate.Store
 	mqtt          *mqttbroker.Manager
 	mqttStore     *mqttstore.Store
 	telegram      *telegrambot.Manager
 	telegramStore *telegramstore.Store
-	log          *slog.Logger
-	mux          *http.ServeMux
-	tpl          *adminTemplates
+	designerStore *designerstore.Store
+	log           *slog.Logger
+	mux           *http.ServeMux
+	tpl           *adminTemplates
 
 	// designerRuns holds the live logic-editor engine runs, one per
 	// admin user (Run executes the posted graph on a wall-clock ticker;
@@ -281,6 +287,7 @@ func New(deps Deps) (*Server, error) {
 		mqttStore:       deps.MQTTStore,
 		telegram:        deps.Telegram,
 		telegramStore:   deps.TelegramStore,
+		designerStore:   deps.DesignerStore,
 		log:             deps.Log.With("component", "httpserver"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
@@ -498,6 +505,18 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/designer/run/monitor", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunMonitor)))
 	s.mux.Handle("POST /a/designer/run/input", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunInput)))
 	s.mux.Handle("POST /a/designer/run/stop", s.requireAdminSession(http.HandlerFunc(s.handleDesignerRunStop)))
+	// Persistence (migration 032): the editor's real folder tree +
+	// graph CRUD + the ~1s debounced autosave. System folders reply
+	// 4xx on every structural mutation.
+	s.mux.Handle("GET /a/designer/tree", s.requireAdminSession(http.HandlerFunc(s.handleDesignerTree)))
+	s.mux.Handle("POST /a/designer/folders", s.requireAdminSession(http.HandlerFunc(s.handleDesignerFolderCreate)))
+	s.mux.Handle("POST /a/designer/folders/{id}/rename", s.requireAdminSession(http.HandlerFunc(s.handleDesignerFolderRename)))
+	s.mux.Handle("POST /a/designer/folders/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerFolderDelete)))
+	s.mux.Handle("POST /a/designer/graphs", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphCreate)))
+	s.mux.Handle("GET /a/designer/graphs/{id}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphGet)))
+	s.mux.Handle("POST /a/designer/graphs/{id}/rename", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphRename)))
+	s.mux.Handle("POST /a/designer/graphs/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphDelete)))
+	s.mux.Handle("POST /a/designer/graphs/{id}/save", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphSave)))
 	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
 
 	// MQTT broker admin (step 1): device credentials + ACL rules +

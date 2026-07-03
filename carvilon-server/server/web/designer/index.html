@@ -13,7 +13,7 @@
 <div class="scanline"></div>
 
 <header class="topbar">
-  <div class="crumb"><span class="crumb-title">Logic Editor</span><span style="color:var(--faint)">/</span><span class="chip"><span class="dot"></span>Staircase · GF Hallway</span></div>
+  <div class="crumb"><span class="crumb-title">Logic Editor</span><span style="color:var(--faint)">/</span><span class="chip"><span class="dot"></span><span id="crumb-text">…</span></span></div>
   <div class="spacer"></div>
   <div class="tools">
     <div class="tbtn toggle on" id="btn-signal"><span>Signal Flow</span><span class="tsw"><i></i></span></div>
@@ -50,7 +50,7 @@
 
 <aside class="rail">
   <div class="rail-head">
-    <button class="proj-btn" id="proj-btn"><i data-lucide="folder-open" class="proj-ic"></i><span class="proj-cur" id="proj-cur">EG · Flur</span><i data-lucide="chevron-down" class="proj-chev"></i></button>
+    <button class="proj-btn" id="proj-btn"><i data-lucide="folder-open" class="proj-ic"></i><span class="proj-cur" id="proj-cur">…</span><i data-lucide="chevron-down" class="proj-chev"></i></button>
   </div>
   <div class="proj-pop" id="proj-pop"></div>
   <div class="search"><i data-lucide="search"></i><span class="search-ph">Search blocks <span class="search-cnt"></span>…</span><button class="filter-btn" id="filter-btn" title="Filter categories"><i data-lucide="sliders-horizontal"></i></button></div>
@@ -92,7 +92,7 @@
     <div class="dock-status">
       <span class="st"><span class="dot"></span><span id="st-host">Host …</span></span>
       <span class="st">Nodes <b id="st-nodes">3</b></span>
-      <span class="st">rev <b>7</b></span>
+      <span class="st" id="st-save">rev <b>–</b></span>
       <span class="st mono" id="st-clock">00:00:00</span>
     </div>
     <button class="dock-toggle" id="dock-toggle" title="Collapse panel"><i data-lucide="chevron-down"></i></button>

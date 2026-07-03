@@ -14,6 +14,14 @@ export const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)'
 export const GRID = 26;
 export function hexRgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
 
+// HTML escaping for the template-literal renderers (node cards, tree
+// rows, inspector rows). Since persistence, def fields (titles, prop
+// values) round-trip through storage as user-editable text and must
+// never reach innerHTML raw. esc for text nodes, escAttr for
+// attribute values.
+export function esc(s){return String(s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
+export function escAttr(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+
 export const CAT={input:{color:'#2DD4EF',label:'Input',icon:'log-in'},logic:{color:'#A78BFA',label:'Logic',icon:'git-fork'},
   time:{color:'#F6B23C',label:'Timing',icon:'timer'},memory:{color:'#5B9DFF',label:'Memory',icon:'database'},output:{color:'#43E08A',label:'Output',icon:'zap'}};
 export const PALETTE=['#2DD4EF','#43E08A','#5BE0C8','#B8E04A','#F6B23C','#FF8A5B','#FF6B8B','#A78BFA','#5B9DFF','#EAF1F5'];
@@ -43,6 +51,14 @@ export const GRAPH={
   ],
   edges:[{from:'btn1:out',to:'stair1:trig'},{from:'stair1:q',to:'lamp1:set'}]
 };
+
+// Autosave seam: the canvas modules call markDirty() after every
+// user-driven graph mutation (create/delete/move/wire/edit); project.js
+// registers the actual debounced scheduler here. A property on an
+// exported object (not a reassignable import) and defined in store.js,
+// which imports nothing, so no module cycles.
+export const graphDirty={fn:null};
+export function markDirty(){if(graphDirty.fn)graphDirty.fn();}
 
 // Live collections, mutated in place by the canvas modules.
 export const nodes={};

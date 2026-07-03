@@ -11,7 +11,12 @@ import { renderMinimap } from './minimap.js';
 export function removeWire(o){o.g.remove();const i=wires.indexOf(o);if(i>=0)wires.splice(i,1);delete wireByEdge[o.from+'>'+o.to];const gi=GRAPH.edges.findIndex(x=>x.from===o.from&&x.to===o.to);if(gi>=0)GRAPH.edges.splice(gi,1);}
 export function fxFlare(wx,wy){const f=document.createElement('div');f.className='fx-flare';f.style.left=wx+'px';f.style.top=wy+'px';world.appendChild(f);setTimeout(()=>f.remove(),440);}
 export function fxBolt(wx,wy){const f=document.createElement('div');f.className='fx-bolt';f.style.left=wx+'px';f.style.top=wy+'px';world.appendChild(f);setTimeout(()=>f.remove(),320);}
-export function cutWire(o){const key=o.from+'>'+o.to;const i=wires.indexOf(o);if(i>=0)wires.splice(i,1);delete wireByEdge[key];const gi=GRAPH.edges.findIndex(x=>x.from===o.from&&x.to===o.to);if(gi>=0)GRAPH.edges.splice(gi,1);
+export function cutWire(o){const key=o.from+'>'+o.to;
+  // Stale handle (the graph was switched since this wire was selected):
+  // never touch the live graph - another graph can carry the same edge
+  // key because node ids are deterministic per page load.
+  if(wireByEdge[key]!==o){o.g.remove();return;}
+  const i=wires.indexOf(o);if(i>=0)wires.splice(i,1);delete wireByEdge[key];const gi=GRAPH.edges.findIndex(x=>x.from===o.from&&x.to===o.to);if(gi>=0)GRAPH.edges.splice(gi,1);
   if(reduceMotion){o.g.remove();return;}
   fxBolt(o.sp.x,o.sp.y);o.g.classList.add('cut');o.vel.x=(Math.random()*2-1)*30;o.vel.y=-32;
   const t0=performance.now(),dur=540;
@@ -48,4 +53,6 @@ export function addWire(e){const wr=world.getBoundingClientRect();const a=socket
   svg.appendChild(g);const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,o={g,hit,base,flow,sparks,from:e.from,to:e.to,i:wires.length,e:{ax:a.x,ay:a.y,bx:b.x,by:b.y}};hit.addEventListener('pointerdown',ev=>{ev.stopPropagation();selectWire(o);});
   const sag=restSag(o);o.sp={x:mx,y:my+sag};o.vel={x:0,y:0};o.off={x:0,y:sag};o.pm={x:mx,y:my};o.base.setAttribute('d',pathOf(o));o.flow.setAttribute('d',pathOf(o));o.hit.setAttribute('d',pathOf(o));
   wires.push(o);wireByEdge[e.from+'>'+e.to]=o;applyEdgeColor(o,e.color||getComputedStyle(document.documentElement).getPropertyValue('--wire').trim()||'#34E4EA');return o;}
-export function buildWires(){GRAPH.edges.forEach(e=>addWire(e));renderWires();}
+// Idempotent so a graph load and the boot path can both call it: an
+// edge that already has its wire (wireByEdge) is not built twice.
+export function buildWires(){GRAPH.edges.forEach(e=>{if(!wireByEdge[e.from+'>'+e.to])addWire(e);});renderWires();}

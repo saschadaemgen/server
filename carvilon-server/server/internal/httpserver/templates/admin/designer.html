@@ -25,6 +25,6 @@
      (see handler_admin_designer.go), wrapped in a rounded stage that clips
      it to a card. Demo feeds for now; live engine/SSE wiring is later. -->
 <div class="designer-stage">
-  <iframe class="designer-frame" src="/a/designer/" title="CARVILON Logik-Editor"></iframe>
+  <iframe class="designer-frame" src="/a/designer/{{if .Page.GraphID}}?g={{.Page.GraphID}}{{end}}" title="CARVILON Logik-Editor"></iframe>
 </div>
 {{end}}

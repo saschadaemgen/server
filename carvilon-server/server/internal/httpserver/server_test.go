@@ -25,6 +25,7 @@ import (
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
@@ -282,6 +283,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Features:        featuregate.NewStore(d.DB),
 		MQTT:            mqttBroker,
 		MQTTStore:       mqttStore,
+		DesignerStore:   designerstore.New(d.DB),
 		Log:             quietLogger(),
 	})
 	if err != nil {

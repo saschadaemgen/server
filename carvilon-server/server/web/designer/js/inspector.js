@@ -1,7 +1,7 @@
 // Inspector: the right-hand panel for the single selected node — title,
 // card colour, editable properties, and the per-port wire colours.
 
-import { nodes, CAT, PALETTE } from './store.js';
+import { nodes, CAT, PALETTE, esc } from './store.js';
 import { setSlider } from './sim.js';
 import { findWireTo, findWireFrom, applyEdgeColor } from './wires.js';
 import { renderMinimap } from './minimap.js';
@@ -34,7 +34,7 @@ export function openInspector(id){
   n.props.forEach(p=>{
     if(!p.inspectorOnly)bodyIdx++;
     const myBody=p.inspectorOnly?-1:bodyIdx;
-    const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${p.k}</label>`;
+    const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${esc(p.k)}</label>`;
     const setBody=v=>{if(myBody<0)return;const pv=nodes[id].el.querySelectorAll('[data-body] .pv')[myBody];if(pv)pv.textContent=v;};
     if(p.kind==='gpio-line'){
       // Pick the physical line from the detected list via the custom
@@ -124,7 +124,7 @@ export function openInspector(id){
   if(n.control==='slider'){const row=document.createElement('div');row.className='iprop';
     const inp=document.createElement('input');inp.value=n.value.toFixed(1);
     inp.oninput=()=>{const v=parseFloat(inp.value);if(!isNaN(v)){n.value=Math.min(n.max,Math.max(n.min,v));setSlider(id,n.value);}};
-    row.innerHTML=`<label>${n.vlabel} (${n.unit})</label>`;row.appendChild(inp);pc.appendChild(row);}
+    row.innerHTML=`<label>${esc(n.vlabel)} (${esc(n.unit)})</label>`;row.appendChild(inp);pc.appendChild(row);}
   // per-port wire colors
   const ws=document.getElementById('insp-wires'),wsec=document.getElementById('insp-wires-sec');ws.innerHTML='';
   const rws=[];
@@ -132,7 +132,7 @@ export function openInspector(id){
   n.ports.out.forEach(p=>{const o=findWireFrom(id+':'+p.id);if(o)rws.push({label:p.label,dir:'Output',o});});
   if(!rws.length){wsec.style.display='none';}
   else{wsec.style.display='';rws.forEach(rw=>{const box=document.createElement('div');box.className='iwire';const dc=rw.dir==='Input'?'var(--cat-input)':'var(--cat-output)';
-    box.innerHTML=`<div class="iwl"><span class="dirdot" style="color:${dc};background:${dc}"></span>${rw.dir} · ${rw.label}</div>`;
+    box.innerHTML=`<div class="iwl"><span class="dirdot" style="color:${dc};background:${dc}"></span>${rw.dir} · ${esc(rw.label)}</div>`;
     const sws=document.createElement('div');sws.className='swatches';
     PALETTE.forEach(col=>{const s=document.createElement('div');s.className='sw'+(col===(rw.o.color||'#34E4EA')?' sel':'');s.style.background=col;s.style.setProperty('--swc',col);
       s.onclick=()=>{applyEdgeColor(rw.o,col);[...sws.children].forEach(x=>x.classList.remove('sel'));s.classList.add('sel');};sws.appendChild(s);});

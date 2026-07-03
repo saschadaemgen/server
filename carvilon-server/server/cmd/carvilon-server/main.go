@@ -27,6 +27,7 @@ import (
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
 	"carvilon.local/server/internal/db"
+	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
@@ -361,6 +362,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		MQTTStore:       mqttStore,
 		Telegram:        telegramBot,
 		TelegramStore:   telegramStore,
+		DesignerStore:   designerstore.New(database.DB),
 		Log:             log,
 	})
 	if err != nil {

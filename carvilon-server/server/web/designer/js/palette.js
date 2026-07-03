@@ -1,13 +1,14 @@
 // Palette: the left rail — the searchable block library (grouped by the
 // five categories, with per-category activate/deactivate + recolour),
-// the favourites strip, the category filter, and the project dropdown.
+// the favourites strip, and the category filter. (The project tree
+// dropdown lives in project.js since it became server-backed.)
 //
 // initPalette() builds the whole rail; main.js calls it once after every
 // module has evaluated (so the node-create drag handlers it wires up are
 // already defined). NAME_ICON / NAME_CAT are filled in here and read by
 // nodes.js when a dragged block is dropped onto the canvas.
 
-import { CAT, PALETTE, nodes, S, dragghost } from './store.js';
+import { CAT, PALETTE, nodes, S, dragghost, markDirty } from './store.js';
 import { attachDrag, moveGhost, dropNew } from './nodes.js';
 import { renderMinimap } from './minimap.js';
 
@@ -58,28 +59,9 @@ export async function initPalette(){
    libEl.appendChild(g);
  }
  const railTotal=Object.values(LIBRARY).reduce((a,x)=>a+x.length,0);const cntEl=document.querySelector('.search-cnt');if(cntEl)cntEl.textContent='('+railTotal+')';
- /* ===== project management dropdown ===== */
- const PROJ=[{type:'folder',name:'Building',open:true,children:[{type:'folder',name:'Ground floor',open:true,children:[{type:'proj',name:'EG · Flur'},{type:'proj',name:'EG · Living'},{type:'proj',name:'EG · Kitchen'}]},{type:'folder',name:'First floor',open:false,children:[{type:'proj',name:'OG · Hall'},{type:'proj',name:'OG · Bath'}]}]},{type:'folder',name:'Sandbox',open:false,children:[{type:'proj',name:'Test rig'}]}];
- let _pid=0;(function tag(ns){ns.forEach(n=>{n._id='p'+(++_pid);if(n.children)tag(n.children);});})(PROJ);
- let curProj='EG · Flur';
- const railEl=document.querySelector('.rail'),projPop=document.getElementById('proj-pop'),projBtn=document.getElementById('proj-btn'),projCur=document.getElementById('proj-cur');
- function findNode(id,ns,parent){for(const n of ns){if(n._id===id)return{n,parent:ns};if(n.children){const r=findNode(id,n.children,n);if(r)return r;}}return null;}
- function renderTree(ns,d){return ns.map(n=>n.type==='folder'?`<div class="pt-folder" data-open="${n.open}"><div class="pt-row pt-fold" data-id="${n._id}" style="--d:${d}"><i class="pt-chev" data-lucide="chevron-right"></i><i data-lucide="folder"></i><span>${n.name}</span></div><div class="pt-children">${n.open?renderTree(n.children,d+1):''}</div></div>`:`<div class="pt-row pt-proj${n.name===curProj?' cur':''}" data-proj="${n.name}" style="--d:${d}"><i data-lucide="file"></i><span>${n.name}</span>${n.name===curProj?'<i class="pt-dot" data-lucide="check"></i>':''}</div>`).join('');}
- function paintProj(){projPop.innerHTML=`<div class="pt-tree">${renderTree(PROJ,0)}</div><div class="pt-actions"><button data-act="newp" title="New project"><i data-lucide="file-plus"></i></button><button data-act="newf" title="New folder"><i data-lucide="folder-plus"></i></button><button data-act="ren" title="Rename"><i data-lucide="pencil"></i></button><button data-act="del" title="Delete"><i data-lucide="trash-2"></i></button></div>`;if(window.lucide)lucide.createIcons();}
- function curParent(ns){for(const n of ns){if(n.type==='proj'&&n.name===curProj)return ns;if(n.children){const r=curParent(n.children);if(r)return r;}}return null;}
- function setCurrent(name){curProj=name;projCur.textContent=name;railEl.classList.remove('proj-open');paintProj();}
- paintProj();
- projBtn.onclick=e=>{e.stopPropagation();railEl.classList.toggle('proj-open');};
- document.addEventListener('pointerdown',e=>{if(!e.target.closest('.rail-head')&&!e.target.closest('#proj-pop'))railEl.classList.remove('proj-open');});
- projPop.addEventListener('click',e=>{
-   const fold=e.target.closest('.pt-fold');if(fold){const r=findNode(fold.dataset.id,PROJ);if(r){r.n.open=!r.n.open;paintProj();}return;}
-   const pr=e.target.closest('.pt-proj');if(pr){setCurrent(pr.dataset.proj);return;}
-   const act=e.target.closest('[data-act]');if(!act)return;const a=act.dataset.act;
-   if(a==='newp'){const nm=prompt('New project name');if(nm){(curParent(PROJ)||PROJ[0].children).push({type:'proj',name:nm,_id:'p'+(++_pid)});setCurrent(nm);}}
-   else if(a==='newf'){const nm=prompt('New folder name');if(nm){PROJ.push({type:'folder',name:nm,open:true,children:[],_id:'p'+(++_pid)});paintProj();}}
-   else if(a==='ren'){const nm=prompt('Rename project',curProj);if(nm){const p=curParent(PROJ);if(p){const it=p.find(x=>x.name===curProj);if(it)it.name=nm;}setCurrent(nm);}}
-   else if(a==='del'){const p=curParent(PROJ);if(p){const i=p.findIndex(x=>x.name===curProj);if(i>=0)p.splice(i,1);}let first=null;(function f(ns){for(const n of ns){if(n.type==='proj'&&!first)first=n.name;if(n.children)f(n.children);}})(PROJ);setCurrent(first||'—');}
- });
+ /* The project tree dropdown (folders + graphs, persistence, autosave)
+    lives in project.js since it went from demo data to the real
+    server-backed tree; main.js initialises it after the palette. */
  /* Category colour picker, "conveyor belt" style: the header label rides
     off to the right and the full palette (PALETTE + a custom-colour chip)
     rides in from the left; picking a colour drives it back. The two panes
@@ -106,7 +88,9 @@ export async function initPalette(){
  function setCategoryColor(cat,col){CAT[cat].color=col;
    document.querySelectorAll(`.lib-group[data-cat="${cat}"] .gd`).forEach(d=>d.style.setProperty('--gc',col));
    document.querySelectorAll(`.lib-item[data-cat="${cat}"]`).forEach(it=>it.style.setProperty('--gc',col));
-   for(const id in nodes){if(nodes[id].def.cat===cat){nodes[id].def.color=col;nodes[id].el.style.setProperty('--cat',col);}}
+   let touched=false;
+   for(const id in nodes){if(nodes[id].def.cat===cat){nodes[id].def.color=col;nodes[id].el.style.setProperty('--cat',col);touched=true;}}
+   if(touched)markDirty(); // def.color is persisted state
    const fp=document.querySelector(`#filter-pop .fp-row[data-cat="${cat}"]`);if(fp)fp.style.setProperty('--c',col);
    const cg=document.querySelector(`.lib-group[data-cat="${cat}"] .glabel-colors`);if(cg)cg.querySelectorAll('.gsw[data-col]').forEach(s=>s.classList.toggle('sel',s.dataset.col.toLowerCase()===col.toLowerCase()));
    if(typeof renderMinimap==='function')renderMinimap();}

@@ -14,20 +14,29 @@ import (
 
 // designerData is the payload for the /a/designer host page. The editor
 // itself lives entirely inside the iframe (its own document, CSS and
-// JS); the host page only needs the admin user for the shared topbar.
+// JS); the host page only needs the admin user for the shared topbar
+// plus the optional ?g=<id> graph deep link forwarded into the iframe.
 type designerData struct {
-	User adminUser
+	User    adminUser
+	GraphID string
 }
 
 // handleAdminDesigner renders the logic-editor host page: the shared
 // Saison-20 admin layout (topbar) wrapping a full-bleed iframe that
 // loads the embedded editor from /a/designer/. The iframe gives the
 // editor a clean isolation boundary from the admin shell's tokens and
-// scripts.
+// scripts. A ?g=<id> deep link (the hook the later Tags page pulls on)
+// passes through onto the iframe src; only a plain integer is
+// forwarded.
 func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
+	g := r.URL.Query().Get("g")
+	if _, err := strconv.ParseInt(g, 10, 64); err != nil {
+		g = ""
+	}
 	s.renderAdminPage(w, "designer", designerData{
-		User: adminUser{Name: username, Initials: initialsOf(username)},
+		User:    adminUser{Name: username, Initials: initialsOf(username)},
+		GraphID: g,
 	})
 }
 

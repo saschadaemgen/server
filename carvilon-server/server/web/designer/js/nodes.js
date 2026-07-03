@@ -3,7 +3,7 @@
 // flow, and node deletion. The three demo nodes (button → staircase →
 // lamp) are built from GRAPH when this module evaluates.
 
-import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduceMotion, selection } from './store.js';
+import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduceMotion, selection, markDirty, esc, escAttr } from './store.js';
 import { selectOnly, clearSel } from './selection.js';
 import { renderMinimap } from './minimap.js';
 import { recomputeEndpoints } from './wires.js';
@@ -30,23 +30,27 @@ const CATALOG={
 function ctlHTML(n){
   if(n.control==='press') return `<div class="node-ctl" data-noselectdrag><button class="ctl-press" data-act="press"><i data-lucide="hand"></i>Press</button></div>`;
   if(n.control==='switch') return `<div class="node-ctl" data-noselectdrag data-act="switch"><div class="ctl-switch"><span class="swlab">Off</span><span class="sw-track"><span class="sw-thumb"></span></span></div></div>`;
-  if(n.control==='slider') return `<div class="node-ctl" data-noselectdrag><div class="ctl-slider"><div class="slhead"><span class="k">${n.vlabel}</span><span class="v" data-vval>${n.value.toFixed(1)} ${n.unit}</span></div><input type="range" min="${n.min}" max="${n.max}" step="${n.step}" value="${n.value}" data-act="slider"><div class="ctl-prog"><i data-prog></i></div></div></div>`;
+  if(n.control==='slider') return `<div class="node-ctl" data-noselectdrag><div class="ctl-slider"><div class="slhead"><span class="k">${esc(n.vlabel)}</span><span class="v" data-vval>${Number(n.value).toFixed(1)} ${esc(n.unit)}</span></div><input type="range" min="${Number(n.min)}" max="${Number(n.max)}" step="${Number(n.step)}" value="${Number(n.value)}" data-act="slider"><div class="ctl-prog"><i data-prog></i></div></div></div>`;
   return '';
 }
 // pvDisp renders a prop's card value: enums show their friendly label
 // (not the raw 'pullup'), everything else its value verbatim.
 function pvDisp(p){return p.opts?((p.opts.find(o=>o.v===p.v)||{}).l||p.v):p.v;}
-function renderNodeBody(n){const rows=n.props.filter(p=>!p.inspectorOnly).map(p=>`<div class="prow"><span class="pk">${p.k}</span><span class="pv ${p.accent?'accent':''}">${pvDisp(p)}</span></div>`).join('');return rows+ctlHTML(n);}
+function renderNodeBody(n){const rows=n.props.filter(p=>!p.inspectorOnly).map(p=>`<div class="prow"><span class="pk">${esc(p.k)}</span><span class="pv ${p.accent?'accent':''}">${esc(pvDisp(p))}</span></div>`).join('');return rows+ctlHTML(n);}
 function normPorts(n){n.ports.in=(n.ports.in||[]).map(p=>typeof p==='string'?{id:p,label:p}:p);n.ports.out=(n.ports.out||[]).map(p=>typeof p==='string'?{id:p,label:p}:p);}
 export function buildNode(n){
-  if(n.color==null)n.color=CAT[n.cat].color;normPorts(n);
-  const c=CAT[n.cat],el=document.createElement('div');
+  // A stored graph can carry a category this host's catalog does not
+  // expose (e.g. gpio saved on a Pi, opened elsewhere) - register a
+  // neutral fallback instead of crashing the load.
+  const c=CAT[n.cat]||(CAT[n.cat]={color:'#7f8c99',label:String(n.cat||'?').toUpperCase(),icon:'box'});
+  if(n.color==null)n.color=c.color;normPorts(n);
+  const el=document.createElement('div');
   el.className='node';el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
-  const insH=n.ports.in.map(p=>`<div class="port" data-port="${n.id}:${p.id}" data-tip="${p.label} · Input"><span class="socket"></span></div>`).join('');
-  const outH=n.ports.out.map(p=>`<div class="port" data-port="${n.id}:${p.id}" data-tip="${p.label} · Output"><span class="socket"></span></div>`).join('');
+  const insH=n.ports.in.map(p=>`<div class="port" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(p.label)} · Input"><span class="socket"></span></div>`).join('');
+  const outH=n.ports.out.map(p=>`<div class="port" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(p.label)} · Output"><span class="socket"></span></div>`).join('');
   el.innerHTML=`<div class="node-accent"></div>
-    <div class="node-head"><div class="node-icon"><i data-lucide="${n.icon}"></i></div>
-    <div class="node-titles"><div class="node-cat" data-catlabel>${c.label}</div><div class="node-title" data-titletext>${n.title}</div></div></div>
+    <div class="node-head"><div class="node-icon"><i data-lucide="${escAttr(n.icon)}"></i></div>
+    <div class="node-titles"><div class="node-cat" data-catlabel>${esc(c.label)}</div><div class="node-title" data-titletext>${esc(n.title)}</div></div></div>
     <div class="node-live" data-live></div>
     <div class="node-body" data-body>${renderNodeBody(n)}</div>
     ${insH?`<div class="ports ports-in">${insH}</div>`:''}${outH?`<div class="ports ports-out">${outH}</div>`:''}`;
@@ -134,8 +138,11 @@ function defFor(name,cat){
   if(c==='output')return{...base,props:[{k:'Output',v:'Q?',accent:true}],ports:{in:['AI'],out:[]},control:'switch',on:false};
   return{...base,props:[],ports:{in:['A'],out:['Q']}};}
 function createNode(name,wx,wy,cat){const t=defFor(name,cat);if(!t)return;
-  const def=JSON.parse(JSON.stringify(t));def.id=name.toLowerCase().replace(/[^a-z0-9]/g,'')+'_'+(++idc);def.title=def.title||name;def.ui={x:snap(wx-107),y:snap(wy-40)};
-  GRAPH.nodes.push(def);const nel=buildNode(def);if(!reduceMotion){nel.classList.add('spawn');fxBurst(def.ui.x,def.ui.y,nel.offsetWidth,nel.offsetHeight,def.color);}selectOnly(def.id);renderMinimap();}
+  const def=JSON.parse(JSON.stringify(t)),slug=name.toLowerCase().replace(/[^a-z0-9]/g,'');
+  // idc restarts at 0 per page load, so skip ids a loaded graph occupies.
+  let id;do{id=slug+'_'+(++idc);}while(nodes[id]);
+  def.id=id;def.title=def.title||name;def.ui={x:snap(wx-107),y:snap(wy-40)};
+  GRAPH.nodes.push(def);const nel=buildNode(def);if(!reduceMotion){nel.classList.add('spawn');fxBurst(def.ui.x,def.ui.y,nel.offsetWidth,nel.offsetHeight,def.color);}selectOnly(def.id);renderMinimap();markDirty();}
 
 /* ===== create (drag from library) + delete ===== */
 export function attachDrag(it){
@@ -159,5 +166,6 @@ function deleteNode(id){const n=nodes[id];if(!n)return;const el=n.el,col=n.def.c
   rm.forEach(o=>{o.g.remove();const wi=wires.indexOf(o);if(wi>=0)wires.splice(wi,1);delete wireByEdge[o.from+'>'+o.to];});
   for(let i=GRAPH.edges.length-1;i>=0;i--){const e=GRAPH.edges[i];if(e.from.split(':')[0]===id||e.to.split(':')[0]===id)GRAPH.edges.splice(i,1);}
   delete nodes[id];const gi=GRAPH.nodes.findIndex(x=>x.id===id);if(gi>=0)GRAPH.nodes.splice(gi,1);
-  if(reduceMotion){el.remove();}else{fxBurst(x,y,w,h,col);el.classList.add('despawn');setTimeout(()=>el.remove(),340);}}
+  if(reduceMotion){el.remove();}else{fxBurst(x,y,w,h,col);el.classList.add('despawn');setTimeout(()=>el.remove(),340);}
+  markDirty();}
 export function deleteSelected(){if(!selection.size)return;[...selection].forEach(deleteNode);clearSel();renderMinimap();recomputeEndpoints();}
