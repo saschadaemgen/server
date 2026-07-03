@@ -26,6 +26,8 @@ import (
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/console"
+	"carvilon.local/server/internal/consolestore"
 	"carvilon.local/server/internal/db"
 	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
@@ -340,6 +342,13 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 			"(set CARVILON_EGRESS_TOKEN_HMAC_KEY to enable)")
 	}
 
+	// Terminal dock session frame (Terminal-Track step 1). It owns the
+	// live console sessions (local shell PTY / outbound SSH), caps
+	// concurrency, and tears each down cleanly. CloseAll on shutdown ends
+	// every open terminal so no shell/SSH process is orphaned.
+	consoleMgr := console.NewManager(log)
+	defer consoleMgr.CloseAll()
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:          cfg,
 		Sessions:        sessionSvc,
@@ -369,6 +378,8 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		TelegramStore:   telegramStore,
 		DesignerStore:   designerstore.New(database.DB),
 		LogBuffer:       logBuf,
+		Console:         consoleMgr,
+		ConsoleStore:    consolestore.New(database.DB, secretsSvc),
 		Log:             log,
 	})
 	if err != nil {

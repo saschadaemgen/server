@@ -24,6 +24,8 @@ import (
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/console"
+	"carvilon.local/server/internal/consolestore"
 	"carvilon.local/server/internal/db"
 	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
@@ -77,23 +79,24 @@ func (c *testClock) Add(d time.Duration) {
 
 // testEnv carries everything a test needs in one place.
 type testEnv struct {
-	srv         *Server
-	ts          *httptest.Server
-	client      *http.Client
-	sess        *session.Service
-	adminSess   *adminsession.Service
-	adminSvc    *admin.Service
-	platformCfg *platformconfig.Service
-	viewerMgr     *viewermanager.Manager
-	hub         *doorbellhub.Hub
-	history     *doorhistory.SQLStore
-	audit       *loginaudit.Service
-	userStore   *fakeUserStore
-	mqttStore   *mqttstore.Store
-	mqttBroker  *mqttbroker.Manager
-	logBuf      *logbuf.Buffer
-	d           *db.DB
-	clock       *testClock
+	srv          *Server
+	ts           *httptest.Server
+	client       *http.Client
+	sess         *session.Service
+	adminSess    *adminsession.Service
+	adminSvc     *admin.Service
+	platformCfg  *platformconfig.Service
+	viewerMgr    *viewermanager.Manager
+	hub          *doorbellhub.Hub
+	history      *doorhistory.SQLStore
+	audit        *loginaudit.Service
+	userStore    *fakeUserStore
+	mqttStore    *mqttstore.Store
+	mqttBroker   *mqttbroker.Manager
+	logBuf       *logbuf.Buffer
+	consoleStore *consolestore.Store
+	d            *db.DB
+	clock        *testClock
 }
 
 // fakeUserStore is a deterministic in-memory access.UserStore for
@@ -259,6 +262,12 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 
 	userStore := newFakeUserStore()
 	logBuffer := logbuf.New(100)
+	consoleSecrets, err := secrets.NewWithKey(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("secrets.NewWithKey: %v", err)
+	}
+	consoleStore := consolestore.New(d.DB, consoleSecrets)
+	consoleMgr := console.NewManager(quietLogger(), console.WithIdleTimeout(0))
 
 	cfg := config.Config{
 		ListenAddr: ":0",
@@ -271,7 +280,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Config:          cfg,
 		Sessions:        sess,
 		AdminSessions:   adminSess,
-		ViewerManager:     viewerMgr,
+		ViewerManager:   viewerMgr,
 		Admin:           adminSvc,
 		PlatformConfig:  platformCfg,
 		Audit:           auditSvc,
@@ -288,6 +297,8 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		MQTTStore:       mqttStore,
 		DesignerStore:   designerstore.New(d.DB),
 		LogBuffer:       logBuffer,
+		Console:         consoleMgr,
+		ConsoleStore:    consoleStore,
 		Log:             quietLogger(),
 	})
 	if err != nil {
@@ -316,14 +327,15 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		srv: srv, ts: ts, client: client,
 		sess: sess, adminSess: adminSess, adminSvc: adminSvc,
 		platformCfg: platformCfg, viewerMgr: viewerMgr,
-		hub:       hub,
-		history:   historyStore,
-		audit:      auditSvc,
-		userStore:  userStore,
-		mqttStore:  mqttStore,
-		mqttBroker: mqttBroker,
-		logBuf:     logBuffer,
-		d:          d, clock: clock,
+		hub:          hub,
+		history:      historyStore,
+		audit:        auditSvc,
+		userStore:    userStore,
+		mqttStore:    mqttStore,
+		mqttBroker:   mqttBroker,
+		logBuf:       logBuffer,
+		consoleStore: consoleStore,
+		d:            d, clock: clock,
 	}
 }
 

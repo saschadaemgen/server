@@ -12,6 +12,7 @@ require (
 	carvilon.local/mock v0.0.0-00010101000000-000000000000
 	carvilon.local/stream v0.0.0-00010101000000-000000000000
 	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/hashicorp/mdns v1.0.6
 	github.com/mochi-mqtt/server/v2 v2.7.9

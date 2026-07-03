@@ -33,6 +33,22 @@ verify path used in the rehash-on-login migration (Saison
 - License:   BSD-3-Clause
 - Imports:   golang.org/x/crypto/argon2
              golang.org/x/crypto/bcrypt
+             golang.org/x/crypto/ssh (terminal dock: the outbound
+             SSH client behind the SSH terminal pane, Terminal-Track
+             step 1)
+
+## github.com/creack/pty
+
+The terminal dock's local-shell pane opens an interactive shell on a
+pseudo-terminal on the Linux edge host (Terminal-Track step 1);
+creack/pty is the de-facto-standard pure-Go PTY helper. Linux-only
+(the edge target); other platforms use a build-tag stub and the dock
+hides the local-shell button.
+
+- Project:   https://github.com/creack/pty
+- License:   MIT
+- Copyright: (c) 2011 Keith Rarick, (c) 2019 Guillaume J. Charmes
+- Imports:   github.com/creack/pty (//go:build linux only)
 
 ## go-qrcode
 

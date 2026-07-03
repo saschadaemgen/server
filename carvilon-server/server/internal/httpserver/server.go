@@ -36,6 +36,8 @@ import (
 	"carvilon.local/server/internal/auth/ratelimit"
 	"carvilon.local/server/internal/auth/session"
 	"carvilon.local/server/internal/config"
+	"carvilon.local/server/internal/console"
+	"carvilon.local/server/internal/consolestore"
 	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
@@ -169,7 +171,16 @@ type Deps struct {
 	// System Log tab streams from (main wires it as a tee around the
 	// stdout handler). Nil leaves the tab's SSE endpoint on 503.
 	LogBuffer *logbuf.Buffer
-	Log       *slog.Logger
+	// Console is the terminal dock's session framework (Terminal-Track
+	// step 1): it bridges each pane's WebSocket to a local shell PTY or an
+	// outbound SSH client. Nil leaves the console WS + caps endpoints on
+	// 503 (the dock shows the tabs inert).
+	Console *console.Manager
+	// ConsoleStore persists the terminal dock's saved connection profiles
+	// and TOFU host-key pins (migration 033). Nil disables the profile API
+	// and ad-hoc SSH still works (host keys just aren't pinned).
+	ConsoleStore *consolestore.Store
+	Log          *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -217,6 +228,8 @@ type Server struct {
 	telegramStore *telegramstore.Store
 	designerStore *designerstore.Store
 	logBuf        *logbuf.Buffer
+	console       *console.Manager
+	consoleStore  *consolestore.Store
 	log           *slog.Logger
 	// engineLog scopes the designer-run lifecycle lines to the "engine"
 	// subsystem (instead of this package's "httpserver"), so the System
@@ -299,6 +312,8 @@ func New(deps Deps) (*Server, error) {
 		telegramStore:   deps.TelegramStore,
 		designerStore:   deps.DesignerStore,
 		logBuf:          deps.LogBuffer,
+		console:         deps.Console,
+		consoleStore:    deps.ConsoleStore,
 		log:             deps.Log.With("component", "httpserver"),
 		engineLog:       deps.Log.With("component", "engine"),
 		mux:             http.NewServeMux(),
@@ -530,6 +545,19 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/designer/graphs/{id}/rename", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphRename)))
 	s.mux.Handle("POST /a/designer/graphs/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphDelete)))
 	s.mux.Handle("POST /a/designer/graphs/{id}/save", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGraphSave)))
+	// Terminal dock (Terminal-Track step 1): the console session frame.
+	// The WS endpoint bridges each pane to a local shell PTY or an
+	// outbound SSH client; the rest is saved-profile CRUD + TOFU host-key
+	// re-trust. All admin-gated; the more specific patterns win over the
+	// /a/designer/ static handler below.
+	s.mux.Handle("GET /a/designer/console/caps", s.requireAdminSession(http.HandlerFunc(s.handleConsoleCaps)))
+	s.mux.Handle("GET /a/designer/console/ws", s.requireAdminSession(http.HandlerFunc(s.handleConsoleWS)))
+	s.mux.Handle("GET /a/designer/console/profiles", s.requireAdminSession(http.HandlerFunc(s.handleConsoleProfilesList)))
+	s.mux.Handle("POST /a/designer/console/profiles", s.requireAdminSession(http.HandlerFunc(s.handleConsoleProfileCreate)))
+	s.mux.Handle("POST /a/designer/console/profiles/{id}", s.requireAdminSession(http.HandlerFunc(s.handleConsoleProfileUpdate)))
+	s.mux.Handle("POST /a/designer/console/profiles/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleConsoleProfileDelete)))
+	s.mux.Handle("POST /a/designer/console/hostkey/forget", s.requireAdminSession(http.HandlerFunc(s.handleConsoleHostKeyForget)))
+
 	s.mux.Handle("GET /a/designer/", s.requireAdminSession(designerStaticHandler()))
 
 	// MQTT broker admin (step 1): device credentials + ACL rules +
