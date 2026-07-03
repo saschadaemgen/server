@@ -38,6 +38,7 @@ type fakeAPI struct {
 	inFlight     int
 	maxInFlight  int
 	calls        int
+	pollHold     time.Duration // empty long-poll hold before answering []
 
 	srv *httptest.Server
 }
@@ -49,7 +50,10 @@ type fakeSent struct {
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{t: t, token: testToken}
+	// Short default hold keeps tests fast; the single-poller test raises
+	// it so a genuinely concurrent poller cannot hide behind an early
+	// long-poll expiry (see there).
+	f := &fakeAPI{t: t, token: testToken, pollHold: 150 * time.Millisecond}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/bot"+testToken+"/getMe", f.handleGetMe)
 	mux.HandleFunc("/bot"+testToken+"/getUpdates", f.handleGetUpdates)
@@ -78,6 +82,27 @@ func (f *fakeAPI) handleGetUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
+	// A stopped poller aborts its getUpdates client-side, but this
+	// handler only exits once the server notices the dropped connection
+	// - there is no happens-before between the manager's poller join
+	// and this goroutine's defer. Let such a zombie drain before
+	// counting, so maxInFlight measures concurrent POLLERS, not a
+	// winding-down handler racing the next poller's first request. A
+	// real second poller holds its long-poll far longer than this grace
+	// (the single-poller test raises pollHold) and is still counted -
+	// and that test's settle sleep before asserting must outlast this
+	// grace, or the overlap registers only after the check ran.
+	drainUntil := time.Now().Add(300 * time.Millisecond)
+	for {
+		f.mu.Lock()
+		n := f.inFlight
+		f.mu.Unlock()
+		if n == 0 || time.Now().After(drainUntil) {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
 	f.mu.Lock()
 	f.calls++
 	f.inFlight++
@@ -85,6 +110,7 @@ func (f *fakeAPI) handleGetUpdates(w http.ResponseWriter, r *http.Request) {
 		f.maxInFlight = f.inFlight
 	}
 	f.lastOffset = req.Offset
+	hold := f.pollHold
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()
@@ -92,9 +118,13 @@ func (f *fakeAPI) handleGetUpdates(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}()
 
-	// Short long-poll: return queued updates >= offset, else empty
-	// after ~150ms (kept short so tests stay fast).
-	deadline := time.Now().Add(150 * time.Millisecond)
+	// Long-poll: queued updates >= offset as soon as they appear, an
+	// empty batch once the hold expires - and a prompt exit on client
+	// abort, keeping the zombie window above tiny.
+	deadline := time.NewTimer(hold)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		f.mu.Lock()
 		var due []apiUpdate
@@ -104,17 +134,29 @@ func (f *fakeAPI) handleGetUpdates(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.mu.Unlock()
-		if len(due) > 0 || time.Now().After(deadline) || r.Context().Err() != nil {
-			var buf bytes.Buffer
-			buf.WriteString(`{"ok":true,"result":`)
-			b, _ := json.Marshal(due)
-			buf.Write(b)
-			buf.WriteString(`}`)
-			_, _ = w.Write(buf.Bytes())
+		if len(due) > 0 {
+			writeUpdates(w, due)
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			writeUpdates(w, nil)
+			return
+		case <-deadline.C:
+			writeUpdates(w, nil)
+			return
+		case <-tick.C:
+		}
 	}
+}
+
+func writeUpdates(w http.ResponseWriter, due []apiUpdate) {
+	var buf bytes.Buffer
+	buf.WriteString(`{"ok":true,"result":`)
+	b, _ := json.Marshal(due)
+	buf.Write(b)
+	buf.WriteString(`}`)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (f *fakeAPI) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +462,12 @@ func TestManager_TokenNeverInLogsOrStatus(t *testing.T) {
 // an already-dispatched update is not re-delivered.
 func TestManager_SinglePollerAcrossReconfigure(t *testing.T) {
 	f := newFakeAPI(t)
+	// The fake tells a real second poller from an aborted handler still
+	// winding down by TIME: hold empty long-polls far beyond the
+	// handler's zombie-drain grace, so a live concurrent getUpdates
+	// cannot slip past the check by expiring early. Set before the
+	// manager exists - nothing polls yet.
+	f.pollHold = 5 * time.Second
 	m, _ := newTestManager(t, f, nil, map[int64]string{42: ""})
 
 	var mu sync.Mutex
@@ -450,7 +498,10 @@ func TestManager_SinglePollerAcrossReconfigure(t *testing.T) {
 	}) {
 		t.Errorf("offset not carried across Reconfigure: %d", f.lastOffset)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// Settle well past the fake's zombie-drain grace: a genuinely
+	// concurrent poller registers in maxInFlight only after the grace
+	// expires, so asserting earlier would miss it.
+	time.Sleep(750 * time.Millisecond)
 	mu.Lock()
 	if dispatched != 1 {
 		t.Errorf("update re-dispatched after Reconfigure: %d", dispatched)
