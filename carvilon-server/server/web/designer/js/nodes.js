@@ -1,7 +1,7 @@
 // Nodes: building the visual node cards, the per-category default
 // shapes for dropped blocks, the library drag-ghost / drop-to-create
-// flow, and node deletion. The three demo nodes (button → staircase →
-// lamp) are built from GRAPH when this module evaluates.
+// flow, and node deletion. The canvas starts empty; project.js builds
+// the persisted graph via buildNode once it arrives from the API.
 
 import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduceMotion, selection, markDirty, esc, escAttr } from './store.js';
 import { selectOnly, clearSel } from './selection.js';
@@ -60,7 +60,6 @@ export function buildNode(n){
   world.appendChild(el);nodes[n.id]={def:n,el};
   if(window.lucide)lucide.createIcons();return el;
 }
-GRAPH.nodes.forEach(buildNode);
 function defFor(name,cat){
   // GPIO blocks (and any future engine-backed I/O block) are typed to the
   // engine's source.channel / sink.channel nodes with their engine port

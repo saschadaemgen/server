@@ -1,17 +1,16 @@
 // Project tree + persistence: the real folder/graph tree in the left
 // rail (backed by the admin-gated designer API, migration 032), graph
 // load/switch, the ~1s debounced autosave with its dock save-state,
-// the topbar breadcrumb, and the ?g=<id> deep link. Replaces the demo
-// dropdown that lived in palette.js.
+// the topbar breadcrumb, and the ?g=<id> deep link. The canvas starts
+// empty with a subtle loading hint and renders exactly once when the
+// selected/deep-linked graph arrives - no flash of stale content.
 //
 // Rules mirrored from the server (which enforces them): system folders
 // (System > Reader) are locked - no rename/delete, no creating inside;
 // their rows render with a lock icon and the toolbar disables. Deleting
 // needs an in-popover confirmation; rename is inline. Switching graphs
 // first stops a running engine graph cleanly, then flushes the pending
-// autosave - no silent loss of changes or run state. The very first
-// save adopts whatever is on the canvas (the demo graph) as the content
-// of the initially selected graph.
+// autosave - no silent loss of changes or run state.
 
 import { GRAPH, nodes, wires, wireByEdge, world, graphDirty, markDirty, esc, escAttr } from './store.js';
 import { buildNode } from './nodes.js';
@@ -36,13 +35,21 @@ const openSet = new Set();
 // ---- autosave state ----
 let dirty = false, saving = false, queued = false, saveTimer = null;
 // lastSaved is the serialized canvas as the server knows it; '' forces
-// the next flush/save to post (used to adopt the boot canvas).
+// the next flush/save to post (used when openGraph adopts an orphan
+// canvas into a never-saved graph).
 let lastSaved = null;
 
 const railEl = document.querySelector('.rail');
 const projPop = document.getElementById('proj-pop');
 const projBtn = document.getElementById('proj-btn');
 const projCur = document.getElementById('proj-cur');
+
+// clearLoading removes the boot loading hint - called exactly once the
+// initial graph has rendered (or turned out not to exist/load).
+function clearLoading(){
+  const el = document.getElementById('canvas-loading');
+  if (el) el.remove();
+}
 
 // api wraps the designer endpoints (relative to /a/designer/). A
 // redirect means the admin session expired (the middleware 303s to the
@@ -270,8 +277,8 @@ async function saveNow(){
   return ok;
 }
 // flushSave persists outstanding changes before a switch/teardown -
-// including the adopted boot canvas (lastSaved '') so switching away
-// from a never-saved graph does not silently drop what was visible.
+// including an orphan canvas openGraph adopted (lastSaved '') so
+// switching away never silently drops what was visible.
 // Returns false when the save failed (the caller blocks the switch).
 async function flushSave(){
   clearTimeout(saveTimer);
@@ -495,6 +502,7 @@ export async function initProject(){
 
   try { await refetchTree(); }
   catch (err){
+    clearLoading();
     if (projCur) projCur.textContent = '—';
     const el = document.getElementById('st-save');
     if (el) el.textContent = 'offline';
@@ -508,25 +516,22 @@ export async function initProject(){
   let last = 0;
   try { last = parseInt(localStorage.getItem(LAST_KEY) || '', 10) || 0; } catch(_) {}
   const pick = deep || (graphById(last) ? last : firstGraphId());
-  if (!pick){ paintAll(); return; }
+  if (!pick){ clearLoading(); paintAll(); return; }
 
   try {
+    // The one boot render: the canvas stays empty (loading hint) until
+    // the picked graph is here, then it is built exactly once - no
+    // demo template, no flash of stale content.
     const data = await api('graphs/' + pick);
     curGraph = { id: data.id, folder_id: data.folder_id, name: data.name, rev: data.rev };
     selKind = 'g'; selId = pick;
-    if (deep || data.rev > 0){
-      // Stored state wins - a deep link shows exactly the stored graph.
-      loadIntoCanvas(data.graph);
-      lastSaved = serializeCanvas();
-    } else {
-      // Never-saved default graph: adopt today's canvas (the demo) as
-      // the unsaved working copy; the first save makes it the content.
-      lastSaved = '';
-    }
+    loadIntoCanvas(data.graph);
+    lastSaved = serializeCanvas();
     remember(pick);
     let f = folderById(curGraph.folder_id);
     while (f){ openSet.add(f.id); f = f.parent_id ? folderById(f.parent_id) : null; }
     saveOpen();
   } catch (err){ curGraph = null; }
+  clearLoading();
   paintAll();
 }

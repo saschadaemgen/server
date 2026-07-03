@@ -36,21 +36,14 @@ export const GRID_SIZES=[16,20,26,32,40,52];
 export const FX=(function(){const d=Object.assign({},FX_DEFAULTS);try{const s=JSON.parse(localStorage.getItem('cv_grid_fx2')||'null');if(s&&typeof s==='object')for(const k in d)if(typeof s[k]===typeof d[k])d[k]=s[k];}catch(e){}return d;})();
 export function saveFX(){try{localStorage.setItem('cv_grid_fx2',JSON.stringify(FX));}catch(e){}}
 
-// Port ids are the engine port names (out/trig/q/set) so the graph maps
-// straight onto the engine when Run executes it; the labels (Q/Tr/AI)
-// keep the display unchanged. type/implemented tag the engine-backed
-// blocks the run serializer includes.
-export const GRAPH={
-  nodes:[
-    {id:'btn1',cat:'input',type:'input.manual',implemented:true,icon:'circle-dot',title:'Push-button',ui:{x:78,y:156},
-      props:[{k:'Input',v:'I1',accent:true}],ports:{in:[],out:[{id:'out',label:'Q'}]},control:'press'},
-    {id:'stair1',cat:'time',type:'time.staircase',implemented:true,icon:'timer',title:'Staircase light',ui:{x:442,y:208},
-      props:[{k:'Mode',v:'Pulse'}],ports:{in:[{id:'trig',label:'Tr'}],out:[{id:'q',label:'Q'}]},control:'slider',value:3,min:1,max:10,step:.5,unit:'s',vlabel:'Hold time'},
-    {id:'lamp1',cat:'output',type:'output.lamp',implemented:true,icon:'lightbulb',title:'Lamp',ui:{x:806,y:166},
-      props:[{k:'Output',v:'Q3',accent:true},{k:'Channel',v:'DALI 1'}],ports:{in:[{id:'set',label:'AI'}],out:[]},control:'switch',on:false}
-  ],
-  edges:[{from:'btn1:out',to:'stair1:trig'},{from:'stair1:q',to:'lamp1:set'}]
-};
+// The working graph. Starts EMPTY: since persistence the canvas is
+// filled exactly once by project.js when the selected/deep-linked
+// graph arrives from the API - the former built-in demo template (its
+// content lives on as the stored "EG · Flur" graph) caused a visible
+// flash of stale nodes on every reload. Node defs use the engine port
+// names (out/trig/q/set) so a graph maps straight onto the engine when
+// Run executes it.
+export const GRAPH={nodes:[],edges:[]};
 
 // Autosave seam: the canvas modules call markDirty() after every
 // user-driven graph mutation (create/delete/move/wire/edit); project.js
