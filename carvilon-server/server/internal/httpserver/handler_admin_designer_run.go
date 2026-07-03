@@ -101,7 +101,9 @@ func (s *designerRunSet) get(user string) *designerRun {
 }
 
 // stopUser stops and forgets the user's current run (explicit Stop).
-func (s *designerRunSet) stopUser(user string) {
+// Reports whether a run was actually running, so the caller can log
+// the lifecycle without noise on idempotent re-stops.
+func (s *designerRunSet) stopUser(user string) bool {
 	s.mu.Lock()
 	run := s.byUser[user]
 	delete(s.byUser, user)
@@ -109,19 +111,25 @@ func (s *designerRunSet) stopUser(user string) {
 	if run != nil {
 		run.stop()
 	}
+	return run != nil
 }
 
 // stopIfCurrent tears down a specific run on monitor disconnect, but only
 // unmaps it while it is still the active one (so a reconnect that already
 // started a newer run is left intact). The run is stopped regardless —
 // stopping an already-replaced run is a harmless idempotent no-op.
-func (s *designerRunSet) stopIfCurrent(user string, run *designerRun) {
+// Reports whether it unmapped the active run, so exactly one lifecycle
+// log line fires per run end (an explicit Stop usually unmaps first,
+// making this return false).
+func (s *designerRunSet) stopIfCurrent(user string, run *designerRun) bool {
 	s.mu.Lock()
-	if s.byUser[user] == run {
+	current := s.byUser[user] == run
+	if current {
 		delete(s.byUser, user)
 	}
 	s.mu.Unlock()
 	run.stop()
+	return current
 }
 
 // handleDesignerRun validates+builds the posted canonical graph and, on
@@ -155,6 +163,10 @@ func (s *Server) handleDesignerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.designerRuns.start(user, eng, designerRunTick, cleanup)
+	// Engine lifecycle into the server log (and the System Log tab):
+	// which admin started what size of graph.
+	s.engineLog.Info("designer run started",
+		"user", user, "nodes", len(g.Nodes), "edges", len(g.Edges))
 	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -487,7 +499,15 @@ func (s *Server) handleDesignerRunMonitor(w http.ResponseWriter, r *http.Request
 
 	frames, cancel := run.eng.Subscribe(64)
 	defer cancel()
-	defer s.designerRuns.stopIfCurrent(user, run)
+	// Monitor disconnect ends the run (briefing rule). The editor's Stop
+	// button closes the stream before POSTing run/stop, so THIS is the
+	// usual place the run actually ends — log it here (and only when we
+	// unmapped it, so an explicit stop that won the race logs instead).
+	defer func() {
+		if s.designerRuns.stopIfCurrent(user, run) {
+			s.engineLog.Info("designer run stopped", "user", user)
+		}
+	}()
 
 	if err := writeDesignerSSE(w, "snapshot", map[string]any{"changes": run.eng.Snapshot()}); err != nil {
 		return
@@ -546,7 +566,9 @@ func (s *Server) handleDesignerRunInput(w http.ResponseWriter, r *http.Request) 
 // handleDesignerRunStop stops the user's run (idempotent).
 func (s *Server) handleDesignerRunStop(w http.ResponseWriter, r *http.Request) {
 	user := AdminUserFromContext(r.Context())
-	s.designerRuns.stopUser(user)
+	if s.designerRuns.stopUser(user) {
+		s.engineLog.Info("designer run stopped", "user", user)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

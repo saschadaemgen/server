@@ -268,6 +268,7 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	}
 	if m.settings.Token == "" {
 		m.setErr("Bot-Token fehlt – auf /a/telegram setzen.")
+		m.log.Warn("telegram bot enabled but no token set")
 		return nil // a config state, not a failure
 	}
 	allow, err := m.store.LoadAllowlist(ctx)
@@ -299,6 +300,9 @@ func (m *Manager) stopLocked() {
 		m.cancel()
 		<-m.pollDone // in-flight getUpdates aborts via context; ms join
 		m.cancel, m.pollDone = nil, nil
+		// The started counterpart, so the lifecycle is visible in the
+		// server log (and the designer's System Log tab).
+		m.log.Info("telegram bot stopped")
 	}
 	m.stateMu.Lock()
 	m.running = false

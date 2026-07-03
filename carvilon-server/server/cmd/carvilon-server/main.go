@@ -37,6 +37,7 @@ import (
 	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/httpserver"
+	"carvilon.local/server/internal/logbuf"
 	"carvilon.local/server/internal/mdns"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
@@ -62,7 +63,11 @@ func main() {
 			"client) or 'cloud' (VPS: side-channel server only)")
 	flag.Parse()
 
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// The stdout/journald handler stays the primary log sink; the logbuf
+	// tee additionally retains recent entries in memory for the designer's
+	// System Log tab (SSE), without altering the stdout output.
+	logBuf := logbuf.New(1000)
+	log := slog.New(logbuf.Tee(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), logBuf))
 	cfg := config.FromEnv()
 
 	// One context for graceful shutdown, shared by whichever role
@@ -74,7 +79,7 @@ func main() {
 
 	switch *role {
 	case "edge":
-		runEdge(ctx, log, cfg)
+		runEdge(ctx, log, logBuf, cfg)
 	case "cloud":
 		runCloud(ctx, log, cfg)
 	default:
@@ -88,7 +93,7 @@ func main() {
 // ADDITIVE side-channel client. This is the historical main() body;
 // nothing about the local behaviour changed, the side-channel client
 // is layered on at the end and never gates startup.
-func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
+func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg config.Config) {
 	if err := cfg.Validate(); err != nil {
 		log.Error("config invalid", "err", err)
 		os.Exit(1)
@@ -363,6 +368,7 @@ func runEdge(ctx context.Context, log *slog.Logger, cfg config.Config) {
 		Telegram:        telegramBot,
 		TelegramStore:   telegramStore,
 		DesignerStore:   designerstore.New(database.DB),
+		LogBuffer:       logBuf,
 		Log:             log,
 	})
 	if err != nil {

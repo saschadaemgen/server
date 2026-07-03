@@ -43,6 +43,7 @@ import (
 	"carvilon.local/server/internal/egresstoken"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/featuregate"
+	"carvilon.local/server/internal/logbuf"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/platformconfig"
@@ -164,7 +165,11 @@ type Deps struct {
 	// graphs (migration 032). Nil returns 503 on the designer
 	// persistence API; the editor keeps an unsaved in-memory canvas.
 	DesignerStore *designerstore.Store
-	Log           *slog.Logger
+	// LogBuffer is the server-wide recent-log ring the designer's
+	// System Log tab streams from (main wires it as a tee around the
+	// stdout handler). Nil leaves the tab's SSE endpoint on 503.
+	LogBuffer *logbuf.Buffer
+	Log       *slog.Logger
 }
 
 // Server owns the mux and references the auth services.
@@ -211,9 +216,14 @@ type Server struct {
 	telegram      *telegrambot.Manager
 	telegramStore *telegramstore.Store
 	designerStore *designerstore.Store
+	logBuf        *logbuf.Buffer
 	log           *slog.Logger
-	mux           *http.ServeMux
-	tpl           *adminTemplates
+	// engineLog scopes the designer-run lifecycle lines to the "engine"
+	// subsystem (instead of this package's "httpserver"), so the System
+	// Log tab attributes them to the engine.
+	engineLog *slog.Logger
+	mux       *http.ServeMux
+	tpl       *adminTemplates
 
 	// designerRuns holds the live logic-editor engine runs, one per
 	// admin user (Run executes the posted graph on a wall-clock ticker;
@@ -288,7 +298,9 @@ func New(deps Deps) (*Server, error) {
 		telegram:        deps.Telegram,
 		telegramStore:   deps.TelegramStore,
 		designerStore:   deps.DesignerStore,
+		logBuf:          deps.LogBuffer,
 		log:             deps.Log.With("component", "httpserver"),
+		engineLog:       deps.Log.With("component", "engine"),
 		mux:             http.NewServeMux(),
 		tpl:             tpl,
 	}
@@ -498,6 +510,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))
 	s.mux.Handle("GET /a/designer/telegram/chats", s.requireAdminSession(http.HandlerFunc(s.handleDesignerTelegramChats)))
 	s.mux.Handle("GET /a/designer/host", s.requireAdminSession(http.HandlerFunc(s.handleDesignerHost)))
+	s.mux.Handle("GET /a/designer/syslog", s.requireAdminSession(http.HandlerFunc(s.handleDesignerSysLog)))
 	// Run: execute the posted graph in the engine, stream live values back
 	// over the monitor SSE, inject the editor's button press, and tear the
 	// run down on stop/disconnect. One run per admin session.

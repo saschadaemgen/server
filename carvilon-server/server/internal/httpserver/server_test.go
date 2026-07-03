@@ -31,6 +31,7 @@ import (
 	"carvilon.local/server/internal/doorhistory"
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/featuregate"
+	"carvilon.local/server/internal/logbuf"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/normalize"
@@ -90,6 +91,7 @@ type testEnv struct {
 	userStore   *fakeUserStore
 	mqttStore   *mqttstore.Store
 	mqttBroker  *mqttbroker.Manager
+	logBuf      *logbuf.Buffer
 	d           *db.DB
 	clock       *testClock
 }
@@ -256,6 +258,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	go func() { _ = hub.Run(hubCtx) }()
 
 	userStore := newFakeUserStore()
+	logBuffer := logbuf.New(100)
 
 	cfg := config.Config{
 		ListenAddr: ":0",
@@ -284,6 +287,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		MQTT:            mqttBroker,
 		MQTTStore:       mqttStore,
 		DesignerStore:   designerstore.New(d.DB),
+		LogBuffer:       logBuffer,
 		Log:             quietLogger(),
 	})
 	if err != nil {
@@ -318,6 +322,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		userStore:  userStore,
 		mqttStore:  mqttStore,
 		mqttBroker: mqttBroker,
+		logBuf:     logBuffer,
 		d:          d, clock: clock,
 	}
 }
