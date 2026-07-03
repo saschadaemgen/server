@@ -124,9 +124,16 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .brand .mark{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:linear-gradient(150deg, var(--cyan), var(--cyan-dim));box-shadow:0 0 14px -2px rgba(52,228,234,.8), inset 0 1px 0 rgba(255,255,255,.4);color:#03100f}
 .brand .mark svg{width:13px;height:13px;stroke-width:2.6}
 .sep{width:1px;height:22px;background:var(--border)}
-.crumb{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted)}
+.crumb{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted);min-width:0}
 .crumb .chip{display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:8px;background:rgba(120,150,180,.07);border:1px solid var(--border);color:var(--text);font-weight:500}
-.crumb .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--cat-time);box-shadow:0 0 8px var(--cat-time)}
+.crumb .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--cat-time);box-shadow:0 0 8px var(--cat-time);flex:none}
+/* the breadcrumb chip is the project-tree button (tree popover anchor) */
+button.crumb-btn{font:inherit;font-size:12.5px;cursor:pointer;transition:.13s;min-width:0}
+button.crumb-btn:hover{background:rgba(120,150,180,.13);border-color:var(--border-bright)}
+button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
+#crumb-text{display:block;max-width:min(42vw,520px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumb-chev{width:13px;height:13px;color:var(--faint);transition:transform .18s;flex:none}
+.crumb-btn.open .crumb-chev{transform:rotate(180deg)}
 .spacer{flex:1}
 .tools{display:flex;align-items:center;gap:8px}
 .tbtn{height:34px;display:flex;align-items:center;gap:9px;padding:0 12px;border-radius:9px;background:#15171d;border:1px solid #272b35;color:#c7ced9;font:500 12.5px/1 var(--font);cursor:pointer;transition:.15s;user-select:none}
@@ -167,10 +174,7 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 
 /* left rail */
 .rail{position:fixed;top:54px;left:0;bottom:0;width:var(--rail-w);z-index:15;background:linear-gradient(180deg, rgba(8,9,11,.78), rgba(6,7,9,.6));border-right:1px solid var(--border);backdrop-filter:blur(14px);display:flex;flex-direction:column}
-.rail-head{padding:10px 12px 8px}
-.proj-btn{width:100%;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:rgba(120,150,180,.05);border:1px solid var(--border);color:var(--text);cursor:pointer;transition:.12s}
-.proj-btn:hover{background:rgba(120,150,180,.1);border-color:var(--border-bright)}
-.proj-btn:focus,.proj-btn:focus-visible,.dock-tab:focus,.rt-act:focus,.rt-tool:focus,.tbtn:focus,.pt-actions button:focus{outline:none}
+.dock-tab:focus,.rt-act:focus,.rt-tool:focus,.tbtn:focus,.pt-actions button:focus{outline:none}
 .rail ::-webkit-scrollbar,.dock ::-webkit-scrollbar,.inspector::-webkit-scrollbar,.proj-pop ::-webkit-scrollbar,.term::-webkit-scrollbar{width:9px;height:9px}
 .rail ::-webkit-scrollbar-thumb,.dock ::-webkit-scrollbar-thumb,.inspector::-webkit-scrollbar-thumb,.proj-pop ::-webkit-scrollbar-thumb,.term::-webkit-scrollbar-thumb{background:rgba(120,150,180,.22);border-radius:5px}
 .rail ::-webkit-scrollbar-thumb:hover,.proj-pop ::-webkit-scrollbar-thumb:hover{background:rgba(120,150,180,.34)}
@@ -178,12 +182,9 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .dock ::-webkit-scrollbar-thumb,.term::-webkit-scrollbar-thumb{background:#23272f}
 .dock ::-webkit-scrollbar-thumb:hover,.term::-webkit-scrollbar-thumb:hover{background:#2f343d}
 .dock ::-webkit-scrollbar-corner,.term::-webkit-scrollbar-corner{background:transparent}
-.proj-ic{width:15px;height:15px;color:var(--muted);flex:none}
-.proj-cur{flex:1;text-align:left;font:600 12.5px/1 var(--font);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.proj-chev{width:14px;height:14px;color:var(--faint);transition:transform .18s;flex:none}
-.rail.proj-open .proj-chev{transform:rotate(180deg)}
-.proj-pop{display:none;margin:0 12px 8px;border-radius:9px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);overflow:hidden}
-.rail.proj-open .proj-pop{display:block}
+/* project-tree popover, anchored under the topbar breadcrumb chip */
+.proj-pop{display:none;position:fixed;top:60px;left:14px;width:300px;z-index:60;border-radius:9px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);overflow:hidden}
+.proj-pop.show{display:block}
 .pt-tree{max-height:240px;overflow:auto;padding:6px}
 .pt-row{display:flex;align-items:center;gap:8px;padding:6px 8px;padding-left:calc(8px + var(--d,0)*13px);border-radius:6px;cursor:pointer;font:500 12px/1 var(--font);color:var(--muted)}
 .pt-row:hover{background:rgba(120,150,180,.08);color:var(--text)}
@@ -218,15 +219,14 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .canvas-loading{position:fixed;inset:0;display:grid;place-items:center;z-index:5;pointer-events:none;font:500 11px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--faint);animation:loadpulse 1.6s ease-in-out infinite}
 @keyframes loadpulse{0%,100%{opacity:.3}50%{opacity:.7}}
 @media (prefers-reduced-motion: reduce){.canvas-loading{animation:none;opacity:.5}}
-.rail-head h2{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);font-weight:600}
-.rail-head .cnt{font:500 10px/1 var(--mono);color:var(--faint);padding:3px 6px;border-radius:5px;border:1px solid var(--border)}
 .search{margin:0 0 8px;display:flex;align-items:center;gap:9px;padding:9px 14px;border-radius:0;background:rgba(0,0,0,.3);border:0;border-bottom:1px solid var(--border);color:var(--faint);font-size:12.5px}
 .search .search-ph{flex:1}
 .filter-btn{width:27px;height:27px;border-radius:4px;border:1px solid var(--border);background:rgba(120,150,180,.06);color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:.13s;flex:none}
 .filter-btn:hover{color:var(--text);border-color:var(--border-bright)}
 .filter-btn.active{color:#fff;background:var(--accent);border-color:transparent}
 .filter-btn svg{width:14px;height:14px}
-.filter-pop{position:absolute;top:72px;left:14px;right:14px;z-index:30;padding:7px;border-radius:11px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);display:none;flex-direction:column;gap:2px}
+/* top 52px = search row (46px) + gap; the rail-head above it is gone */
+.filter-pop{position:absolute;top:52px;left:14px;right:14px;z-index:30;padding:7px;border-radius:11px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);display:none;flex-direction:column;gap:2px}
 .filter-pop.show{display:flex}
 .filter-head{display:flex;align-items:center;justify-content:space-between;padding:3px 8px 6px}
 .filter-head span{font:600 9.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}

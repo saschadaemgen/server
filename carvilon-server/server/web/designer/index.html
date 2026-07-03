@@ -13,7 +13,7 @@
 <div class="scanline"></div>
 
 <header class="topbar">
-  <div class="crumb"><span class="crumb-title">Logic Editor</span><span style="color:var(--faint)">/</span><span class="chip"><span class="dot"></span><span id="crumb-text">…</span></span></div>
+  <div class="crumb"><span class="crumb-title">Logic Editor</span><span style="color:var(--faint)">/</span><button class="chip crumb-btn" id="crumb-btn" title="Projektbaum öffnen"><span class="dot"></span><span id="crumb-text">…</span><i data-lucide="chevron-down" class="crumb-chev"></i></button></div>
   <div class="spacer"></div>
   <div class="tools">
     <div class="tbtn toggle on" id="btn-signal"><span>Signal Flow</span><span class="tsw"><i></i></span></div>
@@ -49,14 +49,14 @@
 </div>
 
 <aside class="rail">
-  <div class="rail-head">
-    <button class="proj-btn" id="proj-btn"><i data-lucide="folder-open" class="proj-ic"></i><span class="proj-cur" id="proj-cur">…</span><i data-lucide="chevron-down" class="proj-chev"></i></button>
-  </div>
-  <div class="proj-pop" id="proj-pop"></div>
   <div class="search"><i data-lucide="search"></i><span class="search-ph">Search blocks <span class="search-cnt"></span>…</span><button class="filter-btn" id="filter-btn" title="Filter categories"><i data-lucide="sliders-horizontal"></i></button></div>
   <div class="filter-pop" id="filter-pop"></div>
   <div class="lib" id="lib"></div>
 </aside>
+
+<!-- Projektbaum-Popover, verankert unter der Kopfzeile (öffnet über den
+     Brotkrumen-Knopf; Inhalt rendert project.js) -->
+<div class="proj-pop" id="proj-pop"></div>
 
 <aside class="inspector" id="inspector">
   <div class="insp-head"><span class="insp-cat" id="insp-cat">—</span>

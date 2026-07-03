@@ -1,7 +1,7 @@
-// Project tree + persistence: the real folder/graph tree in the left
-// rail (backed by the admin-gated designer API, migration 032), graph
-// load/switch, the ~1s debounced autosave with its dock save-state,
-// the topbar breadcrumb, and the ?g=<id> deep link. The canvas starts
+// Project tree + persistence: the folder/graph tree popover anchored
+// under the topbar breadcrumb (backed by the admin-gated designer API,
+// migration 032), graph load/switch, the ~1s debounced autosave with
+// its dock save-state, and the ?g=<id> deep link. The canvas starts
 // empty with a subtle loading hint and renders exactly once when the
 // selected/deep-linked graph arrives - no flash of stale content.
 //
@@ -39,11 +39,14 @@ let dirty = false, saving = false, queued = false, saveTimer = null;
 // canvas into a never-saved graph).
 let lastSaved = null;
 
-const railEl = document.querySelector('.rail');
 const projPop = document.getElementById('proj-pop');
-const projBtn = document.getElementById('proj-btn');
-const projCur = document.getElementById('proj-cur');
+const crumbBtn = document.getElementById('crumb-btn');
 
+// closeTree hides the breadcrumb tree popover (chevron follows).
+function closeTree(){
+  if (projPop) projPop.classList.remove('show');
+  if (crumbBtn) crumbBtn.classList.remove('open');
+}
 // clearLoading removes the boot loading hint - called exactly once the
 // initial graph has rendered (or turned out not to exist/load).
 function clearLoading(){
@@ -177,15 +180,32 @@ function paintTree(){
     inp.onpointerdown = ev => ev.stopPropagation();
     inp.onkeydown = ev => {
       if (ev.key === 'Enter'){ ev.preventDefault(); commitRename(inp.value); }
-      else if (ev.key === 'Escape'){ editing = null; paintTree(); }
+      // stopPropagation: Escape beendet nur das Umbenennen, nicht das
+      // Popover (der document-Handler schliesst sonst den Baum mit).
+      else if (ev.key === 'Escape'){ ev.stopPropagation(); editing = null; paintTree(); }
     };
     inp.onblur = () => { if (editing) commitRename(inp.value); };
   }
 }
 function paintCrumb(){
   const el = document.getElementById('crumb-text');
-  if (el) el.textContent = curGraph ? [...folderPath(curGraph.folder_id), curGraph.name].join(' / ') : '—';
-  if (projCur) projCur.textContent = curGraph ? curGraph.name : '—';
+  if (!el) return;
+  const parts = curGraph ? [...folderPath(curGraph.folder_id), curGraph.name] : [];
+  const full = parts.length ? parts.join(' / ') : '—';
+  el.textContent = full;
+  if (crumbBtn) crumbBtn.title = full === '—' ? 'Projektbaum öffnen' : full;
+  // Bei schmaler Breite mittig kürzen: erste und letzte Station
+  // bleiben, die mittleren weichen einem einzelnen „…".
+  if (parts.length > 2){
+    let mid = parts.slice(1, -1);
+    while (el.scrollWidth > el.clientWidth && mid.length){
+      mid = mid.slice(1);
+      el.textContent = [parts[0], '…', ...mid, parts[parts.length - 1]].join(' / ');
+    }
+  }
+  if (parts.length > 1 && el.scrollWidth > el.clientWidth){
+    el.textContent = '… / ' + parts[parts.length - 1];
+  }
 }
 // setSaveState paints the dock segment: rev N / Speichert… /
 // Gespeichert · rev N / Speichern fehlgeschlagen.
@@ -351,7 +371,7 @@ async function openGraph(id, { keepPopover = false } = {}){
     dirty = false; clearTimeout(saveTimer);
   }
   remember(id);
-  if (!keepPopover && railEl) railEl.classList.remove('proj-open');
+  if (!keepPopover) closeTree();
   paintAll();
 }
 
@@ -455,7 +475,7 @@ async function handleAction(a){
 
 // ---- init ----
 export async function initProject(){
-  if (!projPop || !projBtn) return;
+  if (!projPop || !crumbBtn) return;
 
   try { JSON.parse(localStorage.getItem(OPEN_KEY) || '[]').forEach(id => openSet.add(id)); } catch(_) {}
 
@@ -475,10 +495,19 @@ export async function initProject(){
   addEventListener('pagehide', flushBeacon);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushBeacon(); });
 
-  projBtn.onclick = e => { e.stopPropagation(); railEl.classList.toggle('proj-open'); };
+  crumbBtn.onclick = e => {
+    e.stopPropagation();
+    projPop.classList.toggle('show');
+    crumbBtn.classList.toggle('open', projPop.classList.contains('show'));
+  };
   document.addEventListener('pointerdown', e => {
-    if (!e.target.closest('.rail-head') && !e.target.closest('#proj-pop')) railEl.classList.remove('proj-open');
+    if (!e.target.closest('#proj-pop') && !e.target.closest('#crumb-btn')) closeTree();
   });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && projPop.classList.contains('show')) closeTree();
+  });
+  // Die Mitte-Kürzung der Brotkrume hängt an der verfügbaren Breite.
+  addEventListener('resize', paintCrumb);
   projPop.addEventListener('click', e => {
     if (e.target.closest('.pt-edit')) return;
     const act = e.target.closest('[data-act]');
@@ -503,9 +532,9 @@ export async function initProject(){
   try { await refetchTree(); }
   catch (err){
     clearLoading();
-    if (projCur) projCur.textContent = '—';
     const el = document.getElementById('st-save');
     if (el) el.textContent = 'offline';
+    paintCrumb();
     return;
   }
   if (!localStorage.getItem(OPEN_KEY)) childFolders(0).forEach(f => openSet.add(f.id));
