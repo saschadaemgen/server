@@ -8,10 +8,11 @@
   @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/static/fonts/ibm-plex-sans-600.woff2') format('woff2'); }
   .cv-topbar{ --cv-acc: var(--accent, var(--color-accent, #3d7bff)); position:sticky; top:0; z-index:200; display:flex; align-items:center; justify-content:space-between; height:58px; padding:0 24px; background:#0e1013; border-bottom:1px solid rgba(255,255,255,0.16); box-shadow:0 1px 0 color-mix(in srgb, var(--cv-acc) 55%, transparent), 0 7px 20px rgba(0,0,0,0.5); font-family:'IBM Plex Sans',system-ui,sans-serif; }
   .cv-topbar *{ box-sizing:border-box; }
-  .cv-tb-left{ display:flex; align-items:center; gap:20px; min-width:0; }
-  .cv-brand{ display:flex; flex-direction:column; line-height:1; text-decoration:none; flex:none; }
-  .cv-brand-name{ font-weight:600; font-size:16px; letter-spacing:0.2em; color:#f4f6f8; }
-  .cv-brand-sub{ font-size:8.5px; letter-spacing:0.235em; color:#7b848f; margin-top:3px; }
+  .cv-tb-left{ display:flex; align-items:stretch; gap:18px; min-width:0; }
+  .cv-brand{ display:flex; align-items:center; line-height:1; text-decoration:none; flex:none; cursor:pointer; align-self:stretch; padding:0 20px; margin:0 2px 0 -24px; border:none; border-right:1px solid rgba(255,255,255,0.12); border-radius:0; background:linear-gradient(180deg, rgba(0,159,227,0.12), rgba(0,159,227,0.02)); transition:filter 120ms, background 120ms; }
+  .cv-brand:hover{ filter:brightness(1.12); background:linear-gradient(180deg, rgba(0,159,227,0.18), rgba(0,159,227,0.04)); }
+  .cv-brand:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:2px; }
+  .cv-brand-logo{ height:42px; width:auto; display:block; }
   .cv-nav{ display:flex; align-items:center; gap:2px; }
   .cv-link{ display:inline-flex; align-items:center; gap:6px; padding:8px 10px; border-radius:6px; font-size:13px; font-weight:500; color:#9aa3ae; text-decoration:none; white-space:nowrap; border:1px solid transparent; background:transparent; cursor:pointer; transition:background 110ms,color 110ms; }
   .cv-link:hover{ background:rgba(255,255,255,0.05); color:#f4f6f8; text-decoration:none; }
@@ -73,8 +74,8 @@
   /* responsive: keep the topbar/mega/flyout usable on narrow screens */
   @media (max-width: 860px) {
     .cv-topbar{ padding:0 12px; }
+    .cv-brand{ margin-left:-12px; padding:0 14px; }
     .cv-tb-left{ flex:1 1 auto; min-width:0; }
-    .cv-brand-sub{ display:none; }
     .cv-nav{ overflow-x:auto; min-width:0; scrollbar-width:none; -ms-overflow-style:none; }
     .cv-nav::-webkit-scrollbar{ display:none; }
     .cv-link{ padding:8px 8px; }
@@ -85,11 +86,44 @@
     .cv-user-name{ display:none; }
     .cv-link svg{ display:none; }
   }
+
+  /* ---- About / Über-Modal ---- */
+  .cv-about-ov{ position:fixed; inset:0; z-index:400; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(6,8,11,0.5); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); animation:cv-ab-fade 160ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; }
+  .cv-about-ov[hidden]{ display:none; }
+  @keyframes cv-ab-fade{ from{opacity:0} to{opacity:1} }
+  @keyframes cv-ab-pop{ from{opacity:0; transform:translateY(14px) scale(.975)} to{opacity:1; transform:none} }
+  .cv-about{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:min(580px,100%); max-height:calc(100vh - 48px); overflow:auto; background:#0e1013; border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,0.66), inset 0 0 0 1px rgba(255,255,255,0.10); color:#f4f6f8; animation:cv-ab-pop 190ms cubic-bezier(.2,.8,.2,1) both; }
+  .cv-about *{ box-sizing:border-box; }
+  .cv-ab-head{ display:flex; align-items:center; gap:16px; padding:22px 22px 18px; border-bottom:1px solid rgba(255,255,255,0.08); }
+  .cv-ab-logo{ height:46px; width:auto; flex:none; }
+  .cv-ab-titles{ display:flex; flex-direction:column; gap:3px; min-width:0; flex:1 1 auto; }
+  .cv-ab-name{ font-size:19px; font-weight:600; letter-spacing:0.16em; color:#f4f6f8; }
+  .cv-ab-tag{ font-size:11.5px; letter-spacing:0.18em; color:#7b848f; }
+  .cv-ab-x{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
+  .cv-ab-x:hover{ background:rgba(255,92,77,0.12); color:#ff8a7d; }
+  .cv-ab-body{ padding:20px 22px 8px; }
+  .cv-ab-sec{ margin-bottom:20px; }
+  .cv-ab-sh{ font-size:11px; font-weight:600; letter-spacing:0.09em; text-transform:uppercase; color:var(--cv-acc); margin-bottom:10px; }
+  .cv-ab-row{ display:flex; gap:14px; padding:5px 0; font-size:13.5px; line-height:1.5; }
+  .cv-ab-k{ flex:none; width:140px; color:#7b848f; }
+  .cv-ab-v{ flex:1 1 auto; min-width:0; color:#dfe4ea; }
+  .cv-ab-v a{ color:var(--cv-acc); text-decoration:none; }
+  .cv-ab-v a:hover{ text-decoration:underline; }
+  .cv-ab-links{ display:flex; flex-wrap:wrap; gap:8px; }
+  .cv-ab-link{ display:inline-flex; align-items:center; gap:7px; padding:8px 12px; border-radius:8px; font-size:13px; font-weight:500; color:#dfe4ea; text-decoration:none; background:#171a1f; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:box-shadow 110ms,color 110ms; }
+  .cv-ab-link:hover{ color:var(--cv-acc); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cv-acc) 55%, transparent); text-decoration:none; }
+  .cv-ab-link svg{ width:14px; height:14px; flex:none; }
+  .cv-ab-foot{ padding:16px 22px 22px; border-top:1px solid rgba(255,255,255,0.08); }
+  .cv-ab-disc{ font-size:11.5px; line-height:1.65; color:#6f7884; }
+  .cv-ab-copy{ font-size:11.5px; color:#7b848f; margin-top:12px; }
+  @media (max-width: 560px) {
+    .cv-ab-k{ width:108px; }
+  }
 </style>
 
 <header class="cv-topbar" data-cv-topbar>
   <div class="cv-tb-left">
-    <a class="cv-brand" href="/a/" aria-label="CARVILON Administration"><span class="cv-brand-name">CARVILON</span><span class="cv-brand-sub">ADMINISTRATION</span></a>
+    <button type="button" class="cv-brand" data-cv-about-btn aria-haspopup="dialog" aria-label="Über Carvilon"><svg class="cv-brand-logo" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CARVILON"><path fill="#009fe3" d="M450.6,880.8c-13.2-2.8-30.8-8-53-15.5-22.1-7.5-45.8-18.6-71-33.4-25.2-14.8-49.3-34.1-72.4-58-39.6-40.3-68.3-82.9-86.2-127.9-17.9-45-26.2-90.4-24.7-136.3,1.4-45.9,11.6-90.1,30.7-132.4,19.1-42.4,46-80.9,80.9-115.6,38.6-38.4,80.3-67.5,125-87.1,44.7-19.7,90.3-30.1,136.7-31.3,46.4-1.2,91.6,7,135.6,24.6,44,17.6,84.4,44.6,121.1,81.2,31.1,30.9,55.1,63.2,72,97,16.9,33.7,28.7,64.6,35.3,92.7l-98.9,39.4c-4.2-23-12.1-48.6-23.7-76.9-11.5-28.3-29.5-54.7-54-79-32-31.9-70-52.8-114.1-62.9-44-10.1-88.5-8.9-133.5,3.5-45,12.4-85.3,36.4-121.1,72-36.3,36.1-61.3,75.8-75.2,119.1-13.9,43.3-15.4,86.8-4.6,130.3,10.8,43.6,34.6,83.6,71.3,120.2,26.4,26.2,53.5,45.3,81.6,57.3,28,11.9,53.6,19.1,76.6,21.4l-34.6,97.7h0Z"/><path fill="none" stroke="#009fe3" stroke-miterlimit="10" stroke-width="40.3" d="M584.6,583.4c-34.3,34.1-89.9,34.1-124.2,0-34.3-34.1-34.3-89.4,0-123.6,34.3-34.1,89.9-34.1,124.2,0,34.3,34.1,34.3,89.4,0,123.6Z"/></svg></button>
     <nav class="cv-nav" aria-label="Hauptnavigation">
       <a class="cv-link{{if eq .ActiveNav "dashboard"}} is-active{{end}}" href="/a/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Dashboard</a>
       <span class="cv-sep"></span>
@@ -141,6 +175,51 @@
     <form method="post" action="/a/logout" style="margin:0;"><button type="submit" class="cv-fly-item danger"><span class="cv-fly-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></span>Abmelden</button></form>
   </div>
   <div class="cv-scrim" data-cv-scrim hidden></div>
+
+  <div class="cv-about-ov" data-cv-about hidden>
+    <div class="cv-about" role="dialog" aria-modal="true" aria-labelledby="cv-ab-name">
+      <div class="cv-ab-head">
+        <svg class="cv-ab-logo" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CARVILON"><path fill="#009fe3" d="M450.6,880.8c-13.2-2.8-30.8-8-53-15.5-22.1-7.5-45.8-18.6-71-33.4-25.2-14.8-49.3-34.1-72.4-58-39.6-40.3-68.3-82.9-86.2-127.9-17.9-45-26.2-90.4-24.7-136.3,1.4-45.9,11.6-90.1,30.7-132.4,19.1-42.4,46-80.9,80.9-115.6,38.6-38.4,80.3-67.5,125-87.1,44.7-19.7,90.3-30.1,136.7-31.3,46.4-1.2,91.6,7,135.6,24.6,44,17.6,84.4,44.6,121.1,81.2,31.1,30.9,55.1,63.2,72,97,16.9,33.7,28.7,64.6,35.3,92.7l-98.9,39.4c-4.2-23-12.1-48.6-23.7-76.9-11.5-28.3-29.5-54.7-54-79-32-31.9-70-52.8-114.1-62.9-44-10.1-88.5-8.9-133.5,3.5-45,12.4-85.3,36.4-121.1,72-36.3,36.1-61.3,75.8-75.2,119.1-13.9,43.3-15.4,86.8-4.6,130.3,10.8,43.6,34.6,83.6,71.3,120.2,26.4,26.2,53.5,45.3,81.6,57.3,28,11.9,53.6,19.1,76.6,21.4l-34.6,97.7h0Z"/><path fill="none" stroke="#009fe3" stroke-miterlimit="10" stroke-width="40.3" d="M584.6,583.4c-34.3,34.1-89.9,34.1-124.2,0-34.3-34.1-34.3-89.4,0-123.6,34.3-34.1,89.9-34.1,124.2,0,34.3,34.1,34.3,89.4,0,123.6Z"/></svg>
+        <div class="cv-ab-titles">
+          <span class="cv-ab-name" id="cv-ab-name">CARVILON</span>
+          <span class="cv-ab-tag">SERVER · ADMINISTRATION</span>
+        </div>
+        <button type="button" class="cv-ab-x" data-cv-about-close aria-label="Schließen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+
+      <div class="cv-ab-body">
+        <div class="cv-ab-sec">
+          <div class="cv-ab-sh">Software</div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Version</span><span class="cv-ab-v">Saison 20 (2026)</span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Programmiersprache</span><span class="cv-ab-v">Go (Backend) · HTML/CSS/JavaScript (Web)</span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Herausgeber</span><span class="cv-ab-v">Sascha Dämgen IT and More Systems</span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Ansprechpartner</span><span class="cv-ab-v">Sascha Dämgen</span></div>
+        </div>
+
+        <div class="cv-ab-sec">
+          <div class="cv-ab-sh">Herausgeber &amp; Kontakt</div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Inhaber</span><span class="cv-ab-v">Sascha Dämgen</span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Anschrift</span><span class="cv-ab-v">Am Neumarkt 22<br>45663 Recklinghausen<br>Deutschland</span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">Telefon</span><span class="cv-ab-v"><a href="tel:+4923619702434">+49 2361 9702434</a></span></div>
+          <div class="cv-ab-row"><span class="cv-ab-k">E-Mail</span><span class="cv-ab-v"><a href="mailto:info@it-and-more.systems">info@it-and-more.systems</a></span></div>
+        </div>
+
+        <div class="cv-ab-sec">
+          <div class="cv-ab-sh">Links</div>
+          <div class="cv-ab-links">
+            <a class="cv-ab-link" href="https://carvilon.com" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></svg>carvilon.com</a>
+            <a class="cv-ab-link" href="https://carvilon.com/gdpr" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Datenschutz</a>
+            <a class="cv-ab-link" href="https://it-and-more.systems" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>it-and-more.systems</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="cv-ab-foot">
+        <p class="cv-ab-disc">Diese Software wird „wie besehen" ohne jegliche ausdrückliche oder stillschweigende Gewährleistung bereitgestellt. Die Nutzung erfolgt auf eigene Gefahr; der Herausgeber haftet nicht für direkte, indirekte oder Folgeschäden, die aus der Verwendung oder Nichtverfügbarkeit der Software entstehen. Alle Marken-, Produkt- und Firmennamen sind Eigentum ihrer jeweiligen Inhaber. Es gelten die <a href="https://carvilon.com/gdpr" target="_blank" rel="noopener noreferrer">Datenschutzbestimmungen</a>.</p>
+        <p class="cv-ab-copy">© 2026 Sascha Dämgen IT and More Systems · Alle Rechte vorbehalten.</p>
+      </div>
+    </div>
+  </div>
 </header>
 
 <script>
@@ -158,6 +237,8 @@
     var scrim = bar.querySelector('[data-cv-scrim]');
     var megaBtn = bar.querySelector('[data-cv-mega-btn]');
     var userBtn = bar.querySelector('[data-cv-user-btn]');
+    var aboutOv = bar.querySelector('[data-cv-about]');
+    var aboutBtn = bar.querySelector('[data-cv-about-btn]');
 
     function closeAll() {
       mega.hidden = true; fly.hidden = true; scrim.hidden = true;
@@ -175,7 +256,29 @@
     if (megaBtn) megaBtn.addEventListener('click', function (e) { e.preventDefault(); toggle('mega'); });
     if (userBtn) userBtn.addEventListener('click', function (e) { e.preventDefault(); toggle('user'); });
     if (scrim) scrim.addEventListener('click', closeAll);
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(); });
+
+    // ---- About / Über-Modal ----
+    function openAbout() {
+      if (!aboutOv) return;
+      closeAll();
+      aboutOv.hidden = false;
+      if (aboutBtn) aboutBtn.setAttribute('aria-expanded', 'true');
+      var x = aboutOv.querySelector('[data-cv-about-close]');
+      if (x) x.focus();
+    }
+    function closeAbout() {
+      if (!aboutOv || aboutOv.hidden) return;
+      aboutOv.hidden = true;
+      if (aboutBtn) { aboutBtn.setAttribute('aria-expanded', 'false'); aboutBtn.focus(); }
+    }
+    if (aboutBtn) aboutBtn.addEventListener('click', function (e) { e.preventDefault(); openAbout(); });
+    if (aboutOv) {
+      aboutOv.addEventListener('click', function (e) {
+        if (e.target === aboutOv || e.target.closest('[data-cv-about-close]')) closeAbout();
+      });
+    }
+
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeAll(); closeAbout(); } });
     document.addEventListener('mousedown', function (e) {
       if (mega.hidden && fly.hidden) return;
       if (mega.contains(e.target) || fly.contains(e.target) || (megaBtn && megaBtn.contains(e.target)) || (userBtn && userBtn.contains(e.target))) return;
