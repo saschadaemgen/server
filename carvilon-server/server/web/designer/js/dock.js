@@ -121,6 +121,10 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
       if(e.button!==0)return;e.preventDefault();
       dragging=true;startY=e.clientY;
       startH=dock.classList.contains('collapsed')?0:dockBody.getBoundingClientRect().height;
+      // freeze the current height: grabbing mid-transition (e.g. right
+      // after a double-click reset) must not snap to the target value
+      // when .resizing turns the transition off.
+      if(!dock.classList.contains('collapsed'))applyDockH(startH);
       try{grip.setPointerCapture(e.pointerId);}catch(_){/* stale pointer */}
       dock.classList.add('resizing');document.body.classList.add('dock-resizing');
     });
