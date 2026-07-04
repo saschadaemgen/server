@@ -310,7 +310,7 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 .fav-item:hover .fav-x{display:flex}
 .fav-x:hover{color:#ff7a7a;border-color:#ff7a7a}
 .fav-item.lp{box-shadow:0 0 10px -3px var(--err)}
-.fav-item.lp::after{content:"";position:absolute;inset:-3px;border-radius:9px;pointer-events:none;z-index:2;background:conic-gradient(var(--err) var(--lpp),transparent 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px));mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px));animation:lpprog 2s linear forwards}
+.fav-item.lp::after{content:"";position:absolute;inset:-3px;border-radius:9px;pointer-events:none;z-index:2;background:conic-gradient(var(--err) var(--lpp),transparent 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px));mask:radial-gradient(farthest-side,transparent calc(100% - 3px),#000 calc(100% - 2px));animation:lpprog var(--fav-hold,3s) linear forwards}
 .fav-item.lp-done{animation:lppop .42s ease}
 .fav-item.fav-removing{animation:favRemove .4s cubic-bezier(.3,.7,.4,1) forwards;pointer-events:none;z-index:2}
 @keyframes favRemove{0%{transform:scale(1)}28%{transform:scale(1.35);box-shadow:0 0 18px 2px var(--err);border-color:var(--err)}100%{transform:scale(.15) rotate(45deg);opacity:0}}

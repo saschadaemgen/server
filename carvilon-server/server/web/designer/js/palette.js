@@ -106,6 +106,9 @@ export async function initPalette(){
  const favSec=document.createElement('div');favSec.className='fav-sec';favSec.innerHTML='<div class="fav-row" id="fav-row"></div>'
    +'<div class="fav-pop" id="fav-pop" role="tooltip">Noch frei — das Symbol eines Moduls in der Liste <b>lange gedrückt halten</b>, um es hier als Favorit abzulegen.</div>';
  libEl.parentNode.insertBefore(favSec,libEl);const favRow=favSec.querySelector('#fav-row');
+ // a touch long-press on a favourite must feed the hold timer, not the
+ // browser's context menu (touch-action:none in CSS keeps scrolling off).
+ favRow.addEventListener('contextmenu',e=>e.preventDefault());
  const favPop=favSec.querySelector('#fav-pop');
  document.addEventListener('pointerdown',e=>{if(!e.target.closest('#fav-pop')&&!e.target.closest('.fav-slot'))favPop.classList.remove('show');});
  document.addEventListener('keydown',e=>{if(e.key==='Escape')favPop.classList.remove('show');});
@@ -117,12 +120,41 @@ export async function initPalette(){
    if(window.lucide)lucide.createIcons();}
  function addFavorite(name){if(!name||favorites.includes(name)||favorites.length>=FAV_MAX)return false;favorites.unshift(name);saveFavorites();renderFavorites();return true;}
  function removeFavorite(name){const i=favorites.indexOf(name);if(i<0)return;favorites.splice(i,1);saveFavorites();renderFavorites();}
- function attachFav(it){it.addEventListener('pointerdown',ev=>{ev.preventDefault();const name=it.dataset.name,cat=it.dataset.cat,sx=ev.clientX,sy=ev.clientY;let started=false;it.classList.add('lp');
-   const t=setTimeout(()=>{it.classList.remove('lp');it.classList.add('fav-removing');setTimeout(()=>removeFavorite(name),360);},2000);
-   try{it.setPointerCapture(ev.pointerId);}catch(_){}
-   function mv(e2){if(!started&&Math.hypot(e2.clientX-sx,e2.clientY-sy)>6){started=true;clearTimeout(t);it.classList.remove('lp');S.newDrag={name,cat};dragghost.style.setProperty('--gc',CAT[cat].color);dragghost.innerHTML=`<span class="gi"><i data-lucide="${NAME_ICON[name]||CAT[cat].icon}"></i></span>${name}`;if(window.lucide)lucide.createIcons();dragghost.classList.add('show');}if(started)moveGhost(e2);}
-   function up(e2){clearTimeout(t);it.classList.remove('lp');it.removeEventListener('pointermove',mv);it.removeEventListener('pointerup',up);if(started)dropNew(e2,it);}
-   it.addEventListener('pointermove',mv);it.addEventListener('pointerup',up);});}
+ /* hold-to-remove: press a filled favourite for ~3s to remove it (red
+    progress ring, releasing earlier cancels). The old 6px move
+    threshold silently flipped the hold into the create-drag on real
+    input (mouse micro-drift over the hold time, touch jitter always) —
+    synthetic dev events never move, which is why it only failed on
+    hardware. The drag now starts once the pointer clearly leaves the
+    tile; pointercancel (browser claims the gesture) aborts everything
+    instead of leaving the removal timer armed. */
+ const FAV_HOLD_MS=3000,FAV_DRIFT_PX=14;
+ function attachFav(it){it.addEventListener('pointerdown',ev=>{if(ev.button>0||it.classList.contains('lp'))return;ev.preventDefault();const pid=ev.pointerId,name=it.dataset.name,cat=it.dataset.cat,sx=ev.clientX,sy=ev.clientY;let started=false,done=false;
+   // the ring reads its duration from this var — one source of truth,
+   // the CSS animation can never drift from the removal timer again.
+   it.style.setProperty('--fav-hold',FAV_HOLD_MS+'ms');it.classList.add('lp');
+   const t=setTimeout(()=>{done=true;cleanup();
+     // a re-render mid-hold (another tile's removal, a long-press add)
+     // detaches this tile and its ring — a hold whose countdown nobody
+     // can see anymore must not remove.
+     if(!it.isConnected)return;
+     it.classList.add('fav-removing');setTimeout(()=>removeFavorite(name),360);},FAV_HOLD_MS);
+   try{it.setPointerCapture(pid);}catch(_){/* no active pointer (synthetic) */}
+   function cleanup(){clearTimeout(t);it.classList.remove('lp');it.removeEventListener('pointermove',mv);it.removeEventListener('pointerup',up);it.removeEventListener('pointercancel',cancel);removeEventListener('blur',onBlur);}
+   // Alt-Tab mid-hold: a mouse gets no pointercancel when the window
+   // loses focus, the released button is never seen — blur aborts the
+   // gesture instead of letting the timer remove unattended. (A moment
+   // check via document.hasFocus() would be wrong here: preventDefault
+   // on pointerdown suppresses click-focus, so inside the admin iframe
+   // a first-interaction hold can legitimately run without focus.)
+   function onBlur(){if(done)return;cleanup();if(started){started=false;S.newDrag=null;dragghost.classList.remove('show');}}
+   addEventListener('blur',onBlur);
+   // all three ignore other pointers: capture is per-pointer, so a stray
+   // second touch on the tile would otherwise kill or hijack the hold.
+   function mv(e2){if(done||e2.pointerId!==pid)return;if(!started&&Math.hypot(e2.clientX-sx,e2.clientY-sy)>FAV_DRIFT_PX){started=true;clearTimeout(t);it.classList.remove('lp');S.newDrag={name,cat};dragghost.style.setProperty('--gc',CAT[cat].color);dragghost.innerHTML=`<span class="gi"><i data-lucide="${NAME_ICON[name]||CAT[cat].icon}"></i></span>${name}`;if(window.lucide)lucide.createIcons();dragghost.classList.add('show');}if(started)moveGhost(e2);}
+   function up(e2){if(done||e2.pointerId!==pid)return;const drag=started;cleanup();if(drag)dropNew(e2,it);}
+   function cancel(e2){if(done||e2.pointerId!==pid)return;cleanup();if(started){started=false;S.newDrag=null;dragghost.classList.remove('show');}}
+   it.addEventListener('pointermove',mv);it.addEventListener('pointerup',up);it.addEventListener('pointercancel',cancel);});}
  renderFavorites();
  let lpTimer=null,lpIcon=null,lpLong=false;
  libEl.addEventListener('pointerdown',e=>{const ic=e.target.closest('.li-ic');if(!ic)return;e.stopPropagation();const it=ic.closest('.lib-item');lpIcon=ic;lpLong=false;ic.classList.add('lp');
