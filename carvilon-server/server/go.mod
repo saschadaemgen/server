@@ -14,6 +14,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
 	github.com/eclipse/paho.mqtt.golang v1.5.0
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/mdns v1.0.6
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/pion/webrtc/v4 v4.2.12
@@ -30,7 +31,6 @@ require (
 	github.com/bluenviron/gortsplib/v5 v5.5.3 // indirect
 	github.com/bluenviron/mediacommon/v2 v2.8.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/miekg/dns v1.1.55 // indirect
