@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/access"
+	"carvilon.local/server/internal/platformconfig"
 )
 
 const (
@@ -16,10 +18,23 @@ const (
 	usersMaxPageSize     = 100
 )
 
-// adminUsersData is the payload for templates/admin/users.html.
+// adminUsersData is the payload for templates/admin/users.html - the
+// unified Benutzer page. CARVILONs own users (Native*) are always
+// shown with full management; the UA section (UA*) only renders when
+// UA is enabled.
 type adminUsersData struct {
-	User         adminUser
-	Configured   bool
+	User adminUser
+
+	// Native CARVILON users (access/carvilon, migration 034). Always
+	// present; this is the canonical user source.
+	NativeUsers []nativeUserRow
+	NativeTotal int
+	NativeQuery string
+
+	// UA section. UAEnabled is the effective "UA aktiv" toggle;
+	// UAConfigured additionally requires a stored token/base URL.
+	UAEnabled    bool
+	UAConfigured bool
 	Users        []userRow
 	Total        int
 	Page         int
@@ -29,8 +44,19 @@ type adminUsersData struct {
 	Next         int
 	Query        string
 	StatusFilter string
-	Flash        string
-	FlashType    string
+
+	Flash     string
+	FlashType string
+}
+
+// nativeUserRow is one row in the CARVILON-users table view.
+type nativeUserRow struct {
+	ID          string
+	DisplayName string
+	Initials    string
+	Active      bool
+	StatusLabel string // "Aktiv" | "Inaktiv"
+	UALinked    bool   // has an optional UA link (info only for now)
 }
 
 type userRow struct {
@@ -62,49 +88,107 @@ type linkedViewerRow struct {
 	Online bool
 }
 
-// handleAdminUsersList renders /a/users with pagination + search
-// + status filter. When the UA token is not configured yet, the
-// page shows a hint card instead of an empty table.
+// handleAdminUsersList renders the unified /a/users page: CARVILONs
+// own users (always, full management) plus - only when UA is enabled -
+// the UA proxy list as a clearly separated section.
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := adminUsersData{
-		User:       adminUser{Name: username, Initials: initialsOf(username)},
-		Configured: s.userStore != nil && s.userStore.IsConfigured(),
-		Page:       1,
-		PageSize:   usersDefaultPageSize,
+		User:     adminUser{Name: username, Initials: initialsOf(username)},
+		Page:     1,
+		PageSize: usersDefaultPageSize,
 	}
 
-	if !data.Configured {
-		s.renderAdminPage(w, "users", data)
-		return
+	// --- Native CARVILON users (always) ---
+	data.NativeQuery = strings.TrimSpace(r.URL.Query().Get("nq"))
+	if s.nativeUsers != nil {
+		list, err := s.nativeUsers.List(r.Context(), access.NativeListParams{Query: data.NativeQuery})
+		if err != nil {
+			s.log.Warn("native users list failed", "err", err)
+			data.Flash = "Eigene Benutzer konnten nicht geladen werden."
+			data.FlashType = "red"
+		} else {
+			for _, u := range list {
+				data.NativeUsers = append(data.NativeUsers, toNativeUserRow(u))
+			}
+			data.NativeTotal = len(list)
+		}
 	}
 
-	params := parseListParams(r)
-	data.Page = params.Page
-	data.PageSize = params.Size
-	data.Query = params.Query
-	data.StatusFilter = string(params.StatusFilter)
+	// --- UA users (only when UA is enabled) ---
+	data.UAEnabled = s.uaEnabled(r.Context())
+	if data.UAEnabled {
+		data.UAConfigured = s.userStore != nil && s.userStore.IsConfigured()
+		if data.UAConfigured {
+			params := parseListParams(r)
+			data.Page = params.Page
+			data.PageSize = params.Size
+			data.Query = params.Query
+			data.StatusFilter = string(params.StatusFilter)
 
-	res, err := s.userStore.List(r.Context(), params)
-	if err != nil {
-		s.log.Warn("users list failed", "err", err)
-		data.Flash = friendlyAccessError(err)
-		data.FlashType = "red"
-		s.renderAdminPage(w, "users", data)
-		return
-	}
-	data.Total = res.Total
-	data.PageCount = pageCount(res.Total, params.Size)
-	if params.Page > 1 {
-		data.Prev = params.Page - 1
-	}
-	if params.Page < data.PageCount {
-		data.Next = params.Page + 1
-	}
-	for _, u := range res.Users {
-		data.Users = append(data.Users, toUserRow(u))
+			res, err := s.userStore.List(r.Context(), params)
+			if err != nil {
+				s.log.Warn("users list failed", "err", err)
+				data.Flash = friendlyAccessError(err)
+				data.FlashType = "red"
+			} else {
+				data.Total = res.Total
+				data.PageCount = pageCount(res.Total, params.Size)
+				if params.Page > 1 {
+					data.Prev = params.Page - 1
+				}
+				if params.Page < data.PageCount {
+					data.Next = params.Page + 1
+				}
+				for _, u := range res.Users {
+					data.Users = append(data.Users, toUserRow(u))
+				}
+			}
+		}
 	}
 	s.renderAdminPage(w, "users", data)
+}
+
+// uaEnabled resolves the effective "UA aktiv" toggle for the Benutzer
+// page. An explicit "1"/"0" stored under KeyUAEnabled wins; if unset
+// (fresh install) the default is on when a UA token is stored, off
+// otherwise. This is the single gate for every UA-related bit of the
+// Benutzer page - and only that page.
+func (s *Server) uaEnabled(ctx context.Context) bool {
+	if s.platformCfg == nil {
+		return false
+	}
+	switch raw, _ := s.platformCfg.Get(ctx, platformconfig.KeyUAEnabled); raw {
+	case "1":
+		return true
+	case "0":
+		return false
+	default:
+		tok, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyUAAPIToken)
+		return strings.TrimSpace(tok) != ""
+	}
+}
+
+// uaAvailable is true when the UA section is both enabled and backed
+// by a configured store - the precondition for any UA proxy call from
+// the Benutzer page.
+func (s *Server) uaAvailable(ctx context.Context) bool {
+	return s.uaEnabled(ctx) && s.userStore != nil && s.userStore.IsConfigured()
+}
+
+func toNativeUserRow(u access.NativeUser) nativeUserRow {
+	label := "Inaktiv"
+	if u.Active {
+		label = "Aktiv"
+	}
+	return nativeUserRow{
+		ID:          u.ID,
+		DisplayName: u.DisplayName,
+		Initials:    u.Initials(),
+		Active:      u.Active,
+		StatusLabel: label,
+		UALinked:    u.UAUserID != "",
+	}
 }
 
 // handleAdminUsersListJSON returns the same list as JSON. Used
@@ -147,7 +231,7 @@ func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) 
 	username := AdminUserFromContext(r.Context())
 	data := adminUserDetailData{
 		User:       adminUser{Name: username, Initials: initialsOf(username)},
-		Configured: s.userStore != nil && s.userStore.IsConfigured(),
+		Configured: s.uaAvailable(r.Context()),
 	}
 	if !data.Configured {
 		s.renderAdminPage(w, "user-detail", data)
@@ -172,8 +256,8 @@ func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) 
 // handleAdminUsersCreate handles POST /a/users (create via the
 // modal form or a direct POST).
 func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) {
-	if s.userStore == nil || !s.userStore.IsConfigured() {
-		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
+	if !s.uaAvailable(r.Context()) {
+		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -206,8 +290,8 @@ func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) 
 
 // handleAdminUsersUpdate handles POST /a/users/{id}/update.
 func (s *Server) handleAdminUsersUpdate(w http.ResponseWriter, r *http.Request) {
-	if s.userStore == nil || !s.userStore.IsConfigured() {
-		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
+	if !s.uaAvailable(r.Context()) {
+		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
@@ -239,8 +323,8 @@ func (s *Server) handleAdminUsersDeactivate(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) setUserStatus(w http.ResponseWriter, r *http.Request, status access.Status) {
-	if s.userStore == nil || !s.userStore.IsConfigured() {
-		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
+	if !s.uaAvailable(r.Context()) {
+		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")
@@ -258,8 +342,8 @@ func (s *Server) setUserStatus(w http.ResponseWriter, r *http.Request, status ac
 
 // handleAdminUsersDelete deletes a user in UA.
 func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) {
-	if s.userStore == nil || !s.userStore.IsConfigured() {
-		http.Error(w, "UA-API nicht konfiguriert.", http.StatusServiceUnavailable)
+	if !s.uaAvailable(r.Context()) {
+		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
 		return
 	}
 	id := r.PathValue("id")

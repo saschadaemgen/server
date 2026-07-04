@@ -17,6 +17,7 @@ import (
 
 	"carvilon.local/mock"
 	"carvilon.local/server/internal/access"
+	accesscarvilon "carvilon.local/server/internal/access/carvilon"
 	"carvilon.local/server/internal/auth/admin"
 	"carvilon.local/server/internal/auth/adminsession"
 	"carvilon.local/server/internal/auth/argon2id"
@@ -91,6 +92,7 @@ type testEnv struct {
 	history      *doorhistory.SQLStore
 	audit        *loginaudit.Service
 	userStore    *fakeUserStore
+	nativeUsers  *accesscarvilon.Store
 	mqttStore    *mqttstore.Store
 	mqttBroker   *mqttbroker.Manager
 	logBuf       *logbuf.Buffer
@@ -261,6 +263,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	go func() { _ = hub.Run(hubCtx) }()
 
 	userStore := newFakeUserStore()
+	nativeUserStore := accesscarvilon.New(d.DB, accesscarvilon.WithClock(clock.Now))
 	logBuffer := logbuf.New(100)
 	consoleSecrets, err := secrets.NewWithKey(make([]byte, 32))
 	if err != nil {
@@ -289,6 +292,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		Hub:             hub,
 		History:         historyStore,
 		UserStore:       userStore,
+		NativeUsers:     nativeUserStore,
 		EventBus:        hubBus,
 		DoorbellCalls:   callsSvc,
 		EventsHeartbeat: 50 * time.Millisecond,
@@ -331,6 +335,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		history:      historyStore,
 		audit:        auditSvc,
 		userStore:    userStore,
+		nativeUsers:  nativeUserStore,
 		mqttStore:    mqttStore,
 		mqttBroker:   mqttBroker,
 		logBuf:       logBuffer,

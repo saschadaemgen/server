@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	accesscarvilon "carvilon.local/server/internal/access/carvilon"
 	"carvilon.local/server/internal/access/ua"
 	"carvilon.local/server/internal/auth/admin"
 	"carvilon.local/server/internal/auth/adminsession"
@@ -265,6 +266,11 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// Liste.
 	userStore := ua.New(uaClient)
 
+	// CARVILONs eigene Benutzer (Migration 034). Immer verfuegbar - eine
+	// lokale SQLite-Tabelle, unabhaengig von UA. Das ist die kanonische
+	// Benutzer-Quelle; UA haengt optional dran.
+	nativeUserStore := accesscarvilon.New(database.DB)
+
 	// Saison 17-08: in-process stream server (carvilon_stream build
 	// only). startInProcessStream is nil in the public build, so this
 	// whole block is skipped there. When the hook runs and succeeds it
@@ -367,6 +373,7 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		AdminLimiter:    adminLimiter,
 		UA:              uaClient,
 		UserStore:       userStore,
+		NativeUsers:     nativeUserStore,
 		Hub:             hub,
 		History:         historyStore,
 		TURNStore:       turnStore,

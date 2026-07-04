@@ -28,6 +28,16 @@
       <form class="set-card" method="post" action="/a/settings">
         <div class="set-row">
           <div class="set-row-main">
+            <span class="set-row-label">UA aktiv</span>
+            <span class="set-row-sub">Steuert nur die Benutzer-Seite: an blendet die UA-User zusaetzlich ein, aus zeigt ausschliesslich CARVILONs eigene Benutzer (kein UA-Aufruf). Ohne gesetztes Token ist der Vorgabewert aus.</span>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
+            <input type="checkbox" name="ua_enabled" value="1" {{if .Page.UA.Enabled}}checked{{end}} style="width:18px; height:18px; accent-color: var(--color-accent, var(--accent)); cursor:pointer;"/>
+            <span class="set-row-sub" style="margin:0;">UniFi Access nutzen</span>
+          </label>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
             <span class="set-row-label">Controller-URL</span>
             <span class="set-row-sub">UA-Controller im lokalen Netz, z.B. https://unifi.local</span>
           </div>

@@ -38,6 +38,10 @@ type uaSettingsBlock struct {
 	BaseURL  string
 	Status   string // "connected" | "untested" | "error"
 	HasToken bool
+	// Enabled ist der effektive "UA aktiv"-Schalter. Steuert nur die
+	// Benutzer-Seite (blendet den UA-Abschnitt ein/aus); CARVILONs
+	// eigene Benutzer sind davon unberuehrt.
+	Enabled bool
 }
 
 type auditRow struct {
@@ -83,6 +87,20 @@ func (s *Server) handleAdminSettingsPost(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+	}
+
+	// "UA aktiv"-Schalter. Die Checkbox sendet ihren Namen nur wenn
+	// angehakt; wir schreiben den Zustand deshalb immer explizit als
+	// "1"/"0", damit der Default (Token-abhaengig) danach nicht mehr
+	// greift und der Admin-Wille die Wahrheit ist.
+	uaEnabledVal := "0"
+	if r.PostForm.Get("ua_enabled") != "" {
+		uaEnabledVal = "1"
+	}
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyUAEnabled, uaEnabledVal); err != nil {
+		s.log.Error("save ua_enabled failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	storedURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyUAAPIBaseURL)
@@ -195,6 +213,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 			BaseURL:  baseURL,
 			Status:   status,
 			HasToken: tokenEnc != "",
+			Enabled:  s.uaEnabled(r.Context()),
 		},
 		Station: stationSettingsBlock{
 			Lat: stationLat,

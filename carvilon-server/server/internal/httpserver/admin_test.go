@@ -12,6 +12,7 @@ import (
 
 	"carvilon.local/server/internal/access"
 	"carvilon.local/server/internal/doorhistory"
+	"carvilon.local/server/internal/platformconfig"
 )
 
 const adminTestUser = "saschsa"
@@ -606,30 +607,191 @@ func TestAdminPlaceholders_Render(t *testing.T) {
 	}
 }
 
-// ---------- users tab ----------
+// ---------- Benutzer-Seite: vereinte Ansicht ----------
 
 func seedAccessUsers(env *testEnv, users ...access.User) {
 	env.userStore.users = append(env.userStore.users, users...)
 }
 
-func TestUsersList_RendersTable(t *testing.T) {
+// enableUA schaltet den "UA aktiv"-Schalter explizit an, damit der
+// UA-Abschnitt der Benutzer-Seite rendert und UA-Aufrufe zugelassen
+// sind. Ohne diesen Aufruf ist UA in Tests (kein Token) per Default aus.
+func enableUA(t *testing.T, env *testEnv) {
+	t.Helper()
+	if err := env.platformCfg.Set(context.Background(), platformconfig.KeyUAEnabled, "1"); err != nil {
+		t.Fatalf("enable UA: %v", err)
+	}
+}
+
+// --- Native CARVILON users ---
+
+func TestNativeUsers_EmptyShowsCreateHint(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/users")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if !strings.Contains(body, "CARVILON-Benutzer") {
+		t.Errorf("native section heading missing")
+	}
+	if !strings.Contains(body, "Noch keine Benutzer angelegt") {
+		t.Errorf("native empty-state hint missing")
+	}
+}
+
+func TestNativeUsers_CreateListEditToggleDelete(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
+
+	// Create.
+	form := url.Values{}
+	form.Set("display_name", "Anna Schmidt")
+	post(t, env, "/a/users/carvilon", form, http.StatusSeeOther)
+
+	list, err := env.nativeUsers.List(ctx, access.NativeListParams{})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("after create: list=%v err=%v", list, err)
+	}
+	u := list[0]
+	if u.ID == "" || u.DisplayName != "Anna Schmidt" || !u.Active {
+		t.Fatalf("created native user wrong: %+v", u)
+	}
+
+	// Renders in the list.
+	body := getBody(t, env, "/a/users")
+	if !strings.Contains(body, "Anna Schmidt") {
+		t.Errorf("list missing created user")
+	}
+
+	// Edit (rename), ID stable.
+	ef := url.Values{}
+	ef.Set("display_name", "Anna Berg")
+	post(t, env, "/a/users/carvilon/"+u.ID+"/update", ef, http.StatusSeeOther)
+	got, _ := env.nativeUsers.Get(ctx, u.ID)
+	if got.DisplayName != "Anna Berg" {
+		t.Errorf("after update DisplayName = %q", got.DisplayName)
+	}
+	if got.ID != u.ID {
+		t.Errorf("update changed ID")
+	}
+
+	// Deactivate.
+	post(t, env, "/a/users/carvilon/"+u.ID+"/deactivate", url.Values{}, http.StatusSeeOther)
+	got, _ = env.nativeUsers.Get(ctx, u.ID)
+	if got.Active {
+		t.Errorf("still active after deactivate")
+	}
+	// Activate again.
+	post(t, env, "/a/users/carvilon/"+u.ID+"/activate", url.Values{}, http.StatusSeeOther)
+	got, _ = env.nativeUsers.Get(ctx, u.ID)
+	if !got.Active {
+		t.Errorf("still inactive after activate")
+	}
+
+	// Delete.
+	post(t, env, "/a/users/carvilon/"+u.ID+"/delete", url.Values{}, http.StatusSeeOther)
+	after, _ := env.nativeUsers.List(ctx, access.NativeListParams{})
+	if len(after) != 0 {
+		t.Errorf("after delete list len = %d, want 0", len(after))
+	}
+}
+
+func TestNativeUsers_CreateRejectsBlankName(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	form := url.Values{}
+	form.Set("display_name", "   ")
+	post(t, env, "/a/users/carvilon", form, http.StatusBadRequest)
+	list, _ := env.nativeUsers.List(context.Background(), access.NativeListParams{})
+	if len(list) != 0 {
+		t.Errorf("blank-name create leaked a row")
+	}
+}
+
+func TestNativeUsers_SearchFilter(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
+	_, _ = env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Sascha Daemgen"})
+	_, _ = env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Anna Mueller"})
+	body := getBody(t, env, "/a/users?nq=mueller")
+	if strings.Contains(body, "Sascha Daemgen") {
+		t.Errorf("native search leaked non-matching row")
+	}
+	if !strings.Contains(body, "Anna Mueller") {
+		t.Errorf("native search dropped matching row")
+	}
+}
+
+func TestNativeUsers_RequireAdminSession(t *testing.T) {
+	env := newTestServer(t) // no login
+	form := url.Values{}
+	form.Set("display_name", "Intruder")
+	// requireAdminSession redirects unauthenticated POSTs to the login page.
+	post(t, env, "/a/users/carvilon", form, http.StatusSeeOther)
+	list, _ := env.nativeUsers.List(context.Background(), access.NativeListParams{})
+	if len(list) != 0 {
+		t.Errorf("unauthenticated create was not blocked")
+	}
+}
+
+// --- UA toggle gating ---
+
+func TestUsers_UAToggleHidesAndShowsSection(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedAccessUsers(env,
+		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
+	)
+
+	// UA off by default (no token) -> no UA section, no UA user leaked.
+	off := getBody(t, env, "/a/users")
+	if strings.Contains(off, "UniFi-Access-Benutzer") {
+		t.Errorf("UA section rendered while UA disabled")
+	}
+	if strings.Contains(off, "Sascha Daemgen") {
+		t.Errorf("UA user leaked while UA disabled")
+	}
+
+	// UA on -> section + user appear.
+	enableUA(t, env)
+	on := getBody(t, env, "/a/users")
+	if !strings.Contains(on, "UniFi-Access-Benutzer") {
+		t.Errorf("UA section missing while UA enabled")
+	}
+	if !strings.Contains(on, "Sascha Daemgen") {
+		t.Errorf("UA user missing while UA enabled")
+	}
+}
+
+func TestUsers_UACreateBlockedWhenDisabled(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	form := url.Values{}
+	form.Set("first_name", "Otto")
+	form.Set("last_name", "Neumann")
+	// UA disabled -> 503, no proxy call.
+	post(t, env, "/a/users", form, http.StatusServiceUnavailable)
+	if len(env.userStore.users) != 0 {
+		t.Errorf("UA create ran while UA disabled")
+	}
+}
+
+func TestUAUsers_RendersTable(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	seedAccessUsers(env,
 		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen",
 			Email: "s@d.com", Status: access.StatusActive},
 		access.User{ID: "u2", FirstName: "Anna", LastName: "Mueller",
 			Email: "a@m.com", Status: access.StatusDeactivated},
 	)
-	resp, err := env.client.Get(env.ts.URL + "/a/users")
-	if err != nil {
-		t.Fatalf("GET /a/users: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	body := readBody(t, resp)
+	body := getBody(t, env, "/a/users")
 	for _, want := range []string{"Sascha Daemgen", "Anna Mueller", "Aktiv", "Inaktiv"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
@@ -637,77 +799,34 @@ func TestUsersList_RendersTable(t *testing.T) {
 	}
 }
 
-func TestUsersList_EmptyConfiguredShowsCreateHint(t *testing.T) {
+func TestUAUsers_NotConfiguredShowsHint(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	resp, err := env.client.Get(env.ts.URL + "/a/users")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if !strings.Contains(body, "Noch keine Benutzer angelegt") {
-		t.Errorf("empty-state hint missing")
-	}
-}
-
-func TestUsersList_NotConfiguredShowsHint(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	env.userStore.configured = false
-	resp, err := env.client.Get(env.ts.URL + "/a/users")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := getBody(t, env, "/a/users")
 	if !strings.Contains(body, "noch nicht konfiguriert") {
 		t.Errorf("not-configured hint missing")
 	}
 }
 
-func TestUsersList_Pagination(t *testing.T) {
+func TestUAUsers_Pagination(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	for i := 0; i < 5; i++ {
 		env.userStore.users = append(env.userStore.users, access.User{
 			ID: "u" + string(rune('a'+i)), FirstName: "First", LastName: "Last" + string(rune('A'+i)),
 			Status: access.StatusActive,
 		})
 	}
-	resp, err := env.client.Get(env.ts.URL + "/a/users?page=2&size=2")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := getBody(t, env, "/a/users?page=2&size=2")
 	if !strings.Contains(body, "Seite 2 von 3") {
 		t.Errorf("expected 'Seite 2 von 3' in body")
 	}
 }
 
-func TestUsersList_SearchFilter(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	seedAccessUsers(env,
-		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
-		access.User{ID: "u2", FirstName: "Anna", LastName: "Mueller", Status: access.StatusActive},
-	)
-	resp, err := env.client.Get(env.ts.URL + "/a/users?q=mueller")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if strings.Contains(body, "Sascha Daemgen") {
-		t.Errorf("search filter leaked non-matching row")
-	}
-	if !strings.Contains(body, "Anna Mueller") {
-		t.Errorf("search filter dropped matching row")
-	}
-}
-
-func TestUsersJSON_ReturnsValidJSON(t *testing.T) {
+func TestUAUsers_JSON_ReturnsValidJSON(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	seedAccessUsers(env,
@@ -740,24 +859,15 @@ func TestUsersJSON_ReturnsValidJSON(t *testing.T) {
 	}
 }
 
-func TestUsersCreate_StoresAndRedirects(t *testing.T) {
+func TestUAUsers_CreateStoresAndRedirects(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	form := url.Values{}
 	form.Set("first_name", "Otto")
 	form.Set("last_name", "Neumann")
 	form.Set("email", "otto@n.com")
-	req, _ := http.NewRequest(http.MethodPost,
-		env.ts.URL+"/a/users", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("POST: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303", resp.StatusCode)
-	}
+	post(t, env, "/a/users", form, http.StatusSeeOther)
 	if len(env.userStore.users) != 1 {
 		t.Fatalf("userStore has %d users, want 1", len(env.userStore.users))
 	}
@@ -767,52 +877,67 @@ func TestUsersCreate_StoresAndRedirects(t *testing.T) {
 	}
 }
 
-func TestUsersStatus_ActivateDeactivate(t *testing.T) {
+func TestUAUsers_ActivateDeactivate(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	seedAccessUsers(env,
 		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
 	)
-	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/users/u1/deactivate", nil)
-	resp, err := env.client.Do(req)
-	if err != nil {
-		t.Fatalf("deactivate: %v", err)
-	}
-	resp.Body.Close()
+	post(t, env, "/a/users/u1/deactivate", url.Values{}, http.StatusSeeOther)
 	if env.userStore.users[0].Status != access.StatusDeactivated {
 		t.Errorf("after deactivate status = %q", env.userStore.users[0].Status)
 	}
-	req2, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/a/users/u1/activate", nil)
-	resp2, err := env.client.Do(req2)
-	if err != nil {
-		t.Fatalf("activate: %v", err)
-	}
-	resp2.Body.Close()
+	post(t, env, "/a/users/u1/activate", url.Values{}, http.StatusSeeOther)
 	if env.userStore.users[0].Status != access.StatusActive {
 		t.Errorf("after activate status = %q", env.userStore.users[0].Status)
 	}
 }
 
-func TestUsersDetail_RendersLinkedViewers(t *testing.T) {
+func TestUAUsers_DetailRendersLinkedViewers(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	enableUA(t, env)
 	seedAccessUsers(env,
 		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
 	)
-	// Viewer mit linked_ua_user_id = "u1" seeden
 	env.seedViewerAs(t, "0c:ea:14:dd:ee:01", "Wohnung A", "TestPw-1234567X")
 	if err := env.viewerMgr.SetLinkedUAUserID(context.Background(), "0c:ea:14:dd:ee:01", "u1"); err != nil {
 		t.Fatalf("SetLinkedUAUserID: %v", err)
 	}
-	resp, err := env.client.Get(env.ts.URL + "/a/users/u1")
-	if err != nil {
-		t.Fatalf("GET detail: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
+	body := getBody(t, env, "/a/users/u1")
 	if !strings.Contains(body, "Wohnung A") {
 		t.Errorf("detail page missing linked viewer 'Wohnung A'")
 	}
+}
+
+// post issues an authenticated form POST and asserts the status code.
+func post(t *testing.T, env *testEnv, path string, form url.Values, wantStatus int) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("POST %s status = %d, want %d", path, resp.StatusCode, wantStatus)
+	}
+}
+
+// getBody GETs a path and returns the body, asserting HTTP 200.
+func getBody(t *testing.T, env *testEnv, path string) string {
+	t.Helper()
+	resp, err := env.client.Get(env.ts.URL + path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
+	}
+	return readBody(t, resp)
 }
 
 func TestViewerCreate_StoresLinkedUserID(t *testing.T) {

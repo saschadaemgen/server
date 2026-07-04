@@ -98,6 +98,12 @@ type Deps struct {
 	// (see access/ua). Nil = UA not configured yet; the admin UI
 	// then shows a hint instead of an empty list.
 	UserStore UserStoreLike
+	// NativeUsers is CARVILONs own user store (access/carvilon,
+	// migration 034). Always present (a local SQLite table); it is
+	// the canonical user source, independent of UA. Nil only in
+	// stripped-down setups, in which case the native section of the
+	// Benutzer page degrades to a hint.
+	NativeUsers access.NativeUserStore
 	// Hub fans doorbell events from viewermanager out to per-mock
 	// SSE subscribers. Nil disables /m/events with 503.
 	Hub *doorbellhub.Hub
@@ -196,6 +202,7 @@ type Server struct {
 	adminLimiter    *ratelimit.Limiter
 	ua              *uaapi.Client
 	userStore       UserStoreLike
+	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
 	history         doorhistory.Store
 	turnStore       *turnstore.Store
@@ -293,6 +300,7 @@ func New(deps Deps) (*Server, error) {
 		adminLimiter:    deps.AdminLimiter,
 		ua:              deps.UA,
 		userStore:       deps.UserStore,
+		nativeUsers:     deps.NativeUsers,
 		hub:             deps.Hub,
 		history:         deps.History,
 		turnStore:       deps.TURNStore,
@@ -690,10 +698,23 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
 	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))
 
-	// User CRUD. The UA Access Developer API is the
-	// source-of-truth; all access goes through the
-	// access.UserStore interface.
+	// Benutzer-Seite: vereinte Ansicht. CARVILONs eigene Benutzer
+	// (native, volle Verwaltung) sind die Wahrheit; die UA-User
+	// erscheinen nur als getrennter Abschnitt, wenn UA aktiv ist.
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
+
+	// Native CARVILON-Benutzer-CRUD (access/carvilon, Migration 034).
+	// Eigener Pfad-Namensraum unter /a/users/carvilon/ damit er nicht
+	// mit den UA-{id}-Routen kollidiert.
+	s.mux.Handle("POST /a/users/carvilon", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserCreate)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/update", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserUpdate)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/activate", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserActivate)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/deactivate", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserDeactivate)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserDelete)))
+
+	// UA-User: die bestehende Proxy-Anbindung an die UA Access
+	// Developer API. Nur erreichbar/wirksam, wenn UA aktiv ist (die
+	// Handler pruefen s.uaEnabled); sonst kein UA-Aufruf.
 	s.mux.Handle("GET /a/users.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersListJSON)))
 	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
 	s.mux.Handle("GET /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDetail)))

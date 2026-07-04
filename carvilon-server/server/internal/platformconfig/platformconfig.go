@@ -18,8 +18,14 @@ import (
 
 // Well-known keys. Add new constants here as the platform grows.
 const (
-	KeyUAAPIBaseURL   = "ua_api_base_url"
-	KeyUAAPIToken     = "ua_api_token"
+	KeyUAAPIBaseURL = "ua_api_base_url"
+	KeyUAAPIToken   = "ua_api_token"
+	// KeyUAEnabled ist der "UA aktiv"-Schalter der Benutzer-Seite.
+	// "1"/"0". Fehlt der Wert (Erststart), gilt der Default: an, wenn
+	// ein UA-Token gesetzt ist, sonst aus (siehe Server.uaEnabled).
+	// CARVILONs eigene Benutzer sind davon unberuehrt - der Schalter
+	// blendet nur den UA-Abschnitt der Benutzer-Seite aus.
+	KeyUAEnabled      = "ua_enabled"
 	KeyViewerPwPepper = "viewer_pw_pepper"
 	// Saison 14-01b: physical site coordinates for the open-meteo
 	// weather snapshot rendered on the mieter screensaver.
@@ -35,10 +41,10 @@ const (
 	// from the server's IPv4 (not stored here); these keys hold only
 	// what the admin page edits.
 	KeyMQTTEnabled  = "mqtt_broker_enabled" // "1" / "0"
-	KeyMQTTTCPPort  = "mqtt_tcp_port"        // default 1883
-	KeyMQTTTLSPort  = "mqtt_tls_port"        // default 8883
-	KeyMQTTCertFile = "mqtt_tls_cert"        // empty -> self-signed
-	KeyMQTTKeyFile  = "mqtt_tls_key"         // empty -> self-signed
+	KeyMQTTTCPPort  = "mqtt_tcp_port"       // default 1883
+	KeyMQTTTLSPort  = "mqtt_tls_port"       // default 8883
+	KeyMQTTCertFile = "mqtt_tls_cert"       // empty -> self-signed
+	KeyMQTTKeyFile  = "mqtt_tls_key"        // empty -> self-signed
 	// WebSocket listener for the browser MQTT console.
 	KeyMQTTWSEnabled = "mqtt_ws_enabled" // "1" / "0"
 	KeyMQTTWSPort    = "mqtt_ws_port"    // default 8083
