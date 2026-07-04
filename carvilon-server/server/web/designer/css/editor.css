@@ -119,7 +119,6 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 /* top bar */
 .topbar{position:fixed;top:0;left:0;right:0;height:54px;z-index:20;display:flex;align-items:center;gap:14px;padding:0 16px;
   background:rgba(11,12,15,.93);border-bottom:1px solid var(--border);backdrop-filter:blur(16px)}
-.crumb-title{color:var(--text);font-weight:600;font-size:13px}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.02em;font-size:15px}
 .brand .mark{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:linear-gradient(150deg, var(--cyan), var(--cyan-dim));box-shadow:0 0 14px -2px rgba(52,228,234,.8), inset 0 1px 0 rgba(255,255,255,.4);color:#03100f}
 .brand .mark svg{width:13px;height:13px;stroke-width:2.6}
@@ -182,10 +181,24 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 .dock ::-webkit-scrollbar-thumb,.term::-webkit-scrollbar-thumb{background:#23272f}
 .dock ::-webkit-scrollbar-thumb:hover,.term::-webkit-scrollbar-thumb:hover{background:#2f343d}
 .dock ::-webkit-scrollbar-corner,.term::-webkit-scrollbar-corner{background:transparent}
-/* project-tree popover, anchored under the topbar breadcrumb chip */
-.proj-pop{display:none;position:fixed;top:60px;left:14px;width:300px;z-index:60;border-radius:9px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);overflow:hidden}
-.proj-pop.show{display:block}
-.pt-tree{max-height:240px;overflow:auto;padding:6px}
+/* project tree: a left slide-out drawer that lays OVER the block palette
+   (the breadcrumb chip is its trigger). Off-screen and inert until .show;
+   full height under the topbar so the tree gets real room. */
+.proj-pop{position:fixed;top:54px;left:0;bottom:0;width:min(var(--rail-w),92vw);z-index:18;
+  display:flex;flex-direction:column;background:#15171c;border-right:1px solid var(--border-bright);
+  box-shadow:18px 0 46px -20px rgba(0,0,0,.85);outline:none;
+  transform:translateX(-102%);visibility:hidden;
+  transition:transform .24s cubic-bezier(.4,.02,.2,1),visibility 0s linear .24s}
+.proj-pop.show{transform:translateX(0);visibility:visible;transition:transform .24s cubic-bezier(.4,.02,.2,1)}
+@media (prefers-reduced-motion:reduce){.proj-pop,.proj-pop.show{transition:none}}
+.pt-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px 10px;border-bottom:1px solid var(--border)}
+.pt-head-title{font:600 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.pt-close{width:26px;height:26px;flex:none;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;display:grid;place-items:center;cursor:pointer;transition:.13s}
+.pt-close:hover{color:var(--text);border-color:var(--border-bright);background:rgba(120,150,180,.1)}
+.pt-close:focus,.pt-close:focus-visible{outline:none;border-color:var(--border-bright)}
+.pt-close svg{width:15px;height:15px}
+.pt-panel{flex:1;min-height:0;display:flex;flex-direction:column}
+.pt-tree{flex:1;min-height:0;overflow:auto;padding:6px}
 .pt-row{display:flex;align-items:center;gap:8px;padding:6px 8px;padding-left:calc(8px + var(--d,0)*13px);border-radius:6px;cursor:pointer;font:500 12px/1 var(--font);color:var(--muted)}
 .pt-row:hover{background:rgba(120,150,180,.08);color:var(--text)}
 .pt-row svg{width:14px;height:14px;flex:none}

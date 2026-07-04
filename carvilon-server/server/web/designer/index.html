@@ -13,7 +13,7 @@
 <div class="scanline"></div>
 
 <header class="topbar">
-  <div class="crumb"><span class="crumb-title">Logic Editor</span><span style="color:var(--faint)">/</span><button class="chip crumb-btn" id="crumb-btn" title="Projektbaum öffnen"><span class="dot"></span><span id="crumb-text">…</span><i data-lucide="chevron-down" class="crumb-chev"></i></button></div>
+  <div class="crumb"><button class="chip crumb-btn" id="crumb-btn" title="Projektbaum öffnen" aria-expanded="false" aria-controls="proj-pop"><span class="dot"></span><span id="crumb-text">…</span><i data-lucide="chevron-down" class="crumb-chev"></i></button></div>
   <div class="spacer"></div>
   <div class="tools">
     <div class="tbtn toggle on" id="btn-signal"><span>Signal Flow</span><span class="tsw"><i></i></span></div>
@@ -54,9 +54,13 @@
   <div class="lib" id="lib"></div>
 </aside>
 
-<!-- Projektbaum-Popover, verankert unter der Kopfzeile (öffnet über den
-     Brotkrumen-Knopf; Inhalt rendert project.js) -->
-<div class="proj-pop" id="proj-pop"></div>
+<!-- Projektbaum: linke Ausfahr-Leiste, öffnet über den Brotkrumen-Knopf
+     und legt sich über die Block-Palette. Der Kopf (Titel + Schließen-
+     Kreuz) ist statisch; project.js rendert Baum + Aktionen in #pt-panel. -->
+<aside class="proj-pop" id="proj-pop" tabindex="-1" aria-label="Projektbaum">
+  <div class="pt-head"><span class="pt-head-title">Projektbaum</span><button class="pt-close" id="pt-close" type="button" title="Schließen" aria-label="Baum schließen"><i data-lucide="x"></i></button></div>
+  <div class="pt-panel" id="pt-panel"></div>
+</aside>
 
 <aside class="inspector" id="inspector">
   <div class="insp-head"><span class="insp-cat" id="insp-cat">—</span>

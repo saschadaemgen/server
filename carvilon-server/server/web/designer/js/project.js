@@ -39,13 +39,35 @@ let dirty = false, saving = false, queued = false, saveTimer = null;
 // canvas into a never-saved graph).
 let lastSaved = null;
 
-const projPop = document.getElementById('proj-pop');
+const projPop = document.getElementById('proj-pop');   // the left drawer shell
+const projPanel = document.getElementById('pt-panel');  // tree + actions paint target
 const crumbBtn = document.getElementById('crumb-btn');
+const rail = document.querySelector('.rail');           // block palette the drawer covers
 
-// closeTree hides the breadcrumb tree popover (chevron follows).
-function closeTree(){
+// closeTree slides the left tree drawer shut (chevron + aria-expanded
+// follow) and un-inerts the palette behind it. Focus is only pulled back
+// to the chip when the caller asks (keyboard/close-X), never on an outside
+// click that lands elsewhere.
+function closeTree({ restoreFocus = false } = {}){
   if (projPop) projPop.classList.remove('show');
-  if (crumbBtn) crumbBtn.classList.remove('open');
+  // the covered palette becomes interactive/tabbable again
+  if (rail) rail.inert = false;
+  if (crumbBtn){
+    crumbBtn.classList.remove('open');
+    crumbBtn.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) crumbBtn.focus();
+  }
+}
+// openTree slides the drawer out over the palette and moves focus into it.
+// The palette is inert'd while covered so Tab/AT can't reach controls
+// hidden behind the opaque drawer (it's non-modal — other visible panels
+// stay reachable, and any dismiss gesture restores it).
+function openTree(){
+  if (!projPop) return;
+  projPop.classList.add('show');
+  if (rail) rail.inert = true;
+  if (crumbBtn){ crumbBtn.classList.add('open'); crumbBtn.setAttribute('aria-expanded', 'true'); }
+  projPop.focus();
 }
 // clearLoading removes the boot loading hint - called exactly once the
 // initial graph has rendered (or turned out not to exist/load).
@@ -163,15 +185,15 @@ function renderActions(){
     + `<button data-act="del" class="${dis.del ? 'dis' : ''}" title="Löschen"><i data-lucide="trash-2"></i></button></div>`;
 }
 function paintTree(){
-  if (!projPop) return;
+  if (!projPanel) return;
   // An async repaint (notice timeout, slow error) must not throw away
   // what the user has typed into a live inline-rename input.
-  const prevEdit = projPop.querySelector('.pt-edit');
+  const prevEdit = projPanel.querySelector('.pt-edit');
   const liveVal = prevEdit ? prevEdit.value : null;
   const rows = childFolders(0).map(f => renderFolderRow(f, 0)).join('');
-  projPop.innerHTML = `<div class="pt-tree">${rows || '<div class="pt-empty">Kein Baum geladen</div>'}</div>${renderActions()}`;
+  projPanel.innerHTML = `<div class="pt-tree">${rows || '<div class="pt-empty">Kein Baum geladen</div>'}</div>${renderActions()}`;
   if (window.lucide) lucide.createIcons();
-  const inp = projPop.querySelector('.pt-edit');
+  const inp = projPanel.querySelector('.pt-edit');
   if (inp){
     if (liveVal !== null) inp.value = liveVal;
     inp.focus();
@@ -475,7 +497,7 @@ async function handleAction(a){
 
 // ---- init ----
 export async function initProject(){
-  if (!projPop || !crumbBtn) return;
+  if (!projPop || !projPanel || !crumbBtn) return;
 
   try { JSON.parse(localStorage.getItem(OPEN_KEY) || '[]').forEach(id => openSet.add(id)); } catch(_) {}
 
@@ -497,14 +519,16 @@ export async function initProject(){
 
   crumbBtn.onclick = e => {
     e.stopPropagation();
-    projPop.classList.toggle('show');
-    crumbBtn.classList.toggle('open', projPop.classList.contains('show'));
+    if (projPop.classList.contains('show')) closeTree();
+    else openTree();
   };
+  const ptClose = document.getElementById('pt-close');
+  if (ptClose) ptClose.onclick = e => { e.stopPropagation(); closeTree({ restoreFocus: true }); };
   document.addEventListener('pointerdown', e => {
     if (!e.target.closest('#proj-pop') && !e.target.closest('#crumb-btn')) closeTree();
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && projPop.classList.contains('show')) closeTree();
+    if (e.key === 'Escape' && projPop.classList.contains('show')) closeTree({ restoreFocus: true });
   });
   // Die Mitte-Kürzung der Brotkrume hängt an der verfügbaren Breite.
   addEventListener('resize', paintCrumb);
