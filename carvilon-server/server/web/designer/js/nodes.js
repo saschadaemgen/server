@@ -105,6 +105,18 @@ function defFor(name,cat){
     return {cat:'telegram',icon:NAME_ICON[name]||'send',title:name,type:t,implemented:true,live,props,
       ports:isSrc?{in:[],out:[{id:'out',label:'OUT'}]}:{in:[{id:'in',label:'IN'}],out:[]}};
   }
+  // NFC reader blocks. Also before the generic channel branches: they
+  // reuse source.channel(.text) and would otherwise render as a GPIO
+  // card (line picker + pin options) resp. a system card. Both channels
+  // are baked by the catalog - one block pair per detected reader, like
+  // the sys metrics, no picker; the UID text source shows the last read
+  // tag live on the card.
+  if(NAME_CAT[name]==='nfc'){
+    const isUID=t==='source.channel.text';
+    return {cat:'nfc',icon:NAME_ICON[name]||'nfc',title:name,type:t,implemented:true,live:isUID,
+      props:[{k:'Kanal',v:NAME_CHANNEL[name]||'',param:'channel',inspectorOnly:true}],
+      ports:{in:[],out:[{id:'out',label:isUID?'UID':'DA'}]}};
+  }
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
     // Like the other blocks (staircase shows Mode/Hold, lamp shows
     // Output/Channel), the GPIO card shows its pin options; they stay

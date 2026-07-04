@@ -16,9 +16,10 @@ export const NAME_ICON={},NAME_CAT={},NAME_TYPE={},NAME_CHANNEL={},NAME_UNIT={};
 
 // Categories beyond the five base ones (input/logic/time/memory/output)
 // surface only when the runtime catalog includes them - "gpio" on a GPIO
-// host, "system" where telemetry is readable. Their display metadata lives
+// host, "system" where telemetry is readable, "nfc" when a tag reader is
+// detected, "telegram" while the bot runs. Their display metadata lives
 // here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'}};
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of

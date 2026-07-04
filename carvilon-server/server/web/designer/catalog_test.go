@@ -10,9 +10,9 @@ import (
 // renders: 111 blocks across exactly the five categories, in the
 // counts the former inline list had.
 func TestCatalog_CountsAndCategories(t *testing.T) {
-	blocks := Catalog(false, nil, false, false)
+	blocks := Catalog(false, nil, nil, false, false)
 	if len(blocks) != 111 {
-		t.Fatalf("Catalog(false, nil, false, false) has %d blocks, want 111", len(blocks))
+		t.Fatalf("Catalog(false, nil, nil, false, false) has %d blocks, want 111", len(blocks))
 	}
 	want := map[string]int{"input": 26, "logic": 26, "time": 22, "memory": 13, "output": 24}
 	got := map[string]int{}
@@ -35,7 +35,7 @@ func TestCatalog_CountsAndCategories(t *testing.T) {
 func TestCatalog_Shape(t *testing.T) {
 	validKind := map[string]bool{"bool": true, "float": true, "text": true}
 	seen := map[string]bool{}
-	for _, b := range Catalog(true, nil, false, false) { // superset: also covers the GPIO blocks
+	for _, b := range Catalog(true, nil, nil, false, false) { // superset: also covers the GPIO blocks
 		if b.Type == "" || b.Category == "" || b.Title == "" || b.Icon == "" {
 			t.Errorf("block %+v has an empty identity field", b)
 		}
@@ -71,7 +71,7 @@ func TestCatalog_Implemented(t *testing.T) {
 		"output.lamp":    true,
 	}
 	implCount := 0
-	for _, b := range Catalog(false, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false) {
 		if !b.Implemented {
 			if len(b.Inputs) != 0 || len(b.Outputs) != 0 || len(b.Params) != 0 {
 				t.Errorf("catalog-only block %q unexpectedly carries ports/params", b.Type)
@@ -112,14 +112,14 @@ func TestCatalog_Implemented(t *testing.T) {
 // flag: absent without GPIO, and present (two engine-backed blocks typed
 // to source.channel / sink.channel, with a user-set line param) with it.
 func TestCatalog_GPIO(t *testing.T) {
-	for _, b := range Catalog(false, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false) {
 		if b.Category == "gpio" {
 			t.Fatalf("gpio category present without GPIO: %+v", b)
 		}
 	}
 	byType := map[string]CatalogBlock{}
 	count := 0
-	for _, b := range Catalog(true, nil, false, false) {
+	for _, b := range Catalog(true, nil, nil, false, false) {
 		if b.Category != "gpio" {
 			continue
 		}
@@ -143,7 +143,7 @@ func TestCatalog_GPIO(t *testing.T) {
 	if !ok || len(snk.Inputs) != 1 || snk.Inputs[0].Kind != "bool" {
 		t.Errorf("GPIO Ausgang must be a %s with a bool input: %+v", engine.TypeSinkChannel, snk)
 	}
-	if a, b := len(Catalog(false, nil, false, false)), len(Catalog(true, nil, false, false)); b != a+2 {
+	if a, b := len(Catalog(false, nil, nil, false, false)), len(Catalog(true, nil, nil, false, false)); b != a+2 {
 		t.Errorf("Catalog(true) = %d blocks, want Catalog(false)+2 = %d", b, a+2)
 	}
 }
@@ -152,13 +152,13 @@ func TestCatalog_GPIO(t *testing.T) {
 // running: absent when off, two generic blocks (one source, one sink)
 // when on.
 func TestCatalog_MQTT(t *testing.T) {
-	for _, b := range Catalog(false, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false) {
 		if b.Category == "mqtt" {
 			t.Fatalf("mqtt category present while broker off: %+v", b)
 		}
 	}
 	var mqtt []CatalogBlock
-	for _, b := range Catalog(false, nil, true, false) {
+	for _, b := range Catalog(false, nil, nil, true, false) {
 		if b.Category == "mqtt" {
 			mqtt = append(mqtt, b)
 		}
@@ -186,13 +186,13 @@ func TestCatalog_MQTT(t *testing.T) {
 // the raw text source and text sink - when on, all engine-backed via
 // the generic channel node types.
 func TestCatalog_Telegram(t *testing.T) {
-	for _, b := range Catalog(false, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false) {
 		if b.Category == "telegram" {
 			t.Fatalf("telegram category present while bot off: %+v", b)
 		}
 	}
 	byTitle := map[string]CatalogBlock{}
-	for _, b := range Catalog(false, nil, false, true) {
+	for _, b := range Catalog(false, nil, nil, false, true) {
 		if b.Category != "telegram" {
 			continue
 		}
@@ -235,14 +235,14 @@ func sampleSysMetrics() []SysMetric {
 // block per metric (with its physical ref baked into Channel and a unit)
 // when present.
 func TestCatalog_System(t *testing.T) {
-	for _, b := range Catalog(true, nil, false, false) {
+	for _, b := range Catalog(true, nil, nil, false, false) {
 		if b.Category == "system" {
 			t.Fatalf("system category present without metrics: %+v", b)
 		}
 	}
 	metrics := sampleSysMetrics()
 	var sys []CatalogBlock
-	for _, b := range Catalog(false, metrics, false, false) {
+	for _, b := range Catalog(false, metrics, nil, false, false) {
 		if b.Category == "system" {
 			sys = append(sys, b)
 		}
@@ -263,6 +263,63 @@ func TestCatalog_System(t *testing.T) {
 		if len(b.Outputs) != 1 || b.Outputs[0].Kind != "float" {
 			t.Errorf("system block %q must have one float output: %+v", b.Title, b.Outputs)
 		}
+	}
+}
+
+// TestCatalog_NFC verifies the NFC category is data-driven and gated on
+// detected readers: absent with none, and two source blocks per reader
+// (the UID text source and the "Tag da" bool source, physical refs
+// baked in) when present - with reader-id title suffixes once a second
+// reader appears, because the editor's palette lookups are title-keyed
+// and silently overwrite on a duplicate title.
+func TestCatalog_NFC(t *testing.T) {
+	for _, b := range Catalog(true, nil, nil, true, true) {
+		if b.Category == "nfc" {
+			t.Fatalf("nfc category present without readers: %+v", b)
+		}
+	}
+	one := []NFCReader{{ID: "i2c-1", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"}}
+	var nfc []CatalogBlock
+	for _, b := range Catalog(false, nil, one, false, false) {
+		if b.Category == "nfc" {
+			nfc = append(nfc, b)
+		}
+	}
+	if len(nfc) != 2 {
+		t.Fatalf("nfc category has %d blocks, want 2", len(nfc))
+	}
+	uid, present := nfc[0], nfc[1]
+	if uid.Type != engine.TypeSourceChannelText || uid.Title != "NFC Leser" || uid.Channel != "nfc:i2c-1:uid" || !uid.Implemented {
+		t.Errorf("uid block = %+v", uid)
+	}
+	if len(uid.Outputs) != 1 || uid.Outputs[0].Kind != "text" {
+		t.Errorf("uid block must have one text output: %+v", uid.Outputs)
+	}
+	if present.Type != engine.TypeSourceChannel || present.Title != "NFC Tag da" || present.Channel != "nfc:i2c-1:present" || !present.Implemented {
+		t.Errorf("present block = %+v", present)
+	}
+	if len(present.Outputs) != 1 || present.Outputs[0].Kind != "bool" {
+		t.Errorf("present block must have one bool output: %+v", present.Outputs)
+	}
+	// Two readers: four blocks, titles unique via the reader-id suffix.
+	two := append(one, NFCReader{ID: "i2c-13", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"})
+	titles := map[string]bool{}
+	count := 0
+	for _, b := range Catalog(false, nil, two, false, false) {
+		if b.Category != "nfc" {
+			continue
+		}
+		count++
+		if titles[b.Title] {
+			t.Errorf("duplicate nfc block title %q (palette lookups are title-keyed)", b.Title)
+		}
+		titles[b.Title] = true
+	}
+	if count != 4 {
+		t.Fatalf("nfc category has %d blocks for two readers, want 4", count)
+	}
+	if !titles["NFC Leser (i2c-1)"] || !titles["NFC Tag da (i2c-13)"] {
+		t.Errorf("expected suffixed titles, got %v", titles)
 	}
 }
 

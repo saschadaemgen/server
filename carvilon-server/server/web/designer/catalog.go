@@ -55,22 +55,35 @@ type SysMetric struct {
 	Unit    string
 }
 
+// NFCReader is one detected NFC tag reader the catalog turns into two
+// source blocks (data-driven from the nfc: driver): the tag UID as a
+// text source and "Tag da" as a bool source, each with its physical ref
+// baked in.
+type NFCReader struct {
+	ID             string // stable reader id, e.g. "i2c-1"
+	UIDChannel     string // full physical ref, e.g. "nfc:i2c-1:uid"
+	PresentChannel string // full physical ref, e.g. "nfc:i2c-1:present"
+}
+
 // Catalog returns the building-block descriptors the editor palette
 // renders: the 111 base blocks in the five-category order (input, logic,
-// time, memory, output), plus - when includeGPIO is set (the host has
-// usable GPIO, detected at runtime) - a sixth "gpio" category with two
-// generic blocks. The implemented blocks have their ports, params and
-// delay-boundary filled from the engine registry; the catalog-only ones
-// have empty ports/params until their engine nodes land. The httpserver
-// passes the runtime GPIO flag and serializes this to
-// /a/designer/catalog.json.
-func Catalog(includeGPIO bool, sysMetrics []SysMetric, includeMQTT, includeTelegram bool) []CatalogBlock {
+// time, memory, output), plus the runtime-detected driver categories -
+// "gpio" on a GPIO host, "system" where telemetry is readable, "nfc"
+// when a tag reader is detected, "mqtt"/"telegram" while broker/bot run.
+// The implemented blocks have their ports, params and delay-boundary
+// filled from the engine registry; the catalog-only ones have empty
+// ports/params until their engine nodes land. The httpserver passes the
+// runtime flags and serializes this to /a/designer/catalog.json.
+func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, includeMQTT, includeTelegram bool) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
 	}
 	if len(sysMetrics) > 0 {
 		blocks = append(blocks, sysBlocks(sysMetrics)...)
+	}
+	if len(nfcReaders) > 0 {
+		blocks = append(blocks, nfcBlocks(nfcReaders)...)
 	}
 	if includeMQTT {
 		blocks = append(blocks, mqttBlocks()...)
@@ -165,6 +178,29 @@ func sysBlocks(metrics []SysMetric) []CatalogBlock {
 			Unit:        m.Unit,
 			Implemented: true,
 		})
+	}
+	return out
+}
+
+// nfcBlocks turns the detected NFC readers into two source blocks each
+// (data-driven, appended only when the host has a reader): the tag UID
+// as a text source - the card shows the last read UID live - and
+// "Tag da" as a bool source (tag resting on the module yes/no). Both
+// are generic engine channel nodes with the physical ref baked into
+// Channel, ready to run, no picker. With more than one reader the
+// titles carry the reader id: the editor's palette lookups are
+// title-keyed, so titles MUST stay unique across the catalog.
+func nfcBlocks(readers []NFCReader) []CatalogBlock {
+	out := make([]CatalogBlock, 0, 2*len(readers))
+	for _, r := range readers {
+		suffix := ""
+		if len(readers) > 1 {
+			suffix = " (" + r.ID + ")"
+		}
+		out = append(out,
+			CatalogBlock{Type: engine.TypeSourceChannelText, Category: "nfc", Title: "NFC Leser" + suffix, Icon: "nfc", Channel: r.UIDChannel, Implemented: true},
+			CatalogBlock{Type: engine.TypeSourceChannel, Category: "nfc", Title: "NFC Tag da" + suffix, Icon: "scan", Channel: r.PresentChannel, Implemented: true},
+		)
 	}
 	return out
 }

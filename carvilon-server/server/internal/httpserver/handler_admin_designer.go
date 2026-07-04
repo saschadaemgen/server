@@ -8,6 +8,7 @@ import (
 
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/hostinfo"
+	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/web/designer"
 )
@@ -49,14 +50,15 @@ func (s *Server) handleAdminDesigner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	// GPIO, the system category, MQTT and Telegram all follow runtime
-	// detection: each appears in the palette only when the host/broker/
-	// bot exposes it. MQTT needs the broker actually running (the mqtt:
+	// GPIO, the system category, NFC, MQTT and Telegram all follow
+	// runtime detection: each appears in the palette only when the
+	// host/broker/bot exposes it. NFC needs a reader detected on an I2C
+	// bus at startup; MQTT needs the broker actually running (the mqtt:
 	// driver binds to its in-process inline client); Telegram needs the
 	// bot enabled with a token set (the telegram: driver binds to the
 	// manager's Conn).
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.mqttBrokerRunning(), s.telegramRunning()),
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), nfcReadersForCatalog(), s.mqttBrokerRunning(), s.telegramRunning()),
 	})
 }
 
@@ -82,6 +84,18 @@ func sysMetricsForCatalog() []designer.SysMetric {
 	out := make([]designer.SysMetric, 0, len(ms))
 	for _, m := range ms {
 		out = append(out, designer.SysMetric{Address: m.Address, Label: m.Label, Unit: m.Unit})
+	}
+	return out
+}
+
+// nfcReadersForCatalog bridges the nfc: driver's detected readers to
+// the designer catalog's neutral type, so the catalog package stays
+// unaware of the driver.
+func nfcReadersForCatalog() []designer.NFCReader {
+	rs := nfc.Readers()
+	out := make([]designer.NFCReader, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, designer.NFCReader{ID: r.ID, UIDChannel: r.UIDChannel, PresentChannel: r.PresentChannel})
 	}
 	return out
 }
