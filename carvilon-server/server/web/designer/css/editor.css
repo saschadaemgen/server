@@ -291,8 +291,15 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 @keyframes lpfill{from{box-shadow:0 0 0 0 var(--accent)}to{box-shadow:0 0 0 2px var(--accent),0 0 16px -2px var(--accent)}}
 .li-ic.lp-done{animation:lppop .42s ease}
 @keyframes lppop{0%{transform:scale(1)}45%{transform:scale(1.42)}100%{transform:scale(1)}}
-.fav-sec{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
-.fav-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.fav-sec{position:relative;padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.fav-row{display:flex;flex-wrap:nowrap;gap:6px;justify-content:center}
+/* a free favourite slot: dashed box with a plus, click opens the hint */
+.fav-slot{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;padding:0;color:var(--faint);background:transparent;border:1px dashed rgba(120,150,180,.28);cursor:pointer;transition:.12s}
+.fav-slot:hover{color:var(--muted);border-color:rgba(120,150,180,.5);background:rgba(120,150,180,.07)}
+.fav-slot svg{width:13px;height:13px}
+.fav-pop{position:absolute;left:10px;right:10px;top:calc(100% - 2px);z-index:31;display:none;padding:9px 11px;border-radius:10px;background:#15171c;border:1px solid var(--border-bright);box-shadow:0 18px 40px -14px rgba(0,0,0,.85);font:500 11px/1.55 var(--font);color:var(--muted)}
+.fav-pop.show{display:block}
+.fav-pop b{color:var(--text)}
 .fav-item{position:relative;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;cursor:grab;color:var(--muted);background:transparent;border:1px solid transparent;transition:.12s}
 .fav-item:hover{background:rgba(120,150,180,.12);color:var(--text);transform:translateY(-1px)}
 .fav-item svg{width:15px;height:15px}

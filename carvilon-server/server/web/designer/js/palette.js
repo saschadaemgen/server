@@ -94,16 +94,28 @@ export async function initPalette(){
    const fp=document.querySelector(`#filter-pop .fp-row[data-cat="${cat}"]`);if(fp)fp.style.setProperty('--c',col);
    const cg=document.querySelector(`.lib-group[data-cat="${cat}"] .glabel-colors`);if(cg)cg.querySelectorAll('.gsw[data-col]').forEach(s=>s.classList.toggle('sel',s.dataset.col.toLowerCase()===col.toLowerCase()));
    if(typeof renderMinimap==='function')renderMinimap();}
- const FAV_DEFAULT=['Push-button','Switch','Motion sensor','AND','OR','Staircase light','Timer','Lamp','Relay','Dimmer'];
- const favorites=FAV_DEFAULT.filter(n=>NAME_CAT[n]);
- const favSec=document.createElement('div');favSec.className='fav-sec';favSec.innerHTML='<div class="fav-row" id="fav-row"></div>';
+ /* favourites: a fixed row of six slots above the library. A fresh
+    install starts empty — every free slot shows a plus whose popover
+    explains the long-press capture. Picks fill the row from the left,
+    cap at six, and persist in localStorage across reloads. */
+ const FAV_MAX=6,FAV_KEY='cv_favorites';
+ let favorites=[];
+ try{const s=JSON.parse(localStorage.getItem(FAV_KEY)||'[]');if(Array.isArray(s))favorites=s.filter(n=>typeof n==='string'&&NAME_CAT[n]).slice(0,FAV_MAX);}catch(_){/* fresh start */}
+ function saveFavorites(){try{localStorage.setItem(FAV_KEY,JSON.stringify(favorites));}catch(_){/* private mode */}}
+ const favSec=document.createElement('div');favSec.className='fav-sec';favSec.innerHTML='<div class="fav-row" id="fav-row"></div>'
+   +'<div class="fav-pop" id="fav-pop" role="tooltip">Noch frei — das Symbol eines Moduls in der Liste <b>lange gedrückt halten</b>, um es hier als Favorit abzulegen.</div>';
  libEl.parentNode.insertBefore(favSec,libEl);const favRow=favSec.querySelector('#fav-row');
+ const favPop=favSec.querySelector('#fav-pop');
+ document.addEventListener('pointerdown',e=>{if(!e.target.closest('#fav-pop')&&!e.target.closest('.fav-slot'))favPop.classList.remove('show');});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')favPop.classList.remove('show');});
  function renderFavorites(){favRow.innerHTML='';favorites.forEach(name=>{const cat=NAME_CAT[name];if(!cat)return;const it=document.createElement('div');it.className='fav-item';it.dataset.name=name;it.dataset.cat=cat;it.style.setProperty('--gc',CAT[cat].color);it.title=name+' · hold to remove';
    it.innerHTML=`<i data-lucide="${NAME_ICON[name]||CAT[cat].icon}"></i>`;
    favRow.appendChild(it);attachFav(it);});
-   if(window.lucide)lucide.createIcons();favSec.style.display=favorites.length?'':'none';}
- function addFavorite(name){if(!name||favorites.includes(name))return;favorites.unshift(name);if(favorites.length>14)favorites.pop();renderFavorites();}
- function removeFavorite(name){const i=favorites.indexOf(name);if(i>=0)favorites.splice(i,1);renderFavorites();}
+   for(let i=favorites.length;i<FAV_MAX;i++){const s=document.createElement('button');s.type='button';s.className='fav-slot';s.title='Freier Favoriten-Platz';s.setAttribute('aria-label','Freier Favoriten-Platz — Hinweis anzeigen');s.innerHTML='<i data-lucide="plus"></i>';
+     s.onclick=e=>{e.stopPropagation();favPop.classList.toggle('show');};favRow.appendChild(s);}
+   if(window.lucide)lucide.createIcons();}
+ function addFavorite(name){if(!name||favorites.includes(name)||favorites.length>=FAV_MAX)return false;favorites.unshift(name);saveFavorites();renderFavorites();return true;}
+ function removeFavorite(name){const i=favorites.indexOf(name);if(i<0)return;favorites.splice(i,1);saveFavorites();renderFavorites();}
  function attachFav(it){it.addEventListener('pointerdown',ev=>{ev.preventDefault();const name=it.dataset.name,cat=it.dataset.cat,sx=ev.clientX,sy=ev.clientY;let started=false;it.classList.add('lp');
    const t=setTimeout(()=>{it.classList.remove('lp');it.classList.add('fav-removing');setTimeout(()=>removeFavorite(name),360);},2000);
    try{it.setPointerCapture(ev.pointerId);}catch(_){}
@@ -113,7 +125,7 @@ export async function initPalette(){
  renderFavorites();
  let lpTimer=null,lpIcon=null,lpLong=false;
  libEl.addEventListener('pointerdown',e=>{const ic=e.target.closest('.li-ic');if(!ic)return;e.stopPropagation();const it=ic.closest('.lib-item');lpIcon=ic;lpLong=false;ic.classList.add('lp');
-   lpTimer=setTimeout(()=>{lpLong=true;ic.classList.remove('lp');ic.classList.add('lp-done');setTimeout(()=>ic.classList.remove('lp-done'),440);addFavorite(it.dataset.name);},2000);},true);
+   lpTimer=setTimeout(()=>{lpLong=true;ic.classList.remove('lp');if(addFavorite(it.dataset.name)){ic.classList.add('lp-done');setTimeout(()=>ic.classList.remove('lp-done'),440);}},2000);},true);
  function lpEnd(){if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}if(lpIcon){lpIcon.classList.remove('lp');lpIcon=null;}}
  libEl.addEventListener('pointerup',lpEnd,true);libEl.addEventListener('pointercancel',lpEnd,true);
  libEl.addEventListener('pointermove',e=>{if(lpTimer&&!e.target.closest('.li-ic'))lpEnd();},true);
