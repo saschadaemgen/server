@@ -201,12 +201,12 @@ func hostPortOf(host string, port int) string {
 // ---- the WebSocket bridge ----
 
 // consoleHello is the first client message on the WebSocket: it selects
-// the backend (local shell, or SSH by profile / ad-hoc parameters) and
-// carries the initial window size. Ad-hoc credentials travel here, inside
-// the (TLS-in-production) socket body — never in the URL, so they stay
-// out of access logs.
+// the backend (local shell, SSH by profile / ad-hoc parameters, or a
+// TCP/UDP socket) and carries the initial window size. Ad-hoc
+// credentials travel here, inside the (TLS-in-production) socket body —
+// never in the URL, so they stay out of access logs.
 type consoleHello struct {
-	Kind       string `json:"kind"` // "local" | "ssh"
+	Kind       string `json:"kind"` // "local" | "ssh" | "tcp" | "udp"
 	Profile    int64  `json:"profile"`
 	Host       string `json:"host"`
 	Port       int    `json:"port"`
@@ -215,6 +215,8 @@ type consoleHello struct {
 	Password   string `json:"password"`
 	Key        string `json:"key"`
 	Passphrase string `json:"passphrase"`
+	// ListenPort binds the local UDP listen socket (kind "udp" only).
+	ListenPort int    `json:"listen_port"`
 	Cols       uint16 `json:"cols"`
 	Rows       uint16 `json:"rows"`
 }
@@ -325,6 +327,32 @@ func (s *Server) buildConsoleBackend(ctx context.Context, user string, h console
 			return nil, "", "", err
 		}
 		return b, "ssh", title, nil
+	case "tcp":
+		// LAN-guarded by default (AllowPublic stays false — a deliberate
+		// operator decision in code would be needed to relay further).
+		b, err := console.DialTCPConsole(console.NetConfig{Host: h.Host, Port: h.Port})
+		if err != nil {
+			return nil, "", "", err
+		}
+		return b, "tcp", "tcp " + hostPortOf(h.Host, h.Port), nil
+	case "udp":
+		b, err := console.OpenUDPConsole(console.UDPConfig{ListenPort: h.ListenPort, Host: h.Host, Port: h.Port})
+		if err != nil {
+			return nil, "", "", err
+		}
+		// Title reflects the mode: listen (":port"), target ("→ host:port"),
+		// or both. A target-only console binds an ephemeral port, so ":0"
+		// would be misleading — leave it out.
+		var title string
+		if h.ListenPort > 0 {
+			title = "udp :" + strconv.Itoa(h.ListenPort)
+		} else {
+			title = "udp"
+		}
+		if h.Host != "" {
+			title += " → " + hostPortOf(h.Host, h.Port)
+		}
+		return b, "udp", title, nil
 	default:
 		return nil, "", "", fmt.Errorf("unknown console kind %q", h.Kind)
 	}
@@ -332,8 +360,9 @@ func (s *Server) buildConsoleBackend(ctx context.Context, user string, h console
 
 // consoleClientError turns a backend build error into a safe client
 // message. A changed host key surfaces distinctly so the UI can offer an
-// explicit re-trust; everything else is a generic connection failure so
-// no credential or internal detail leaks.
+// explicit re-trust, the LAN guard surfaces distinctly so the operator
+// understands the block is deliberate; everything else is a generic
+// connection failure so no credential or internal detail leaks.
 func consoleClientError(err error) string {
 	var changed *console.HostKeyChangedError
 	if errors.As(err, &changed) {
@@ -341,6 +370,9 @@ func consoleClientError(err error) string {
 	}
 	if errors.Is(err, console.ErrLocalShellUnsupported) {
 		return "local shell unavailable on this host"
+	}
+	if errors.Is(err, console.ErrPublicTarget) {
+		return "public target blocked (LAN only)"
 	}
 	return "connection failed"
 }

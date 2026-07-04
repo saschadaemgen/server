@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -141,6 +143,108 @@ func TestConsoleWS_CredentialNeverLogged(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), secret) {
 		t.Fatalf("credential leaked into logs:\n%s", buf.String())
+	}
+}
+
+// dialConsoleWS opens the console WebSocket with the admin session jar.
+func dialConsoleWS(t *testing.T, env *testEnv) *websocket.Conn {
+	t.Helper()
+	wsURL := strings.Replace(env.ts.URL, "http://", "ws://", 1) + "/a/designer/console/ws"
+	conn, _, err := websocket.Dial(context.Background(), wsURL, &websocket.DialOptions{
+		HTTPClient: &http.Client{Jar: env.client.Jar},
+	})
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	return conn
+}
+
+// The LAN guard is the default for the TCP/UDP consoles: a public target
+// must be refused before any dial, with the distinct status detail the
+// UI shows (terminal-track step 2).
+func TestConsoleWS_TCPPublicTargetBlocked(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.srv.console = console.NewManager(nil, console.WithIdleTimeout(0))
+
+	conn := dialConsoleWS(t, env)
+	defer conn.CloseNow()
+	hello := `{"kind":"tcp","host":"8.8.8.8","port":80}`
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(hello)); err != nil {
+		t.Fatalf("ws write hello: %v", err)
+	}
+	_, data, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("ws read status: %v", err)
+	}
+	if !bytes.Contains(data, []byte("error")) || !bytes.Contains(data, []byte("public target blocked (LAN only)")) {
+		t.Fatalf("status = %s, want the LAN-guard error", data)
+	}
+	if n := env.srv.console.Count(); n != 0 {
+		t.Fatalf("blocked target left %d sessions", n)
+	}
+}
+
+// TCP console end to end through the real WS bridge: hello, connected
+// status, echo roundtrip as binary frames, teardown on client close.
+func TestConsoleWS_TCPEchoEndToEnd(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	env.srv.console = console.NewManager(nil, console.WithIdleTimeout(0))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 4096)
+		for {
+			n, rerr := c.Read(buf)
+			if n > 0 {
+				if _, werr := c.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	conn := dialConsoleWS(t, env)
+	defer conn.CloseNow()
+	hello := `{"kind":"tcp","host":"127.0.0.1","port":` + strconv.Itoa(port) + `}`
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(hello)); err != nil {
+		t.Fatalf("ws write hello: %v", err)
+	}
+	typ, data, err := conn.Read(context.Background())
+	if err != nil || typ != websocket.MessageText || !bytes.Contains(data, []byte("connected")) {
+		t.Fatalf("first frame = %v %s (err %v), want connected status", typ, data, err)
+	}
+	if err := conn.Write(context.Background(), websocket.MessageBinary, []byte("ping\n")); err != nil {
+		t.Fatalf("ws write data: %v", err)
+	}
+	typ, data, err = conn.Read(context.Background())
+	if err != nil || typ != websocket.MessageBinary || string(data) != "ping\n" {
+		t.Fatalf("echo frame = %v %q (err %v)", typ, data, err)
+	}
+
+	// Client goes away -> the session must fully tear down (step-1
+	// guarantee holding for the new backend type).
+	conn.CloseNow()
+	deadline := time.Now().Add(5 * time.Second)
+	for env.srv.console.Count() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("session still registered after client close")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
