@@ -2,13 +2,14 @@
 // a WebSocket to a local shell PTY or an outbound SSH client, sshterm.js),
 // MQTT a real broker client, System Log streams the server's real journal
 // (syslog.js), and the Engine tab shows only real engine events fed by
-// run.js. TCP/UDP still carry demo content until step 2 of the terminal
-// track. SSH is the only multi-instance tab: clicking its active tab (or
-// double-clicking it) adds another terminal, up to four side by side,
-// each its own independent session. MQTT, System Log, Engine and the
-// demo TCP/UDP tabs are single-instance.
+// run.js. TCP/UDP are placeholders until step 2 of the terminal track:
+// they show an honest empty state, no feed. SSH is the only
+// multi-instance tab: clicking its active tab (or double-clicking it)
+// adds another terminal, up to four side by side, each its own
+// independent session. MQTT, System Log, Engine and the TCP/UDP
+// placeholders are single-instance.
 
-import { reduceMotion, nodes } from './store.js';
+import { nodes } from './store.js';
 import { mountMqttConsole } from './mqttconsole.js';
 import { mountSysLog, startSysLog } from './syslog.js';
 import { mountSshPane } from './sshterm.js';
@@ -28,20 +29,15 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
 (function(){
   const dock=document.getElementById('dock');if(!dock)return;
   const tabs=[...document.querySelectorAll('.dock-tab')];
-  const pick=a=>a[Math.random()*a.length|0], ri=n=>Math.random()*n|0;
   const nowt=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());};
+  // TCP/UDP show only their honest empty state until the real consoles
+  // arrive with terminal-track step 2 — no demo feed anywhere anymore.
   const INIT={
-    tcp:`<div><span class="ok">●</span> tcp listener <span class="dim">0.0.0.0:9090</span> · accepting</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="blue">SYN</span> 10.0.0.21:54122 → :9090</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="ok">EST</span> conn #4 · mss 1460 · rtt 6ms</div>`+
-        `<div class="dim">tx 1.2 kB · rx 884 B · win 64k</div>`,
-    udp:`<div><span class="ok">●</span> udp socket <span class="dim">:9091</span> · bound</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="blue">RECV</span> 10.0.0.33:5353 · len 142</div>`+
-        `<div><span class="t">${nowt()}</span> <span class="amber">▸</span> datagram · discovery beacon</div>`,
+    tcp:`<div class="dim idle-note">Noch keine TCP-Konsole — kommt mit Terminal-Track Schritt 2.</div>`,
+    udp:`<div class="dim idle-note">Noch keine UDP-Konsole — kommt mit Terminal-Track Schritt 2.</div>`,
     engine:`<div class="dim idle-note">idle — kein Run aktiv</div>`,
   };
-  // SSH is no longer demo: it mounts real xterm terminals (below), so it
-  // has neither an INIT seed nor a POOL feed.
+  // SSH mounts real xterm terminals (below), so it has no INIT seed.
   const MAXCOLS=4;
   const TLABEL={ssh:'SSH',mqtt:'MQTT',tcp:'TCP',udp:'UDP',sys:'System',engine:'Engine'};
   // how many side-by-side columns each terminal tab is split into (1..MAXCOLS).
@@ -99,17 +95,9 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
   });
   const dockBody=document.getElementById('dock-body');
   // per-column search filters that column's lines (case-insensitive) — for
-  // the demo TCP/UDP tabs; SSH terminals are real xterm and have no search.
+  // the line-based tabs; SSH terminals are real xterm and have no search.
   dockBody.addEventListener('input',e=>{const s=e.target.closest('.tcol-search');if(!s)return;const body=s.closest('.term-col').querySelector('.tcol-body');if(!body)return;const q=s.value.toLowerCase();body.querySelectorAll(':scope>div').forEach(ln=>{ln.style.display=(!q||ln.textContent.toLowerCase().includes(q))?'':'none';});});
   document.getElementById('dock-toggle').onclick=()=>dock.classList.toggle('collapsed');
-  const POOL={
-    tcp:()=>`<div><span class="t">[${nowt()}]</span> ${pick(['<span class="blue">SYN</span> 10.0.0.'+(20+ri(40))+':'+(49152+ri(16000))+' → :9090','<span class="ok">EST</span> conn #'+(1+ri(9))+' · rtt '+(3+ri(12))+'ms','RX '+(64+ri(1400))+' B · frame ok','TX '+(64+ri(1400))+' B · ack','<span class="amber">FIN</span> conn #'+(1+ri(9))+' · closed'])}</div>`,
-    udp:()=>`<div><span class="t">${nowt()}</span> ${pick(['<span class="blue">RECV</span> 10.0.0.'+(20+ri(40))+' · len '+(40+ri(460)),'<span class="ok">SEND</span> broadcast · len '+(40+ri(200)),'<span class="amber">▸</span> datagram <span class="dim">discovery</span>','<span class="err">drop</span> · checksum mismatch'])}</div>`,
-  };
-  // Demo feed for the not-yet-real tabs only (TCP/UDP — step 2). SSH, MQTT,
-  // System Log and Engine show exclusively real events.
-  function addLine(name){const host=document.getElementById('term-'+name);if(!host||!POOL[name])return;host.querySelectorAll('.term-col').forEach(col=>{const el=col.querySelector('.tcol-body');if(!el)return;const stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;el.insertAdjacentHTML('beforeend',POOL[name]());const sv=col.querySelector('.tcol-search'),q=sv&&sv.value?sv.value.toLowerCase():'';if(q){const last=el.lastElementChild;if(last&&!last.textContent.toLowerCase().includes(q))last.style.display='none';}while(el.children.length>200)el.removeChild(el.firstChild);if(stick)el.scrollTop=el.scrollHeight;});}
-  if(!reduceMotion)setInterval(()=>{const a=document.querySelector('.dock-tab.active');const name=a?a.dataset.tab:'ssh';addLine(name);},2600);
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
   // Replace the placeholder host label with the real host (Pi model / distro),
   // fetched once on load. The status dot stays as the connection indicator;
