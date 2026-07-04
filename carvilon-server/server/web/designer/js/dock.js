@@ -1,16 +1,17 @@
-// Bottom dock: the log terminals. SSH is a real terminal (xterm.js over
-// a WebSocket to a local shell PTY or an outbound SSH client, sshterm.js),
-// MQTT a real broker client, System Log streams the server's real journal
-// (syslog.js), and the Engine tab shows only real engine events fed by
-// run.js. TCP/UDP are placeholders until step 2 of the terminal track:
-// they show an honest empty state, no feed. SSH is the only
-// multi-instance tab: clicking its active tab (or double-clicking it)
-// adds another terminal, up to four side by side, each its own
-// independent session. MQTT, System Log, Engine and the TCP/UDP
-// placeholders are single-instance.
+// Bottom dock: the log terminals — real end to end. SSH is a real
+// terminal (xterm.js over a WebSocket to a local shell PTY or an
+// outbound SSH client, sshterm.js), MQTT a real broker client, TCP and
+// UDP are real socket line-consoles over the same session bridge
+// (netconsole.js, terminal-track step 2), System Log streams the
+// server's real journal (syslog.js), and the Engine tab shows only real
+// engine events fed by run.js. SSH is the only multi-instance tab:
+// clicking its active tab (or double-clicking it) adds another
+// terminal, up to four side by side, each its own independent session.
+// MQTT, TCP, UDP, System Log and Engine are single-instance.
 
 import { nodes } from './store.js';
 import { mountMqttConsole } from './mqttconsole.js';
+import { mountNetConsole } from './netconsole.js';
 import { mountSysLog, startSysLog } from './syslog.js';
 import { mountSshPane } from './sshterm.js';
 
@@ -30,11 +31,7 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
   const dock=document.getElementById('dock');if(!dock)return;
   const tabs=[...document.querySelectorAll('.dock-tab')];
   const nowt=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());};
-  // TCP/UDP show only their honest empty state until the real consoles
-  // arrive with terminal-track step 2 — no demo feed anywhere anymore.
   const INIT={
-    tcp:`<div class="dim idle-note">Noch keine TCP-Konsole — kommt mit Terminal-Track Schritt 2.</div>`,
-    udp:`<div class="dim idle-note">Noch keine UDP-Konsole — kommt mit Terminal-Track Schritt 2.</div>`,
     engine:`<div class="dim idle-note">idle — kein Run aktiv</div>`,
   };
   // SSH mounts real xterm terminals (below), so it has no INIT seed.
@@ -74,6 +71,7 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
     const host=document.getElementById('term-'+name);if(!host)return;
     if(name==='ssh'){initSshPanes();updateSshUI();return;}
     if(name==='mqtt'){mountMqttConsole(host);const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split='1';return;}
+    if(name==='tcp'||name==='udp'){mountNetConsole(host,name);const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split='1';return;}
     if(name==='sys'){mountSysLog(host);const tab=tabs.find(t=>t.dataset.tab===name);if(tab)tab.dataset.split='1';return;}
     const lbl=TLABEL[name]||name;
     const h=`<div class="term-col"><div class="tcol-bar">`
