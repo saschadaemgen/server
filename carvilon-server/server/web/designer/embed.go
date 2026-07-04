@@ -12,8 +12,10 @@
 // page makes no network request to any external host (no unpkg, no
 // Google Fonts) when it loads.
 //
-// The log dock currently shows demo/placeholder feeds; wiring the real
-// engine/SSE feeds is a later ticket.
+// The log dock is real end to end: SSH terminals (xterm.js over a
+// server-side bridge), MQTT broker client, System Log SSE and engine
+// events. TCP/UDP are honest empty placeholders until terminal-track
+// step 2.
 package designer
 
 import "embed"
