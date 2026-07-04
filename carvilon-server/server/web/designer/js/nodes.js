@@ -161,11 +161,16 @@ export function attachDrag(it){
     dragghost.style.setProperty('--gc',CAT[cat].color);dragghost.innerHTML=`<span class="gi"><i data-lucide="${NAME_ICON[name]||CAT[cat].icon}"></i></span>${name}`;
     if(window.lucide)lucide.createIcons();dragghost.classList.add('show');moveGhost(ev);
     try{it.setPointerCapture(ev.pointerId);}catch(_){}
-    it._mv=e2=>moveGhost(e2);it._up=e2=>dropNew(e2,it);
-    it.addEventListener('pointermove',it._mv);it.addEventListener('pointerup',it._up);});
+    it._mv=e2=>moveGhost(e2);it._up=e2=>dropNew(e2,it);it._cn=()=>cancelNew(it);
+    it.addEventListener('pointermove',it._mv);it.addEventListener('pointerup',it._up);it.addEventListener('pointercancel',it._cn);});
 }
 export function moveGhost(e){dragghost.style.left=(e.clientX+14)+'px';dragghost.style.top=(e.clientY+10)+'px';}
-export function dropNew(e,it){it.removeEventListener('pointermove',it._mv);it.removeEventListener('pointerup',it._up);dragghost.classList.remove('show');
+function unhookNew(it){it.removeEventListener('pointermove',it._mv);it.removeEventListener('pointerup',it._up);it.removeEventListener('pointercancel',it._cn);dragghost.classList.remove('show');}
+// pointercancel — the browser claimed the gesture (touch pan on the rail,
+// screen edge, etc.). Without this the ghost stuck on screen at its last
+// position and S.newDrag stayed stale until the next drag.
+function cancelNew(it){unhookNew(it);S.newDrag=null;}
+export function dropNew(e,it){unhookNew(it);
   const nd=S.newDrag;S.newDrag=null;if(!nd)return;const el=document.elementFromPoint(e.clientX,e.clientY);
   if(el&&el.closest('#viewport')&&!el.closest('.rail,.inspector,.topbar,.minimap,.zoom,.alignbar')){S.userAdjusted=true;const wx=(e.clientX-S.tx)/S.scale,wy=(e.clientY-S.ty)/S.scale;createNode(nd.name,wx,wy,nd.cat);}}
 function fxBurst(x,y,w,h,color){const wrap=document.createElement('div');wrap.className='fx-wrap';wrap.style.left=x+'px';wrap.style.top=y+'px';wrap.style.width=w+'px';wrap.style.height=h+'px';wrap.style.setProperty('--cat',color);

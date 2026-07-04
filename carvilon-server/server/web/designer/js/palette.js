@@ -156,6 +156,10 @@ export async function initPalette(){
    function cancel(e2){if(done||e2.pointerId!==pid)return;cleanup();if(started){started=false;S.newDrag=null;dragghost.classList.remove('show');}}
    it.addEventListener('pointermove',mv);it.addEventListener('pointerup',up);it.addEventListener('pointercancel',cancel);});}
  renderFavorites();
+ // a touch long-press in the list must feed the 2s favourite-capture on
+ // .li-ic (and the create drag), not the browser's context menu — same
+ // treatment as favRow above.
+ libEl.addEventListener('contextmenu',e=>e.preventDefault());
  let lpTimer=null,lpIcon=null,lpLong=false;
  libEl.addEventListener('pointerdown',e=>{const ic=e.target.closest('.li-ic');if(!ic)return;e.stopPropagation();const it=ic.closest('.lib-item');lpIcon=ic;lpLong=false;ic.classList.add('lp');
    lpTimer=setTimeout(()=>{lpLong=true;ic.classList.remove('lp');if(addFavorite(it.dataset.name)){ic.classList.add('lp-done');setTimeout(()=>ic.classList.remove('lp-done'),440);}},2000);},true);

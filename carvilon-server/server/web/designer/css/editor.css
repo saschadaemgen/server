@@ -317,7 +317,12 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 .fav-item.fav-removing::after{content:"";position:absolute;inset:-2px;border-radius:6px;border:2px solid var(--err);animation:favRing .42s ease-out forwards}
 @keyframes favRing{0%{transform:scale(.7);opacity:.8}100%{transform:scale(2.2);opacity:0}}
 .lib-items{display:flex;flex-direction:column;padding-bottom:6px}
-.lib-item{display:flex;align-items:center;gap:9px;padding:7px 8px;cursor:grab;transition:.12s;border-bottom:1px solid rgba(255,255,255,.05)}
+/* touch-action:pan-y — .lib is the rail's scroll container, so a blanket
+   none here would kill touch scrolling; pan-y lets a vertical swipe still
+   scroll the rail (the create drag gets pointercancel'd and torn down)
+   while a horizontal drag-out keeps its pointer stream. user-select stops
+   the long-press selection callout while an icon hold arms the timer. */
+.lib-item{display:flex;align-items:center;gap:9px;padding:7px 8px;cursor:grab;transition:.12s;border-bottom:1px solid rgba(255,255,255,.05);touch-action:pan-y;user-select:none}
 .lib-item:last-child{border-bottom:none}
 .lib-item:hover{background:rgba(120,150,180,.07)}
 .lib-item .li-ic{width:22px;height:22px;border-radius:4px;flex:none;display:grid;place-items:center;color:var(--gc);background:color-mix(in srgb,var(--gc) 11%,transparent);border:1px solid color-mix(in srgb,var(--gc) 22%,transparent)}
