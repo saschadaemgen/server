@@ -104,12 +104,19 @@ func formatUID(uid []byte) string {
 }
 
 // classify turns candidate bus device paths plus a prober into a Status
-// and the detected readers. It is pure and platform-independent so the
-// detection logic is unit-testable without hardware: probe returns the
-// reader on success, a permission error (errors.Is fs.ErrPermission)
-// when the bus cannot be opened, or any other error when there is no
-// PN532 on that bus.
-func classify(devs []string, probe func(dev string) (detectedReader, error)) (Status, []detectedReader) {
+// and the detected readers. It is platform-independent so the detection
+// logic is unit-testable without hardware: probe returns the reader on
+// success, a permission error (errors.Is fs.ErrPermission) when the bus
+// cannot be opened, or any other error when there is no PN532 on that
+// bus. Every probe failure is logged per bus at Info: a bus without a
+// responding reader is normal on any host with I2C enabled, but a
+// silent failure made a mis-timed exchange on the RPi indistinguishable
+// from "no hardware" - never again. Permission failures get their own
+// per-bus line too (the aggregated EACCES warning in Probe only fires
+// when NO reader was found anywhere, so a mixed host would otherwise
+// hide the inaccessible bus). Hosts without /dev/i2c-* stay silent as
+// before.
+func classify(devs []string, probe func(dev string) (detectedReader, error), log *slog.Logger) (Status, []detectedReader) {
 	if len(devs) == 0 {
 		return Unavailable, nil
 	}
@@ -120,7 +127,10 @@ func classify(devs []string, probe func(dev string) (detectedReader, error)) (St
 		if err != nil {
 			if errors.Is(err, fs.ErrPermission) {
 				forbidden = true
+				log.Info("nfc probe: bus not accessible", "bus", dev, "err", err)
+				continue
 			}
+			log.Info("nfc probe: no pn532 on bus", "bus", dev, "err", err)
 			continue
 		}
 		found = append(found, r)
@@ -148,9 +158,15 @@ var (
 
 // Probe detects PN532 readers on the I2C buses once at startup and
 // caches the result for Enabled / Readers / NewDriver. It logs the
-// outcome - silent when there is simply no reader, a clear actionable
-// line on EACCES - and never blocks or panics. Call it once at startup.
+// outcome - silent when there is no I2C bus at all, one Info line per
+// bus whose probe failed, a clear actionable line on EACCES - and never
+// blocks or panics. Call it once at startup. The logger is cached
+// BEFORE the platform probe runs so the probe itself can report
+// per-bus failures through it.
 func Probe(log *slog.Logger) Status {
+	mu.Lock()
+	logger = log
+	mu.Unlock()
 	st, readers := probeFn()
 	for i := range readers {
 		readers[i].info.UIDChannel = engine.PrefixNFC + ":" + uidAddr(readers[i].info.ID)
@@ -159,7 +175,6 @@ func Probe(log *slog.Logger) Status {
 	mu.Lock()
 	status = st
 	detected = readers
-	logger = log
 	mu.Unlock()
 	switch st {
 	case Available:
@@ -217,6 +232,14 @@ func release(id string) {
 	mu.Lock()
 	defer mu.Unlock()
 	delete(inUse, id)
+}
+
+// currentLogger returns the logger Probe cached (the server logger from
+// startup on); the platform probe uses it to report per-bus failures.
+func currentLogger() *slog.Logger {
+	mu.Lock()
+	defer mu.Unlock()
+	return logger
 }
 
 // pollInterval is the tag poll cycle: fast enough that holding a tag to

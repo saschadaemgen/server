@@ -66,14 +66,15 @@ var ackFrame = []byte{0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00}
 
 var errNotReady = errors.New("nfc: pn532 not ready in time")
 
-// pn532 drives one chip over a transaction bus. sleep is injectable so
-// the exchange logic tests clock-free.
+// pn532 drives one chip over a transaction bus. sleep and now are
+// injectable so the exchange logic tests clock-free.
 type pn532 struct {
 	bus   pn532Bus
 	sleep func(time.Duration)
+	now   func() time.Time
 }
 
-func newPN532(bus pn532Bus) *pn532 { return &pn532{bus: bus, sleep: time.Sleep} }
+func newPN532(bus pn532Bus) *pn532 { return &pn532{bus: bus, sleep: time.Sleep, now: time.Now} }
 
 // buildFrame wraps TFI + data in a normal information frame:
 // 00 00 FF LEN LCS <TFI data...> DCS 00, with LEN counting TFI+data,
@@ -142,23 +143,50 @@ func isACK(buf []byte) bool {
 }
 
 // readFrame polls the I2C status byte until the chip flags a pending
-// frame, then reads it in one transaction. Every read transaction
-// restarts at a fresh status byte - the PN532 replays its output per
-// transaction - so the returned slice has the status byte stripped.
+// frame, then reads it in one transaction. A FAILED status read counts
+// as "not ready yet" and merely consumes an attempt: a PN532 that is
+// still waking (LowVbat, standby, oscillator start) NAKs its address,
+// which surfaces as a read error - aborting on it made a healthy
+// reader on a healthy bus look like "no hardware" (the silent RPi
+// probe failure of Schritt 1). The flip side: a dead reader whose
+// writes still succeed now exhausts the budget each poll round instead
+// of failing fast - bounded and below the poll interval, so the error
+// aging still fires on schedule. Only a failed read of the frame
+// itself, after readiness was signalled, is a hard error. Every read
+// transaction restarts at a fresh status byte - the PN532 replays its
+// output per transaction - so the returned slice has the status byte
+// stripped.
 func (p *pn532) readFrame(attempts, size int) ([]byte, error) {
+	// The attempt count is the nominal budget (fast NAKs, not-ready
+	// polls); the wall-clock deadline bounds the pathological mode where
+	// each errored read itself blocks for the kernel's i2c timeout (a
+	// wedged bus, an indefinite clock stretch) - without it a single
+	// exchange could stall for minutes and hold teardown hostage.
+	deadline := p.now().Add(5 * time.Duration(attempts) * readyInterval)
 	st := make([]byte, 1)
+	var lastErr error
 	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			p.sleep(readyInterval)
+			if p.now().After(deadline) {
+				break
+			}
+		}
 		if err := p.bus.Read(st); err != nil {
+			lastErr = err
+			continue
+		}
+		if st[0]&0x01 != 1 {
+			continue
+		}
+		buf := make([]byte, size+1)
+		if err := p.bus.Read(buf); err != nil {
 			return nil, err
 		}
-		if st[0]&0x01 == 1 {
-			buf := make([]byte, size+1)
-			if err := p.bus.Read(buf); err != nil {
-				return nil, err
-			}
-			return buf[1:], nil
-		}
-		p.sleep(readyInterval)
+		return buf[1:], nil
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("%w (last read error: %w)", errNotReady, lastErr)
 	}
 	return nil, errNotReady
 }
@@ -268,6 +296,30 @@ func (p *pn532) inListPassiveTarget() (uid []byte, found bool, err error) {
 		return nil, false, errors.New("nfc: truncated uid")
 	}
 	return append([]byte(nil), data[6:6+n]...), true, nil
+}
+
+// wakeRetryDelay gives a chip that is still starting its oscillator
+// (power-on, standby wake) time before the one probe retry.
+const wakeRetryDelay = 50 * time.Millisecond
+
+// probeChip runs the detection exchange on one candidate chip: the wake
+// goes FIRST - after power-on in the LowVbat condition the PN532
+// processes nothing before SAMConfiguration (§7.2.10), and while
+// starting its oscillator it NAKs outright, so the wake's own result is
+// deliberately ignored - then the firmware answer (IC 0x32) alone
+// decides, with one delayed full retry for a chip that needed the whole
+// wake time. A device that answers the firmware query coherently but is
+// no PN532 (errNotPN532) is not poked again. Untagged (sleep injected)
+// so the wake sequence is pinned by tests without hardware.
+func probeChip(p *pn532, sleep func(time.Duration)) (ver, rev byte, err error) {
+	_ = p.samConfiguration()
+	ver, rev, err = p.firmwareVersion()
+	if err != nil && !errors.Is(err, errNotPN532) {
+		sleep(wakeRetryDelay)
+		_ = p.samConfiguration()
+		ver, rev, err = p.firmwareVersion()
+	}
+	return ver, rev, err
 }
 
 // pn532Reader adapts one configured PN532 to the reader-model seam.

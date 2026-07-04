@@ -3,7 +3,6 @@
 package nfc
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,9 +22,6 @@ const (
 	// pn532I2CAddr is the PN532's fixed 7-bit I2C address (0x48 in the
 	// manual's 8-bit form; the Elechouse V3 module has no address strap).
 	pn532I2CAddr = 0x24
-	// wakeRetryDelay gives a chip that is still starting its oscillator
-	// (power-on, standby wake) time before the one probe retry.
-	wakeRetryDelay = 50 * time.Millisecond
 )
 
 // i2cDev is one open I2C peer: every Read/Write is a single I2C
@@ -56,19 +52,19 @@ func openBus(dev string) (*i2cDev, error) {
 // without one (or with unrelated devices) stay silent.
 func platformProbe() (Status, []detectedReader) {
 	devs, _ := filepath.Glob("/dev/i2c-*")
-	return classify(devs, probeBus)
+	return classify(devs, probeBus, currentLogger())
 }
 
 // probeBus checks one bus for a PN532 and, on success, returns the
 // reader plus an opener that reopens and configures the device for a
-// run. The firmware query goes first; only when it stays unanswered is
-// the chip woken with SAMConfiguration and probed once more - after
-// power-on in the LowVbat condition the PN532 processes nothing before
-// SAMConfiguration, and a standby wake stretches the first exchange.
-// Note the tradeoff this probe cannot avoid: an addressed-slave query
-// IS a bus write, so a foreign device parked at 0x24 sees the firmware
-// command bytes at startup - but a device that answers coherently
-// (errNotPN532) is left alone, without the wake retry.
+// run. The detection exchange itself (SAM wake first, firmware answer
+// decides, one delayed retry) lives in probeChip. Tradeoff this probe
+// cannot avoid: an addressed-slave query IS a bus write, so a foreign
+// device parked at 0x24 sees a few command bytes at startup. Cost per
+// bus: an empty address NAKs the writes immediately (~50 ms, the retry
+// delay dominates); the absolute worst case - a write-ACKing but mute
+// device - stays around half a second. Probe runs once, sequentially,
+// on the startup path.
 func probeBus(dev string) (detectedReader, error) {
 	bus, err := openBus(dev)
 	if err != nil {
@@ -76,12 +72,7 @@ func probeBus(dev string) (detectedReader, error) {
 	}
 	defer bus.Close()
 	p := newPN532(bus)
-	ver, rev, err := p.firmwareVersion()
-	if err != nil && !errors.Is(err, errNotPN532) {
-		time.Sleep(wakeRetryDelay)
-		_ = p.samConfiguration()
-		ver, rev, err = p.firmwareVersion()
-	}
+	ver, rev, err := probeChip(p, time.Sleep)
 	if err != nil {
 		return detectedReader{}, err
 	}

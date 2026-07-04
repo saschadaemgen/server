@@ -3,6 +3,7 @@ package nfc
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -315,6 +316,161 @@ func TestCallFailsWithoutACK(t *testing.T) {
 	}}
 	if _, _, err := testPN532(bus).firmwareVersion(); err == nil {
 		t.Error("missing ack accepted")
+	}
+	bus.done()
+}
+
+// TestReadFramePollsThroughReadErrors pins the RPi wake fix: a PN532
+// that is still waking NAKs its address, so status reads FAIL instead
+// of returning a not-ready byte. Those errors must consume attempts,
+// not abort the exchange - aborting made a healthy reader silently
+// classify as "no hardware".
+func TestReadFramePollsThroughReadErrors(t *testing.T) {
+	nak := errors.New("remote i/o error")
+	bus := &scriptBus{t: t, ops: []busOp{
+		{write: fwCmdFrame},
+		{read: []byte{0x00}, err: nak}, // NAK while waking
+		{read: []byte{0x00}, err: nak}, // still waking
+		{read: []byte{0x00}},           // awake, frame not ready yet
+		{read: []byte{0x01}},           // ready
+		{read: ready(ackFrame)},
+		{read: []byte{0x00}, err: nak}, // response wait hits one more NAK
+		{read: []byte{0x01}},
+		{read: ready(fwRespFrame)},
+	}}
+	ver, rev, err := testPN532(bus).firmwareVersion()
+	if err != nil {
+		t.Fatalf("firmwareVersion through NAKs: %v", err)
+	}
+	if ver != 0x01 || rev != 0x06 {
+		t.Errorf("version = %d.%d, want 1.6", ver, rev)
+	}
+	bus.done()
+}
+
+// TestReadFrameReportsLastReadError: when the budget runs out on a
+// persistently NAKing chip, the error must stay errNotReady (for the
+// callers' checks) and carry the underlying read error (for the per-bus
+// probe log).
+func TestReadFrameReportsLastReadError(t *testing.T) {
+	nak := errors.New("remote i/o error")
+	ops := []busOp{{write: fwCmdFrame}}
+	for i := 0; i < ackReadyAttempts; i++ {
+		ops = append(ops, busOp{read: []byte{0x00}, err: nak})
+	}
+	ops = append(ops, busOp{write: ackFrame}) // abort/resync still happens
+	bus := &scriptBus{t: t, ops: ops}
+	_, _, err := testPN532(bus).firmwareVersion()
+	if !errors.Is(err, errNotReady) {
+		t.Fatalf("err = %v, want errNotReady", err)
+	}
+	if !strings.Contains(err.Error(), "remote i/o error") {
+		t.Errorf("underlying read error not reported: %v", err)
+	}
+	bus.done()
+}
+
+// TestReadFrameDeadlineBoundsSlowErrors: attempt counting bounds fast
+// NAKs, but an errored read that itself blocks (wedged bus, endless
+// clock stretch, ~1s kernel i2c timeout each) must hit the wall-clock
+// deadline instead of stalling for attempts x timeout.
+func TestReadFrameDeadlineBoundsSlowErrors(t *testing.T) {
+	bus := &scriptBus{t: t, ops: []busOp{
+		{write: fwCmdFrame},
+		{read: []byte{0x00}, err: errors.New("i2c transfer timed out")},
+		{write: ackFrame}, // abort/resync after the deadline fires
+	}}
+	p := testPN532(bus)
+	base := time.Unix(0, 0)
+	calls := 0
+	p.now = func() time.Time {
+		calls++
+		// Each call advances far past the deadline: the first computes
+		// it, the second (before attempt 2) must trip it.
+		return base.Add(time.Duration(calls) * time.Minute)
+	}
+	_, _, err := p.firmwareVersion()
+	if !errors.Is(err, errNotReady) {
+		t.Fatalf("err = %v, want errNotReady", err)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("underlying slow error not reported: %v", err)
+	}
+	bus.done()
+}
+
+// probeChip wake-sequence tests: the field-facing detection order (SAM
+// wake first, firmware decides, one delayed full retry) - pinned
+// without hardware, exactly the sequence that silently failed on the
+// RPi before the wake fix.
+func samOKOps() []busOp {
+	cmd := buildFrame(pn532TFIOut, []byte{cmdSAMConfiguration, 0x01, 0x14, 0x01})
+	resp := buildFrame(pn532TFIIn, []byte{0x15})
+	return []busOp{
+		{write: cmd},
+		{read: []byte{0x01}},
+		{read: ready(ackFrame)},
+		{read: []byte{0x01}},
+		{read: ready(resp)},
+	}
+}
+
+func fwOKOps() []busOp {
+	return []busOp{
+		{write: fwCmdFrame},
+		{read: []byte{0x01}},
+		{read: ready(ackFrame)},
+		{read: []byte{0x01}},
+		{read: ready(fwRespFrame)},
+	}
+}
+
+func TestProbeChipWakesSleepingReader(t *testing.T) {
+	// First round: the chip NAKs everything (LowVbat / oscillator
+	// start) - both writes fail. After the wake delay the retry round
+	// succeeds end-to-end.
+	nak := errors.New("remote i/o error")
+	samCmd := buildFrame(pn532TFIOut, []byte{cmdSAMConfiguration, 0x01, 0x14, 0x01})
+	var ops []busOp
+	ops = append(ops, busOp{write: samCmd, err: nak})
+	ops = append(ops, busOp{write: fwCmdFrame, err: nak})
+	ops = append(ops, samOKOps()...)
+	ops = append(ops, fwOKOps()...)
+	bus := &scriptBus{t: t, ops: ops}
+	slept := 0
+	ver, rev, err := probeChip(testPN532(bus), func(d time.Duration) {
+		slept++
+		if d != wakeRetryDelay {
+			t.Errorf("retry slept %v, want %v", d, wakeRetryDelay)
+		}
+	})
+	if err != nil {
+		t.Fatalf("probeChip: %v", err)
+	}
+	if ver != 0x01 || rev != 0x06 || slept != 1 {
+		t.Errorf("ver=%d rev=%d slept=%d, want 1 6 1", ver, rev, slept)
+	}
+	bus.done()
+}
+
+func TestProbeChipLeavesForeignDeviceAlone(t *testing.T) {
+	// A device that answers the firmware query coherently but with a
+	// foreign IC byte must yield errNotPN532 WITHOUT the wake retry -
+	// the exhausted script proves no second round was attempted.
+	foreign := buildFrame(pn532TFIIn, []byte{0x03, 0x33, 0x01, 0x06, 0x07})
+	var ops []busOp
+	ops = append(ops, samOKOps()...)
+	ops = append(ops,
+		busOp{write: fwCmdFrame},
+		busOp{read: []byte{0x01}},
+		busOp{read: ready(ackFrame)},
+		busOp{read: []byte{0x01}},
+		busOp{read: ready(foreign)},
+	)
+	bus := &scriptBus{t: t, ops: ops}
+	_, _, err := probeChip(testPN532(bus), func(time.Duration) { t.Error("foreign device retried") })
+	if !errors.Is(err, errNotPN532) {
+		t.Fatalf("err = %v, want errNotPN532", err)
 	}
 	bus.done()
 }

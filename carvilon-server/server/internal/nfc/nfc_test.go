@@ -1,6 +1,7 @@
 package nfc
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -112,14 +113,15 @@ func TestClassify(t *testing.T) {
 	noReader := func(dev string) (detectedReader, error) {
 		return detectedReader{}, errors.New("nfc: not a pn532")
 	}
+	log := discardLogger()
 
-	if st, rs := classify(nil, okReader); st != Unavailable || rs != nil {
+	if st, rs := classify(nil, okReader, log); st != Unavailable || rs != nil {
 		t.Errorf("no devices: (%v, %v), want (Unavailable, nil)", st, rs)
 	}
-	if st, rs := classify([]string{"/dev/i2c-1"}, eacces); st != Forbidden || rs != nil {
+	if st, rs := classify([]string{"/dev/i2c-1"}, eacces, log); st != Forbidden || rs != nil {
 		t.Errorf("all EACCES: (%v, %v), want (Forbidden, nil)", st, rs)
 	}
-	if st, rs := classify([]string{"/dev/i2c-1"}, noReader); st != Unavailable || rs != nil {
+	if st, rs := classify([]string{"/dev/i2c-1"}, noReader, log); st != Unavailable || rs != nil {
 		t.Errorf("bus without reader: (%v, %v), want (Unavailable, nil)", st, rs)
 	}
 	// One forbidden bus plus one with a reader: the reader wins.
@@ -129,9 +131,35 @@ func TestClassify(t *testing.T) {
 		}
 		return okReader(dev)
 	}
-	st, rs := classify([]string{"/dev/i2c-0", "/dev/i2c-1"}, probe)
+	st, rs := classify([]string{"/dev/i2c-0", "/dev/i2c-1"}, probe, log)
 	if st != Available || len(rs) != 1 {
 		t.Errorf("mixed buses: (%v, %d readers), want (Available, 1)", st, len(rs))
+	}
+}
+
+// TestClassifyLogsFailedBuses pins the observability fix: every bus
+// whose probe fails must leave one visible Info line - a silent failure
+// looked exactly like "no hardware" on the RPi. Permission failures get
+// their own line (the aggregated EACCES warning never fires on a mixed
+// host where another bus has a reader).
+func TestClassifyLogsFailedBuses(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	probe := func(dev string) (detectedReader, error) {
+		if dev == "/dev/i2c-0" {
+			return detectedReader{}, &fs.PathError{Op: "open", Path: dev, Err: fs.ErrPermission}
+		}
+		return detectedReader{}, errors.New("nfc: await ack for command 0x02: nfc: pn532 not ready in time")
+	}
+	if st, _ := classify([]string{"/dev/i2c-0", "/dev/i2c-1"}, probe, log); st != Forbidden {
+		t.Fatalf("status = %v, want Forbidden", st)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "no pn532 on bus") || !strings.Contains(out, "/dev/i2c-1") {
+		t.Errorf("failed bus not logged: %q", out)
+	}
+	if !strings.Contains(out, "bus not accessible") || !strings.Contains(out, "/dev/i2c-0") {
+		t.Errorf("EACCES bus not logged per-bus: %q", out)
 	}
 }
 
