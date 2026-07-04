@@ -21,7 +21,7 @@ let stylesDone = false;
 function injectStyles() {
   if (stylesDone) return; stylesDone = true;
   const css = `
-  .ncx{display:flex;flex-direction:column;height:100%;min-height:0;font:12px/1.5 var(--mono,monospace)}
+  .ncx{flex:1 1 0;min-width:0;display:flex;flex-direction:column;height:100%;min-height:0;font:12px/1.5 var(--mono,monospace)}
   .ncx-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border,#1d2730);background:rgba(255,255,255,.02)}
   .ncx-bar input,.ncx-bar select{background:#0c1116;border:1px solid var(--border,#1d2730);color:var(--text,#cfe);border-radius:5px;padding:4px 7px;font:12px var(--mono,monospace);min-width:0}
   .ncx-bar input:focus,.ncx-bar select:focus{outline:1px solid var(--accent,#34e4ea)}
@@ -36,6 +36,8 @@ function injectStyles() {
   .ncx-dot.err{background:#ff6b6b;box-shadow:0 0 7px #ff6b6b}
   .ncx-sub{font-size:10.5px;color:#7b848f;white-space:nowrap}
   .ncx-sp{flex:1 1 auto}
+  .ncx-div{width:1px;height:20px;background:var(--border,#1d2730);flex:none;margin:0 3px}
+  .ncx-bar input.ncx-send{flex:0 1 220px;min-width:130px}
   .ncx-body{flex:1 1 auto;min-height:0;overflow:auto;padding:4px 8px}
   .ncx-row{display:flex;gap:8px;align-items:baseline;padding:1px 0;border-bottom:1px solid rgba(255,255,255,.03)}
   .ncx-row .t{color:#5a6b78;flex:none}
@@ -126,17 +128,19 @@ export function mountNetConsole(host, proto) {
     : `<label>Host</label><input data-host type="text" placeholder="host / 10.0.0.9" size="14">
        <label>Port</label><input data-port type="number" min="1" max="65535" placeholder="Port" style="width:70px">`;
 
+  // One horizontal toolbar (was two rows): connect controls · send · view
+  // controls. flex-wrap only folds it at genuinely narrow widths; the LAN
+  // safety note rides the connect button's tooltip (the body placeholder
+  // states it too) so nothing is lost by collapsing to a single row.
+  const lanNote = isUDP ? 'UDP-Datagramme · Ziele nur im LAN' : 'Roher TCP-Socket · Ziele nur im LAN';
   host.innerHTML = `
     <div class="ncx">
       <div class="ncx-bar">
         <span class="ncx-dot"></span><span class="ncx-sub" data-status>getrennt</span>
         ${connFields}
-        <button class="ncx-btn go" data-connect type="button">${isUDP ? 'Starten' : 'Verbinden'}</button>
-        <span class="ncx-sp"></span>
-        <span class="ncx-sub">${isUDP ? 'UDP-Datagramme · Ziele nur im LAN' : 'Roher TCP-Socket · Ziele nur im LAN'}</span>
-      </div>
-      <div class="ncx-bar">
-        <input data-send type="text" placeholder="Senden…" size="22" ${isUDP ? 'title="Eine Eingabe = ein Datagramm ans Ziel"' : ''}>
+        <button class="ncx-btn go" data-connect type="button" title="${lanNote}">${isUDP ? 'Starten' : 'Verbinden'}</button>
+        <span class="ncx-div"></span>
+        <input class="ncx-send" data-send type="text" placeholder="Senden…" ${isUDP ? 'title="Eine Eingabe = ein Datagramm ans Ziel"' : ''}>
         <select data-eol title="Zeilenende beim Senden">
           <option value="lf">LF</option><option value="crlf">CRLF</option>
           <option value="cr">CR</option><option value="none">keins</option>

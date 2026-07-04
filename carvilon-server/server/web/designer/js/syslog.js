@@ -35,7 +35,7 @@ function hhmmss(ms) { const d = new Date(ms), p = n => String(n).padStart(2, '0'
 function injectStyles() {
   if (stylesDone) return; stylesDone = true;
   const css = `
-  .slc{display:flex;flex-direction:column;height:100%;min-height:0;font:12px/1.5 var(--mono,monospace)}
+  .slc{flex:1 1 0;min-width:0;display:flex;flex-direction:column;height:100%;min-height:0;font:12px/1.5 var(--mono,monospace)}
   .slc-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border,#1d2730);background:rgba(255,255,255,.02)}
   .slc-bar input,.slc-bar select{background:#0c1116;border:1px solid var(--border,#1d2730);color:var(--text,#cfe);border-radius:5px;padding:4px 7px;font:12px var(--mono,monospace);min-width:0}
   .slc-bar input:focus,.slc-bar select:focus{outline:1px solid var(--accent,#34e4ea)}
