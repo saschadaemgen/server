@@ -9,6 +9,26 @@ import (
 	"carvilon.local/server/internal/uaapi"
 )
 
+// TestNew_TypedNilClientIsNotConfigured deckt die Go-typed-nil-Falle
+// ab: ein nil *uaapi.Client, in die UAClient-Schnittstelle verpackt,
+// darf NICHT als "konfiguriert" gelten und keine Methode auf dem
+// nil-Client aufrufen (sonst panic). Der Aufrufer (main) uebergibt
+// genau so einen typed-nil Pointer, wenn kein Token gesetzt ist.
+func TestNew_TypedNilClientIsNotConfigured(t *testing.T) {
+	var nilClient *uaapi.Client // typed nil
+	s := New(nilClient)
+	if s.IsConfigured() {
+		t.Fatal("IsConfigured() = true for a typed-nil client, want false")
+	}
+	// Muss ErrNotConfigured liefern, nicht paniken.
+	if _, err := s.List(context.Background(), access.ListParams{}); !errors.Is(err, access.ErrNotConfigured) {
+		t.Errorf("List with typed-nil client = %v, want ErrNotConfigured", err)
+	}
+	if _, err := s.Get(context.Background(), "x"); !errors.Is(err, access.ErrNotConfigured) {
+		t.Errorf("Get with typed-nil client = %v, want ErrNotConfigured", err)
+	}
+}
+
 // fakeClient erfuellt UAClient ohne Netzwerk.
 type fakeClient struct {
 	users     []uaapi.User

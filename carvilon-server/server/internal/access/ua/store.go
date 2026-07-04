@@ -44,7 +44,17 @@ type Store struct {
 // New erstellt einen Store gegen den UA-Client. Nil ist explizit
 // erlaubt: das passiert wenn der Admin im /a/settings den Token
 // noch nicht eingetragen hat.
+//
+// Achtung typed-nil: der Aufrufer uebergibt einen *uaapi.Client, der
+// nil sein kann. In die UAClient-Schnittstelle verpackt waere so ein
+// nil-Pointer ein NICHT-nil Interface (Go-Falle), sodass
+// s.client != nil faelschlich true liefert und IsConfigured luegt.
+// Wir normalisieren einen typed-nil *uaapi.Client deshalb auf ein
+// echtes nil, damit die Nil-Guards greifen.
 func New(client UAClient) *Store {
+	if c, ok := client.(*uaapi.Client); ok && c == nil {
+		return &Store{client: nil}
+	}
 	return &Store{client: client}
 }
 
