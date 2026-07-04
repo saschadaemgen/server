@@ -75,10 +75,11 @@ type Configurable interface {
 	ConfigureOutput(addr string, cfg ChannelConfig) error
 }
 
-// Driver namespace prefixes. virtual is active now; the rest are reserved
-// seams - a future driver registers under its prefix with no engine
-// change. The prefix is the first colon-delimited segment of a physical
-// address ("virtual:btn0", "gpio:17").
+// Driver namespace prefixes. The prefix is the first colon-delimited
+// segment of a physical address ("virtual:btn0", "gpio:gpiochip0:17",
+// "nfc:i2c-1:uid"). gpio/sys/mqtt/telegram/nfc have live drivers today,
+// virtual is the in-memory test driver; esp remains a reserved seam - a
+// future driver registers under its prefix with no engine change.
 const (
 	PrefixVirtual  = "virtual"
 	PrefixGPIO     = "gpio"
@@ -86,6 +87,7 @@ const (
 	PrefixMQTT     = "mqtt"
 	PrefixTelegram = "telegram"
 	PrefixESP      = "esp"
+	PrefixNFC      = "nfc"
 )
 
 // DriverRegistry maps a namespace prefix to its Source/Sink driver. A

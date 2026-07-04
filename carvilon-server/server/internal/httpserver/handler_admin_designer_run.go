@@ -14,6 +14,7 @@ import (
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttdriver"
+	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/internal/telegrambot"
 	"carvilon.local/server/internal/telegramdriver"
@@ -372,10 +373,11 @@ func (s *Server) telegramConn() (telegrambot.Conn, bool) {
 
 // bindRunIO wires a freshly built run's I/O nodes to their drivers. It
 // registers a driver for each namespace the graph's channels actually use
-// and the host exposes: gpio: (source+sink, requests the lines) and sys:
-// (source-only telemetry, starts a poller). It returns a cleanup that
-// Close()s every registered driver on teardown (releasing GPIO lines,
-// stopping the poller). A graph with no I/O channels (the demo:
+// and the host exposes: gpio: (source+sink, requests the lines), sys:
+// (source-only telemetry, starts a poller) and nfc: (source-only tag
+// readers, claims the reader and starts a poller). It returns a cleanup
+// that Close()s every registered driver on teardown (releasing GPIO
+// lines, stopping the pollers). A graph with no I/O channels (the demo:
 // input.manual/output.lamp) binds nothing and runs as before. A channel
 // whose prefix has no driver here is rejected loudly by BindGraph.
 func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
@@ -416,6 +418,15 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 			return nil, fmt.Errorf("sys driver: %w", err)
 		}
 		reg.RegisterSource(engine.PrefixSys, drv) // telemetry is read-only
+		closers = append(closers, drv)
+	}
+	if prefixes[engine.PrefixNFC] && nfc.Enabled() {
+		drv, err := nfc.NewDriver()
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("nfc driver: %w", err)
+		}
+		reg.RegisterSource(engine.PrefixNFC, drv) // tags are read-only
 		closers = append(closers, drv)
 	}
 	if prefixes[engine.PrefixMQTT] {

@@ -43,6 +43,7 @@ import (
 	"carvilon.local/server/internal/mdns"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
+	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/secrets"
@@ -113,6 +114,11 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// driver). Only the metrics this host can actually read surface as
 	// "system" source blocks; on a non-Linux host the category is absent.
 	sysmetrics.Probe(log)
+
+	// Detect PN532 NFC readers on the I2C buses once at startup (nfc:
+	// driver, first step of the tags track). Only detected readers
+	// surface as "NFC" source blocks; without one the category is absent.
+	nfc.Probe(log)
 
 	secretsSvc, err := secrets.New()
 	if err != nil {
