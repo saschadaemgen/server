@@ -460,8 +460,16 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 .dock-toggle:hover{background:rgba(120,150,180,.1);color:var(--text)}
 .dock-toggle svg{width:15px;height:15px;transition:transform .2s}
 .dock.collapsed .dock-toggle svg{transform:rotate(180deg)}
-.dock-body{height:210px;border-top:1px solid var(--border);overflow:hidden;transition:height .22s ease}
+.dock-body{height:var(--dock-h,210px);border-top:1px solid var(--border);overflow:hidden;transition:height .22s ease}
 .dock.collapsed .dock-body{height:0;border-top:none}
+/* divider above the dock bar: grab and drag to resize the dock height,
+   double-click for the default. The 9px hit area straddles the dock's
+   top border; hover/drag lights the border line itself. */
+.dock-resize{position:absolute;left:0;right:0;top:-4px;height:9px;cursor:ns-resize;z-index:3;touch-action:none}
+.dock-resize::after{content:"";position:absolute;left:0;right:0;top:4px;height:1px;background:transparent;transition:background .15s,box-shadow .15s}
+.dock-resize:hover::after,.dock.resizing .dock-resize::after{background:rgba(59,130,246,.6);box-shadow:0 0 8px rgba(59,130,246,.45)}
+.dock.resizing .dock-body{transition:none}
+body.dock-resizing{user-select:none;-webkit-user-select:none;cursor:ns-resize}
 .term{height:100%;display:none}
 .term.active{display:flex}
 /* one or more side-by-side terminal columns (double-click a tab to split,

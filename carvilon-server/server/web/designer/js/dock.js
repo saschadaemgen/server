@@ -98,6 +98,47 @@ export function focusEngine(){const tab=document.querySelector('.dock-tab[data-t
   // the line-based tabs; SSH terminals are real xterm and have no search.
   dockBody.addEventListener('input',e=>{const s=e.target.closest('.tcol-search');if(!s)return;const body=s.closest('.term-col').querySelector('.tcol-body');if(!body)return;const q=s.value.toLowerCase();body.querySelectorAll(':scope>div').forEach(ln=>{ln.style.display=(!q||ln.textContent.toLowerCase().includes(q))?'':'none';});});
   document.getElementById('dock-toggle').onclick=()=>dock.classList.toggle('collapsed');
+
+  // ---- resizable height ----
+  // The divider above the dock bar drags the dock height; the stage is a
+  // fullscreen canvas behind the dock overlay, so it takes the remaining
+  // room by itself. xterm panes refit through their own ResizeObserver
+  // (sshterm.js) — live SSH sessions only get a resize frame, nothing
+  // reconnects. The applied height goes through --dock-h so the
+  // .collapsed rule (height:0) keeps winning while collapsed.
+  const DOCKH_KEY='cv_dock_h',DOCKH_DEF=210,DOCKH_MIN=64;
+  // keep at least 160px of stage under the 54px topbar; 34px dock bar.
+  const maxDockH=()=>Math.max(DOCKH_MIN,innerHeight-54-160-34);
+  function applyDockH(h){const hh=Math.round(Math.max(DOCKH_MIN,Math.min(maxDockH(),h)));dock.style.setProperty('--dock-h',hh+'px');return hh;}
+  let dockH=parseInt(localStorage.getItem(DOCKH_KEY)||'',10);
+  if(!Number.isFinite(dockH)||dockH<=0)dockH=DOCKH_DEF;
+  dockH=applyDockH(dockH);
+  const saveDockH=()=>{try{localStorage.setItem(DOCKH_KEY,String(dockH));}catch(_){/* private mode */}};
+  const grip=document.getElementById('dock-resize');
+  if(grip){
+    let startY=0,startH=0,raf=0,want=0,dragging=false;
+    grip.addEventListener('pointerdown',e=>{
+      if(e.button!==0)return;e.preventDefault();
+      dragging=true;startY=e.clientY;
+      startH=dock.classList.contains('collapsed')?0:dockBody.getBoundingClientRect().height;
+      try{grip.setPointerCapture(e.pointerId);}catch(_){/* stale pointer */}
+      dock.classList.add('resizing');document.body.classList.add('dock-resizing');
+    });
+    grip.addEventListener('pointermove',e=>{
+      if(!dragging)return;
+      want=startH+(startY-e.clientY);
+      // pulling the divider up out of the collapsed state opens the dock
+      if(dock.classList.contains('collapsed')&&want>24)dock.classList.remove('collapsed');
+      if(!raf)raf=requestAnimationFrame(()=>{raf=0;dockH=applyDockH(want);});
+    });
+    const endDrag=()=>{if(!dragging)return;dragging=false;dock.classList.remove('resizing');document.body.classList.remove('dock-resizing');saveDockH();};
+    grip.addEventListener('pointerup',endDrag);
+    grip.addEventListener('pointercancel',endDrag);
+    grip.addEventListener('dblclick',()=>{dock.classList.remove('collapsed');dockH=applyDockH(DOCKH_DEF);saveDockH();});
+    // window shrink clamps the applied height but keeps the wish, so a
+    // grown window restores it.
+    addEventListener('resize',()=>applyDockH(dockH));
+  }
   setInterval(()=>{const c=document.getElementById('st-clock');if(c)c.textContent=nowt();const n=document.getElementById('st-nodes');if(n)n.textContent=Object.keys(nodes).length;},1000);
   // Replace the placeholder host label with the real host (Pi model / distro),
   // fetched once on load. The status dot stays as the connection indicator;
