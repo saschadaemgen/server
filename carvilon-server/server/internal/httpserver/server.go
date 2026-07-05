@@ -49,6 +49,7 @@ import (
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
@@ -173,6 +174,9 @@ type Deps struct {
 	// graphs (migration 032). Nil returns 503 on the designer
 	// persistence API; the editor keeps an unsaved in-memory canvas.
 	DesignerStore *designerstore.Store
+	// ReaderStore is the tag-reader registry (migration 036) the NFC
+	// menu page reads. Nil leaves the page on an empty registry.
+	ReaderStore *readerstore.Store
 	// LogBuffer is the server-wide recent-log ring the designer's
 	// System Log tab streams from (main wires it as a tee around the
 	// stdout handler). Nil leaves the tab's SSE endpoint on 503.
@@ -234,6 +238,7 @@ type Server struct {
 	telegram      *telegrambot.Manager
 	telegramStore *telegramstore.Store
 	designerStore *designerstore.Store
+	readerStore   *readerstore.Store
 	logBuf        *logbuf.Buffer
 	console       *console.Manager
 	consoleStore  *consolestore.Store
@@ -319,6 +324,7 @@ func New(deps Deps) (*Server, error) {
 		telegram:        deps.Telegram,
 		telegramStore:   deps.TelegramStore,
 		designerStore:   deps.DesignerStore,
+		readerStore:     deps.ReaderStore,
 		logBuf:          deps.LogBuffer,
 		console:         deps.Console,
 		consoleStore:    deps.ConsoleStore,
@@ -528,6 +534,12 @@ func (s *Server) routes() {
 	// /a/designer/ subtree is the bundle). The palette is fed from the
 	// Go block catalog at /a/designer/catalog.json. All admin-gated. Demo
 	// data only; live engine/SSE feeds are a later ticket.
+	// NFC reader registry (device level). The menu page lists every
+	// auto-registered tag reader with its online/offline status and last
+	// seen tag, and jumps into the reader's System/Reader graph in the
+	// editor. Admin-gated like the rest of /a/.
+	s.mux.Handle("GET /a/nfc", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFC)))
+	s.mux.Handle("GET /a/nfc.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFCJSON)))
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
 	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))

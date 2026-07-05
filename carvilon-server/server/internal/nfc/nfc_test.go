@@ -413,6 +413,92 @@ func TestDriverStepErrorAging(t *testing.T) {
 	}
 }
 
+// TestTagObserverFiresOnlyOnNewReads pins the registry seam: the tag
+// observer is invoked with the reader's stable identity exactly once per
+// genuine new-tag read - not on a resting tag, not on removal, not on a
+// poll error - and again when a different tag arrives.
+func TestTagObserverFiresOnlyOnNewReads(t *testing.T) {
+	fake := &fakeTagReader{}
+	d, r := testDriver(fake)
+	r.info.Identity = "nfc:i2c-1"
+
+	var got [][2]string
+	SetTagObserver(func(id, uid string) { got = append(got, [2]string{id, uid}) })
+	t.Cleanup(func() { SetTagObserver(nil) })
+
+	d.step(r) // no tag: no observation
+	fake.set([]byte{0xD6, 0x45, 0x90, 0x3B}, true, nil)
+	d.step(r) // arrival: one observation
+	d.step(r) // resting: none
+	d.step(r)
+	if len(got) != 1 || got[0] != [2]string{"nfc:i2c-1", "D6:45:90:3B"} {
+		t.Fatalf("after arrival, observations = %+v, want one [nfc:i2c-1 D6:45:90:3B]", got)
+	}
+
+	// A poll error must not observe anything.
+	fake.set(nil, false, errors.New("bus glitch"))
+	d.step(r)
+	if len(got) != 1 {
+		t.Fatalf("poll error produced an observation: %+v", got)
+	}
+
+	// Removal (no tag) must not observe.
+	fake.set(nil, false, nil)
+	d.step(r)
+	d.step(r)
+	if len(got) != 1 {
+		t.Fatalf("removal produced an observation: %+v", got)
+	}
+
+	// A different tag is a fresh read: one more observation.
+	fake.set([]byte{0x04, 0xA3, 0x1B, 0x2C}, true, nil)
+	d.step(r)
+	if len(got) != 2 || got[1] != [2]string{"nfc:i2c-1", "04:A3:1B:2C"} {
+		t.Fatalf("new tag observations = %+v", got)
+	}
+}
+
+// TestTagObserverRefreshesOnReTap pins the last-seen semantics for the
+// NFC page: re-presenting the SAME tag after a removal fires the
+// observer again (a present rising edge is a fresh presentation), so the
+// page's "last seen" timestamp tracks the latest tap, not just the last
+// distinct UID.
+func TestTagObserverRefreshesOnReTap(t *testing.T) {
+	fake := &fakeTagReader{}
+	d, r := testDriver(fake)
+	r.info.Identity = "nfc:i2c-1"
+
+	var got [][2]string
+	SetTagObserver(func(id, uid string) { got = append(got, [2]string{id, uid}) })
+	t.Cleanup(func() { SetTagObserver(nil) })
+
+	fake.set([]byte{0xD6, 0x45, 0x90, 0x3B}, true, nil)
+	d.step(r) // arrival: one observation
+	// Removal (needs missThreshold blank rounds to drop present).
+	fake.set(nil, false, nil)
+	d.step(r)
+	d.step(r)
+	if len(got) != 1 {
+		t.Fatalf("removal changed observations: %+v", got)
+	}
+	// Same tag re-presented: present rising edge -> a fresh observation.
+	fake.set([]byte{0xD6, 0x45, 0x90, 0x3B}, true, nil)
+	d.step(r)
+	if len(got) != 2 || got[1] != [2]string{"nfc:i2c-1", "D6:45:90:3B"} {
+		t.Fatalf("re-tap did not refresh last-seen: %+v", got)
+	}
+}
+
+// TestTagObserverNilByDefault guards that with no observer installed the
+// step path is a plain no-op (no panic, existing behaviour unchanged).
+func TestTagObserverNilByDefault(t *testing.T) {
+	SetTagObserver(nil)
+	fake := &fakeTagReader{}
+	d, r := testDriver(fake)
+	fake.set([]byte{0xD6, 0x45, 0x90, 0x3B}, true, nil)
+	d.step(r) // must not panic with a nil observer
+}
+
 func TestSubscribeRejectsUnknownAddresses(t *testing.T) {
 	fake := &fakeTagReader{}
 	mockReaders(t, []detectedReader{{

@@ -47,6 +47,7 @@ import (
 	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/publishtoken"
+	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
@@ -361,6 +362,36 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	consoleMgr := console.NewManager(log)
 	defer consoleMgr.CloseAll()
 
+	// Reader registry (NFC-Track, device level). Every tag reader the
+	// nfc driver detected at startup is auto-registered as a protected
+	// component: it gets an online row plus a structure-locked graph
+	// under System/Reader (the target the NFC page's editor jump opens),
+	// and a reader that is no longer present stays as an offline row
+	// instead of vanishing. This is the component view of the same
+	// detection the editor palette exposes as logic blocks - one source,
+	// two views. The tag observer records the last-seen tag during runs.
+	designerStore := designerstore.New(database.DB)
+	readerStore := readerstore.New(database.DB)
+	detectedReaders := make([]readerstore.Detected, 0, len(nfc.Readers()))
+	for _, rd := range nfc.Readers() {
+		detectedReaders = append(detectedReaders, readerstore.Detected{
+			ID:       rd.Identity,
+			Kind:     "nfc",
+			Model:    rd.Model,
+			Firmware: rd.Firmware,
+			Bus:      rd.ID,
+			Name:     rd.Model + " · " + rd.ID,
+		})
+	}
+	if err := readerStore.Sync(ctx, detectedReaders, designerStore.EnsureReaderGraph); err != nil {
+		log.Error("reader registry sync failed (continuing; NFC page may be stale)", "err", err)
+	}
+	nfc.SetTagObserver(func(id, uid string) {
+		if err := readerStore.NoteTag(ctx, id, uid); err != nil {
+			log.Warn("reader registry: note tag failed", "reader", id, "err", err)
+		}
+	})
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:          cfg,
 		Sessions:        sessionSvc,
@@ -389,7 +420,8 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		MQTTStore:       mqttStore,
 		Telegram:        telegramBot,
 		TelegramStore:   telegramStore,
-		DesignerStore:   designerstore.New(database.DB),
+		DesignerStore:   designerStore,
+		ReaderStore:     readerStore,
 		LogBuffer:       logBuf,
 		Console:         consoleMgr,
 		ConsoleStore:    consolestore.New(database.DB, secretsSvc),

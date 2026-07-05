@@ -55,6 +55,7 @@ type ReaderInfo struct {
 	ID             string
 	Model          string
 	Firmware       string
+	Identity       string // stable registry id, e.g. "nfc:i2c-1"
 	UIDChannel     string // full physical ref, e.g. "nfc:i2c-1:uid"
 	PresentChannel string // full physical ref, e.g. "nfc:i2c-1:present"
 }
@@ -156,6 +157,38 @@ var (
 	probeFn = platformProbe
 )
 
+var (
+	obsMu       sync.Mutex
+	tagObserver func(readerID, uid string)
+)
+
+// SetTagObserver installs a side-channel callback the driver invokes on
+// every tag PRESENTATION during a run - a new/changed UID or the same
+// tag re-presented - after the tag has already been handed to the
+// engine (readerID is the reader's stable registry identity, e.g.
+// "nfc:i2c-1"; uid is the canonical tag id). It is a pure addition
+// used by the reader registry to record the last-seen tag - it does NOT
+// touch the engine tick path, so determinism is unchanged, and it stays
+// nil (a no-op) in every context that does not opt in. Pass nil to
+// detach. Set once at startup, before any run.
+func SetTagObserver(fn func(readerID, uid string)) {
+	obsMu.Lock()
+	tagObserver = fn
+	obsMu.Unlock()
+}
+
+// notifyTag delivers a new-tag read to the observer, snapshotting it
+// under its own lock so the poll goroutine never calls it while holding
+// a driver lock.
+func notifyTag(readerID, uid string) {
+	obsMu.Lock()
+	fn := tagObserver
+	obsMu.Unlock()
+	if fn != nil {
+		fn(readerID, uid)
+	}
+}
+
 // Probe detects PN532 readers on the I2C buses once at startup and
 // caches the result for Enabled / Readers / NewDriver. It logs the
 // outcome - silent when there is no I2C bus at all, one Info line per
@@ -169,6 +202,7 @@ func Probe(log *slog.Logger) Status {
 	mu.Unlock()
 	st, readers := probeFn()
 	for i := range readers {
+		readers[i].info.Identity = engine.PrefixNFC + ":" + readers[i].info.ID
 		readers[i].info.UIDChannel = engine.PrefixNFC + ":" + uidAddr(readers[i].info.ID)
 		readers[i].info.PresentChannel = engine.PrefixNFC + ":" + presentAddr(readers[i].info.ID)
 	}
@@ -479,6 +513,13 @@ func (d *Driver) step(r *runReader) {
 	}
 	uid, found, err := dev.Poll()
 	var evs []tagEvent
+	// noteUID is set when this round is a tag PRESENTATION for the
+	// registry's last-seen tracker: a new/changed UID, or the same tag
+	// re-presented (present rising edge, so re-tapping a resting card
+	// still refreshes the timestamp). Removal, poll errors and the
+	// late-subscriber replay below are not presentations and leave it
+	// empty. The actual notify runs after the engine handoff (below).
+	noteUID := ""
 	if err != nil {
 		r.errs++
 		if r.errs < errThreshold {
@@ -497,6 +538,13 @@ func (d *Driver) step(r *runReader) {
 			s = formatUID(uid)
 		}
 		evs = r.state.apply(s, found)
+		if found {
+			for _, ev := range evs {
+				if ev.ch == chanUID || (ev.ch == chanPresent && ev.v == engine.BoolVal(true)) {
+					noteUID = s
+				}
+			}
+		}
 	}
 	// Late subscribers missed the edges the state machine has already
 	// latched; replay the current levels once, unless this round's
@@ -525,6 +573,12 @@ func (d *Driver) step(r *runReader) {
 			delete(r.fresh, ch)
 		}
 		d.mu.Unlock()
+	}
+	// Registry side-channel LAST: the engine subscribers (the real-time
+	// path) are already served, so the observer's work - a SQL write in
+	// the reader registry - never delays a tag's delivery to the engine.
+	if noteUID != "" {
+		notifyTag(r.info.Identity, noteUID)
 	}
 }
 

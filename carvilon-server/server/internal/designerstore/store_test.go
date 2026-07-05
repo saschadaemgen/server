@@ -232,6 +232,70 @@ func TestSystemFolders_GraphContentEditableStructureLocked(t *testing.T) {
 	}
 }
 
+// TestEnsureReaderGraph pins the reader-registry seam: it seeds one
+// graph in the protected System/Reader folder, is idempotent (a second
+// call returns the same id, no duplicate), and the seeded graph is
+// structure-locked but content-editable - the exact contract the reader
+// registry relies on.
+func TestEnsureReaderGraph(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+
+	id, err := s.EnsureReaderGraph(ctx, "PN532 · i2c-1")
+	if err != nil {
+		t.Fatalf("EnsureReaderGraph: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("EnsureReaderGraph returned id 0")
+	}
+
+	// Idempotent: same reader, same graph, no second row.
+	id2, err := s.EnsureReaderGraph(ctx, "PN532 · i2c-1")
+	if err != nil {
+		t.Fatalf("EnsureReaderGraph (again): %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("second call returned %d, want %d (idempotent)", id2, id)
+	}
+
+	// It landed in the protected System/Reader folder with empty content.
+	folders, graphs, err := s.Tree(ctx)
+	if err != nil {
+		t.Fatalf("Tree: %v", err)
+	}
+	reader := findFolder(folders, "Reader")
+	if reader == nil {
+		t.Fatal("Reader folder missing")
+	}
+	n := 0
+	for _, g := range graphs {
+		if g.FolderID == reader.ID {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("System/Reader graphs = %d, want 1", n)
+	}
+	g, err := s.Graph(ctx, id)
+	if err != nil {
+		t.Fatalf("Graph: %v", err)
+	}
+	if g.JSON != EmptyGraphJSON {
+		t.Errorf("seeded graph JSON = %q, want empty", g.JSON)
+	}
+
+	// Structure-locked, content-editable (same contract as the seeded case).
+	if err := s.RenameGraph(ctx, id, "anders"); !errors.Is(err, ErrSystemFolder) {
+		t.Errorf("rename = %v, want ErrSystemFolder", err)
+	}
+	if err := s.DeleteGraph(ctx, id); !errors.Is(err, ErrSystemFolder) {
+		t.Errorf("delete = %v, want ErrSystemFolder", err)
+	}
+	if _, err := s.SaveGraph(ctx, id, `{"schema":1,"nodes":[],"edges":[]}`); err != nil {
+		t.Errorf("SaveGraph in reader graph: %v", err)
+	}
+}
+
 // ---------- graphs ----------
 
 func TestGraph_CreateLoadSaveRev(t *testing.T) {

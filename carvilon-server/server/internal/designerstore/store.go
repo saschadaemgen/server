@@ -391,6 +391,80 @@ func (s *Store) Graph(ctx context.Context, id int64) (Graph, error) {
 	return g, nil
 }
 
+// ReaderFolderName is the protected System sub-folder that holds one
+// structure-locked graph per registered tag reader (the reader flow the
+// package doc describes). It is seeded system=1 in migration 032.
+const ReaderFolderName = "Reader"
+
+// EnsureReaderGraph returns the id of the reader's graph inside the
+// protected System/Reader folder, creating an empty one on first call.
+// It is the un-guarded seam the reader registry uses to file a detected
+// reader under System/Reader: CreateGraph deliberately refuses system
+// folders (that guard is for the UI), while this reader-owned flow is
+// allowed to seed there - exactly the "created later by their own flow"
+// case the package doc and the system-folder tests describe.
+//
+// Idempotent by (Reader folder, name): a second call for the same
+// reader returns the same graph id, so restarts never accumulate
+// duplicate graphs. The seeded graph is structure-locked (rename/delete
+// return ErrSystemFolder) but its content stays editable via SaveGraph.
+func (s *Store) EnsureReaderGraph(ctx context.Context, name string) (int64, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("designerstore: begin ensure reader graph: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var folderID int64
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM designer_folders WHERE name = ? AND system = 1`,
+		ReaderFolderName).Scan(&folderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("designerstore: system folder %q missing", ReaderFolderName)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("designerstore: find reader folder: %w", err)
+	}
+
+	var id int64
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM designer_graphs WHERE folder_id = ? AND name = ?`,
+		folderID, name).Scan(&id)
+	if err == nil {
+		return id, tx.Commit() // already exists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("designerstore: find reader graph: %w", err)
+	}
+
+	var sort int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(sort)+1, 0) FROM designer_graphs WHERE folder_id = ?`,
+		folderID).Scan(&sort); err != nil {
+		return 0, fmt.Errorf("designerstore: next reader graph sort: %w", err)
+	}
+	now := s.now().UnixMilli()
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO designer_graphs (folder_id, name, graph_json, rev, sort, updated_at)
+		 VALUES (?, ?, ?, 0, ?, ?)`,
+		folderID, name, EmptyGraphJSON, sort, now)
+	if err != nil {
+		return 0, fmt.Errorf("designerstore: insert reader graph: %w", err)
+	}
+	id, err = res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("designerstore: reader graph id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("designerstore: commit ensure reader graph: %w", err)
+	}
+	return id, nil
+}
+
 // SaveGraph replaces a graph's content and increments its revision,
 // returning the new revision. Saving is allowed in system folders too:
 // the structure there is locked, the content stays editable (the later

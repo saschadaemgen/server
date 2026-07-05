@@ -1,0 +1,125 @@
+{{define "title"}}NFC{{end}}
+
+{{define "head-extra"}}
+<style>
+  /* NFC reader registry (device level). Reuses the Saison-20 admin
+     tokens (admin-tokens.css / admin-components.css) and mirrors the
+     Telegram/MQTT page vocabulary; layout-only rules live here. */
+  .nfc-wrap { max-width:980px; margin:0 auto; display:flex; flex-direction:column; gap:var(--space-8); }
+  .nfc-head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-6); flex-wrap:wrap; padding-bottom:var(--space-7); border-bottom:1px solid var(--divider); }
+  .nfc-head h1 { margin:0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); }
+  .nfc-head .nfc-ico { width:34px; height:34px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
+  .nfc-pill { display:inline-flex; align-items:center; gap:var(--space-4); padding:5px 12px; border-radius:999px; font:var(--type-label); background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .nfc-pill.on { background:color-mix(in srgb, #2ecc71 16%, transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
+  .nfc-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+  .nfc-intro { font:var(--type-data); color:var(--text-tertiary); margin-top:-4px; }
+
+  .nfc-card { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-7) var(--space-8); display:flex; align-items:center; gap:var(--space-6); flex-wrap:wrap; }
+  .nfc-card .nfc-main { display:flex; flex-direction:column; gap:6px; min-width:0; flex:1 1 320px; }
+  .nfc-name { font:var(--type-subheading); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); flex-wrap:wrap; }
+  .nfc-meta { font:var(--type-data); color:var(--text-tertiary); display:flex; gap:var(--space-5); flex-wrap:wrap; }
+  .nfc-meta .mono { font-family:var(--font-mono); color:var(--text-secondary); }
+
+  .nfc-status { display:inline-flex; align-items:center; gap:var(--space-4); padding:4px 11px; border-radius:999px; font:var(--type-eyebrow); letter-spacing:var(--tracking-label); }
+  .nfc-status.online { background:color-mix(in srgb,#2ecc71 16%,transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
+  .nfc-status.offline { background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+
+  .nfc-tag { display:flex; flex-direction:column; gap:2px; flex:1 1 200px; min-width:0; }
+  .nfc-tag .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .nfc-tag .uid { font-family:var(--font-mono); font:var(--type-value); color:var(--text-primary); word-break:break-all; }
+  .nfc-tag .when { font:var(--type-data); color:var(--text-tertiary); }
+  .nfc-tag .none { font:var(--type-data); color:var(--text-tertiary); }
+
+  .nfc-actions { display:flex; align-items:center; gap:var(--space-5); flex:0 0 auto; }
+  .nfc-btn { display:inline-flex; align-items:center; gap:var(--space-4); padding:8px 14px; border-radius:var(--radius-md); border:none; cursor:pointer; text-decoration:none; font:var(--type-label); background:var(--surface-raised); color:var(--text-primary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .nfc-btn:hover { filter:brightness(1.08); }
+  .nfc-btn svg { width:15px; height:15px; }
+
+  .nfc-empty { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-10) var(--space-8); text-align:center; display:flex; flex-direction:column; align-items:center; gap:var(--space-5); }
+  .nfc-empty .nfc-empty-ico { width:52px; height:52px; border-radius:var(--radius-lg); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--text-tertiary); }
+  .nfc-empty h2 { margin:0; font:var(--type-subheading); color:var(--text-secondary); }
+  .nfc-empty p { margin:0; font:var(--type-data); color:var(--text-tertiary); max-width:52ch; }
+
+  @media (max-width:620px){ .nfc-actions{ flex:1 1 100%; } .nfc-btn{ flex:1 1 auto; justify-content:center; } }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="nfc-wrap">
+  <div class="nfc-head">
+    <h1>
+      <span class="nfc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8.32a7.43 7.43 0 0 1 0 7.36"/><path d="M9.46 6.21a11.76 11.76 0 0 1 0 11.58"/><path d="M12.91 4.1a15.91 15.91 0 0 1 .01 15.8"/><path d="M16.37 2a20.16 20.16 0 0 1 0 20"/></svg></span>
+      NFC
+    </h1>
+    {{if .Page.Readers}}
+      <span class="nfc-pill{{if .Page.OnlineCount}} on{{end}}"><span class="nfc-dot"></span>{{.Page.OnlineCount}} online · {{len .Page.Readers}} gesamt</span>
+    {{end}}
+  </div>
+
+  <p class="nfc-intro">Erkannte Tag-Leser werden automatisch als geschützte Komponenten registriert (Geräte-Ebene). Ein fehlendes Gerät bleibt als „offline" stehen, statt lautlos zu verschwinden.</p>
+
+  {{if not .Page.Readers}}
+    <div class="nfc-empty" data-nfc-sig="{{.Page.Sig}}">
+      <span class="nfc-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8.32a7.43 7.43 0 0 1 0 7.36"/><path d="M9.46 6.21a11.76 11.76 0 0 1 0 11.58"/><path d="M12.91 4.1a15.91 15.91 0 0 1 .01 15.8"/><path d="M16.37 2a20.16 20.16 0 0 1 0 20"/></svg></span>
+      <h2>Kein Leser erkannt</h2>
+      <p>Sobald beim Start ein Leser am Bus antwortet (z.&nbsp;B. ein PN532 über I²C), erscheint er hier automatisch. Auf einem Host ohne Leser-Hardware bleibt die Liste leer.</p>
+    </div>
+  {{else}}
+    <div data-nfc-list data-nfc-sig="{{.Page.Sig}}">
+    {{range .Page.Readers}}
+      <div class="nfc-card">
+        <div class="nfc-main">
+          <div class="nfc-name">
+            {{.Name}}
+            {{if .Online}}<span class="nfc-status online"><span class="nfc-dot"></span>online</span>{{else}}<span class="nfc-status offline"><span class="nfc-dot"></span>offline</span>{{end}}
+          </div>
+          <div class="nfc-meta">
+            <span>{{.Model}}{{if .Firmware}} · Firmware {{.Firmware}}{{end}}</span>
+            {{if .Bus}}<span>Bus <span class="mono">{{.Bus}}</span></span>{{end}}
+            <span class="mono">{{.ID}}</span>
+          </div>
+        </div>
+        <div class="nfc-tag">
+          <span class="k">Zuletzt gesehenes Tag</span>
+          {{if .HasTag}}
+            <span class="uid">{{.LastUID}}</span>
+            <span class="when">{{.LastSeen}}</span>
+          {{else}}
+            <span class="none">— noch keins gelesen</span>
+          {{end}}
+        </div>
+        <div class="nfc-actions">
+          {{if .HasGraph}}
+            <a class="nfc-btn" href="/a/designer?g={{.GraphID}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>Im Editor öffnen</a>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
+    </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+  // Auto-refresh: poll a compact signature of the registry (online
+  // state + last tag per reader) and reload only when it changes - so a
+  // reader coming online or reading a tag appears without a manual
+  // reload, and nothing reloads while nothing changed (Telegram page
+  // pattern).
+  (function () {
+    var el = document.querySelector('[data-nfc-sig]');
+    if (!el) return;
+    var last = el.getAttribute('data-nfc-sig') || '';
+    setInterval(function () {
+      fetch('/a/nfc.json', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && typeof d.sig === 'string' && d.sig !== last) location.reload();
+        })
+        .catch(function () {});
+    }, 4000);
+  })();
+</script>
+{{end}}

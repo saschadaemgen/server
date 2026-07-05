@@ -240,7 +240,35 @@ function setSaveState(state){
   else if (state === 'error') el.textContent = 'Speichern fehlgeschlagen';
   else el.innerHTML = 'rev <b>' + curGraph.rev + '</b>';
 }
-function paintAll(){ paintTree(); paintCrumb(); setSaveState('idle'); }
+// paintReaderBack is the reverse of the NFC page's editor jump: when the
+// open graph is one of the auto-created reader graphs (System/Reader),
+// show a small "NFC" chip beside the breadcrumb that returns to the NFC
+// device page. target="_top" leaves the editor iframe and loads the
+// admin page in the full window (same origin). Defensive: it no-ops if
+// the crumb bar is absent and removes itself outside a reader graph.
+function paintReaderBack(){
+  const bar = document.querySelector('.crumb');
+  if (!bar) return;
+  let link = document.getElementById('crumb-nfc');
+  const f = curGraph ? folderById(curGraph.folder_id) : null;
+  const inReader = !!(f && f.system && f.name === 'Reader');
+  if (inReader){
+    if (!link){
+      link = document.createElement('a');
+      link.id = 'crumb-nfc';
+      link.className = 'chip crumb-nfc';
+      link.href = '/a/nfc';
+      link.target = '_top';
+      link.title = 'Zur NFC-Übersicht';
+      link.style.marginLeft = '6px';
+      link.textContent = 'NFC';
+      bar.appendChild(link);
+    }
+  } else if (link){
+    link.remove();
+  }
+}
+function paintAll(){ paintTree(); paintCrumb(); setSaveState('idle'); paintReaderBack(); }
 
 function flashErr(err){
   notice = (err && err.message) ? err.message : 'Fehler';

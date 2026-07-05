@@ -39,6 +39,7 @@ import (
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/viewermanager"
 )
@@ -97,6 +98,7 @@ type testEnv struct {
 	mqttBroker   *mqttbroker.Manager
 	logBuf       *logbuf.Buffer
 	consoleStore *consolestore.Store
+	readerStore  *readerstore.Store
 	d            *db.DB
 	clock        *testClock
 }
@@ -271,6 +273,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	}
 	consoleStore := consolestore.New(d.DB, consoleSecrets)
 	consoleMgr := console.NewManager(quietLogger(), console.WithIdleTimeout(0))
+	readerStore := readerstore.New(d.DB)
 
 	cfg := config.Config{
 		ListenAddr: ":0",
@@ -300,6 +303,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		MQTT:            mqttBroker,
 		MQTTStore:       mqttStore,
 		DesignerStore:   designerstore.New(d.DB),
+		ReaderStore:     readerStore,
 		LogBuffer:       logBuffer,
 		Console:         consoleMgr,
 		ConsoleStore:    consoleStore,
@@ -340,6 +344,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		mqttBroker:   mqttBroker,
 		logBuf:       logBuffer,
 		consoleStore: consoleStore,
+		readerStore:  readerStore,
 		d:            d, clock: clock,
 	}
 }
