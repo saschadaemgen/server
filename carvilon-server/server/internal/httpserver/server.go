@@ -698,31 +698,28 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/viewers/{mac}/password", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerPassword)))
 	s.mux.Handle("POST /a/viewers/{mac}/regenerate-token", s.requireAdminSession(http.HandlerFunc(s.handleAdminViewerRegenerateToken)))
 
-	// Benutzer-Seite: vereinte Ansicht. CARVILONs eigene Benutzer
-	// (native, volle Verwaltung) sind die Wahrheit; die UA-User
-	// erscheinen nur als getrennter Abschnitt, wenn UA aktiv ist.
+	// Benutzer-Seite: EINE Liste - die CARVILON-Benutzer (Master).
+	// UA ist kein eigener Benutzer-Bestand, nur eine optionale
+	// Verknuepfung pro Benutzer.
 	s.mux.Handle("GET /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersList)))
 
-	// Native CARVILON-Benutzer-CRUD (access/carvilon, Migration 034).
-	// Eigener Pfad-Namensraum unter /a/users/carvilon/ damit er nicht
-	// mit den UA-{id}-Routen kollidiert.
+	// Native CARVILON-Benutzer-CRUD + UA-Verknuepfung. Eigener
+	// Pfad-Namensraum unter /a/users/carvilon/ (kollidiert nicht mit
+	// der UA-Profil-Detailroute /a/users/{id}).
 	s.mux.Handle("POST /a/users/carvilon", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserCreate)))
 	s.mux.Handle("POST /a/users/carvilon/{id}/update", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserUpdate)))
 	s.mux.Handle("POST /a/users/carvilon/{id}/activate", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserActivate)))
 	s.mux.Handle("POST /a/users/carvilon/{id}/deactivate", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserDeactivate)))
 	s.mux.Handle("POST /a/users/carvilon/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserDelete)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/link", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserLink)))
+	s.mux.Handle("POST /a/users/carvilon/{id}/unlink", s.requireAdminSession(http.HandlerFunc(s.handleAdminNativeUserUnlink)))
 
-	// UA-User: die bestehende Proxy-Anbindung an die UA Access
-	// Developer API. Nur erreichbar/wirksam, wenn UA aktiv ist (die
-	// Handler pruefen s.uaEnabled); sonst kein UA-Aufruf.
+	// UA-Profile werden NICHT ueber uns verwaltet. Geblieben ist nur:
+	// die Profil-Liste als JSON fuer den Viewer-Verknuepfungs-Dialog
+	// (andere UA-Abhaengigkeit, bewusst unberuehrt) und der read-only
+	// Profil-Blick, der aus den Viewer-Seiten verlinkt ist.
 	s.mux.Handle("GET /a/users.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersListJSON)))
-	s.mux.Handle("POST /a/users", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersCreate)))
 	s.mux.Handle("GET /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDetail)))
-	s.mux.Handle("POST /a/users/{id}/update", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersUpdate)))
-	s.mux.Handle("POST /a/users/{id}/activate", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersActivate)))
-	s.mux.Handle("POST /a/users/{id}/deactivate", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDeactivate)))
-	s.mux.Handle("POST /a/users/{id}/delete", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
-	s.mux.Handle("DELETE /a/users/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUsersDelete)))
 }
 
 // Handler returns the underlying mux so callers (tests) can wrap

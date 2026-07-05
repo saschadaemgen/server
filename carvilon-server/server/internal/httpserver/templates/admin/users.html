@@ -15,7 +15,11 @@
     <header class="page-header">
       <div class="page-title-stack">
         <h1 class="page-title">Benutzer</h1>
-        <p class="page-subtitle">CARVILONs eigene Benutzer. {{if .Page.UAEnabled}}UniFi Access ist aktiv und wird zusaetzlich angezeigt.{{else}}UniFi Access ist deaktiviert.{{end}}</p>
+        <p class="page-subtitle">
+          {{if .Page.UAConfigured}}UniFi Access ist aktiv - pro Benutzer kann optional ein UA-Profil verknuepft werden.
+          {{else if .Page.UAEnabled}}UniFi Access ist aktiv, aber nicht erreichbar - Verknuepfen derzeit nicht moeglich.
+          {{else}}Die CARVILON-Benutzer sind die Wahrheit. UniFi Access ist deaktiviert.{{end}}
+        </p>
       </div>
       <div class="page-actions">
         <button class="btn btn-primary" type="button" data-open-modal="create-native-user">
@@ -28,79 +32,99 @@
     {{if .Page.Flash}}
       <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
     {{end}}
+    {{if .Page.UAError}}
+      <div class="banner banner-red" role="status" style="margin-bottom: var(--space-4);">UA-Profile konnten nicht geladen werden: {{.Page.UAError}}</div>
+    {{end}}
 
-    <!-- ============ CARVILON-Benutzer (nativ) ============ -->
-    <section class="set-section">
-      <div class="set-section-title">CARVILON-Benutzer{{if .Page.NativeTotal}} ({{.Page.NativeTotal}}){{end}}</div>
-      <div class="app-card">
-        <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
-          <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
-            <input class="input" name="nq" type="search" placeholder="Name suchen" value="{{.Page.NativeQuery}}" style="max-width:320px;"/>
-            <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
-            {{if .Page.NativeQuery}}
-              <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>
-            {{end}}
-          </form>
-        </div>
-
-        {{if not .Page.NativeUsers}}
-          <div class="app-card-body" style="text-align:center; padding: var(--space-6); color: var(--color-text-tertiary);">
-            {{if .Page.NativeQuery}}
-              Keine Treffer fuer die aktuelle Suche.
-            {{else}}
-              Noch keine Benutzer angelegt. Mit "Neuer Benutzer" rechts oben einen ersten Eintrag erzeugen.
-            {{end}}
-          </div>
-        {{else}}
-          <table class="app-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th style="text-align:right;">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{range .Page.NativeUsers}}
-                <tr>
-                  <td>
-                    <span style="display:flex; gap:var(--space-2); align-items:center;">
-                      <span class="app-table-mark">{{.Initials}}</span>
-                      <strong>{{.DisplayName}}</strong>
-                      {{if .UALinked}}<span class="badge" title="Mit einem UA-User verknuepft">UA</span>{{end}}
-                    </span>
-                  </td>
-                  <td>
-                    {{if .Active}}
-                      <span class="status-pill is-ok"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                    {{else}}
-                      <span class="status-pill is-danger"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                    {{end}}
-                  </td>
-                  <td style="text-align:right; white-space:nowrap;">
-                    <button class="btn btn-secondary btn-sm" type="button" data-open-modal="edit-native-{{.ID}}">Bearbeiten</button>
-                    {{if .Active}}
-                      <form method="post" action="/a/users/carvilon/{{.ID}}/deactivate" style="display:inline; margin:0;">
-                        <button class="btn btn-secondary btn-sm" type="submit">Deaktivieren</button>
-                      </form>
-                    {{else}}
-                      <form method="post" action="/a/users/carvilon/{{.ID}}/activate" style="display:inline; margin:0;">
-                        <button class="btn btn-secondary btn-sm" type="submit">Aktivieren</button>
-                      </form>
-                    {{end}}
-                    <form method="post" action="/a/users/carvilon/{{.ID}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Benutzer {{.DisplayName}} endgueltig loeschen?');">
-                      <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
-                    </form>
-                  </td>
-                </tr>
-              {{end}}
-            </tbody>
-          </table>
-        {{end}}
+    <div class="app-card">
+      <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
+        <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
+          <input class="input" name="nq" type="search" placeholder="Name suchen" value="{{.Page.NativeQuery}}" style="max-width:320px;"/>
+          <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
+          {{if .Page.NativeQuery}}
+            <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>
+          {{end}}
+        </form>
+        <span style="color:var(--color-text-tertiary);">{{.Page.NativeTotal}} Benutzer</span>
       </div>
-    </section>
 
-    <!-- Edit-Modals je nativer Benutzer -->
+      {{if not .Page.NativeUsers}}
+        <div class="app-card-body" style="text-align:center; padding: var(--space-6); color: var(--color-text-tertiary);">
+          {{if .Page.NativeQuery}}
+            Keine Treffer fuer die aktuelle Suche.
+          {{else}}
+            Noch keine Benutzer angelegt. Mit "Neuer Benutzer" rechts oben einen ersten Eintrag erzeugen.
+          {{end}}
+        </div>
+      {{else}}
+        <table class="app-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Status</th>
+              {{if .Page.UAEnabled}}<th>UA-Profil</th>{{end}}
+              <th style="text-align:right;">Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Page.NativeUsers}}
+              <tr>
+                <td>
+                  <span style="display:flex; gap:var(--space-2); align-items:center;">
+                    <span class="app-table-mark">{{.Initials}}</span>
+                    <strong>{{.DisplayName}}</strong>
+                  </span>
+                </td>
+                <td>
+                  {{if .Active}}
+                    <span class="status-pill is-ok"><span class="status-dot"></span>{{.StatusLabel}}</span>
+                  {{else}}
+                    <span class="status-pill is-danger"><span class="status-dot"></span>{{.StatusLabel}}</span>
+                  {{end}}
+                </td>
+                {{if $.Page.UAEnabled}}
+                  <td>
+                    {{if .UALinked}}
+                      <span style="display:inline-flex; gap:var(--space-2); align-items:center; flex-wrap:wrap;">
+                        <span class="badge">UA</span>
+                        <span>{{.LinkedUAName}}</span>
+                        <form method="post" action="/a/users/carvilon/{{.ID}}/unlink" style="display:inline; margin:0;" onsubmit="return confirm('UA-Verknuepfung von {{.DisplayName}} loesen?');">
+                          <button class="btn btn-secondary btn-sm" type="submit">Loesen</button>
+                        </form>
+                      </span>
+                    {{else if $.Page.UAConfigured}}
+                      <button class="btn btn-secondary btn-sm" type="button"
+                              data-open-modal="link-ua" data-user-id="{{.ID}}" data-user-name="{{.DisplayName}}">
+                        UA-Profil verknuepfen
+                      </button>
+                    {{else}}
+                      <span style="color:var(--color-text-tertiary);">&mdash;</span>
+                    {{end}}
+                  </td>
+                {{end}}
+                <td style="text-align:right; white-space:nowrap;">
+                  <button class="btn btn-secondary btn-sm" type="button" data-open-modal="edit-native-{{.ID}}">Bearbeiten</button>
+                  {{if .Active}}
+                    <form method="post" action="/a/users/carvilon/{{.ID}}/deactivate" style="display:inline; margin:0;">
+                      <button class="btn btn-secondary btn-sm" type="submit">Deaktivieren</button>
+                    </form>
+                  {{else}}
+                    <form method="post" action="/a/users/carvilon/{{.ID}}/activate" style="display:inline; margin:0;">
+                      <button class="btn btn-secondary btn-sm" type="submit">Aktivieren</button>
+                    </form>
+                  {{end}}
+                  <form method="post" action="/a/users/carvilon/{{.ID}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Benutzer {{.DisplayName}} endgueltig loeschen?');">
+                    <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
+                  </form>
+                </td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
+    </div>
+
+    <!-- Edit-Modals je Benutzer -->
     {{range .Page.NativeUsers}}
       <div class="modal-scrim" data-modal="edit-native-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="edit-native-title-{{.ID}}">
         <div class="modal-glass">
@@ -129,7 +153,7 @@
       </div>
     {{end}}
 
-    <!-- Anlegen-Modal (nativ) -->
+    <!-- Anlegen-Modal -->
     <div class="modal-scrim" data-modal="create-native-user" role="dialog" aria-modal="true" aria-labelledby="create-native-title">
       <div class="modal-glass">
         <form method="post" action="/a/users/carvilon">
@@ -156,159 +180,46 @@
       </div>
     </div>
 
-    {{if .Page.UAEnabled}}
-    <!-- ============ UniFi-Access-Benutzer (Proxy) ============ -->
-    <section class="set-section" style="margin-top: var(--space-6);">
-      <div class="set-section-title">UniFi-Access-Benutzer{{if .Page.UAConfigured}} ({{.Page.Total}}){{end}}</div>
-
-      {{if not .Page.UAConfigured}}
-        <div class="app-card">
-          <div class="app-card-body" style="padding: var(--space-6);">
-            <h2 class="app-card-title">UA aktiv, aber noch nicht konfiguriert</h2>
-            <p style="color: var(--color-text-secondary);">Bitte unter <a href="/a/settings">Einstellungen</a> die Controller-URL und das API-Token eintragen - oder UA dort abschalten.</p>
-          </div>
-        </div>
-      {{else}}
-        <div class="app-card">
-          <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
-            <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
-              <input class="input" name="q" type="search" placeholder="Name, Email, Personal-Nr." value="{{.Page.Query}}" style="max-width:320px;"/>
-              <div class="dropdown" data-dropdown
-                   data-dropdown-source="inline"
-                   data-dropdown-value="{{.Page.StatusFilter}}"
-                   style="max-width:160px;">
-                <select name="status" data-dropdown-target>
-                  <option value="" {{if eq .Page.StatusFilter ""}}selected{{end}}>Alle Status</option>
-                  <option value="active" {{if eq .Page.StatusFilter "active"}}selected{{end}}>Aktiv</option>
-                  <option value="deactivated" {{if eq .Page.StatusFilter "deactivated"}}selected{{end}}>Inaktiv</option>
-                  <option value="pending" {{if eq .Page.StatusFilter "pending"}}selected{{end}}>Pending</option>
+    {{if and .Page.UAConfigured (not .Page.UAError)}}
+    <!-- Geteilter Verknuepfen-Dialog: UA-Profile NUR hier als Auswahl. -->
+    <div class="modal-scrim" data-modal="link-ua" role="dialog" aria-modal="true" aria-labelledby="link-ua-title">
+      <div class="modal-glass">
+        <form method="post" action="/a/users/carvilon/link">
+          <header class="modal-header">
+            <div>
+              <h2 id="link-ua-title" class="modal-title">UA-Profil verknuepfen</h2>
+              <p class="modal-sub">Benutzer: <strong data-link-user></strong>. Das UA-Profil ist nur eine Bruecke, damit UA-Reader-Ereignisse diesem Benutzer zugeordnet werden.</p>
+            </div>
+            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </header>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
+            {{if .Page.UACandidates}}
+              <div class="field">
+                <label class="field-label" for="link-select">UA-Profil</label>
+                <select class="input" id="link-select" name="ua_user_id" required>
+                  <option value="" disabled selected>&mdash; UA-Profil waehlen &mdash;</option>
+                  {{range .Page.UACandidates}}
+                    {{if .LinkedToName}}
+                      <option value="{{.ID}}" disabled>{{.Name}} (bereits verknuepft mit {{.LinkedToName}})</option>
+                    {{else}}
+                      <option value="{{.ID}}">{{.Name}}</option>
+                    {{end}}
+                  {{end}}
                 </select>
               </div>
-              <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
-              {{if or .Page.Query .Page.StatusFilter}}
-                <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>
-              {{end}}
-            </form>
-            <button class="btn btn-secondary" type="button" data-open-modal="create-ua-user">Neuer UA-User</button>
+            {{else}}
+              <p style="color:var(--color-text-tertiary);">Keine UA-Profile gefunden.</p>
+            {{end}}
           </div>
-
-          {{if not .Page.Users}}
-            <div class="app-card-body" style="text-align:center; padding: var(--space-6); color: var(--color-text-tertiary);">
-              {{if or .Page.Query .Page.StatusFilter}}
-                Keine Treffer fuer die aktuellen Filter.
-              {{else}}
-                Keine UA-User vorhanden.
-              {{end}}
-            </div>
-          {{else}}
-            <table class="app-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Personal-Nr.</th>
-                  <th>Status</th>
-                  <th>Auth</th>
-                  <th style="text-align:right;">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {{range .Page.Users}}
-                  <tr>
-                    <td>
-                      <a href="/a/users/{{.ID}}" style="display:flex; gap:var(--space-2); align-items:center;">
-                        <span class="app-table-mark">{{.Initials}}</span>
-                        <strong>{{.DisplayName}}</strong>
-                      </a>
-                    </td>
-                    <td>{{.Email}}</td>
-                    <td>{{.EmployeeNumber}}</td>
-                    <td>
-                      {{if eq .Status "active"}}
-                        <span class="status-pill is-ok"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                      {{else if eq .Status "deactivated"}}
-                        <span class="status-pill is-danger"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                      {{else}}
-                        <span class="status-pill"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                      {{end}}
-                    </td>
-                    <td>
-                      {{if .HasNFC}}<span class="badge">NFC</span>{{end}}
-                      {{if .HasPIN}}<span class="badge">PIN</span>{{end}}
-                    </td>
-                    <td style="text-align:right; white-space:nowrap;">
-                      {{if eq .Status "active"}}
-                        <form method="post" action="/a/users/{{.ID}}/deactivate" style="display:inline; margin:0;">
-                          <button class="btn btn-secondary btn-sm" type="submit">Deaktivieren</button>
-                        </form>
-                      {{else}}
-                        <form method="post" action="/a/users/{{.ID}}/activate" style="display:inline; margin:0;">
-                          <button class="btn btn-secondary btn-sm" type="submit">Aktivieren</button>
-                        </form>
-                      {{end}}
-                      <a class="btn btn-secondary btn-sm" href="/a/users/{{.ID}}">Detail</a>
-                    </td>
-                  </tr>
-                {{end}}
-              </tbody>
-            </table>
-          {{end}}
-
-          {{if .Page.PageCount}}
-            <div class="app-card-body" style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-3) var(--space-4); color: var(--color-text-tertiary);">
-              <span>Eintraege {{.Page.Total}} - Seite {{.Page.Page}} von {{.Page.PageCount}}</span>
-              <div style="display:flex; gap:var(--space-2);">
-                {{if .Page.Prev}}
-                  <a class="btn btn-secondary btn-sm" href="?{{if .Page.Query}}q={{.Page.Query}}&{{end}}{{if .Page.StatusFilter}}status={{.Page.StatusFilter}}&{{end}}page={{.Page.Prev}}&size={{.Page.PageSize}}">Zurueck</a>
-                {{end}}
-                {{if .Page.Next}}
-                  <a class="btn btn-secondary btn-sm" href="?{{if .Page.Query}}q={{.Page.Query}}&{{end}}{{if .Page.StatusFilter}}status={{.Page.StatusFilter}}&{{end}}page={{.Page.Next}}&size={{.Page.PageSize}}">Weiter</a>
-                {{end}}
-              </div>
-            </div>
-          {{end}}
-        </div>
-
-        <!-- UA-Anlegen-Modal -->
-        <div class="modal-scrim" data-modal="create-ua-user" role="dialog" aria-modal="true" aria-labelledby="create-ua-title">
-          <div class="modal-glass">
-            <form method="post" action="/a/users">
-              <header class="modal-header">
-                <div>
-                  <h2 id="create-ua-title" class="modal-title">Neuen UA-User anlegen</h2>
-                  <p class="modal-sub">Stammdaten landen direkt in UniFi Access.</p>
-                </div>
-                <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-                </button>
-              </header>
-              <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
-                <div class="field">
-                  <label class="field-label" for="cu-first">Vorname</label>
-                  <input class="input" id="cu-first" name="first_name" type="text" required maxlength="64"/>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="cu-last">Nachname</label>
-                  <input class="input" id="cu-last" name="last_name" type="text" required maxlength="64"/>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="cu-email">E-Mail</label>
-                  <input class="input" id="cu-email" name="email" type="email" maxlength="128"/>
-                </div>
-                <div class="field">
-                  <label class="field-label" for="cu-emp">Personal-Nr. (optional)</label>
-                  <input class="input" id="cu-emp" name="employee_number" type="text" maxlength="32"/>
-                </div>
-              </div>
-              <footer class="modal-footer">
-                <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
-                <button class="btn btn-primary" type="submit">Anlegen</button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      {{end}}
-    </section>
+          <footer class="modal-footer">
+            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
+            <button class="btn btn-primary" type="submit" {{if not .Page.UACandidates}}disabled{{end}}>Verknuepfen</button>
+          </footer>
+        </form>
+      </div>
+    </div>
     {{end}}
   </main>
 
@@ -321,7 +232,18 @@
           e.preventDefault();
           var key = opener.getAttribute('data-open-modal');
           var m = document.querySelector('[data-modal="' + key + '"]');
-          if (m) m.classList.add('is-open');
+          if (!m) return;
+          // Shared link modal: wire it to the clicked user's row.
+          if (key === 'link-ua') {
+            var uid = opener.getAttribute('data-user-id');
+            var form = m.querySelector('form');
+            if (form && uid) form.setAttribute('action', '/a/users/carvilon/' + uid + '/link');
+            var label = m.querySelector('[data-link-user]');
+            if (label) label.textContent = opener.getAttribute('data-user-name') || '';
+            var sel = m.querySelector('select[name="ua_user_id"]');
+            if (sel) sel.selectedIndex = 0;
+          }
+          m.classList.add('is-open');
           return;
         }
         if (e.target.closest('[data-action="close-modal"]')) {

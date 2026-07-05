@@ -628,15 +628,7 @@ func enableUA(t *testing.T, env *testEnv) {
 func TestNativeUsers_EmptyShowsCreateHint(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	resp, err := env.client.Get(env.ts.URL + "/a/users")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	body := readBody(t, resp)
-	if !strings.Contains(body, "CARVILON-Benutzer") {
-		t.Errorf("native section heading missing")
-	}
+	body := getBody(t, env, "/a/users")
 	if !strings.Contains(body, "Noch keine Benutzer angelegt") {
 		t.Errorf("native empty-state hint missing")
 	}
@@ -739,90 +731,123 @@ func TestNativeUsers_RequireAdminSession(t *testing.T) {
 	}
 }
 
-// --- UA toggle gating ---
+// --- UA as an optional per-user link (not a second list) ---
 
-func TestUsers_UAToggleHidesAndShowsSection(t *testing.T) {
+func TestUsers_UALinkCapabilityToggle(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	seedAccessUsers(env,
-		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
-	)
+	_, _ = env.nativeUsers.Create(context.Background(), access.CreateNativeUserParams{DisplayName: "Anna"})
 
-	// UA off by default (no token) -> no UA section, no UA user leaked.
+	// UA off: no link capability, nothing UA-related on the page.
 	off := getBody(t, env, "/a/users")
-	if strings.Contains(off, "UniFi-Access-Benutzer") {
-		t.Errorf("UA section rendered while UA disabled")
-	}
-	if strings.Contains(off, "Sascha Daemgen") {
-		t.Errorf("UA user leaked while UA disabled")
+	if strings.Contains(off, "UA-Profil") {
+		t.Errorf("UA-related markup present while UA disabled")
 	}
 
-	// UA on -> section + user appear.
-	enableUA(t, env)
-	on := getBody(t, env, "/a/users")
-	if !strings.Contains(on, "UniFi-Access-Benutzer") {
-		t.Errorf("UA section missing while UA enabled")
-	}
-	if !strings.Contains(on, "Sascha Daemgen") {
-		t.Errorf("UA user missing while UA enabled")
-	}
-}
-
-func TestUsers_UACreateBlockedWhenDisabled(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	form := url.Values{}
-	form.Set("first_name", "Otto")
-	form.Set("last_name", "Neumann")
-	// UA disabled -> 503, no proxy call.
-	post(t, env, "/a/users", form, http.StatusServiceUnavailable)
-	if len(env.userStore.users) != 0 {
-		t.Errorf("UA create ran while UA disabled")
-	}
-}
-
-func TestUAUsers_RendersTable(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	// UA on: a link action appears; UA profiles are offered only as a
+	// selection (never as a second list of users).
 	enableUA(t, env)
 	seedAccessUsers(env,
-		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen",
-			Email: "s@d.com", Status: access.StatusActive},
-		access.User{ID: "u2", FirstName: "Anna", LastName: "Mueller",
-			Email: "a@m.com", Status: access.StatusDeactivated},
+		access.User{ID: "ua-1", FirstName: "Karl", LastName: "UA", Status: access.StatusActive},
 	)
-	body := getBody(t, env, "/a/users")
-	for _, want := range []string{"Sascha Daemgen", "Anna Mueller", "Aktiv", "Inaktiv"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q", want)
-		}
+	on := getBody(t, env, "/a/users")
+	if !strings.Contains(on, "UA-Profil verknuepfen") {
+		t.Errorf("link action missing while UA enabled")
+	}
+	if !strings.Contains(on, "UA-Profil waehlen") {
+		t.Errorf("selection dialog placeholder missing")
+	}
+	if !strings.Contains(on, "Karl UA") {
+		t.Errorf("UA profile not offered as a selectable option")
 	}
 }
 
-func TestUAUsers_NotConfiguredShowsHint(t *testing.T) {
+func TestNativeUsers_LinkUnlinkUAProfile(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
 	enableUA(t, env)
-	env.userStore.configured = false
+	seedAccessUsers(env,
+		access.User{ID: "ua-1", FirstName: "Karl", LastName: "UA", Status: access.StatusActive},
+	)
+	u, _ := env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Anna"})
+
+	// Link.
+	lf := url.Values{}
+	lf.Set("ua_user_id", "ua-1")
+	post(t, env, "/a/users/carvilon/"+u.ID+"/link", lf, http.StatusSeeOther)
+	got, _ := env.nativeUsers.Get(ctx, u.ID)
+	if got.UAUserID != "ua-1" {
+		t.Fatalf("after link UAUserID = %q, want ua-1", got.UAUserID)
+	}
 	body := getBody(t, env, "/a/users")
-	if !strings.Contains(body, "noch nicht konfiguriert") {
-		t.Errorf("not-configured hint missing")
+	if !strings.Contains(body, "Karl UA") || !strings.Contains(body, "Loesen") {
+		t.Errorf("linked profile name / unlink action missing on page")
+	}
+
+	// Unlink.
+	post(t, env, "/a/users/carvilon/"+u.ID+"/unlink", url.Values{}, http.StatusSeeOther)
+	got, _ = env.nativeUsers.Get(ctx, u.ID)
+	if got.UAUserID != "" {
+		t.Errorf("after unlink UAUserID = %q, want empty", got.UAUserID)
 	}
 }
 
-func TestUAUsers_Pagination(t *testing.T) {
+func TestNativeUsers_LinkRejectsDoubleLink(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
 	enableUA(t, env)
-	for i := 0; i < 5; i++ {
-		env.userStore.users = append(env.userStore.users, access.User{
-			ID: "u" + string(rune('a'+i)), FirstName: "First", LastName: "Last" + string(rune('A'+i)),
-			Status: access.StatusActive,
-		})
+	seedAccessUsers(env,
+		access.User{ID: "ua-1", FirstName: "Karl", LastName: "UA", Status: access.StatusActive},
+	)
+	a, _ := env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Anna"})
+	b, _ := env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Bob"})
+
+	lf := url.Values{}
+	lf.Set("ua_user_id", "ua-1")
+	post(t, env, "/a/users/carvilon/"+a.ID+"/link", lf, http.StatusSeeOther)
+	// Same UA profile to a second user must be rejected.
+	post(t, env, "/a/users/carvilon/"+b.ID+"/link", lf, http.StatusConflict)
+	gotB, _ := env.nativeUsers.Get(ctx, b.ID)
+	if gotB.UAUserID != "" {
+		t.Errorf("B linked despite conflict: %q", gotB.UAUserID)
 	}
-	body := getBody(t, env, "/a/users?page=2&size=2")
-	if !strings.Contains(body, "Seite 2 von 3") {
-		t.Errorf("expected 'Seite 2 von 3' in body")
+}
+
+func TestNativeUsers_LinkBlockedWhenUAOff(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	u, _ := env.nativeUsers.Create(context.Background(), access.CreateNativeUserParams{DisplayName: "Anna"})
+	lf := url.Values{}
+	lf.Set("ua_user_id", "ua-1")
+	// UA disabled -> no linking.
+	post(t, env, "/a/users/carvilon/"+u.ID+"/link", lf, http.StatusServiceUnavailable)
+	got, _ := env.nativeUsers.Get(context.Background(), u.ID)
+	if got.UAUserID != "" {
+		t.Errorf("link succeeded while UA disabled: %q", got.UAUserID)
+	}
+}
+
+func TestUsers_LinkCandidateExcludesAlreadyLinked(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
+	enableUA(t, env)
+	seedAccessUsers(env,
+		access.User{ID: "ua-1", FirstName: "Karl", LastName: "UA", Status: access.StatusActive},
+		access.User{ID: "ua-2", FirstName: "Lena", LastName: "UA", Status: access.StatusActive},
+	)
+	a, _ := env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Anna"})
+	if err := env.nativeUsers.SetUALink(ctx, a.ID, "ua-1"); err != nil {
+		t.Fatalf("SetUALink: %v", err)
+	}
+	_, _ = env.nativeUsers.Create(ctx, access.CreateNativeUserParams{DisplayName: "Bob"})
+
+	body := getBody(t, env, "/a/users")
+	// ua-1 is taken -> the option is annotated as already linked to Anna.
+	if !strings.Contains(body, "bereits verknuepft mit Anna") {
+		t.Errorf("already-linked candidate not annotated")
 	}
 }
 
@@ -856,41 +881,6 @@ func TestUAUsers_JSON_ReturnsValidJSON(t *testing.T) {
 	}
 	if payload.Total != 1 || len(payload.Users) != 1 || payload.Users[0].ID != "u1" {
 		t.Errorf("payload wrong: %+v", payload)
-	}
-}
-
-func TestUAUsers_CreateStoresAndRedirects(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	enableUA(t, env)
-	form := url.Values{}
-	form.Set("first_name", "Otto")
-	form.Set("last_name", "Neumann")
-	form.Set("email", "otto@n.com")
-	post(t, env, "/a/users", form, http.StatusSeeOther)
-	if len(env.userStore.users) != 1 {
-		t.Fatalf("userStore has %d users, want 1", len(env.userStore.users))
-	}
-	got := env.userStore.users[0]
-	if got.FirstName != "Otto" || got.LastName != "Neumann" || got.Email != "otto@n.com" {
-		t.Errorf("created user wrong: %+v", got)
-	}
-}
-
-func TestUAUsers_ActivateDeactivate(t *testing.T) {
-	env := newTestServer(t)
-	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	enableUA(t, env)
-	seedAccessUsers(env,
-		access.User{ID: "u1", FirstName: "Sascha", LastName: "Daemgen", Status: access.StatusActive},
-	)
-	post(t, env, "/a/users/u1/deactivate", url.Values{}, http.StatusSeeOther)
-	if env.userStore.users[0].Status != access.StatusDeactivated {
-		t.Errorf("after deactivate status = %q", env.userStore.users[0].Status)
-	}
-	post(t, env, "/a/users/u1/activate", url.Values{}, http.StatusSeeOther)
-	if env.userStore.users[0].Status != access.StatusActive {
-		t.Errorf("after activate status = %q", env.userStore.users[0].Status)
 	}
 }
 

@@ -94,6 +94,60 @@ func (s *Server) handleAdminNativeUserDelete(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/a/users", http.StatusSeeOther)
 }
 
+// handleAdminNativeUserLink handles POST /a/users/carvilon/{id}/link -
+// heftet ein UA-Profil (ua_user_id) an den CARVILON-Benutzer. Das
+// UA-Profil ist kein eigener Nutzer, nur diese Verknuepfung. Erfordert
+// aktives + erreichbares UA (sonst gibt es keine Profile zum Waehlen).
+func (s *Server) handleAdminNativeUserLink(w http.ResponseWriter, r *http.Request) {
+	if s.nativeUsers == nil {
+		http.Error(w, "Benutzerverwaltung nicht verfuegbar.", http.StatusServiceUnavailable)
+		return
+	}
+	if !s.uaAvailable(r.Context()) {
+		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "ungueltige Formular-Daten.", http.StatusBadRequest)
+		return
+	}
+	uaUserID := strings.TrimSpace(r.PostForm.Get("ua_user_id"))
+	if uaUserID == "" {
+		http.Error(w, "Kein UA-Profil gewaehlt.", http.StatusBadRequest)
+		return
+	}
+	switch err := s.nativeUsers.SetUALink(r.Context(), id, uaUserID); {
+	case errors.Is(err, access.ErrUALinkTaken):
+		http.Error(w, "Dieses UA-Profil ist bereits mit einem anderen Benutzer verknuepft.", http.StatusConflict)
+		return
+	case errors.Is(err, access.ErrNotFound):
+		http.Error(w, "Benutzer wurde nicht gefunden.", http.StatusNotFound)
+		return
+	case err != nil:
+		s.log.Warn("native user link failed", "err", err)
+		http.Error(w, "Verknuepfung fehlgeschlagen.", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/a/users", http.StatusSeeOther)
+}
+
+// handleAdminNativeUserUnlink handles POST /a/users/carvilon/{id}/unlink -
+// loest die UA-Verknuepfung (ua_user_id -> NULL). Braucht kein aktives
+// UA (eine stale Verknuepfung soll sich immer entfernen lassen).
+func (s *Server) handleAdminNativeUserUnlink(w http.ResponseWriter, r *http.Request) {
+	if s.nativeUsers == nil {
+		http.Error(w, "Benutzerverwaltung nicht verfuegbar.", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.nativeUsers.SetUALink(r.Context(), id, ""); err != nil {
+		s.handleNativeUserError(w, "unlink", err)
+		return
+	}
+	http.Redirect(w, r, "/a/users", http.StatusSeeOther)
+}
+
 // handleNativeUserError maps a store error to an HTTP response. A
 // missing row is a 404 (the user was likely removed concurrently);
 // everything else is a 500 with a logged cause.

@@ -18,32 +18,27 @@ const (
 	usersMaxPageSize     = 100
 )
 
-// adminUsersData is the payload for templates/admin/users.html - the
-// unified Benutzer page. CARVILONs own users (Native*) are always
-// shown with full management; the UA section (UA*) only renders when
-// UA is enabled.
+// adminUsersData is the payload for templates/admin/users.html.
+//
+// CARVILON ist die Master-Datenbank: es gibt genau EINE Benutzerliste
+// (NativeUsers). Ein UA-Profil ist kein eigener Eintrag, sondern nur
+// eine optionale Verknuepfung (ua_user_id) an einem CARVILON-Benutzer.
+// Wenn UA aktiv + erreichbar ist, wird pro Benutzer eine Verknuepfen-/
+// Loesen-Aktion angeboten; die UA-Profile erscheinen NUR im
+// Verknuepfen-Dialog als Auswahl (UACandidates), nie als Liste.
 type adminUsersData struct {
 	User adminUser
 
-	// Native CARVILON users (access/carvilon, migration 034). Always
-	// present; this is the canonical user source.
+	// Die einzige Benutzerliste (access/carvilon, Migration 034).
 	NativeUsers []nativeUserRow
 	NativeTotal int
 	NativeQuery string
 
-	// UA section. UAEnabled is the effective "UA aktiv" toggle;
-	// UAConfigured additionally requires a stored token/base URL.
-	UAEnabled    bool
-	UAConfigured bool
-	Users        []userRow
-	Total        int
-	Page         int
-	PageSize     int
-	PageCount    int
-	Prev         int
-	Next         int
-	Query        string
-	StatusFilter string
+	// UA nur als Verknuepfungs-Bruecke:
+	UAEnabled    bool          // "UA aktiv"-Schalter an
+	UAConfigured bool          // zusaetzlich Backend erreichbar (Token/URL)
+	UAError      string        // gesetzt, wenn UA an+konfiguriert, aber der Profil-Abruf scheiterte
+	UACandidates []uaCandidate // UA-Profile fuer den (geteilten) Verknuepfen-Dialog
 
 	Flash     string
 	FlashType string
@@ -56,7 +51,19 @@ type nativeUserRow struct {
 	Initials    string
 	Active      bool
 	StatusLabel string // "Aktiv" | "Inaktiv"
-	UALinked    bool   // has an optional UA link (info only for now)
+	// Optionale UA-Verknuepfung (nur ein Attribut, kein eigener Nutzer):
+	UALinked     bool   // hat eine UA-Kopplung
+	LinkedUAID   string // die ua_user_id (opak)
+	LinkedUAName string // aufgeloester UA-Profil-Anzeigename (oder Fallback)
+}
+
+// uaCandidate ist ein UA-Profil, das im Verknuepfen-Dialog zur Auswahl
+// steht. LinkedToName ist der CARVILON-Benutzer, an dem das Profil schon
+// haengt (leer = frei, sonst wird die Option gesperrt).
+type uaCandidate struct {
+	ID           string
+	Name         string
+	LinkedToName string
 }
 
 type userRow struct {
@@ -88,19 +95,19 @@ type linkedViewerRow struct {
 	Online bool
 }
 
-// handleAdminUsersList renders the unified /a/users page: CARVILONs
-// own users (always, full management) plus - only when UA is enabled -
-// the UA proxy list as a clearly separated section.
+// handleAdminUsersList renders /a/users: the single CARVILON user list.
+// When UA is enabled and reachable, each user gets a "UA-Profil
+// verknuepfen"/"Loesen" action and the UA profiles are offered as a
+// selection (never as a second list).
 func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := adminUsersData{
-		User:     adminUser{Name: username, Initials: initialsOf(username)},
-		Page:     1,
-		PageSize: usersDefaultPageSize,
+		User:        adminUser{Name: username, Initials: initialsOf(username)},
+		NativeQuery: strings.TrimSpace(r.URL.Query().Get("nq")),
 	}
 
-	// --- Native CARVILON users (always) ---
-	data.NativeQuery = strings.TrimSpace(r.URL.Query().Get("nq"))
+	// The (optionally filtered) list to display.
+	var displayList []access.NativeUser
 	if s.nativeUsers != nil {
 		list, err := s.nativeUsers.List(r.Context(), access.NativeListParams{Query: data.NativeQuery})
 		if err != nil {
@@ -108,45 +115,83 @@ func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 			data.Flash = "Eigene Benutzer konnten nicht geladen werden."
 			data.FlashType = "red"
 		} else {
-			for _, u := range list {
-				data.NativeUsers = append(data.NativeUsers, toNativeUserRow(u))
-			}
+			displayList = list
 			data.NativeTotal = len(list)
 		}
 	}
 
-	// --- UA users (only when UA is enabled) ---
-	data.UAEnabled = s.uaEnabled(r.Context())
-	if data.UAEnabled {
-		data.UAConfigured = s.userStore != nil && s.userStore.IsConfigured()
-		if data.UAConfigured {
-			params := parseListParams(r)
-			data.Page = params.Page
-			data.PageSize = params.Size
-			data.Query = params.Query
-			data.StatusFilter = string(params.StatusFilter)
+	// linkOwner maps ua_user_id -> owning CARVILON display name, built
+	// from the FULL set (unfiltered) so the candidate dialog knows every
+	// existing link even under an active search filter.
+	linkOwner := map[string]string{}
+	fullList := displayList
+	if s.nativeUsers != nil && data.NativeQuery != "" {
+		if all, err := s.nativeUsers.List(r.Context(), access.NativeListParams{}); err == nil {
+			fullList = all
+		}
+	}
+	for _, u := range fullList {
+		if u.UAUserID != "" {
+			linkOwner[u.UAUserID] = u.DisplayName
+		}
+	}
 
-			res, err := s.userStore.List(r.Context(), params)
-			if err != nil {
-				s.log.Warn("users list failed", "err", err)
-				data.Flash = friendlyAccessError(err)
-				data.FlashType = "red"
-			} else {
-				data.Total = res.Total
-				data.PageCount = pageCount(res.Total, params.Size)
-				if params.Page > 1 {
-					data.Prev = params.Page - 1
-				}
-				if params.Page < data.PageCount {
-					data.Next = params.Page + 1
-				}
-				for _, u := range res.Users {
-					data.Users = append(data.Users, toUserRow(u))
-				}
+	// UA is a bridge only: resolve profile names + build the candidate
+	// list for the link dialog. Nothing UA-related when the toggle is off.
+	data.UAEnabled = s.uaEnabled(r.Context())
+	uaNames := map[string]string{}
+	if data.UAEnabled && s.userStore != nil && s.userStore.IsConfigured() {
+		data.UAConfigured = true
+		profiles, err := s.listAllUAProfiles(r.Context())
+		if err != nil {
+			s.log.Warn("ua profiles fetch failed", "err", err)
+			data.UAError = friendlyAccessError(err)
+		} else {
+			for _, p := range profiles {
+				name := p.DisplayName()
+				uaNames[p.ID] = name
+				data.UACandidates = append(data.UACandidates, uaCandidate{
+					ID: p.ID, Name: name, LinkedToName: linkOwner[p.ID],
+				})
 			}
 		}
 	}
+
+	for _, u := range displayList {
+		row := toNativeUserRow(u)
+		if u.UAUserID != "" {
+			switch {
+			case uaNames[u.UAUserID] != "":
+				row.LinkedUAName = uaNames[u.UAUserID]
+			case data.UAConfigured && data.UAError == "":
+				// UA reachable but this id has no profile -> dangling link.
+				row.LinkedUAName = "UA-Profil " + u.UAUserID + " (nicht gefunden)"
+			default:
+				// UA off or unreachable: show the raw id, don't guess a name.
+				row.LinkedUAName = "UA-Profil " + u.UAUserID
+			}
+		}
+		data.NativeUsers = append(data.NativeUsers, row)
+	}
 	s.renderAdminPage(w, "users", data)
+}
+
+// listAllUAProfiles pulls the full UA user list (paging through the
+// store's 100-cap) for the link dialog + name resolution. Realistic
+// staff counts are small; the guard bounds a pathological case.
+func (s *Server) listAllUAProfiles(ctx context.Context) ([]access.User, error) {
+	var all []access.User
+	for page := 1; page <= 1000; page++ {
+		res, err := s.userStore.List(ctx, access.ListParams{Page: page, Size: usersMaxPageSize})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, res.Users...)
+		if len(res.Users) == 0 || len(all) >= res.Total {
+			break
+		}
+	}
+	return all, nil
 }
 
 // uaEnabled resolves the effective "UA aktiv" toggle for the Benutzer
@@ -188,6 +233,8 @@ func toNativeUserRow(u access.NativeUser) nativeUserRow {
 		Active:      u.Active,
 		StatusLabel: label,
 		UALinked:    u.UAUserID != "",
+		LinkedUAID:  u.UAUserID,
+		// LinkedUAName wird im Handler aufgeloest (braucht die UA-Namen).
 	}
 }
 
@@ -253,112 +300,12 @@ func (s *Server) handleAdminUsersDetail(w http.ResponseWriter, r *http.Request) 
 	s.renderAdminPage(w, "user-detail", data)
 }
 
-// handleAdminUsersCreate handles POST /a/users (create via the
-// modal form or a direct POST).
-func (s *Server) handleAdminUsersCreate(w http.ResponseWriter, r *http.Request) {
-	if !s.uaAvailable(r.Context()) {
-		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "ungueltige Formular-Daten.", http.StatusBadRequest)
-		return
-	}
-	params := access.CreateUserParams{
-		FirstName:      strings.TrimSpace(r.PostForm.Get("first_name")),
-		LastName:       strings.TrimSpace(r.PostForm.Get("last_name")),
-		Email:          strings.TrimSpace(r.PostForm.Get("email")),
-		EmployeeNumber: strings.TrimSpace(r.PostForm.Get("employee_number")),
-	}
-	if params.FirstName == "" && params.LastName == "" {
-		http.Error(w, "Vor- oder Nachname ist Pflicht.", http.StatusBadRequest)
-		return
-	}
-	created, err := s.userStore.Create(r.Context(), params)
-	if err != nil {
-		s.log.Warn("user create failed", "err", err)
-		http.Error(w, friendlyAccessError(err), accessErrorStatus(err))
-		return
-	}
-	if wantsJSON(r) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(toUserRow(created))
-		return
-	}
-	http.Redirect(w, r, "/a/users/"+created.ID, http.StatusSeeOther)
-}
-
-// handleAdminUsersUpdate handles POST /a/users/{id}/update.
-func (s *Server) handleAdminUsersUpdate(w http.ResponseWriter, r *http.Request) {
-	if !s.uaAvailable(r.Context()) {
-		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
-		return
-	}
-	id := r.PathValue("id")
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "ungueltige Formular-Daten.", http.StatusBadRequest)
-		return
-	}
-	_, err := s.userStore.Update(r.Context(), id, access.UpdateUserParams{
-		FirstName:      strings.TrimSpace(r.PostForm.Get("first_name")),
-		LastName:       strings.TrimSpace(r.PostForm.Get("last_name")),
-		Email:          strings.TrimSpace(r.PostForm.Get("email")),
-		EmployeeNumber: strings.TrimSpace(r.PostForm.Get("employee_number")),
-	})
-	if err != nil {
-		s.log.Warn("user update failed", "err", err)
-		http.Error(w, friendlyAccessError(err), accessErrorStatus(err))
-		return
-	}
-	http.Redirect(w, r, "/a/users/"+id, http.StatusSeeOther)
-}
-
-// handleAdminUsersActivate / Deactivate set the user status.
-func (s *Server) handleAdminUsersActivate(w http.ResponseWriter, r *http.Request) {
-	s.setUserStatus(w, r, access.StatusActive)
-}
-
-func (s *Server) handleAdminUsersDeactivate(w http.ResponseWriter, r *http.Request) {
-	s.setUserStatus(w, r, access.StatusDeactivated)
-}
-
-func (s *Server) setUserStatus(w http.ResponseWriter, r *http.Request, status access.Status) {
-	if !s.uaAvailable(r.Context()) {
-		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
-		return
-	}
-	id := r.PathValue("id")
-	if err := s.userStore.SetStatus(r.Context(), id, status); err != nil {
-		s.log.Warn("user status failed", "err", err, "status", status)
-		http.Error(w, friendlyAccessError(err), accessErrorStatus(err))
-		return
-	}
-	target := "/a/users/" + id
-	if r.Referer() != "" && strings.HasSuffix(r.Referer(), "/a/users") {
-		target = "/a/users"
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
-}
-
-// handleAdminUsersDelete deletes a user in UA.
-func (s *Server) handleAdminUsersDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.uaAvailable(r.Context()) {
-		http.Error(w, "UA ist deaktiviert oder nicht konfiguriert.", http.StatusServiceUnavailable)
-		return
-	}
-	id := r.PathValue("id")
-	if err := s.userStore.Delete(r.Context(), id); err != nil {
-		s.log.Warn("user delete failed", "err", err)
-		http.Error(w, friendlyAccessError(err), accessErrorStatus(err))
-		return
-	}
-	if r.Method == http.MethodDelete || wantsJSON(r) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]any{"deleted": id})
-		return
-	}
-	http.Redirect(w, r, "/a/users", http.StatusSeeOther)
-}
+// Hinweis: UA-Profile werden NICHT mehr ueber uns angelegt/bearbeitet/
+// geloescht (Korrektur-Modell: UA ist kein eigener Benutzer-Bestand,
+// nur eine Verknuepfung). Die frueheren UA-CRUD-Handler sind entfallen;
+// geblieben sind der read-only Profil-Blick (handleAdminUsersDetail,
+// verlinkt aus den Viewer-Seiten) und die Profil-Liste als JSON fuer
+// den Viewer-Verknuepfungs-Dialog (handleAdminUsersListJSON).
 
 // --- helpers ---
 

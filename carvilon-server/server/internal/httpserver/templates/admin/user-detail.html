@@ -52,18 +52,6 @@
         </div>
         <div class="page-actions">
           <a class="btn btn-secondary" href="/a/users">Zurueck</a>
-          {{if eq .Page.Profile.Status "active"}}
-            <form method="post" action="/a/users/{{.Page.Profile.ID}}/deactivate" style="display:inline; margin:0;">
-              <button class="btn btn-secondary" type="submit">Deaktivieren</button>
-            </form>
-          {{else}}
-            <form method="post" action="/a/users/{{.Page.Profile.ID}}/activate" style="display:inline; margin:0;">
-              <button class="btn btn-secondary" type="submit">Aktivieren</button>
-            </form>
-          {{end}}
-          <form method="post" action="/a/users/{{.Page.Profile.ID}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Benutzer endgueltig in UniFi Access loeschen?');">
-            <button class="btn btn-secondary" type="submit">Loeschen</button>
-          </form>
         </div>
       </header>
 
@@ -71,32 +59,26 @@
         <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
       {{end}}
 
+      <div class="banner" role="status" style="margin-bottom: var(--space-4); background: var(--color-surface-1); box-shadow: inset 0 0 0 1px var(--color-hairline-strong); color: var(--color-text-secondary);">
+        Read-only Blick auf ein UniFi-Access-Profil. UA-Profile werden nicht ueber CARVILON bearbeitet; die Verwaltung der Benutzer laeuft ueber die <a href="/a/users">CARVILON-Benutzer</a>.
+      </div>
+
       <section class="set-section">
-        <div class="set-section-title">Stammdaten</div>
-        <form class="set-card" method="post" action="/a/users/{{.Page.Profile.ID}}/update">
+        <div class="set-section-title">Stammdaten (UA)</div>
+        <div class="set-card">
           <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Vorname</span>
-            </div>
-            <input class="input" name="first_name" type="text" value="{{.Page.Profile.DisplayName}}" style="max-width:320px;" placeholder="Vorname"/>
+            <div class="set-row-main"><span class="set-row-label">Name</span></div>
+            <span>{{.Page.Profile.DisplayName}}</span>
           </div>
           <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Email</span>
-            </div>
-            <input class="input" name="email" type="email" value="{{.Page.Profile.Email}}" style="max-width:320px;"/>
+            <div class="set-row-main"><span class="set-row-label">Email</span></div>
+            <span>{{if .Page.Profile.Email}}{{.Page.Profile.Email}}{{else}}<span style="color:var(--color-text-tertiary);">&mdash;</span>{{end}}</span>
           </div>
           <div class="set-row">
-            <div class="set-row-main">
-              <span class="set-row-label">Personal-Nr.</span>
-            </div>
-            <input class="input" name="employee_number" type="text" value="{{.Page.Profile.EmployeeNumber}}" style="max-width:320px;"/>
+            <div class="set-row-main"><span class="set-row-label">Personal-Nr.</span></div>
+            <span>{{if .Page.Profile.EmployeeNumber}}{{.Page.Profile.EmployeeNumber}}{{else}}<span style="color:var(--color-text-tertiary);">&mdash;</span>{{end}}</span>
           </div>
-          <div class="set-row">
-            <div class="set-row-main"></div>
-            <button class="btn btn-primary" type="submit">Speichern</button>
-          </div>
-        </form>
+        </div>
       </section>
 
       <section class="set-section" style="margin-top:var(--space-6);">
