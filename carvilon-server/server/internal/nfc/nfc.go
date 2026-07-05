@@ -149,9 +149,7 @@ var (
 	mu       sync.Mutex
 	status   Status
 	detected []detectedReader
-	// inUse enforces reader exclusivity across runs (see claim).
-	inUse  = map[string]bool{}
-	logger = slog.Default()
+	logger   = slog.Default()
 	// probeFn is the platform probe (set in the build-tagged files);
 	// tests override it to drive detection without hardware.
 	probeFn = platformProbe
@@ -190,7 +188,7 @@ func notifyTag(readerID, uid string) {
 }
 
 // Probe detects PN532 readers on the I2C buses once at startup and
-// caches the result for Enabled / Readers / NewDriver. It logs the
+// caches the result for Enabled / Readers / NewMonitor. It logs the
 // outcome - silent when there is no I2C bus at all, one Info line per
 // bus whose probe failed, a clear actionable line on EACCES - and never
 // blocks or panics. Call it once at startup. The logger is cached
@@ -245,27 +243,6 @@ func Readers() []ReaderInfo {
 		out = append(out, r.info)
 	}
 	return out
-}
-
-// claim reserves a reader for one run. Unlike GPIO lines (the kernel
-// enforces line-request exclusivity), /dev/i2c-* has no userspace
-// exclusivity - two pollers on one bus would interleave transactions
-// and silently corrupt each other's frames - so the package enforces
-// it: a second run binding the same reader fails loudly at bind time.
-func claim(id string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	if inUse[id] {
-		return fmt.Errorf("nfc: reader %s is already in use by another run", id)
-	}
-	inUse[id] = true
-	return nil
-}
-
-func release(id string) {
-	mu.Lock()
-	defer mu.Unlock()
-	delete(inUse, id)
 }
 
 // currentLogger returns the logger Probe cached (the server logger from
@@ -347,14 +324,18 @@ func (s *tagState) drop() []tagEvent {
 	return []tagEvent{{chanPresent, engine.BoolVal(false)}}
 }
 
-// Driver is a live NFC source driver: one poll goroutine per bound
-// reader feeds debounced tag events into the engine via the subscribe
-// callbacks (-> EnqueueInput, values land at the next tick - the same
-// determinism seam as gpio edges and sys polls). One instance per run;
-// Close stops the pollers and releases the readers.
-type Driver struct {
+// Monitor owns one persistent poll goroutine per detected reader, from
+// startup until shutdown, INDEPENDENT of engine runs. Each poller feeds
+// the tag observer (the reader registry) on every tag presentation and,
+// while a run is bound to that reader, the run's engine callbacks too
+// (-> EnqueueInput, values land at the next tick - the same determinism
+// seam as gpio edges and sys polls). One poll goroutine per reader: no
+// double poll on a bus. The reader is infrastructure - it reads whether
+// or not a graph runs. Runs attach/detach through a RunBinding; they
+// never open a device or start a poller.
+type Monitor struct {
 	mu       sync.Mutex
-	readers  map[string]*runReader
+	readers  map[string]*monReader
 	chans    []engine.Channel
 	interval time.Duration
 	done     chan struct{}
@@ -363,141 +344,193 @@ type Driver struct {
 	log      *slog.Logger
 }
 
-// runReader is one reader's run-scoped state. The device is opened (and
-// the reader claimed) lazily on the first Subscribe that touches it, so
-// a run binding only reader A never claims reader B. The debounce state
-// and error counters are owned by the reader's poll goroutine. fresh
-// marks channels subscribed AFTER the poller started: the state machine
-// may already have latched their edges (a tag resting on the module
-// since before the bind), so the next poll round replays the current
-// levels to them once.
-type runReader struct {
-	info    ReaderInfo
-	open    func() (tagReader, error)
-	dev     tagReader
-	claimed bool
-	started bool
-	subs    map[string]func(engine.Value)
-	fresh   map[string]bool
-	state   tagState
-	errs    int
-	warned  bool
+// monReader is one reader's persistent state. The device is opened at
+// Start and polled until Close. owner is the run currently bound to the
+// reader's engine channels (nil = only the registry is fed); subs holds
+// that owner's per-channel engine callbacks. fresh marks channels bound
+// after the poller latched a resting tag, so the next round replays the
+// current levels to them once (every bind is "late" now - the poller is
+// always live).
+//
+// Concurrency: owner/subs/fresh are guarded by Monitor.mu. The debounce
+// fields (state/errs/warned) are read and written ONLY by this reader's
+// single poll goroutine (step), so they need no lock; a second toucher
+// would be an unguarded race.
+type monReader struct {
+	info   ReaderInfo
+	dev    tagReader
+	owner  *RunBinding
+	subs   map[string]func(engine.Value)
+	fresh  map[string]bool
+	state  tagState
+	errs   int
+	warned bool
 }
 
-// NewDriver builds a fresh NFC driver from the probed readers, for one
-// run. It opens nothing yet - devices are claimed and opened on the
-// first Subscribe. The caller registers it under engine.PrefixNFC and
-// Close()s it on teardown. Errors on a host with no readers (where
-// Enabled() is false and this is never reached).
-func NewDriver() (*Driver, error) {
+// NewMonitor builds the reader monitor from the probed readers, opens
+// each device and launches its persistent poll goroutine. It returns
+// nil when there are no readers. The caller Close()s it on shutdown; it
+// lives for the whole process, feeding the registry regardless of runs.
+func NewMonitor(log *slog.Logger) *Monitor {
 	mu.Lock()
 	defs := append([]detectedReader(nil), detected...)
-	log := logger
 	mu.Unlock()
 	if len(defs) == 0 {
-		return nil, errors.New("nfc: no readers available")
+		return nil
 	}
-	d := &Driver{
-		readers:  map[string]*runReader{},
+	m := newMonitor(defs, log)
+	m.start(defs)
+	return m
+}
+
+// newMonitor builds the monitor struct (channels + reader map) without
+// opening any device - the seam tests drive step() through.
+func newMonitor(defs []detectedReader, log *slog.Logger) *Monitor {
+	if log == nil {
+		log = slog.Default()
+	}
+	m := &Monitor{
+		readers:  map[string]*monReader{},
 		interval: pollInterval,
 		done:     make(chan struct{}),
 		log:      log,
 	}
 	for _, def := range defs {
-		d.readers[def.info.ID] = &runReader{
+		m.readers[def.info.ID] = &monReader{
 			info: def.info,
-			open: def.open,
 			subs: map[string]func(engine.Value){},
 		}
-		d.chans = append(d.chans,
+		m.chans = append(m.chans,
 			engine.Channel{Address: uidAddr(def.info.ID), Label: def.info.Model + " " + def.info.ID + " UID", Kind: engine.Text},
 			engine.Channel{Address: presentAddr(def.info.ID), Label: def.info.Model + " " + def.info.ID + " Tag da", Kind: engine.Bool},
 		)
 	}
-	return d, nil
+	return m
+}
+
+// start opens each reader and launches its poller. A reader that fails
+// to open is logged and skipped - the others still run and feed the
+// registry.
+func (m *Monitor) start(defs []detectedReader) {
+	for _, def := range defs {
+		r := m.readers[def.info.ID]
+		dev, err := def.open()
+		if err != nil {
+			m.log.Warn("nfc reader open failed; skipping", "reader", def.info.ID, "err", err)
+			continue
+		}
+		r.dev = dev
+		m.wg.Add(1)
+		go m.poll(r)
+	}
 }
 
 // Channels lists each reader's UID (Text) and present (Bool) channels.
-func (d *Driver) Channels() []engine.Channel { return d.chans }
+func (m *Monitor) Channels() []engine.Channel { return m.chans }
 
-// Subscribe binds an engine callback to a reader channel. The first
-// subscription touching a reader claims it (loud error when another run
-// holds it), opens and configures the device, and starts its poll
-// goroutine; a reader's uid and present channels share both. The
-// channels start at their kind's zero values (no tag); the first poll
-// round runs immediately, and a channel subscribed after the poller
-// already latched a resting tag gets the current levels replayed on the
-// next round - so a tag on the module at run start shows on every bound
-// channel within a poll round.
-func (d *Driver) Subscribe(addr string, cb func(engine.Value)) error {
+// RunBinding is a run's engine.Source view over the Monitor: it attaches
+// the engine's callbacks to the already-running pollers and detaches
+// them on Close. It never opens a device or starts a poller - the reader
+// polls continuously regardless.
+type RunBinding struct {
+	m     *Monitor
+	bound map[string]bool // reader ids this binding owns
+}
+
+// NewRunBinding returns a binding over the monitor for one engine run.
+func (m *Monitor) NewRunBinding() *RunBinding {
+	return &RunBinding{m: m, bound: map[string]bool{}}
+}
+
+// Channels lists the monitor's reader channels.
+func (b *RunBinding) Channels() []engine.Channel { return b.m.chans }
+
+// Subscribe attaches an engine callback to a reader channel. The first
+// channel of a reader claims it for this run (loud error when another
+// run already owns it); a reader's uid and present channels share the
+// binding. The channel's current level is replayed on the next poll
+// round (the poller is always live), so a tag resting on the module at
+// run start shows on every bound channel within a round.
+func (b *RunBinding) Subscribe(addr string, cb func(engine.Value)) error {
 	id, ch, ok := splitAddr(addr)
 	if !ok || (ch != chanUID && ch != chanPresent) {
 		return fmt.Errorf("nfc: unknown channel %q", addr)
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed {
-		return errors.New("nfc: driver is closed")
+	m := b.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return errors.New("nfc: monitor is closed")
 	}
-	r := d.readers[id]
+	r := m.readers[id]
 	if r == nil {
 		return fmt.Errorf("nfc: unknown reader %q", id)
 	}
+	if r.owner != nil && r.owner != b {
+		return fmt.Errorf("nfc: reader %s is already in use by another run", id)
+	}
+	r.owner = b
+	b.bound[id] = true
 	r.subs[ch] = cb
-	if r.started {
-		// The poll goroutine is live: any edge for this channel may
-		// already be latched in the state machine and would never
-		// re-fire. Have the next round replay the current levels.
-		if r.fresh == nil {
-			r.fresh = map[string]bool{}
+	if r.fresh == nil {
+		r.fresh = map[string]bool{}
+	}
+	r.fresh[ch] = true
+	return nil
+}
+
+// Close detaches this run's callbacks and releases the readers it owned;
+// the pollers keep running (they feed the registry regardless). A poll
+// round that snapshotted this binding's callbacks just before Close may
+// still deliver one more value into the run's engine afterwards - that
+// is harmless: the run's cleanup runs after its final tick, and
+// EnqueueInput on a no-longer-ticking engine only appends to a queue
+// that is never drained (no panic, no cross-run leak - the callback
+// closes over this run's engine, not the next run's).
+func (b *RunBinding) Close() error {
+	m := b.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id := range b.bound {
+		r := m.readers[id]
+		if r != nil && r.owner == b {
+			r.owner = nil
+			r.subs = map[string]func(engine.Value){}
+			r.fresh = nil
 		}
-		r.fresh[ch] = true
-		return nil
 	}
-	if err := claim(id); err != nil {
-		return err
-	}
-	dev, err := r.open()
-	if err != nil {
-		release(id)
-		return fmt.Errorf("open reader %s: %w", id, err)
-	}
-	r.claimed = true
-	r.dev = dev
-	r.started = true
-	d.wg.Add(1)
-	go d.poll(r)
+	b.bound = map[string]bool{}
 	return nil
 }
 
 // poll drives one reader until Close. The first poll is immediate so a
 // resting tag shows within a frame, not after the first interval.
-func (d *Driver) poll(r *runReader) {
-	defer d.wg.Done()
-	d.step(r)
-	t := time.NewTicker(d.interval)
+func (m *Monitor) poll(r *monReader) {
+	defer m.wg.Done()
+	m.step(r)
+	t := time.NewTicker(m.interval)
 	defer t.Stop()
 	for {
 		select {
-		case <-d.done:
+		case <-m.done:
 			return
 		case <-t.C:
-			d.step(r)
+			m.step(r)
 		}
 	}
 }
 
 // step performs one poll round: read the device, advance the debounce
-// state machine, deliver the resulting events. The subscription map is
-// snapshotted under d.mu; the device I/O and the callbacks run OUTSIDE
-// the lock, so cb -> EnqueueInput (which takes the engine lock) never
-// nests under d.mu and Close never waits on a bus transaction it also
-// holds the lock for. A transient poll error keeps the state (an RF
-// hiccup is not a removal); errThreshold consecutive errors drop the
-// present level and warn once, so a dead reader cannot hold downstream
-// logic active forever.
-func (d *Driver) step(r *runReader) {
-	d.mu.Lock()
+// state machine, feed the registry, and deliver events to the bound
+// run's engine callbacks. The subscription map is snapshotted under
+// m.mu; the device I/O and the callbacks run OUTSIDE the lock, so cb ->
+// EnqueueInput (which takes the engine lock) never nests under m.mu and
+// Close never waits on a bus transaction it also holds the lock for. A
+// transient poll error keeps the state (an RF hiccup is not a removal);
+// errThreshold consecutive errors drop the present level and warn once,
+// so a dead reader cannot hold downstream logic active forever.
+func (m *Monitor) step(r *monReader) {
+	m.mu.Lock()
 	subs := make(map[string]func(engine.Value), len(r.subs))
 	for ch, cb := range r.subs {
 		subs[ch] = cb
@@ -507,7 +540,7 @@ func (d *Driver) step(r *runReader) {
 		fresh[ch] = true
 	}
 	dev := r.dev
-	d.mu.Unlock()
+	m.mu.Unlock()
 	if dev == nil {
 		return
 	}
@@ -527,7 +560,7 @@ func (d *Driver) step(r *runReader) {
 		}
 		if !r.warned {
 			r.warned = true
-			d.log.Warn("nfc reader not responding", "reader", r.info.ID, "err", err)
+			m.log.Warn("nfc reader not responding", "reader", r.info.ID, "err", err)
 		}
 		evs = r.state.drop()
 	} else {
@@ -568,11 +601,11 @@ func (d *Driver) step(r *runReader) {
 		}
 	}
 	if len(fresh) > 0 {
-		d.mu.Lock()
+		m.mu.Lock()
 		for ch := range fresh {
 			delete(r.fresh, ch)
 		}
-		d.mu.Unlock()
+		m.mu.Unlock()
 	}
 	// Registry side-channel LAST: the engine subscribers (the real-time
 	// path) are already served, so the observer's work - a SQL write in
@@ -582,41 +615,39 @@ func (d *Driver) step(r *runReader) {
 	}
 }
 
-// Close stops all pollers, closes the opened readers and releases their
-// claims. Idempotent. The run layer calls it once, after the final tick,
-// so it never overlaps a callback delivery into a live engine.
-func (d *Driver) Close() error {
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
+// Close stops all pollers and closes the opened readers. Idempotent;
+// called once on process shutdown (the pollers outlive individual runs).
+func (m *Monitor) Close() error {
+	if m == nil {
 		return nil
 	}
-	d.closed = true
-	close(d.done)
-	d.mu.Unlock()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	m.closed = true
+	close(m.done)
+	m.mu.Unlock()
 	// Wait for in-flight poll rounds so no goroutine still touches a
 	// device we are about to close.
-	d.wg.Wait()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, r := range d.readers {
+	m.wg.Wait()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.readers {
 		if r.dev != nil {
 			_ = r.dev.Close()
 			r.dev = nil
-		}
-		if r.claimed {
-			release(r.info.ID)
-			r.claimed = false
 		}
 	}
 	return nil
 }
 
-// Ensure the driver satisfies the engine Source contract (and is a
+// Ensure the run binding satisfies the engine Source contract (and is a
 // Closer) at compile time. It is deliberately NOT a Sink - tags are
-// read-only in this ticket - and not Configurable (no per-channel
-// options yet).
+// read-only - and not Configurable (no per-channel options yet).
 var (
-	_ engine.Source = (*Driver)(nil)
-	_ io.Closer     = (*Driver)(nil)
+	_ engine.Source = (*RunBinding)(nil)
+	_ io.Closer     = (*RunBinding)(nil)
+	_ io.Closer     = (*Monitor)(nil)
 )

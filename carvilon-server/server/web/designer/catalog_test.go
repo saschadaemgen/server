@@ -278,7 +278,7 @@ func TestCatalog_NFC(t *testing.T) {
 			t.Fatalf("nfc category present without readers: %+v", b)
 		}
 	}
-	one := []NFCReader{{ID: "i2c-1", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"}}
+	one := []NFCReader{{ID: "i2c-1", Name: "RPi-NFC-PN532 (I2C-1)", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"}}
 	var nfc []CatalogBlock
 	for _, b := range Catalog(false, nil, one, false, false) {
 		if b.Category == "nfc" {
@@ -289,23 +289,49 @@ func TestCatalog_NFC(t *testing.T) {
 		t.Fatalf("nfc category has %d blocks, want 2", len(nfc))
 	}
 	uid, present := nfc[0], nfc[1]
-	if uid.Type != engine.TypeSourceChannelText || uid.Title != "NFC Leser" || uid.Channel != "nfc:i2c-1:uid" || !uid.Implemented {
+	if uid.Type != engine.TypeSourceChannelText || uid.Title != "RPi-NFC-PN532 (I2C-1) · Leser" || uid.Channel != "nfc:i2c-1:uid" || !uid.Implemented {
 		t.Errorf("uid block = %+v", uid)
 	}
 	if len(uid.Outputs) != 1 || uid.Outputs[0].Kind != "text" {
 		t.Errorf("uid block must have one text output: %+v", uid.Outputs)
 	}
-	if present.Type != engine.TypeSourceChannel || present.Title != "NFC Tag da" || present.Channel != "nfc:i2c-1:present" || !present.Implemented {
+	if present.Type != engine.TypeSourceChannel || present.Title != "RPi-NFC-PN532 (I2C-1) · Tag da" || present.Channel != "nfc:i2c-1:present" || !present.Implemented {
 		t.Errorf("present block = %+v", present)
 	}
 	if len(present.Outputs) != 1 || present.Outputs[0].Kind != "bool" {
 		t.Errorf("present block must have one bool output: %+v", present.Outputs)
 	}
-	// Two readers: four blocks, titles unique via the reader-id suffix.
-	two := append(one, NFCReader{ID: "i2c-13", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"})
+	// Two readers with DISTINCT display names: four blocks, unique titles,
+	// no bus suffix (the names already disambiguate).
+	distinct := []NFCReader{
+		{ID: "i2c-1", Name: "Haustür", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"},
+		{ID: "i2c-13", Name: "Garage", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"},
+	}
+	titles := uniqueNFCTitles(t, distinct, 4)
+	if !titles["Haustür · Leser"] || !titles["Garage · Tag da"] {
+		t.Errorf("distinct names should carry no suffix, got %v", titles)
+	}
+	// Two readers with the SAME display name (a custom-name collision):
+	// titles must STILL be unique - disambiguated by the reader's bus id -
+	// so the palette can never bake one reader's channel into the other.
+	clash := []NFCReader{
+		{ID: "i2c-1", Name: "Eingang", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"},
+		{ID: "i2c-13", Name: "Eingang", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"},
+	}
+	titles = uniqueNFCTitles(t, clash, 4)
+	if !titles["Eingang (i2c-1) · Leser"] || !titles["Eingang (i2c-13) · Tag da"] {
+		t.Errorf("colliding names should disambiguate by bus, got %v", titles)
+	}
+}
+
+// uniqueNFCTitles collects the nfc block titles for the given readers,
+// asserting the expected count and that no title repeats (the editor's
+// palette lookups are title-keyed).
+func uniqueNFCTitles(t *testing.T, readers []NFCReader, want int) map[string]bool {
+	t.Helper()
 	titles := map[string]bool{}
 	count := 0
-	for _, b := range Catalog(false, nil, two, false, false) {
+	for _, b := range Catalog(false, nil, readers, false, false) {
 		if b.Category != "nfc" {
 			continue
 		}
@@ -315,12 +341,10 @@ func TestCatalog_NFC(t *testing.T) {
 		}
 		titles[b.Title] = true
 	}
-	if count != 4 {
-		t.Fatalf("nfc category has %d blocks for two readers, want 4", count)
+	if count != want {
+		t.Fatalf("nfc blocks = %d, want %d", count, want)
 	}
-	if !titles["NFC Leser (i2c-1)"] || !titles["NFC Tag da (i2c-13)"] {
-		t.Errorf("expected suffixed titles, got %v", titles)
-	}
+	return titles
 }
 
 func assertPorts(t *testing.T, typ, side string, got []CatalogPort, want []engine.Port) {

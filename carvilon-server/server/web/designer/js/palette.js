@@ -40,6 +40,12 @@ export async function initPalette(){
      (LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);
    }
  }catch(err){console.error('designer: block catalog load failed',err);}
+ // The NFC category is permanent hardware infrastructure: it stays in the
+ // palette even with no reader detected (an empty section with a hint), so
+ // an operator always knows where the reader blocks appear once a reader
+ // answers on the bus. GPIO/system/telegram stay conditional as before.
+ if(!LIBRARY.nfc)LIBRARY.nfc=[];
+ if(!CAT.nfc)CAT.nfc=EXTRA_CATS.nfc;
  const libEl=document.getElementById('lib');
  function mkItem(name,icon,cat,c,implemented){const it=document.createElement('div');it.className='lib-item';it.dataset.name=name;it.dataset.cat=cat;it.dataset.impl=implemented?'1':'0';it.style.setProperty('--gc',c.color);
    if(!implemented)it.title=name+' · Katalog-Eintrag — Engine-Node folgt';
@@ -50,6 +56,7 @@ export async function initPalette(){
    g.innerHTML=`<div class="lib-glabel"><div class="glabel-track"><div class="glabel-colors" role="listbox" aria-label="Kategoriefarbe wählen"></div><div class="glabel-main"><span class="gd" title="Farbe ändern" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div></div></div><div class="lib-items"></div>`;
    const iw=g.querySelector('.lib-items');
    for(const [name,icon,implemented] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c,implemented));}
+   if(items.length===0&&cat==='nfc'){const e=document.createElement('div');e.className='lib-empty';e.textContent='Kein Leser erkannt — sobald einer am Bus antwortet, erscheint er hier.';iw.appendChild(e);}
    // Accordion: at most one category open at a time. Clicking a closed
    // group closes the others and opens it; clicking the open one closes it.
    g.querySelector('.lib-glabel').addEventListener('click',()=>{if(g.classList.contains('coloring'))return;const willOpen=g.classList.contains('collapsed');libEl.querySelectorAll('.lib-group').forEach(x=>x.classList.add('collapsed'));if(willOpen)g.classList.remove('collapsed');});

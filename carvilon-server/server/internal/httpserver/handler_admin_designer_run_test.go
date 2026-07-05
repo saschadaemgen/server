@@ -209,3 +209,58 @@ func TestDesignerRun_GPIONodeWithoutDriver(t *testing.T) {
 		t.Errorf("a GPIO graph must not start a run without a gpio driver")
 	}
 }
+
+// TestDesignerRunViewerGraceReaper pins Teil 3's run-survives-reload
+// mechanism at the run-set level: a run outlives its last monitor
+// disconnect for the grace period and is reaped only if no viewer
+// reconnects; a reconnect within the grace keeps it alive.
+func TestDesignerRunViewerGraceReaper(t *testing.T) {
+	old := designerRunGrace
+	designerRunGrace = 30 * time.Millisecond
+	t.Cleanup(func() { designerRunGrace = old })
+
+	stopped := func(run *designerRun) bool {
+		select {
+		case <-run.done:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// (a) No reconnect: the run is reaped after the grace and unmapped.
+	set := newDesignerRunSet()
+	run := &designerRun{done: make(chan struct{}), graphID: 7}
+	set.mu.Lock()
+	set.byUser["u"] = run
+	set.mu.Unlock()
+	set.viewerConnect(run)
+	set.viewerDisconnect("u", run, quietLogger())
+	deadline := time.Now().Add(2 * time.Second)
+	for !stopped(run) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !stopped(run) {
+		t.Fatal("run not reaped after grace with no viewer")
+	}
+	if set.get("u") != nil {
+		t.Fatal("reaped run is still mapped")
+	}
+
+	// (b) A reconnect within the grace (a reload) keeps the run alive.
+	set2 := newDesignerRunSet()
+	run2 := &designerRun{done: make(chan struct{}), graphID: 9}
+	set2.mu.Lock()
+	set2.byUser["u"] = run2
+	set2.mu.Unlock()
+	set2.viewerConnect(run2)                        // monitor connected
+	set2.viewerDisconnect("u", run2, quietLogger()) // reload: disconnect -> schedule reap
+	set2.viewerConnect(run2)                        // reload done: reconnect -> cancel reap
+	time.Sleep(80 * time.Millisecond)               // well past the grace
+	if stopped(run2) {
+		t.Fatal("run reaped despite a reconnecting viewer")
+	}
+	if set2.get("u") != run2 {
+		t.Fatal("live run lost its mapping")
+	}
+}

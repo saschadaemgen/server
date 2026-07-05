@@ -19,7 +19,7 @@ import { renderMinimap } from './minimap.js';
 import { fit } from './transform.js';
 import { clearSel } from './selection.js';
 import { resetWireSelection } from './interactions.js';
-import { isRunning, stopRun } from './run.js';
+import { isRunning, stopRun, setActiveGraph, maybeRestoreRun } from './run.js';
 
 const OPEN_KEY = 'cv_tree_open';
 const LAST_KEY = 'cv_last_graph';
@@ -240,35 +240,7 @@ function setSaveState(state){
   else if (state === 'error') el.textContent = 'Speichern fehlgeschlagen';
   else el.innerHTML = 'rev <b>' + curGraph.rev + '</b>';
 }
-// paintReaderBack is the reverse of the NFC page's editor jump: when the
-// open graph is one of the auto-created reader graphs (System/Reader),
-// show a small "NFC" chip beside the breadcrumb that returns to the NFC
-// device page. target="_top" leaves the editor iframe and loads the
-// admin page in the full window (same origin). Defensive: it no-ops if
-// the crumb bar is absent and removes itself outside a reader graph.
-function paintReaderBack(){
-  const bar = document.querySelector('.crumb');
-  if (!bar) return;
-  let link = document.getElementById('crumb-nfc');
-  const f = curGraph ? folderById(curGraph.folder_id) : null;
-  const inReader = !!(f && f.system && f.name === 'Reader');
-  if (inReader){
-    if (!link){
-      link = document.createElement('a');
-      link.id = 'crumb-nfc';
-      link.className = 'chip crumb-nfc';
-      link.href = '/a/nfc';
-      link.target = '_top';
-      link.title = 'Zur NFC-Übersicht';
-      link.style.marginLeft = '6px';
-      link.textContent = 'NFC';
-      bar.appendChild(link);
-    }
-  } else if (link){
-    link.remove();
-  }
-}
-function paintAll(){ paintTree(); paintCrumb(); setSaveState('idle'); paintReaderBack(); }
+function paintAll(){ paintTree(); paintCrumb(); setSaveState('idle'); }
 
 function flashErr(err){
   notice = (err && err.message) ? err.message : 'Fehler';
@@ -410,6 +382,7 @@ async function openGraph(id, { keepPopover = false } = {}){
   }
   curGraph = { id: data.id, folder_id: data.folder_id, name: data.name, rev: data.rev };
   selKind = 'g'; selId = id;
+  setActiveGraph(curGraph.id);
   if (orphan){
     lastSaved = '';
     dirty = true;
@@ -462,6 +435,7 @@ async function doDelete(){
     await refetchTree();
     if (wasCur){
       curGraph = null;
+      setActiveGraph(0);
       // The deleted graph's content leaves the canvas with it (user
       // intent) - so the follow-up open never sees an orphan surface.
       loadIntoCanvas(null);
@@ -606,6 +580,7 @@ export async function initProject(){
     const data = await api('graphs/' + pick);
     curGraph = { id: data.id, folder_id: data.folder_id, name: data.name, rev: data.rev };
     selKind = 'g'; selId = pick;
+    setActiveGraph(curGraph.id);
     loadIntoCanvas(data.graph);
     lastSaved = serializeCanvas();
     remember(pick);
@@ -615,4 +590,8 @@ export async function initProject(){
   } catch (err){ curGraph = null; }
   clearLoading();
   paintAll();
+  // A run may still be live server-side after a reload (it survives the
+  // monitor disconnect for a grace period): reconnect to it if the graph
+  // now open is the one running, so the Run state is not lost on reload.
+  maybeRestoreRun();
 }

@@ -3,23 +3,26 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
-	"carvilon.local/server/internal/designerstore"
 	"carvilon.local/server/internal/readerstore"
 )
 
 func seedReader(t *testing.T, env *testEnv, det readerstore.Detected) {
 	t.Helper()
-	ds := designerstore.New(env.d.DB)
-	if err := env.readerStore.Sync(context.Background(), []readerstore.Detected{det}, ds.EnsureReaderGraph); err != nil {
+	if err := env.readerStore.Sync(context.Background(), []readerstore.Detected{det}); err != nil {
 		t.Fatalf("seed reader: %v", err)
 	}
 }
 
-// TestAdminNFC_EmptyState: with no readers the page renders a clean
-// empty state and the NFC nav link is present.
+var readerA = readerstore.Detected{
+	ID: "nfc:i2c-1", Kind: "nfc", Model: "PN532", Firmware: "1.6", Bus: "i2c-1", Name: "RPi-NFC-PN532 (I2C-1)",
+}
+
+// TestAdminNFC_EmptyState: with no readers the page renders a clean empty
+// state and the NFC nav link is present.
 func TestAdminNFC_EmptyState(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
@@ -34,23 +37,21 @@ func TestAdminNFC_EmptyState(t *testing.T) {
 }
 
 // TestAdminNFC_ListsReaderWithJumpAndTag: a registered reader shows with
-// its online status, the editor-jump link into its System/Reader graph,
+// its speaking auto-name, online status, an editor jump into the palette,
 // and (after a tag read) its last-seen UID.
 func TestAdminNFC_ListsReaderWithJumpAndTag(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	seedReader(t, env, readerstore.Detected{
-		ID: "nfc:i2c-1", Kind: "nfc", Model: "PN532", Firmware: "1.6", Bus: "i2c-1", Name: "PN532 · i2c-1",
-	})
+	seedReader(t, env, readerA)
 
 	body := getBody(t, env, "/a/nfc")
-	if !strings.Contains(body, "PN532 · i2c-1") {
-		t.Errorf("reader name missing from page")
+	if !strings.Contains(body, "RPi-NFC-PN532 (I2C-1)") {
+		t.Errorf("reader auto-name missing from page")
 	}
 	if !strings.Contains(body, "online") {
 		t.Errorf("online status missing")
 	}
-	if !strings.Contains(body, "/a/designer?g=") {
+	if !strings.Contains(body, `href="/a/designer"`) {
 		t.Errorf("editor jump link missing")
 	}
 	if !strings.Contains(body, "noch keins") {
@@ -66,19 +67,52 @@ func TestAdminNFC_ListsReaderWithJumpAndTag(t *testing.T) {
 	}
 }
 
+// TestAdminNFC_Rename: a custom name overrides the auto-name and shows on
+// the page; clearing reverts.
+func TestAdminNFC_Rename(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	seedReader(t, env, readerA)
+
+	form := url.Values{"id": {"nfc:i2c-1"}, "name": {"Haustür"}}
+	resp, err := env.client.PostForm(env.ts.URL+"/a/nfc/name", form)
+	if err != nil {
+		t.Fatalf("POST rename: %v", err)
+	}
+	resp.Body.Close()
+
+	body := getBody(t, env, "/a/nfc")
+	if !strings.Contains(body, "Haustür") {
+		t.Errorf("custom name missing from page")
+	}
+	// The auto-name is still shown as a hint.
+	if !strings.Contains(body, "RPi-NFC-PN532 (I2C-1)") {
+		t.Errorf("auto-name hint missing after rename")
+	}
+
+	// Clearing reverts to the auto-name.
+	resp, err = env.client.PostForm(env.ts.URL+"/a/nfc/name", url.Values{"id": {"nfc:i2c-1"}, "name": {""}})
+	if err != nil {
+		t.Fatalf("POST clear: %v", err)
+	}
+	resp.Body.Close()
+	r, err := env.readerStore.Get(context.Background(), "nfc:i2c-1")
+	if err != nil || r.CustomName != "" {
+		t.Fatalf("clear did not revert: r=%+v err=%v", r, err)
+	}
+}
+
 // TestAdminNFC_OfflineReaderShown: a reader that dropped out stays on the
 // page as offline (never silently gone).
 func TestAdminNFC_OfflineReaderShown(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	seedReader(t, env, readerstore.Detected{ID: "nfc:i2c-1", Kind: "nfc", Model: "PN532", Bus: "i2c-1", Name: "PN532 · i2c-1"})
-	// Hardware gone.
-	ds := designerstore.New(env.d.DB)
-	if err := env.readerStore.Sync(context.Background(), nil, ds.EnsureReaderGraph); err != nil {
+	seedReader(t, env, readerA)
+	if err := env.readerStore.Sync(context.Background(), nil); err != nil {
 		t.Fatalf("Sync empty: %v", err)
 	}
 	body := getBody(t, env, "/a/nfc")
-	if !strings.Contains(body, "PN532 · i2c-1") {
+	if !strings.Contains(body, "RPi-NFC-PN532 (I2C-1)") {
 		t.Errorf("gone reader disappeared from the page")
 	}
 	if !strings.Contains(body, "offline") {
@@ -91,7 +125,7 @@ func TestAdminNFC_OfflineReaderShown(t *testing.T) {
 func TestAdminNFC_JSONSignature(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	seedReader(t, env, readerstore.Detected{ID: "nfc:i2c-1", Kind: "nfc", Model: "PN532", Bus: "i2c-1", Name: "PN532 · i2c-1"})
+	seedReader(t, env, readerA)
 
 	sig1, n1 := nfcJSON(t, env)
 	if n1 != 1 {

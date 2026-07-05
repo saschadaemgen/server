@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -58,7 +59,7 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	// bot enabled with a token set (the telegram: driver binds to the
 	// manager's Conn).
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), nfcReadersForCatalog(), s.mqttBrokerRunning(), s.telegramRunning()),
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning()),
 	})
 }
 
@@ -88,14 +89,29 @@ func sysMetricsForCatalog() []designer.SysMetric {
 	return out
 }
 
-// nfcReadersForCatalog bridges the nfc: driver's detected readers to
-// the designer catalog's neutral type, so the catalog package stays
-// unaware of the driver.
-func nfcReadersForCatalog() []designer.NFCReader {
+// nfcReadersForCatalog bridges the nfc: driver's detected readers to the
+// designer catalog's neutral type, joining in each reader's display name
+// from the registry (the operator's custom name overrides the speaking
+// auto-name) so the palette blocks read the same as the NFC page. The
+// catalog package stays unaware of the driver and the registry.
+func (s *Server) nfcReadersForCatalog(ctx context.Context) []designer.NFCReader {
 	rs := nfc.Readers()
+	names := map[string]string{}
+	if s.readerStore != nil {
+		if list, err := s.readerStore.List(ctx); err == nil {
+			for _, rd := range list {
+				names[rd.ID] = rd.DisplayName()
+			}
+		}
+	}
 	out := make([]designer.NFCReader, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, designer.NFCReader{ID: r.ID, UIDChannel: r.UIDChannel, PresentChannel: r.PresentChannel})
+		out = append(out, designer.NFCReader{
+			ID:             r.ID,
+			Name:           names[r.Identity],
+			UIDChannel:     r.UIDChannel,
+			PresentChannel: r.PresentChannel,
+		})
 	}
 	return out
 }

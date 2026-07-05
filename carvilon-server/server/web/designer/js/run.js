@@ -22,9 +22,15 @@ const PULSE_MS = 170;
 let running = false;
 let es = null;
 let liveByEdge = {};
+let activeGraphId = 0; // the open graph id, so a run can be tied to its graph
 const btnRun = document.getElementById('btn-run');
 
 export function isRunning(){ return running; }
+
+// setActiveGraph records which graph is open (project.js calls it on
+// boot and every switch), so a started run is tagged with its graph id
+// and a reload can tell whether the open graph is the running one.
+export function setActiveGraph(id){ activeGraphId = Number(id) || 0; }
 
 function esc(s){ return String(s).replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
 
@@ -93,7 +99,7 @@ async function startRun(){
   if(!graph.nodes.length){ engineLine('<span class="amber">nothing to run — add an implemented block</span>'); return; }
   let res,data;
   try{
-    res=await fetch('run',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(graph)});
+    res=await fetch('run?g='+encodeURIComponent(activeGraphId),{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(graph)});
     data=await res.json().catch(()=>({}));
   }catch(err){ engineLine('<span class="err">run request failed</span> '+esc(err&&err.message||err)); return; }
   if(!res.ok || !data.ok){
@@ -118,11 +124,30 @@ export async function stopRun(){
   try{ await fetch('run/stop',{method:'POST',credentials:'same-origin'}); }catch(_){}
 }
 
-function enterRunning(){
+function enterRunning(note){
   running=true; liveByEdge={};
   document.body.classList.add('running');
   paintRunBtn();
-  engineLine('<span class="ok">RUN</span> graph started · 100 ms tick');
+  engineLine(note || '<span class="ok">RUN</span> graph started · 100 ms tick');
+}
+
+// maybeRestoreRun reconnects to a run that is still live server-side
+// after a page reload (the run survives the monitor disconnect for a
+// grace period). Only restores when the graph now open is the one
+// running - a different open graph stays Stop and the orphan run reaps
+// itself. project.js calls this once, after the boot graph has loaded.
+export async function maybeRestoreRun(){
+  if(running) return;
+  let d;
+  try{
+    const r=await fetch('run/status',{credentials:'same-origin'});
+    if(!r.ok) return;
+    d=await r.json();
+  }catch(_){ return; }
+  if(!d || !d.running || Number(d.graph_id)!==activeGraphId) return;
+  focusEngine();
+  enterRunning('<span class="ok">RUN</span> mit laufendem Graph wieder verbunden');
+  openStream();
 }
 function exitRunning(){
   running=false;

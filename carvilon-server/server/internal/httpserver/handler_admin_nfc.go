@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,43 +13,56 @@ import (
 )
 
 // nfcReaderRow is one reader as the NFC page renders it: the registry
-// row plus the presentation-ready fields (formatted timestamp, whether
-// a tag/graph exists) so the template stays logic-free.
+// row plus presentation-ready fields (display name, formatted timestamp,
+// whether a tag exists) so the template stays logic-free.
 type nfcReaderRow struct {
-	ID       string
-	Name     string
-	Model    string
-	Firmware string
-	Bus      string
-	Kind     string
-	Online   bool
-	GraphID  int64
-	HasGraph bool
-	LastUID  string
-	HasTag   bool
-	LastSeen string // formatted local time, "" if never
+	ID          string
+	DisplayName string // custom name if set, else the auto-name
+	AutoName    string // the speaking auto-name (shown as a hint when a custom name overrides it)
+	CustomName  string // the operator override, "" when unset (prefills the rename field)
+	Model       string
+	Firmware    string
+	Bus         string
+	Kind        string
+	Online      bool
+	LastUID     string
+	HasTag      bool
+	LastSeen    string // formatted local time, "" if never
 }
 
-// nfcPageData is the payload for the /a/nfc device page: the registered
-// readers (online and offline), an online count for the header, and a
-// signature the client polls to auto-refresh when a reader's status or
-// last tag changes.
+// nfcPageData is the payload for the /a/nfc device page.
 type nfcPageData struct {
 	User        adminUser
 	Available   bool // registry wired in
 	Readers     []nfcReaderRow
 	OnlineCount int
 	Sig         string
+	Flash       string
+	FlashType   string // "green" | "red"
+}
+
+// nfcFlash maps a stable flash code (carried in the redirect query,
+// never free text) to a message + color.
+var nfcFlash = map[string]struct{ msg, typ string }{
+	"renamed":   {"Name gespeichert.", "green"},
+	"reset":     {"Auf den Auto-Namen zurückgesetzt.", "green"},
+	"err-name":  {"Umbenennen fehlgeschlagen.", "red"},
+	"err-notfd": {"Leser nicht gefunden.", "red"},
 }
 
 // handleAdminNFC renders the NFC reader registry page. Readers are
-// auto-registered at startup; on a host without a reader the registry
-// is empty and the page shows a clean empty state.
+// auto-registered at startup; on a host without a reader the registry is
+// empty and the page shows a clean empty state.
 func (s *Server) handleAdminNFC(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := nfcPageData{
 		User:      adminUser{Name: username, Initials: initialsOf(username)},
 		Available: s.readerStore != nil,
+	}
+	if code := r.URL.Query().Get("flash"); code != "" {
+		if f, ok := nfcFlash[code]; ok {
+			data.Flash, data.FlashType = f.msg, f.typ
+		}
 	}
 	if s.readerStore != nil {
 		readers, err := s.readerStore.List(r.Context())
@@ -64,6 +78,38 @@ func (s *Server) handleAdminNFC(w http.ResponseWriter, r *http.Request) {
 		data.Sig = nfcSignature(readers)
 	}
 	s.renderAdminPage(w, "nfc", data)
+}
+
+// handleAdminNFCRename sets or clears a reader's custom name. Clearing
+// (empty name) reverts to the speaking auto-name. Redirects back to the
+// page with a flash - never reflects the submitted text.
+func (s *Server) handleAdminNFCRename(w http.ResponseWriter, r *http.Request) {
+	if s.readerStore == nil {
+		http.Redirect(w, r, "/a/nfc", http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/a/nfc?flash=err-name", http.StatusSeeOther)
+		return
+	}
+	id := strings.TrimSpace(r.PostFormValue("id"))
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if id == "" {
+		http.Redirect(w, r, "/a/nfc?flash=err-name", http.StatusSeeOther)
+		return
+	}
+	err := s.readerStore.SetCustomName(r.Context(), id, name)
+	switch {
+	case errors.Is(err, readerstore.ErrNotFound):
+		http.Redirect(w, r, "/a/nfc?flash=err-notfd", http.StatusSeeOther)
+	case err != nil:
+		s.log.Error("nfc set custom name", "reader", id, "err", err)
+		http.Redirect(w, r, "/a/nfc?flash=err-name", http.StatusSeeOther)
+	case name == "":
+		http.Redirect(w, r, "/a/nfc?flash=reset", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/a/nfc?flash=renamed", http.StatusSeeOther)
+	}
 }
 
 // handleAdminNFCJSON returns the current registry signature so the page
@@ -97,17 +143,17 @@ func nfcReaderRows(readers []readerstore.Reader) []nfcReaderRow {
 	out := make([]nfcReaderRow, 0, len(readers))
 	for _, rd := range readers {
 		row := nfcReaderRow{
-			ID:       rd.ID,
-			Name:     rd.Name,
-			Model:    rd.Model,
-			Firmware: rd.Firmware,
-			Bus:      rd.Bus,
-			Kind:     rd.Kind,
-			Online:   rd.Online,
-			GraphID:  rd.GraphID,
-			HasGraph: rd.GraphID != 0,
-			LastUID:  rd.LastUID,
-			HasTag:   rd.LastUID != "",
+			ID:          rd.ID,
+			DisplayName: rd.DisplayName(),
+			AutoName:    rd.Name,
+			CustomName:  rd.CustomName,
+			Model:       rd.Model,
+			Firmware:    rd.Firmware,
+			Bus:         rd.Bus,
+			Kind:        rd.Kind,
+			Online:      rd.Online,
+			LastUID:     rd.LastUID,
+			HasTag:      rd.LastUID != "",
 		}
 		if rd.LastSeenAt > 0 {
 			row.LastSeen = time.UnixMilli(rd.LastSeenAt).Format("02.01.2006 15:04:05")
@@ -119,7 +165,7 @@ func nfcReaderRows(readers []readerstore.Reader) []nfcReaderRow {
 
 // nfcSignature is a compact fingerprint of the registry state that
 // changes exactly when the page should refresh: a reader appearing,
-// going online/offline, or reading a new tag.
+// going online/offline, being renamed, or reading a new tag.
 func nfcSignature(readers []readerstore.Reader) string {
 	var b strings.Builder
 	for _, rd := range readers {
@@ -130,6 +176,8 @@ func nfcSignature(readers []readerstore.Reader) string {
 		} else {
 			b.WriteByte('0')
 		}
+		b.WriteByte('|')
+		b.WriteString(rd.DisplayName())
 		b.WriteByte('|')
 		b.WriteString(rd.LastUID)
 		b.WriteByte('|')

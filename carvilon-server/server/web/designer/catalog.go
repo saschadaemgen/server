@@ -61,6 +61,7 @@ type SysMetric struct {
 // baked in.
 type NFCReader struct {
 	ID             string // stable reader id, e.g. "i2c-1"
+	Name           string // speaking display name, e.g. "RPi-NFC-PN532 (I2C-1)" (custom name wins)
 	UIDChannel     string // full physical ref, e.g. "nfc:i2c-1:uid"
 	PresentChannel string // full physical ref, e.g. "nfc:i2c-1:present"
 }
@@ -187,19 +188,36 @@ func sysBlocks(metrics []SysMetric) []CatalogBlock {
 // as a text source - the card shows the last read UID live - and
 // "Tag da" as a bool source (tag resting on the module yes/no). Both
 // are generic engine channel nodes with the physical ref baked into
-// Channel, ready to run, no picker. With more than one reader the
-// titles carry the reader id: the editor's palette lookups are
-// title-keyed, so titles MUST stay unique across the catalog.
+// Channel, ready to run, no picker. Each block's title carries the
+// reader's speaking display name (Platform-Function-Model (Bus), or the
+// operator's custom name) so its origin is clear.
+//
+// The editor's palette lookups are title-keyed, so titles MUST be unique
+// across the catalog - a duplicate would silently bake one reader's
+// channel into the other's block. Auto-names carry the bus and are
+// unique, but two operator custom names (or a custom name matching
+// another reader's auto-name) can collide; any duplicate display name is
+// disambiguated with the reader's (unique) bus id.
 func nfcBlocks(readers []NFCReader) []CatalogBlock {
+	label := func(r NFCReader) string {
+		if r.Name != "" {
+			return r.Name
+		}
+		return "NFC " + r.ID
+	}
+	count := map[string]int{}
+	for _, r := range readers {
+		count[label(r)]++
+	}
 	out := make([]CatalogBlock, 0, 2*len(readers))
 	for _, r := range readers {
-		suffix := ""
-		if len(readers) > 1 {
-			suffix = " (" + r.ID + ")"
+		name := label(r)
+		if count[name] > 1 {
+			name += " (" + r.ID + ")"
 		}
 		out = append(out,
-			CatalogBlock{Type: engine.TypeSourceChannelText, Category: "nfc", Title: "NFC Leser" + suffix, Icon: "nfc", Channel: r.UIDChannel, Implemented: true},
-			CatalogBlock{Type: engine.TypeSourceChannel, Category: "nfc", Title: "NFC Tag da" + suffix, Icon: "scan", Channel: r.PresentChannel, Implemented: true},
+			CatalogBlock{Type: engine.TypeSourceChannelText, Category: "nfc", Title: name + " · Leser", Icon: "nfc", Channel: r.UIDChannel, Implemented: true},
+			CatalogBlock{Type: engine.TypeSourceChannel, Category: "nfc", Title: name + " · Tag da", Icon: "scan", Channel: r.PresentChannel, Implemented: true},
 		)
 	}
 	return out

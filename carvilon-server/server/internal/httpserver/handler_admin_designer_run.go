@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +16,6 @@ import (
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttdriver"
-	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/internal/telegrambot"
 	"carvilon.local/server/internal/telegramdriver"
@@ -26,12 +27,19 @@ const designerRunTick = 100 * time.Millisecond
 
 // designerRun is one live engine run bound to an admin session: a built
 // engine driven by a wall-clock ticker. done stops both the ticker and
-// the monitor SSE; closing it is idempotent.
+// the monitor SSE; closing it is idempotent. graphID is the graph the
+// run executes, so the editor can tell on reload whether the open graph
+// is the one that is running. viewers/reap decouple the run's lifetime
+// from the monitor SSE: a run outlives a monitor disconnect (a reload)
+// for a grace period, and is reaped only if no viewer reconnects.
 type designerRun struct {
 	eng     *engine.Engine
+	graphID int64
 	done    chan struct{}
 	once    sync.Once
-	cleanup func() // release bound driver I/O (e.g. GPIO lines) on teardown
+	cleanup func() // release bound driver I/O on teardown
+	viewers int    // live monitor SSE connections (guarded by the set's mu)
+	reap    *time.Timer
 }
 
 func (r *designerRun) stop() { r.once.Do(func() { close(r.done) }) }
@@ -82,17 +90,80 @@ func newDesignerRunSet() *designerRunSet {
 	return &designerRunSet{byUser: map[string]*designerRun{}}
 }
 
-func (s *designerRunSet) start(user string, eng *engine.Engine, tick time.Duration, cleanup func()) *designerRun {
-	run := &designerRun{eng: eng, done: make(chan struct{}), cleanup: cleanup}
+func (s *designerRunSet) start(user string, eng *engine.Engine, graphID int64, tick time.Duration, cleanup func(), log *slog.Logger) *designerRun {
+	run := &designerRun{eng: eng, graphID: graphID, done: make(chan struct{}), cleanup: cleanup}
 	s.mu.Lock()
 	old := s.byUser[user]
+	if old != nil && old.reap != nil {
+		old.reap.Stop()
+	}
 	s.byUser[user] = run
+	// Arm a reap immediately: a run whose monitor SSE never connects (a
+	// client that POSTed /run and then vanished, or a bare API caller)
+	// would otherwise tick and hold its reader reservation forever. The
+	// first viewerConnect cancels this timer.
+	run.reap = time.AfterFunc(designerRunGrace, func() { s.reapIdle(user, run, log) })
 	s.mu.Unlock()
 	if old != nil {
 		old.stop()
 	}
 	go run.loop(tick)
 	return run
+}
+
+// designerRunGrace is how long a run outlives its last monitor SSE
+// connection before it is reaped. Long enough to bridge a page reload
+// (the new page reconnects the monitor within a second or two), short
+// enough that a closed tab does not leave the engine ticking for long.
+// A var (not const) so tests can shorten it.
+var designerRunGrace = 20 * time.Second
+
+// viewerConnect registers a monitor SSE connection and cancels any
+// pending reap (a reload reconnecting keeps the run alive).
+func (s *designerRunSet) viewerConnect(run *designerRun) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.viewers++
+	if run.reap != nil {
+		run.reap.Stop()
+		run.reap = nil
+	}
+}
+
+// viewerDisconnect drops a monitor connection; when the last viewer
+// leaves, the run is reaped after designerRunGrace unless a viewer
+// reconnects first. This is what lets the Run state survive a reload
+// without leaking a run when the tab is simply closed.
+func (s *designerRunSet) viewerDisconnect(user string, run *designerRun, log *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.viewers > 0 {
+		run.viewers--
+	}
+	if run.viewers > 0 || s.byUser[user] != run {
+		return
+	}
+	if run.reap != nil {
+		run.reap.Stop()
+	}
+	run.reap = time.AfterFunc(designerRunGrace, func() { s.reapIdle(user, run, log) })
+}
+
+// reapIdle stops a run that has had no viewer for the grace period,
+// unless a viewer reconnected (viewers>0) or it was already replaced.
+func (s *designerRunSet) reapIdle(user string, run *designerRun, log *slog.Logger) {
+	s.mu.Lock()
+	idle := s.byUser[user] == run && run.viewers == 0
+	if idle {
+		delete(s.byUser, user)
+	}
+	s.mu.Unlock()
+	if idle {
+		run.stop()
+		if log != nil {
+			log.Info("designer run stopped", "user", user, "reason", "no viewer")
+		}
+	}
 }
 
 func (s *designerRunSet) get(user string) *designerRun {
@@ -108,29 +179,14 @@ func (s *designerRunSet) stopUser(user string) bool {
 	s.mu.Lock()
 	run := s.byUser[user]
 	delete(s.byUser, user)
+	if run != nil && run.reap != nil {
+		run.reap.Stop()
+	}
 	s.mu.Unlock()
 	if run != nil {
 		run.stop()
 	}
 	return run != nil
-}
-
-// stopIfCurrent tears down a specific run on monitor disconnect, but only
-// unmaps it while it is still the active one (so a reconnect that already
-// started a newer run is left intact). The run is stopped regardless —
-// stopping an already-replaced run is a harmless idempotent no-op.
-// Reports whether it unmapped the active run, so exactly one lifecycle
-// log line fires per run end (an explicit Stop usually unmaps first,
-// making this return false).
-func (s *designerRunSet) stopIfCurrent(user string, run *designerRun) bool {
-	s.mu.Lock()
-	current := s.byUser[user] == run
-	if current {
-		delete(s.byUser, user)
-	}
-	s.mu.Unlock()
-	run.stop()
-	return current
 }
 
 // handleDesignerRun validates+builds the posted canonical graph and, on
@@ -163,12 +219,29 @@ func (s *Server) handleDesignerRun(w http.ResponseWriter, r *http.Request) {
 		designerJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	s.designerRuns.start(user, eng, designerRunTick, cleanup)
+	// The graph id (?g=) lets the editor tell on reload whether the open
+	// graph is the one running; 0 when the client did not send it.
+	graphID, _ := strconv.ParseInt(r.URL.Query().Get("g"), 10, 64)
+	s.designerRuns.start(user, eng, graphID, designerRunTick, cleanup, s.engineLog)
 	// Engine lifecycle into the server log (and the System Log tab):
 	// which admin started what size of graph.
 	s.engineLog.Info("designer run started",
-		"user", user, "nodes", len(g.Nodes), "edges", len(g.Edges))
+		"user", user, "graph", graphID, "nodes", len(g.Nodes), "edges", len(g.Edges))
 	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDesignerRunStatus reports whether a run is live for this admin
+// and which graph it executes, so the editor can restore the Run state
+// (and reconnect the monitor) after a page reload instead of resetting
+// to Stop.
+func (s *Server) handleDesignerRunStatus(w http.ResponseWriter, r *http.Request) {
+	user := AdminUserFromContext(r.Context())
+	run := s.designerRuns.get(user)
+	resp := map[string]any{"running": run != nil}
+	if run != nil {
+		resp["graph_id"] = run.graphID
+	}
+	designerJSON(w, http.StatusOK, resp)
 }
 
 // isChannelNode reports whether a node type is one of the engine's I/O
@@ -420,12 +493,11 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		reg.RegisterSource(engine.PrefixSys, drv) // telemetry is read-only
 		closers = append(closers, drv)
 	}
-	if prefixes[engine.PrefixNFC] && nfc.Enabled() {
-		drv, err := nfc.NewDriver()
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("nfc driver: %w", err)
-		}
+	if prefixes[engine.PrefixNFC] && s.nfcMonitor != nil {
+		// The reader polls continuously (infrastructure); the run only
+		// attaches its engine callbacks to the persistent poller and
+		// detaches them on teardown - no second poll goroutine.
+		drv := s.nfcMonitor.NewRunBinding()
 		reg.RegisterSource(engine.PrefixNFC, drv) // tags are read-only
 		closers = append(closers, drv)
 	}
@@ -510,15 +582,12 @@ func (s *Server) handleDesignerRunMonitor(w http.ResponseWriter, r *http.Request
 
 	frames, cancel := run.eng.Subscribe(64)
 	defer cancel()
-	// Monitor disconnect ends the run (briefing rule). The editor's Stop
-	// button closes the stream before POSTing run/stop, so THIS is the
-	// usual place the run actually ends — log it here (and only when we
-	// unmapped it, so an explicit stop that won the race logs instead).
-	defer func() {
-		if s.designerRuns.stopIfCurrent(user, run) {
-			s.engineLog.Info("designer run stopped", "user", user)
-		}
-	}()
+	// The run outlives a monitor disconnect: a reload reconnects within
+	// the grace period and the run keeps ticking (so the Run state
+	// survives a reload). Only an explicit Stop, a replacement, or the
+	// grace-reaper (no viewer reconnects) ends the run - each logs there.
+	s.designerRuns.viewerConnect(run)
+	defer s.designerRuns.viewerDisconnect(user, run, s.engineLog)
 
 	if err := writeDesignerSSE(w, "snapshot", map[string]any{"changes": run.eng.Snapshot()}); err != nil {
 		return
