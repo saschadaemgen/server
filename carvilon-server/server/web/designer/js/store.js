@@ -66,6 +66,12 @@ export const selection=new Set();
 // seeded from the persisted FX.gridSize, edited via the settings popover.
 export const S={scale:1,tx:0,ty:0,userAdjusted:false,snapOn:true,gridOn:true,newDrag:null,grid:GRID_SIZES.includes(FX.gridSize)?FX.gridSize:GRID};
 
+// Per-graph viewport persistence: graphId is the graph currently on the
+// canvas (0 = none). transform.js remembers pan+zoom under this id so a
+// reload/graph-switch returns to the exact viewport the user left;
+// project.js sets it when a graph is loaded.
+export const view={graphId:0};
+
 export function snap(v){return S.snapOn?Math.round(v/S.grid)*S.grid:v;}
 
 // Shared DOM roots. The module scripts are deferred, so these elements

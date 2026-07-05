@@ -34,7 +34,13 @@ tickClock();setInterval(tickClock,1000);
 
 /* ===== init ===== */
 let started=false;
-function boot(){if(started)return;started=true;sizeCanvas();buildWires();renderMinimap();fit(false);
+// The initial frame is guarded by S.userAdjusted just like the retries:
+// project.js may already have restored a per-graph view before boot runs
+// (graph load wins the race on a warm/local backend), and an unguarded
+// fit here would override that restored pan/zoom (and even persist the
+// override). When no view was restored, userAdjusted is false and the
+// graph is framed as before.
+function boot(){if(started)return;started=true;sizeCanvas();buildWires();renderMinimap();if(!S.userAdjusted)fit(false);else{recomputeEndpoints();renderMinimap();updateMinimap();}
   requestAnimationFrame(tick);[120,400,900].forEach(ms=>setTimeout(()=>{if(!S.userAdjusted)fit(false);else{recomputeEndpoints();renderMinimap();updateMinimap();}},ms));}
 if(document.readyState==='complete')setTimeout(boot,30);else addEventListener('load',()=>setTimeout(boot,30));
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{if(started){recomputeEndpoints();renderMinimap();}});

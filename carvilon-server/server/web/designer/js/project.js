@@ -12,11 +12,11 @@
 // first stops a running engine graph cleanly, then flushes the pending
 // autosave - no silent loss of changes or run state.
 
-import { GRAPH, nodes, wires, wireByEdge, world, graphDirty, markDirty, esc, escAttr } from './store.js';
+import { GRAPH, nodes, wires, wireByEdge, world, graphDirty, markDirty, esc, escAttr, view, S } from './store.js';
 import { buildNode } from './nodes.js';
 import { buildWires, recomputeEndpoints } from './wires.js';
 import { renderMinimap } from './minimap.js';
-import { fit } from './transform.js';
+import { fit, restoreView, flushView } from './transform.js';
 import { clearSel } from './selection.js';
 import { resetWireSelection } from './interactions.js';
 import { isRunning, stopRun, setActiveGraph, maybeRestoreRun } from './run.js';
@@ -263,7 +263,17 @@ function loadIntoCanvas(g){
   clearCanvas();
   for (const n of (g && g.nodes) || []){ GRAPH.nodes.push(n); buildNode(n); }
   for (const e of (g && g.edges) || []) GRAPH.edges.push(e);
-  buildWires(); renderMinimap(); recomputeEndpoints(); fit(false);
+  buildWires(); renderMinimap(); recomputeEndpoints();
+  // Per-graph viewport: restore the pan/zoom this graph was left at, else
+  // frame it. view.graphId keys the stored view (0 when the canvas cleared).
+  // Reset userAdjusted first: it is a per-session sticky flag, but the view
+  // store treats it as "the user shaped THIS graph's view". Without the
+  // reset a leftover true from the previous graph would make an untouched
+  // graph's auto-fit get persisted (and then wrongly suppress re-fit on
+  // resize). restoreView re-sets it to true only when it truly restores.
+  S.userAdjusted = false;
+  view.graphId = curGraph ? curGraph.id : 0;
+  if (!(view.graphId && restoreView())) fit(false);
 }
 // serializeCanvas is the persisted wire format: the full editor defs
 // (positions, colors, props, control values) minus the runtime-only
@@ -360,6 +370,8 @@ function flushBeacon(){
 let switchSeq = 0;
 async function openGraph(id, { keepPopover = false } = {}){
   const seq = ++switchSeq;
+  // Persist the outgoing graph's pan/zoom before it leaves the canvas.
+  flushView();
   // Kein stiller Verlust: erst den Run sauber stoppen, dann die
   // offenen Aenderungen sichern; schlaegt das Sichern fehl, wird der
   // Wechsel mit Hinweis geblockt statt still verworfen.
@@ -516,8 +528,8 @@ export async function initProject(){
 
   // Unload flush: pagehide covers reload/close, hidden covers the
   // admin iframe being swapped away.
-  addEventListener('pagehide', flushBeacon);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushBeacon(); });
+  addEventListener('pagehide', () => { flushView(); flushBeacon(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden'){ flushView(); flushBeacon(); } });
 
   crumbBtn.onclick = e => {
     e.stopPropagation();

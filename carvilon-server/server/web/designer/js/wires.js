@@ -4,7 +4,7 @@
 // owns the geometry (socketCenter/pathOf), the per-frame step, edge
 // creation/teardown, and the cut animation.
 
-import { world, svg, wires, wireByEdge, GRAPH, S, reduceMotion, NS, hexRgb } from './store.js';
+import { world, svg, wires, wireByEdge, GRAPH, reduceMotion, NS, hexRgb } from './store.js';
 import { selectWire } from './interactions.js';
 import { renderMinimap } from './minimap.js';
 
@@ -26,7 +26,16 @@ export function cutWire(o){const key=o.from+'>'+o.to;
     o.g.style.opacity=String(1-Math.max(0,(k-0.45)/0.55));
     if(k<1)requestAnimationFrame(step);else o.g.remove();})(t0);}
 
-export function socketCenter(sel,wRect){const el=world.querySelector(`[data-port="${sel}"] .socket`);if(!el)return null;const r=el.getBoundingClientRect();return{x:(r.left+r.width/2-wRect.left)/S.scale,y:(r.top+r.height/2-wRect.top)/S.scale};}
+// socketCenter returns a port's centre in #world layout coordinates,
+// derived purely from offsetLeft/offsetTop up the offsetParent chain to
+// #world. That makes it transform-independent: it is identical at every
+// zoom level and mid-transition (unlike getBoundingClientRect()/scale,
+// which reads the momentarily-mismatched screen rect while the CSS zoom
+// tween is still running and used to snap the wires off their ports).
+export function socketCenter(sel){const el=world.querySelector(`[data-port="${sel}"] .socket`);if(!el)return null;
+  let x=el.offsetWidth/2,y=el.offsetHeight/2,n=el;
+  while(n&&n!==world){x+=n.offsetLeft;y+=n.offsetTop;n=n.offsetParent;}
+  return{x,y};}
 export function restSag(o){const dx=o.e.bx-o.e.ax,dy=o.e.by-o.e.ay;return Math.min(88,Math.max(0,(Math.hypot(dx,dy)-70)*0.2));}
 export function pathOf(o){const{ax,ay,bx,by}=o.e,dx=Math.max(24,Math.abs(bx-ax)*0.5),ox=o.off.x,oy=o.off.y;return`M ${ax} ${ay} C ${ax+dx+ox*1.0} ${ay+oy}, ${bx-dx+ox*1.0} ${by+oy}, ${bx} ${by}`;}
 export function stepPhysics(o){const mx=(o.e.ax+o.e.bx)/2,my=(o.e.ay+o.e.by)/2,sag=restSag(o);
@@ -41,13 +50,13 @@ export function stepPhysics(o){const mx=(o.e.ax+o.e.bx)/2,my=(o.e.ay+o.e.by)/2,s
   o.sp.x+=o.vel.x;o.sp.y+=o.vel.y;
   o.off.x=Math.max(-180,Math.min(180,o.sp.x-mx));o.off.y=Math.max(-60,Math.min(230,o.sp.y-my));}
 export function renderWires(){for(const o of wires){const d=pathOf(o);o.base.setAttribute('d',d);o.flow.setAttribute('d',d);if(o.hit)o.hit.setAttribute('d',d);}}
-export function recomputeEndpoints(){const wr=world.getBoundingClientRect();for(const o of wires){const a=socketCenter(o.from,wr),b=socketCenter(o.to,wr);if(a&&b)o.e={ax:a.x,ay:a.y,bx:b.x,by:b.y};}renderWires();}
+export function recomputeEndpoints(){for(const o of wires){const a=socketCenter(o.from),b=socketCenter(o.to);if(a&&b)o.e={ax:a.x,ay:a.y,bx:b.x,by:b.y};}renderWires();}
 export function applyEdgeColor(o,col){o.color=col;const[r,g,b]=hexRgb(col);o.g.style.setProperty('--wire',col);o.g.style.setProperty('--wire-soft',`rgba(${r},${g},${b},.5)`);
   [o.from,o.to].forEach(sel=>{const pe=world.querySelector(`[data-port="${sel}"]`);if(pe){pe.style.setProperty('--wire',col);pe.style.setProperty('--wire-soft',`rgba(${r},${g},${b},.5)`);}});
   const idx=GRAPH.edges.findIndex(e=>e.from===o.from&&e.to===o.to);if(idx>=0)GRAPH.edges[idx].color=col;renderMinimap();}
 export function findWireFrom(sel){return wires.find(o=>o.from===sel);}
 export function findWireTo(sel){return wires.find(o=>o.to===sel);}
-export function addWire(e){const wr=world.getBoundingClientRect();const a=socketCenter(e.from,wr),b=socketCenter(e.to,wr);if(!a||!b)return null;
+export function addWire(e){const a=socketCenter(e.from),b=socketCenter(e.to);if(!a||!b)return null;
   const g=NS('g');g.setAttribute('class','wire');const hit=NS('path');hit.setAttribute('class','wire-hit');const base=NS('path');base.setAttribute('class','wire-base');const flow=NS('path');flow.setAttribute('class','wire-flow');g.appendChild(hit);g.appendChild(base);g.appendChild(flow);
   const sparks=[];for(let k=0;k<3;k++){const cc=NS('circle');cc.setAttribute('class','spark');cc.setAttribute('r','3');cc.setAttribute('fill','#EAFEFF');cc.setAttribute('opacity','0');g.appendChild(cc);sparks.push({el:cc,p:k/3});}
   svg.appendChild(g);const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,o={g,hit,base,flow,sparks,from:e.from,to:e.to,i:wires.length,e:{ax:a.x,ay:a.y,bx:b.x,by:b.y}};hit.addEventListener('pointerdown',ev=>{ev.stopPropagation();selectWire(o);});
