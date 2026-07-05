@@ -151,4 +151,8 @@ var (
 	ErrNotFound      = errors.New("access: not found")
 	ErrUnauthorized  = errors.New("access: unauthorized")
 	ErrNotConfigured = errors.New("access: backend not configured")
+	// ErrUALinkTaken: das UA-Profil ist bereits an einen anderen
+	// CARVILON-Benutzer geknuepft (partieller UNIQUE-Index auf
+	// carvilon_users.ua_user_id).
+	ErrUALinkTaken = errors.New("access: ua profile already linked to another user")
 )

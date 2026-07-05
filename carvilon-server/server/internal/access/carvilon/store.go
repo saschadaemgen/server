@@ -179,6 +179,27 @@ func (s *Store) SetActive(ctx context.Context, id string, active bool) error {
 	return nil
 }
 
+// SetUALink heftet die optionale UA-Identitaet an den Benutzer oder
+// loest sie (leerer uaUserID -> NULL). Die UA-Kopplung ist nur ein
+// Attribut am CARVILON-Benutzer, kein eigener Eintrag. Ein bereits an
+// einen anderen Benutzer vergebenes UA-Profil liefert
+// access.ErrUALinkTaken (partieller UNIQUE-Index, faengt auch Races).
+func (s *Store) SetUALink(ctx context.Context, id string, uaUserID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE carvilon_users SET ua_user_id = ?, updated_at = ? WHERE id = ?`,
+		nullString(strings.TrimSpace(uaUserID)), s.now().UnixMilli(), id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return access.ErrUALinkTaken
+		}
+		return fmt.Errorf("carvilon: set ua link: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return access.ErrNotFound
+	}
+	return nil
+}
+
 // Delete entfernt den Benutzer endgueltig.
 func (s *Store) Delete(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM carvilon_users WHERE id = ?`, id)
@@ -222,4 +243,10 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// isUniqueViolation erkennt einen UNIQUE-Constraint-Bruch aus modernc/
+// sqlite ueber die Fehlermeldung (gleiche Strategie wie telegramstore).
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(strings.ToUpper(err.Error()), "UNIQUE")
 }

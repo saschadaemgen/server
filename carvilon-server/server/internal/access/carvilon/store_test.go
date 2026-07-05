@@ -299,6 +299,78 @@ func TestWithIDFunc_Deterministic(t *testing.T) {
 	}
 }
 
+func TestSetUALink_SetAndClear(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	u, _ := s.Create(ctx, access.CreateNativeUserParams{DisplayName: "Anna"})
+
+	if err := s.SetUALink(ctx, u.ID, "ua-777"); err != nil {
+		t.Fatalf("SetUALink: %v", err)
+	}
+	got, _ := s.Get(ctx, u.ID)
+	if got.UAUserID != "ua-777" {
+		t.Errorf("UAUserID = %q, want ua-777", got.UAUserID)
+	}
+
+	// Clearing with empty string sets NULL again.
+	if err := s.SetUALink(ctx, u.ID, ""); err != nil {
+		t.Fatalf("SetUALink clear: %v", err)
+	}
+	got, _ = s.Get(ctx, u.ID)
+	if got.UAUserID != "" {
+		t.Errorf("after clear UAUserID = %q, want empty", got.UAUserID)
+	}
+}
+
+func TestSetUALink_UnknownUser(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.SetUALink(ctx, "nope", "ua-1"); !errors.Is(err, access.ErrNotFound) {
+		t.Errorf("SetUALink unknown = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetUALink_RejectsDoubleLink(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	a, _ := s.Create(ctx, access.CreateNativeUserParams{DisplayName: "A"})
+	b, _ := s.Create(ctx, access.CreateNativeUserParams{DisplayName: "B"})
+
+	if err := s.SetUALink(ctx, a.ID, "ua-shared"); err != nil {
+		t.Fatalf("first link: %v", err)
+	}
+	// Same UA profile to a second user must be rejected by the unique index.
+	if err := s.SetUALink(ctx, b.ID, "ua-shared"); !errors.Is(err, access.ErrUALinkTaken) {
+		t.Fatalf("double link = %v, want ErrUALinkTaken", err)
+	}
+	// B stays unlinked.
+	gotB, _ := s.Get(ctx, b.ID)
+	if gotB.UAUserID != "" {
+		t.Errorf("B UAUserID = %q after rejected link, want empty", gotB.UAUserID)
+	}
+	// Re-linking the same profile to the SAME user is idempotent (no error).
+	if err := s.SetUALink(ctx, a.ID, "ua-shared"); err != nil {
+		t.Errorf("relink same user = %v, want nil", err)
+	}
+}
+
+func TestSetUALink_FreedAfterClear(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	a, _ := s.Create(ctx, access.CreateNativeUserParams{DisplayName: "A"})
+	b, _ := s.Create(ctx, access.CreateNativeUserParams{DisplayName: "B"})
+	if err := s.SetUALink(ctx, a.ID, "ua-x"); err != nil {
+		t.Fatalf("link a: %v", err)
+	}
+	// Unlink A, then B may take the profile.
+	if err := s.SetUALink(ctx, a.ID, ""); err != nil {
+		t.Fatalf("clear a: %v", err)
+	}
+	if err := s.SetUALink(ctx, b.ID, "ua-x"); err != nil {
+		t.Errorf("link b after a freed = %v, want nil", err)
+	}
+}
+
 func names(us []access.NativeUser) []string {
 	out := make([]string, len(us))
 	for i, u := range us {

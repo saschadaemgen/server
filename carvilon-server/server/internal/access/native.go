@@ -106,7 +106,9 @@ type NativeListParams struct {
 //
 // Die Methoden decken die vom Ticket geforderten Operationen ab:
 // Anlegen (Create), Lesen (Get), Auflisten (List), Aktualisieren
-// (Update), Loeschen (Delete), Aktiv-Schalten (SetActive).
+// (Update), Loeschen (Delete), Aktiv-Schalten (SetActive) sowie die
+// optionale UA-Verknuepfung (SetUALink) - das UA-Profil ist kein
+// eigener Eintrag, nur ein Attribut am CARVILON-Benutzer.
 type NativeUserStore interface {
 	Create(ctx context.Context, params CreateNativeUserParams) (NativeUser, error)
 	Get(ctx context.Context, id string) (NativeUser, error)
@@ -114,4 +116,9 @@ type NativeUserStore interface {
 	Update(ctx context.Context, id string, params UpdateNativeUserParams) (NativeUser, error)
 	SetActive(ctx context.Context, id string, active bool) error
 	Delete(ctx context.Context, id string) error
+	// SetUALink heftet die optionale UA-Identitaet an den Benutzer
+	// (setzt ua_user_id) oder loest sie (leerer uaUserID -> NULL).
+	// Ein UA-Profil darf hoechstens an einen Benutzer haengen; ein
+	// bereits vergebenes liefert ErrUALinkTaken.
+	SetUALink(ctx context.Context, id string, uaUserID string) error
 }
