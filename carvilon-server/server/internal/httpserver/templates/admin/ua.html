@@ -81,10 +81,11 @@
 
   .dc-search-wrap { padding:12px 14px 10px; border-bottom:1px solid var(--divider); }
   .dc-search { position:relative; border-radius:var(--radius-md); background:var(--field-bg); box-shadow:var(--well); overflow:hidden; }
+  .dc-search:focus-within { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dc-search-canvas { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
   .dc-search .dc-search-ico { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--text-tertiary); pointer-events:none; display:flex; z-index:2; }
   .dc-search input { position:relative; z-index:2; width:100%; height:34px; padding:0 12px 0 34px; border:none; background:transparent; color:var(--white); font-family:var(--font-sans); font-size:13px; outline:none; }
   .dc-search input::placeholder { color:var(--text-tertiary); }
-  .dc-search .dc-glint { position:absolute; top:0; left:0; height:1px; width:34%; background:linear-gradient(90deg,transparent,rgba(255,192,138,0.7),rgba(255,122,26,0.5),transparent); animation:dc-edgeglint 8s ease-in-out infinite; pointer-events:none; z-index:3; }
 
   .dc-filters { flex:1; overflow-y:auto; padding:2px 8px 20px; }
   .dc-filter-head { display:flex; align-items:center; gap:8px; padding:10px 6px 2px; }
@@ -228,7 +229,6 @@
   .dc-gate a { color:var(--orange-400); text-decoration:none; }
   .dc-gate a:hover { text-decoration:underline; }
 
-  @keyframes dc-edgeglint { 0%{transform:translateX(-160%);opacity:0;} 8%{opacity:0.85;} 26%{transform:translateX(480%);opacity:0;} 100%{transform:translateX(480%);opacity:0;} }
   @keyframes dc-pagein { from{transform:translateX(102%);} to{transform:translateX(0);} }
   @keyframes dc-pageout { from{transform:translateX(0);} to{transform:translateX(102%);} }
   @keyframes dc-contentin { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
@@ -296,9 +296,9 @@
 
       <div class="dc-search-wrap">
         <div class="dc-search">
+          <canvas class="dc-search-canvas" data-dc-search-canvas aria-hidden="true"></canvas>
           <span class="dc-search-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
           <input type="text" data-dc-search placeholder="Search name, IP, MAC" autocomplete="off" spellcheck="false" aria-label="Search devices">
-          <span class="dc-glint"></span>
         </div>
       </div>
 
@@ -756,6 +756,148 @@
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePanel(); });
 
     apply();
+  })();
+
+  // Search-field ambient animation: a faint orange dot field behind the
+  // input. Typed text pushes the dots aside (a "magnet"); after a few
+  // idle seconds a soft pair of eyes may blink/glance in the empty
+  // space. Canvas-only, purely decorative, disabled under
+  // prefers-reduced-motion.
+  (function () {
+    var box = document.querySelector('.dc-search');
+    var cv = box && box.querySelector('[data-dc-search-canvas]');
+    var input = box && box.querySelector('[data-dc-search]');
+    if (!box || !cv || !input) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    var ctx = cv.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var PAD = 34;                                 // where the input text starts
+    var FONT = '13px "IBM Plex Sans", system-ui, sans-serif';
+    var PLACEHOLDER = input.getAttribute('placeholder') || '';
+
+    var R = 15, MAX = 11;                                  // magnet reach / strength
+    var EYE_D = 3600, AW = 13, AH = 7, PR = 2.4, SEP = 30; // idle eyes
+
+    var ss = function (a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+    var W, H, cols, rows, cx, cy, dots = null;
+    var lastAct = performance.now(), nextEye = 0, eye = null;
+
+    function build() {
+      var r = cv.getBoundingClientRect();
+      W = r.width; H = r.height;
+      if (!W || !H) { dots = null; return; }
+      cv.width = W * dpr; cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cols = Math.max(1, Math.round(W / 3.4)); rows = Math.max(1, Math.round(H / 3.4));
+      cx = W / cols; cy = H / rows;
+      dots = [];
+      for (var i = 0; i < cols; i++) {
+        for (var j = 0; j < rows; j++) {
+          dots.push({ hx: (i + 0.5) * cx, hy: (j + 0.5) * cy, ox: 0, oy: 0, bias: i / cols, ph: Math.random() * 6.283, sp: 0.6 + Math.random() * 1.4 });
+        }
+      }
+    }
+
+    function act() { lastAct = performance.now(); eye = null; }
+    input.addEventListener('input', act);
+    input.addEventListener('focus', act);
+
+    function draw(t) {
+      if (!dots) { build(); if (!dots) { requestAnimationFrame(draw); return; } }
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#0a0c0f';
+      ctx.fillRect(0, 0, W, H);
+
+      var val = input.value || '';
+      ctx.font = FONT;
+      var tw2 = val ? ctx.measureText(val).width : 0;
+      var x0 = PAD, x1 = PAD + tw2, yc = H / 2;
+
+      // eyes only in clear space right of the placeholder; if it is long
+      // and leaves no room, let them roam the inner width instead.
+      var phW = ctx.measureText(PLACEHOLDER).width;
+      var halfSpan = SEP / 2 + AW + 4;
+      var minX = PAD + phW + 14 + halfSpan;
+      var maxX = W - 12 - halfSpan;
+      if (maxX <= minX) { minX = PAD + halfSpan; maxX = W - 12 - halfSpan; }
+
+      var idle = !val && (t - lastAct) > 5000;
+      if (!idle) { eye = null; }
+      else if (!eye && t > nextEye && maxX > minX) {
+        eye = { x: minX + Math.random() * (maxX - minX), t0: t, gp: Math.random() * 6.283, gd: Math.random() < 0.5 ? -1 : 1 };
+        nextEye = t + EYE_D + 4000 + Math.random() * 6000;
+      }
+
+      var ef = null;
+      if (eye) {
+        var e = (t - eye.t0) / EYE_D;
+        if (e >= 1) { eye = null; }
+        else {
+          var fade = ss(0, 0.22, e) * (1 - ss(0.78, 1, e));
+          var lid = 0;
+          if (e > 0.46 && e < 0.76) { lid = Math.sin((e - 0.46) / 0.30 * Math.PI); }
+          ef = { x: eye.x, fade: fade, lid: lid, glance: Math.sin(e * 2.6 + eye.gp) * 3 * eye.gd };
+        }
+      }
+
+      for (var k = 0; k < dots.length; k++) {
+        var d = dots[k];
+        var tox = 0, toy = 0;
+        if (val && d.hx <= x1 + 1) {
+          var nx = Math.max(x0, Math.min(d.hx, x1));
+          var vx = d.hx - nx, vy = d.hy - yc, dist = Math.hypot(vx, vy);
+          if (dist < R) {
+            if (dist < 0.001) { vx = 0; vy = Math.random() < 0.5 ? -1 : 1; dist = 1; }
+            var f = (R - dist) / R * MAX;
+            tox = vx / dist * f; toy = vy / dist * f;
+          }
+        }
+        d.ox += (tox - d.ox) * 0.2;
+        d.oy += (toy - d.oy) * 0.2;
+
+        var px = d.hx + d.ox, py = d.hy + d.oy;
+        var tw = 0.5 + 0.5 * Math.sin(t * 0.002 * d.sp + d.ph);
+        var a = (0.05 + d.bias * 0.5) * tw;
+        // dim -> bright orange ramp (#FF7A1A family)
+        var rC = 120 + d.bias * 135, gC = 55 + d.bias * 67, bC = 18 + d.bias * 12, s = 1.8;
+
+        if (ef) {
+          var best = 0;
+          var centers = [ef.x - SEP / 2, ef.x + SEP / 2];
+          for (var c = 0; c < 2; c++) {
+            var ecx = centers[c];
+            var dxE = d.hx - ecx, dyE = d.hy - yc;
+            var rr = (dxE / AW) * (dxE / AW) + (dyE / AH) * (dyE / AH);
+            var soft = Math.pow(Math.max(0, 1 - rr), 1.2);
+            if (soft > 0) {
+              var lidLine = -AH + ef.lid * 2 * AH;
+              var vis = ss(lidLine, lidLine + 2.5, dyE);
+              var pd = Math.hypot(d.hx - (ecx + ef.glance), dyE);
+              var pupilDim = pd < PR ? 0.12 : (pd < PR + 3 ? 0.12 + (pd - PR) / 3 * 0.88 : 1);
+              var b = ef.fade * soft * vis * pupilDim * 0.75;
+              if (b > best) best = b;
+            }
+          }
+          if (best > 0) {
+            a = Math.min(1, a + best);
+            rC = Math.min(255, rC + best * 90);
+            gC = Math.min(255, gC + best * 95);
+            bC = Math.min(255, bC + best * 60);
+            s = 1.8 + best * 0.5;
+          }
+        }
+
+        ctx.fillStyle = 'rgba(' + Math.round(rC) + ',' + Math.round(gC) + ',' + Math.round(bC) + ',' + a.toFixed(3) + ')';
+        ctx.fillRect(px - s / 2, py - s / 2, s, s);
+      }
+      requestAnimationFrame(draw);
+    }
+
+    build();
+    window.addEventListener('resize', build);
+    requestAnimationFrame(draw);
   })();
 </script>
 {{end}}
