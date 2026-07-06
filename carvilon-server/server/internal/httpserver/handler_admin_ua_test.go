@@ -473,7 +473,7 @@ func TestAdminUA_ProtectOnlyMakesNoUACalls(t *testing.T) {
 	if strings.Contains(body, `class="dc-gate`) {
 		t.Errorf("gate card shown although Protect fills the page")
 	}
-	for _, want := range []string{"Einfahrt", "Kellersensor", "only UniFi Protect devices are shown"} {
+	for _, want := range []string{"Einfahrt", "Kellersensor", "only devices from other sources are shown"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("protect-only overview missing %q", want)
 		}

@@ -180,8 +180,9 @@ type Deps struct {
 	// graphs (migration 032). Nil returns 503 on the designer
 	// persistence API; the editor keeps an unsaved in-memory canvas.
 	DesignerStore *designerstore.Store
-	// ReaderStore is the tag-reader registry (migrations 036/037) the NFC
-	// menu page reads. Nil leaves the page on an empty registry.
+	// ReaderStore is the tag-reader registry (migrations 036/037) the
+	// Device Center reads (readers appear as source "RPi"). Nil leaves
+	// the page without local reader rows.
 	ReaderStore *readerstore.Store
 	// NFCMonitor owns the persistent per-reader pollers (the reader is
 	// infrastructure). A run binds its engine to it via a RunBinding. Nil
@@ -561,8 +562,13 @@ func (s *Server) routes() {
 	// Saison 21 - UA read-only device + door overview (Etappe 1). The
 	// two detail routes are lazily fetched when a row is expanded; the
 	// status route is the live poll that keeps the page fresh.
+	// CARVILON's own tag readers (registry, migrations 036/037) appear
+	// on the same page as source "RPi"; the rename route is the one
+	// write the page carries - it only touches OUR reader registry,
+	// never UA.
 	s.mux.Handle("GET /a/ua", s.requireAdminSession(http.HandlerFunc(s.handleAdminUA)))
 	s.mux.Handle("GET /a/ua/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAStatus)))
+	s.mux.Handle("POST /a/ua/readers/name", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAReaderRename)))
 	s.mux.Handle("GET /a/ua/devices/{id}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADeviceSettings)))
 	s.mux.Handle("GET /a/ua/doors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADoorDetail)))
 	// Protect Etappe 1: lazy camera/sensor detail for the same page.

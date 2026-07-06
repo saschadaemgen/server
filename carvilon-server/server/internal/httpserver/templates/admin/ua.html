@@ -202,6 +202,8 @@
   .dc-banner.alert { background:var(--lock-haze); color:#ffcabf; }
   .dc-banner.alert svg { color:var(--lock-500); }
   .dc-banner.warn { background:color-mix(in srgb, var(--orange-500) 12%, transparent); color:var(--orange-300); }
+  .dc-banner.ok { background:color-mix(in srgb, var(--live-500) 10%, transparent); color:#9be8b8; }
+  .dc-banner.ok svg { color:var(--live-500); }
   .dc-banner-body { min-width:0; display:flex; flex-direction:column; gap:4px; }
   .dc-banner-body strong { color:var(--text-primary); font-weight:600; }
   .dc-banner.alert .dc-banner-body strong { color:#ffd9d1; }
@@ -259,6 +261,22 @@
   .dc-kv-grid .dc-v { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); word-break:break-word; }
   .dc-kv-grid .dc-kv-cell { display:flex; flex-direction:column; gap:1px; min-width:0; }
 
+  /* Local-reader controls in the panel's right column (rename + editor
+     jump) - the one editable block on the page; everything UniFi stays
+     read-only. Same field/button vocabulary as the rest of the design. */
+  .dc-act-form { display:flex; flex-direction:column; gap:10px; padding:14px 20px 16px; border-bottom:1px solid var(--divider); }
+  .dc-act-label { font-size:11px; font-weight:600; letter-spacing:0.04em; color:var(--text-tertiary); }
+  .dc-act-input { height:34px; padding:0 12px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-sans); font-size:13px; outline:none; }
+  .dc-act-input::placeholder { color:var(--text-tertiary); }
+  .dc-act-input:focus { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dc-act-row { display:flex; gap:8px; flex-wrap:wrap; }
+  .dc-act-btn { height:32px; display:inline-flex; align-items:center; gap:7px; padding:0 16px; border-radius:16px; border:1px solid var(--border-strong); background:var(--surface-raised); color:var(--text-secondary); cursor:pointer; text-decoration:none; font-family:var(--font-sans); font-size:12px; font-weight:600; }
+  .dc-act-btn:hover { color:var(--white); border-color:var(--border-accent); }
+  .dc-act-btn svg { width:13px; height:13px; }
+  .dc-act-btn.accent { border:1px solid rgba(255,192,138,0.55); background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); color:var(--text-on-accent); box-shadow:inset 0 1px 0 rgba(255,255,255,0.28),0 5px 15px -8px rgba(0,0,0,0.75); }
+  .dc-act-btn.accent:hover { background:linear-gradient(180deg,var(--orange-400),var(--orange-500)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.34),0 0 16px var(--amber-glow); }
+  .dc-act-hint { margin:0; font-size:11px; color:var(--text-tertiary); line-height:1.5; }
+
   /* ============ Gating / empty states ============ */
   .dc-gate { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:40px; text-align:center; }
   .dc-gate-ico { width:54px; height:54px; border-radius:var(--radius-lg); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:inset 0 0 0 1px var(--border-default); color:var(--text-tertiary); }
@@ -294,18 +312,19 @@
 
 {{define "content"}}
 <div class="dc-root" data-dc{{if or .Page.UANotice .Page.ProtectError .Page.DoorsError}} data-dc-degraded="1"{{end}}>
-  {{/* Gate cards only when Protect cannot fill the page either; with
-       Protect available UA trouble degrades to a banner over the table.
-       data-dc-degraded marks a render that KNOWS it is incomplete - the
-       status poller then never auto-reloads (a degraded render plus a
-       healthy poll would otherwise reload in a loop). */}}
-  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable)}}
+  {{/* Gate cards only when no other source can fill the page; with
+       Protect or a local reader available UA trouble degrades to a
+       banner over the table. data-dc-degraded marks a render that KNOWS
+       it is incomplete - the status poller then never auto-reloads (a
+       degraded render plus a healthy poll would otherwise reload in a
+       loop). */}}
+  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
       <h2>UniFi Access is disabled</h2>
       <p>The UniFi Access integration is turned off. Turn it on under <a href="/a/settings">Settings</a> once UA credentials are stored, and the device and door overview appears here.</p>
     </div>
-  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable)}}
+  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>
       <h2>No UA credentials stored</h2>
@@ -435,6 +454,7 @@
       {{if .Page.DoorsError}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>Doors could not be loaded</strong> {{.Page.DoorsError}}</div></div>{{end}}
       {{if .Page.UANotice}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>UniFi Access</strong> {{.Page.UANotice}}</div></div>{{end}}
       {{if .Page.ProtectError}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>Cameras and sensors could not be loaded</strong> {{.Page.ProtectError}}</div></div>{{end}}
+      {{if .Page.Flash}}<div class="dc-banner {{if eq .Page.FlashType "err"}}alert{{else}}ok{{end}}" data-dc-flash><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{{if eq .Page.FlashType "err"}}<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>{{else}}<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>{{end}}</svg><div class="dc-banner-body"><strong>{{.Page.Flash}}</strong></div></div>{{end}}
 
       <div class="dc-scroll">
         <div class="dc-table">
@@ -491,6 +511,25 @@
                   <div class="dc-caps">{{range $r.Capabilities}}<span class="dc-cap">{{.}}</span>{{end}}</div>
                 {{end}}
               </template>
+
+              {{/* Local readers are CARVILON's own data: their panel's
+                   right column carries the two controls the reader keeps
+                   (rename, editor jump) instead of a lazy UA fetch. */}}
+              {{if eq $r.Kind "rpi-reader"}}
+              <template data-dc-actions="{{$r.Index}}">
+                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Reader controls</span><span class="dc-hr"></span></div>
+                <form class="dc-act-form" method="post" action="/a/ua/readers/name">
+                  <input type="hidden" name="id" value="{{$r.ID}}">
+                  <span class="dc-act-label">Custom name</span>
+                  <input class="dc-act-input" type="text" name="name" value="{{$r.CustomName}}" placeholder="{{$r.AutoName}}" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Custom name">
+                  <div class="dc-act-row">
+                    <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Save name</button>
+                    <a class="dc-act-btn accent" href="/a/designer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>Open in editor</a>
+                  </div>
+                  <p class="dc-act-hint">Leave the field empty and save to revert to the auto-generated name. In the editor the reader is available as a palette block.</p>
+                </form>
+              </template>
+              {{end}}
             {{end}}
           </div>
           <div class="dc-empty-rows" data-dc-noresults hidden>No devices match the current filters.</div>
@@ -798,11 +837,20 @@
       var det = tbody.querySelector('[data-dc-detail="' + idx + '"]');
       if (det && det.content) leftCol.appendChild(det.content.cloneNode(true));
 
-      // right column: lazy sections
-      var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
-      rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
-        + lazyTitle
-        + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
+      // right column: a local reader gets its pre-rendered controls
+      // (its registry data is already complete - nothing to fetch),
+      // everything else its lazy UA/Protect sections.
+      var isLocalReader = kind === 'rpi-reader';
+      if (isLocalReader) {
+        rightCol.innerHTML = '';
+        var act = tbody.querySelector('[data-dc-actions="' + idx + '"]');
+        if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
+      } else {
+        var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
+        rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
+          + lazyTitle
+          + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
+      }
 
       var id = row.getAttribute('data-id');
       layer.classList.remove('is-closing');
@@ -817,8 +865,8 @@
         if (closeBtn) { try { closeBtn.focus({ preventScroll: true }); } catch (e) { closeBtn.focus(); } }
         // Defer the lazy fetch+inject until the slide has essentially
         // finished, so injecting detail rows never reflows during the slide.
-        setTimeout(function () {
-          if (selectedRow === row) loadDetail(kind, id, rightCol);
+        if (!isLocalReader) setTimeout(function () {
+          if (selectedRow === row) loadDetail(kind, id, rightCol, row);
         }, 360);
       });
     }
@@ -830,21 +878,26 @@
       if (selectedRow) { selectedRow.classList.remove('is-selected'); selectedRow = null; }
     }
 
-    function loadDetail(kind, id, target) {
+    function loadDetail(kind, id, target, row) {
       var url = kind === 'door' ? '/a/ua/doors/' + encodeURIComponent(id)
         : kind === 'camera' ? '/a/ua/protect/cameras/' + encodeURIComponent(id)
         : kind === 'sensor' ? '/a/ua/protect/sensors/' + encodeURIComponent(id)
         : '/a/ua/devices/' + encodeURIComponent(id) + '/settings';
+      // A slow response must never clobber the panel after the user has
+      // opened another row (the right column can hold the local reader's
+      // rename form by then - typed input would be destroyed).
+      function stale() { return row && selectedRow !== row; }
       fetch(url, { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
+          if (stale()) return;
           if (!d || d.ok === false) {
             target.innerHTML = sectionErr((d && d.error) || 'Could not be loaded.');
             return;
           }
           target.innerHTML = renderSections(d.sections || []);
         })
-        .catch(function () { target.innerHTML = sectionErr('Could not be loaded.'); });
+        .catch(function () { if (!stale()) target.innerHTML = sectionErr('Could not be loaded.'); });
     }
 
     function sectionErr(msg) {
@@ -880,11 +933,12 @@
     // matched by kind+id; the flip counters re-roll only when a digit
     // actually changes. Paused while the tab is hidden.
     var rowByKey = {};
-    var hasUARows = false, hasProtectRows = false;
+    var hasUARows = false, hasProtectRows = false, hasLocalRows = false;
     rows.forEach(function (r) {
       var kind = r.getAttribute('data-kind');
       rowByKey[kind + ' ' + r.getAttribute('data-id')] = r;
       if (kind === 'camera' || kind === 'sensor') hasProtectRows = true;
+      else if (kind === 'rpi-reader') hasLocalRows = true;
       else hasUARows = true;
     });
     var statTiles = {};
@@ -941,9 +995,9 @@
       if (el) el.textContent = n;
     }
 
-    // Refresh the status (and, for doors, the position) lines inside a
-    // rendered kv container (the pre-rendered overview template or the
-    // open panel's clone).
+    // Refresh the status (and, for doors, the position; for local
+    // readers, the last tag) lines inside a rendered kv container (the
+    // pre-rendered overview template or the open panel's clone).
     function setDetailKVs(container, item) {
       if (!container) return;
       Array.prototype.forEach.call(container.querySelectorAll('.dc-kv'), function (kv) {
@@ -952,6 +1006,8 @@
         if (!k || !v) return;
         if (k.textContent === 'Status' || k.textContent === 'Lock') v.textContent = item.text;
         else if (item.pos && k.textContent === 'Door position (DPS)') v.textContent = item.pos;
+        else if (item.tag && k.textContent === 'Last tag') v.textContent = item.tag;
+        else if (item.tagSeen && k.textContent === 'Last tag seen') v.textContent = item.tagSeen;
       });
     }
 
@@ -975,7 +1031,19 @@
           posChanged = true;
         }
       }
-      if (changed || posChanged) {
+      // Local readers: a scan (new tag, or the same tag again with a
+      // fresh timestamp) refreshes the panel's tag lines. The composite
+      // is remembered on the row; the first poll seeds it (one no-op
+      // kv rewrite - harmless).
+      var tagChanged = false;
+      if (item.tag) {
+        var tagKey = item.tag + '|' + (item.tagSeen || '');
+        if (row.getAttribute('data-tag') !== tagKey) {
+          row.setAttribute('data-tag', tagKey);
+          tagChanged = true;
+        }
+      }
+      if (changed || posChanged || tagChanged) {
         var det = tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
         if (det && det.content) setDetailKVs(det.content, item);
         if (selectedRow === row) {
@@ -1000,7 +1068,8 @@
       // rendered rows for - after an integration was switched off its
       // rows are stale, and fresh counts would contradict them.
       var src = d.sources || {};
-      var sourceMismatch = (hasUARows && src.ua === false) || (hasProtectRows && src.protect === false);
+      var sourceMismatch = (hasUARows && src.ua === false) || (hasProtectRows && src.protect === false)
+        || (hasLocalRows && src.rpi === false);
       if (!sourceMismatch) {
         var c = d.counts || {};
         setCounter('online', c.online);
@@ -1047,6 +1116,19 @@
       if (!document.hidden) schedulePoll(250);
     });
     schedulePoll(POLL_MS);
+  })();
+
+  // A reader rename lands back with ?flash=...; strip it from the URL
+  // once rendered so a later (auto-)reload does not repeat the banner.
+  // Anchored match, and only the flash param is removed - other query
+  // params and the hash survive.
+  (function () {
+    if (!/[?&]flash=/.test(window.location.search)) return;
+    var qs = window.location.search.slice(1).split('&').filter(function (p) {
+      return p.indexOf('flash=') !== 0;
+    }).join('&');
+    var url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+    try { window.history.replaceState(null, '', url); } catch (e) {}
   })();
 
   // Group-header scan sweep: every 8s at most one visible group's trailing

@@ -385,9 +385,10 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// nfc driver detected at startup is auto-registered as a protected
 	// component with an online row and a speaking auto-name; a reader
 	// that is no longer present stays as an offline row instead of
-	// vanishing. This is the component view (the NFC page) of the same
-	// detection the editor palette exposes as logic blocks - one source,
-	// two views. A reader is NOT a graph in the folder tree.
+	// vanishing. This is the component view (the Device Center row,
+	// source "RPi") of the same detection the editor palette exposes as
+	// logic blocks - one source, two views. A reader is NOT a graph in
+	// the folder tree.
 	designerStore := designerstore.New(database.DB)
 	readerStore := readerstore.New(database.DB)
 	platform := nfcPlatformTag()
@@ -403,7 +404,7 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		})
 	}
 	if err := readerStore.Sync(ctx, detectedReaders); err != nil {
-		log.Error("reader registry sync failed (continuing; NFC page may be stale)", "err", err)
+		log.Error("reader registry sync failed (continuing; Device Center readers may be stale)", "err", err)
 	}
 
 	// The reader is infrastructure: one persistent poll goroutine per

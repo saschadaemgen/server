@@ -11,13 +11,20 @@
 //
 // The design ships a "Cameras" and "Sensors" category too, but there is
 // no backend for them yet (UniFi Protect / sensors are a later ticket),
-// so those categories render empty/disabled - no invented data. Only
-// the "UniFi" source is real; the Source facet is built so further
-// sources are pure additions later.
+// so those categories render empty/disabled - no invented data.
+//
+// Besides the two UniFi integrations the page carries a third,
+// independent source: CARVILON's own tag readers (the local registry,
+// migrations 036/037) appear as source "RPi" in the same flat table.
+// They are OUR data, so their rows keep their two controls (rename,
+// editor jump) in the detail panel while everything UniFi stays
+// read-only.
 //
 // Gating: the page only talks to the UDM when the "UA aktiv" toggle is
 // on AND a client is configured (base URL + token). Everything else is
-// a clean hint. The token/host never reach the log or the HTML - only
+// a clean hint - but the RPi source is NOT behind that gate: with a
+// reader registered the table always renders and UA trouble degrades
+// to a banner. The token/host never reach the log or the HTML - only
 // fixed friendly strings do.
 package httpserver
 
@@ -32,6 +39,7 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/protectapi"
+	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/uaapi"
 )
 
@@ -49,6 +57,18 @@ type uaOverviewData struct {
 	// AND wired. When true the page always renders the table (never a
 	// UA gate card) and UA trouble degrades to the UANotice banner.
 	ProtectAvailable bool
+
+	// LocalAvailable: at least one CARVILON reader is registered
+	// (source "RPi"). Like ProtectAvailable it keeps the table on
+	// screen and degrades UA trouble to a banner - the local source
+	// is independent of any UniFi configuration.
+	LocalAvailable bool
+
+	// Flash is the outcome banner after a reader rename (the page's
+	// only write). Set from a stable code in the redirect query -
+	// never from free text. FlashType is "ok" or "err".
+	Flash     string
+	FlashType string
 
 	// Terminal error states (devices could not be listed at all AND
 	// Protect cannot fill the page either) -> full-page gate cards.
@@ -123,8 +143,8 @@ type uaRow struct {
 	Position      string
 	PositionState string // "open" | "closed" | "unknown"
 
-	Source      string // "unifi"
-	SourceLabel string // "UniFi"
+	Source      string // "unifi" | "rpi"
+	SourceLabel string // "UniFi" | "RPi"
 
 	Model    string // device model / type (also the Model facet key)
 	IP       string
@@ -137,6 +157,11 @@ type uaRow struct {
 	// door-detail and lock-rule sections load when the panel opens).
 	Detail       []kvRow
 	Capabilities []string
+
+	// RPi-reader extras: the rename form in the detail panel prefills
+	// the custom name and shows the auto-name as its placeholder.
+	AutoName   string
+	CustomName string
 
 	// Lowercased "name model ip mac" for the client search box.
 	Search string
@@ -170,7 +195,8 @@ var categoryOrder = map[string]int{
 	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "other": 5, "door": 6,
 }
 
-// handleAdminUA renders the read-only Device Center.
+// handleAdminUA renders the Device Center (read-only except for the
+// local readers' rename control).
 func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := uaOverviewData{
@@ -179,23 +205,29 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 		ProtectAvailable: s.protectReady(r.Context()),
 	}
 	data.Configured = data.Enabled && s.ua != nil
-	// Neither integration ready -> no calls at all, just the gate
-	// hints (Etappe-1 contract, now covering both sources).
-	if !(data.Enabled && data.Configured) && !data.ProtectAvailable {
+	if f, ok := uaFlash[r.URL.Query().Get("flash")]; ok {
+		data.Flash, data.FlashType = f.msg, f.typ
+	}
+	readers := s.localReaders(r.Context())
+	data.LocalAvailable = len(readers) > 0
+	// No source can fill the page -> no calls at all, just the gate
+	// hints (Etappe-1 contract, now covering all three sources).
+	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable {
 		s.renderAdminPage(w, "ua", data)
 		return
 	}
-	s.buildUAOverview(r.Context(), &data)
+	s.buildUAOverview(r.Context(), &data, readers)
 	s.renderAdminPage(w, "ua", data)
 }
 
 // buildUAOverview fetches UA devices (with ?refresh=true), doors and
 // the emergency status plus - Protect Etappe 1 - the Protect cameras
-// and sensors, and flattens everything into rows + facets. Each fetch
-// is isolated: a doors failure does not blank the (already loaded)
-// devices, a Protect failure only drops a banner, and with Protect
-// available a UA failure degrades to a banner instead of a gate.
-func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
+// and sensors, folds in the local reader registry (source "RPi"), and
+// flattens everything into rows + facets. Each fetch is isolated: a
+// doors failure does not blank the (already loaded) devices, a Protect
+// failure only drops a banner, and with another source available a UA
+// failure degrades to a banner instead of a gate.
+func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader) {
 	var devices []uaapi.Device
 	var doors []uaapi.Door
 	switch {
@@ -203,8 +235,8 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
 		var err error
 		devices, err = s.ua.ListDevicesRefresh(ctx)
 		if err != nil {
-			if !data.ProtectAvailable {
-				// Terminal, as before Protect existed: gate card.
+			if !data.ProtectAvailable && !data.LocalAvailable {
+				// Terminal, as before other sources existed: gate card.
 				if errors.Is(err, uaapi.ErrUnauthorized) {
 					data.Unauthorized = true
 				} else {
@@ -230,8 +262,9 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
 				data.Emergency = buildEmergencyView(em)
 			}
 		}
-	case data.ProtectAvailable:
-		data.UANotice = "UniFi Access is disabled or not configured - only UniFi Protect devices are shown."
+	default:
+		// UA off/unconfigured but another source fills the page.
+		data.UANotice = "UniFi Access is disabled or not configured - only devices from other sources are shown."
 	}
 
 	var cams []protectapi.Camera
@@ -257,12 +290,13 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, cams, sens, readers, s.viewerMACSet(ctx))
 }
 
-// buildRows turns devices + doors + Protect cameras/sensors into the
-// flat, pre-sorted row list and computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, mockMACs map[string]bool) {
+// buildRows turns devices + doors + Protect cameras/sensors + local
+// readers into the flat, pre-sorted row list and computes the facet
+// counts.
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, mockMACs map[string]bool) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -292,6 +326,9 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	for _, sn := range sens {
 		addDeviceRow(makeSensorRow(sn, now), sn.IsOnline())
 	}
+	for _, rd := range readers {
+		addDeviceRow(makeReaderRow(rd), rd.Online)
+	}
 	for _, dr := range doors {
 		row := makeDoorRow(dr)
 		data.Rows = append(data.Rows, row)
@@ -307,11 +344,14 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		return strings.ToLower(data.Rows[i].Name) < strings.ToLower(data.Rows[j].Name)
 	})
 
-	// Number the rows and mark the first of each category as a group
-	// start (label + total count) for the table's group headings.
+	// Number the rows, mark the first of each category as a group
+	// start (label + total count) for the table's group headings, and
+	// count the sources for their facet.
 	lastCat := ""
+	srcCount := map[string]int{}
 	for i := range data.Rows {
 		data.Rows[i].Index = i + 1
+		srcCount[data.Rows[i].Source]++
 		if data.Rows[i].Category != lastCat {
 			lastCat = data.Rows[i].Category
 			data.Rows[i].GroupStart = true
@@ -346,10 +386,14 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		}
 	}
 
-	// Source facet: only UniFi is real today. Further sources appear
-	// here once their device backends exist.
-	if data.TotalCount > 0 {
-		data.SourceFacets = append(data.SourceFacets, uaFacet{Key: "unifi", Label: "UniFi", Count: data.TotalCount})
+	// Source facet: every source with at least one row. UniFi covers
+	// the UA + Protect rows, RPi the local reader registry.
+	for _, sc := range []struct{ key, label string }{
+		{"unifi", "UniFi"}, {"rpi", "RPi"},
+	} {
+		if n := srcCount[sc.key]; n > 0 {
+			data.SourceFacets = append(data.SourceFacets, uaFacet{Key: sc.key, Label: sc.label, Count: n})
+		}
 	}
 
 	// Status facet: device reachability (doors carry no online/offline).
@@ -518,6 +562,124 @@ func makeSensorRow(sn protectapi.Sensor, now time.Time) uaRow {
 	row.Detail = det
 	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.MAC, row.TypeLabel}, " "))
 	return row
+}
+
+// makeReaderRow builds the flat row for a CARVILON reader from the
+// local registry (source "RPi"). It shares the Readers category with
+// the UA readers - the Source facet is what tells them apart. All the
+// registry knows is already in the row, so the panel needs no lazy
+// fetch; its right column carries the reader's controls instead
+// (rename + editor jump). Columns the registry has no data for (IP,
+// device version, MAC) stay empty and render "-".
+func makeReaderRow(rd readerstore.Reader) uaRow {
+	row := uaRow{
+		ID:          rd.ID,
+		Kind:        "rpi-reader",
+		Category:    "reader",
+		TypeLabel:   "Reader",
+		Name:        rd.DisplayName(),
+		Source:      "rpi",
+		SourceLabel: "RPi",
+		Model:       rd.Model,
+		Firmware:    rd.Firmware,
+		AutoName:    rd.Name,
+		CustomName:  rd.CustomName,
+	}
+	if rd.Online {
+		row.StatusState, row.StatusText = "online", "Online"
+	} else {
+		row.StatusState, row.StatusText = "offline", "Offline"
+	}
+
+	det := []kvRow{
+		{Key: "Type", Value: "Reader"},
+		{Key: "Status", Value: row.StatusText},
+		{Key: "Source", Value: row.SourceLabel},
+	}
+	det = appendKVDash(det, "Model", rd.Model)
+	det = appendKVDash(det, "Firmware", rd.Firmware)
+	det = appendKVDash(det, "Bus", rd.Bus)
+	det = append(det, kvRow{Key: "Identity", Value: rd.ID})
+	if rd.CustomName != "" {
+		det = append(det, kvRow{Key: "Auto name", Value: rd.Name})
+	}
+	det = appendKVDash(det, "Last tag", rd.LastUID)
+	det = appendKVDash(det, "Last tag seen", readerLastSeenLabel(rd))
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, rd.Bus, rd.ID, row.TypeLabel, "rpi"}, " "))
+	return row
+}
+
+// readerLastSeenLabel formats a reader's last tag-read time, "" if the
+// reader never saw a tag.
+func readerLastSeenLabel(rd readerstore.Reader) string {
+	if rd.LastSeenAt <= 0 {
+		return ""
+	}
+	return time.UnixMilli(rd.LastSeenAt).Format("2006-01-02 15:04:05")
+}
+
+// localReaders lists the CARVILON reader registry. Nil-safe (no store
+// wired) and non-fatal on error - the Device Center then simply shows
+// no local rows.
+func (s *Server) localReaders(ctx context.Context) []readerstore.Reader {
+	if s.readerStore == nil {
+		return nil
+	}
+	readers, err := s.readerStore.List(ctx)
+	if err != nil {
+		s.log.Warn("device center: list readers failed", "err", err)
+		return nil
+	}
+	return readers
+}
+
+// uaFlash maps a stable flash code (carried in the redirect query,
+// never free text) to the banner after a reader rename.
+var uaFlash = map[string]struct{ msg, typ string }{
+	"renamed":   {"Reader name saved.", "ok"},
+	"reset":     {"Reader name reset to the auto-generated name.", "ok"},
+	"err-name":  {"Renaming failed.", "err"},
+	"err-notfd": {"Reader not found.", "err"},
+}
+
+// handleAdminUAReaderRename sets or clears a local reader's custom name
+// from the Device Center panel - the page's only write, and it only
+// touches CARVILON's own registry, never UA. Clearing (empty name)
+// reverts to the speaking auto-name. Redirects back with a stable flash
+// code - never reflects the submitted text.
+func (s *Server) handleAdminUAReaderRename(w http.ResponseWriter, r *http.Request) {
+	if s.readerStore == nil {
+		http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+		return
+	}
+	id := strings.TrimSpace(r.PostFormValue("id"))
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	// The form's maxlength is 80; that is client-side only, so a direct
+	// POST beyond it is truncated here rather than rejected.
+	if rn := []rune(name); len(rn) > 80 {
+		name = string(rn[:80])
+	}
+	if id == "" {
+		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+		return
+	}
+	err := s.readerStore.SetCustomName(r.Context(), id, name)
+	switch {
+	case errors.Is(err, readerstore.ErrNotFound):
+		http.Redirect(w, r, "/a/ua?flash=err-notfd", http.StatusSeeOther)
+	case err != nil:
+		s.log.Error("device center: set reader custom name", "reader", id, "err", err)
+		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+	case name == "":
+		http.Redirect(w, r, "/a/ua?flash=reset", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/a/ua?flash=renamed", http.StatusSeeOther)
+	}
 }
 
 // makeDoorRow builds the flat row for a door.
@@ -728,13 +890,17 @@ func uaEmergencyFlag(val any) bool {
 }
 
 // uaStatusItem is one row's live status in the /a/ua/status payload,
-// addressed by kind+id (matching the row's data attributes).
+// addressed by kind+id (matching the row's data attributes). Local
+// readers additionally carry their last tag so an open panel shows a
+// scan without a reload.
 type uaStatusItem struct {
-	Kind   string `json:"kind"`
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Text   string `json:"text"`
-	Pos    string `json:"pos,omitempty"`
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Text    string `json:"text"`
+	Pos     string `json:"pos,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+	TagSeen string `json:"tagSeen,omitempty"`
 }
 
 // handleAdminUAStatus serves a lightweight live snapshot of every
@@ -752,8 +918,21 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	uaOK := s.uaReady(r.Context())
 	protectOK := s.protectReady(r.Context())
-	if !uaOK && !protectOK {
-		writeUADetailError(w, "Neither UniFi Access nor UniFi Protect is active and configured.")
+	// The local reader registry is a source of its own: readers keep
+	// their live status even with every UniFi integration off. The
+	// list is a local SQLite read - cheap enough for the poll. A read
+	// error is tracked separately from "no readers": it must mark the
+	// snapshot incomplete below, not just drop the source flag.
+	var localReaders []readerstore.Reader
+	var localErr error
+	if s.readerStore != nil {
+		if localReaders, localErr = s.readerStore.List(r.Context()); localErr != nil {
+			s.log.Warn("device center: status poll readers failed", "err", localErr)
+		}
+	}
+	localOK := len(localReaders) > 0
+	if !uaOK && !protectOK && !localOK {
+		writeUADetailError(w, "No device source is available - UniFi Access and UniFi Protect are off and no local reader is registered.")
 		return
 	}
 	var items []uaStatusItem
@@ -813,6 +992,17 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if localErr != nil {
+		complete = false
+	}
+	for _, rd := range localReaders {
+		addOnline("rpi-reader", rd.ID, rd.Online)
+		if rd.LastUID != "" {
+			it := &items[len(items)-1]
+			it.Tag = rd.LastUID
+			it.TagSeen = readerLastSeenLabel(rd)
+		}
+	}
 
 	// sources tells the client which integrations this snapshot covers,
 	// so it can suppress the counters when the page still shows rows
@@ -821,7 +1011,7 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"ok":      true,
 		"items":   items,
-		"sources": map[string]bool{"ua": uaOK, "protect": protectOK},
+		"sources": map[string]bool{"ua": uaOK, "protect": protectOK, "rpi": localOK},
 	}
 	if complete {
 		out["counts"] = map[string]any{"online": online, "offline": offline, "updates": 0, "total": total}

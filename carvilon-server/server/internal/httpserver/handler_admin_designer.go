@@ -92,7 +92,7 @@ func sysMetricsForCatalog() []designer.SysMetric {
 // nfcReadersForCatalog bridges the nfc: driver's detected readers to the
 // designer catalog's neutral type, joining in each reader's display name
 // from the registry (the operator's custom name overrides the speaking
-// auto-name) so the palette blocks read the same as the NFC page. The
+// auto-name) so the palette blocks read the same as the Device Center. The
 // catalog package stays unaware of the driver and the registry.
 func (s *Server) nfcReadersForCatalog(ctx context.Context) []designer.NFCReader {
 	rs := nfc.Readers()
