@@ -190,8 +190,6 @@ func navSlotFor(name string) string {
 		return "turn"
 	case "designer":
 		return "designer"
-	case "nfc":
-		return "nfc"
 	case "ua":
 		return "ua"
 	case "mqtt":

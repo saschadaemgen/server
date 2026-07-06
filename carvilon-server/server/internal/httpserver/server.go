@@ -558,14 +558,6 @@ func (s *Server) routes() {
 	// /a/designer/ subtree is the bundle). The palette is fed from the
 	// Go block catalog at /a/designer/catalog.json. All admin-gated. Demo
 	// data only; live engine/SSE feeds are a later ticket.
-	// NFC reader registry (device level). The menu page lists every
-	// auto-registered tag reader with its online/offline status and last
-	// seen tag, and jumps into the reader's System/Reader graph in the
-	// editor. Admin-gated like the rest of /a/.
-	s.mux.Handle("GET /a/nfc", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFC)))
-	s.mux.Handle("GET /a/nfc.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFCJSON)))
-	s.mux.Handle("POST /a/nfc/name", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFCRename)))
-
 	// Saison 21 - UA read-only device + door overview (Etappe 1). The
 	// two detail routes are lazily fetched when a row is expanded; the
 	// status route is the live poll that keeps the page fresh.
