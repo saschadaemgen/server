@@ -3,13 +3,16 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/uaapi"
 	"carvilon.local/server/internal/viewerstore"
 )
@@ -358,4 +361,272 @@ func firstLines(s string) string {
 		return s[:600]
 	}
 	return s
+}
+
+// --- Protect Etappe 1 (cameras + sensors, read-only) ---
+
+// protectStub is a fake Protect Integration API serving the read-only
+// endpoints the Device Center uses. hits counts every request; fail
+// flips the stub into a 500-everything mode.
+type protectStub struct {
+	ts   *httptest.Server
+	hits int32
+	fail bool
+}
+
+func newProtectStub(t *testing.T) *protectStub {
+	t.Helper()
+	s := &protectStub{}
+	s.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&s.hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if s.fail {
+			w.WriteHeader(500)
+			_, _ = w.Write([]byte(`{"error":"boom"}`))
+			return
+		}
+		if r.Header.Get("X-API-KEY") == "" {
+			w.WriteHeader(401)
+			return
+		}
+		switch r.URL.Path {
+		case "/proxy/protect/integration/v1/meta/info":
+			_, _ = w.Write([]byte(`{"applicationVersion":"5.0.34"}`))
+		case "/proxy/protect/integration/v1/cameras":
+			// cam-2 carries only the identity trio - every optional
+			// field must degrade to "-" without breaking anything.
+			_, _ = w.Write([]byte(`[
+				{"id":"cam-1","name":"Einfahrt","state":"CONNECTED","mac":"AABBCC001122","videoMode":"default","hdrType":"auto","hasPackageCamera":true,"featureFlags":{"hasHdr":true}},
+				{"id":"cam-2","name":"Garten","state":"DISCONNECTED"}
+			]`))
+		case "/proxy/protect/integration/v1/sensors":
+			_, _ = w.Write([]byte(`[
+				{"id":"sen-1","name":"Kellersensor","state":"CONNECTED","mac":"AABBCC003344",
+				 "mountType":"leak","isOpened":false,"isMotionDetected":false,
+				 "stats":{"temperature":{"value":21.5},"humidity":{"value":48},"light":{"value":120}},
+				 "batteryStatus":{"percentage":87,"isLow":false},
+				 "wirelessConnectionState":{"signalState":"good","signalStrength":-62,"bridge":"bridge-1"}}
+			]`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(s.ts.Close)
+	return s
+}
+
+// wireProtect turns the "Protect aktiv" toggle on and points the
+// client at the stub.
+func wireProtect(t *testing.T, env *testEnv, stub *protectStub) {
+	t.Helper()
+	if err := env.platformCfg.Set(context.Background(), platformconfig.KeyProtectEnabled, "1"); err != nil {
+		t.Fatalf("enable protect: %v", err)
+	}
+	env.srv.SetProtectClient(protectapi.New(protectapi.Options{BaseURL: stub.ts.URL, APIKey: "k"}))
+}
+
+// Protect on: cameras + sensors appear as real rows in their own
+// groups, their facets are enabled, sensor readings land in the
+// pre-rendered detail and missing camera fields degrade to "-".
+func TestAdminUA_ProtectRows(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	wireUA(t, env, newUAStub(t))
+	wireProtect(t, env, newProtectStub(t))
+
+	body := getBody(t, env, "/a/ua")
+	for _, want := range []string{
+		"Einfahrt", "Garten", "Kellersensor", // protect device names
+		">Cameras<", ">Sensors<", // group headings
+		"Video mode", "HDR type", "Package camera", // camera panel fields
+		"21.5 °C", "48 %", "120 lx", // sensor readings
+		"Water leak", "Connected to", "bridge-1", // sensor panel fields
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("protect overview missing %q", want)
+		}
+	}
+	// The facets are real now - not the disabled shells.
+	for _, facet := range []string{`data-dc-value="camera"`, `data-dc-value="sensor"`} {
+		if !strings.Contains(body, facet) {
+			t.Errorf("facet %s missing", facet)
+		}
+		if strings.Contains(body, facet+" disabled") {
+			t.Errorf("facet %s still disabled", facet)
+		}
+	}
+}
+
+// UA off but Protect on: the table renders (no gate card), a notice
+// banner explains, and the UA developer API is never called.
+func TestAdminUA_ProtectOnlyMakesNoUACalls(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	uaStub := newUAStub(t)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: uaStub.ts.URL, Token: "t"}))
+	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
+	wireProtect(t, env, newProtectStub(t))
+
+	body := getBody(t, env, "/a/ua")
+	// `class="dc-gate` is the rendered card; the bare ".dc-gate" in
+	// the stylesheet is always present.
+	if strings.Contains(body, `class="dc-gate`) {
+		t.Errorf("gate card shown although Protect fills the page")
+	}
+	for _, want := range []string{"Einfahrt", "Kellersensor", "only UniFi Protect devices are shown"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("protect-only overview missing %q", want)
+		}
+	}
+	if h := atomic.LoadInt32(&uaStub.hits); h != 0 {
+		t.Errorf("UDM developer API was called %d times while UA disabled, want 0", h)
+	}
+}
+
+// A Protect failure keeps the UA rows and degrades to a banner - one
+// broken source never blanks the page.
+func TestAdminUA_ProtectErrorKeepsPage(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	wireUA(t, env, newUAStub(t))
+	stub := newProtectStub(t)
+	stub.fail = true
+	wireProtect(t, env, stub)
+
+	body := getBody(t, env, "/a/ua")
+	for _, want := range []string{"Haupt-Hub", "Cameras and sensors could not be loaded"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview missing %q", want)
+		}
+	}
+	if strings.Contains(body, stub.ts.URL) {
+		t.Errorf("protect host leaked into the page")
+	}
+}
+
+// The lazy camera endpoint returns the flattened full record so the
+// panel shows everything the NVR sent (featureFlags included).
+func TestAdminUA_ProtectCameraDetailLazy(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	wireUA(t, env, newUAStub(t))
+	wireProtect(t, env, newProtectStub(t))
+
+	resp, err := env.client.Get(env.ts.URL + "/a/ua/protect/cameras/cam-1")
+	if err != nil {
+		t.Fatalf("GET camera detail: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK       bool `json:"ok"`
+		Sections []struct {
+			Title string `json:"title"`
+			Rows  []struct{ Key, Value string } `json:"rows"`
+		} `json:"sections"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK || len(out.Sections) != 1 || out.Sections[0].Title != "Camera details" {
+		t.Fatalf("bad response: %+v", out)
+	}
+	var sawFlag bool
+	for _, kv := range out.Sections[0].Rows {
+		if kv.Key == "featureFlags.hasHdr" && kv.Value == "Yes" {
+			sawFlag = true
+		}
+	}
+	if !sawFlag {
+		t.Errorf("featureFlags.hasHdr=Yes row missing: %+v", out.Sections[0].Rows)
+	}
+}
+
+// The status poll covers the Protect rows too and counts them into
+// the fleet counters.
+func TestAdminUA_StatusIncludesProtect(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	wireUA(t, env, newUAStub(t))
+	wireProtect(t, env, newProtectStub(t))
+
+	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	if err != nil {
+		t.Fatalf("GET status: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Online  int `json:"online"`
+			Offline int `json:"offline"`
+			Total   int `json:"total"`
+		} `json:"counts"`
+		Items []struct {
+			Kind   string `json:"kind"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("ok=false")
+	}
+	// UA: 3 online + 1 offline devices + 2 doors; Protect: 1 online +
+	// 1 offline camera + 1 online sensor.
+	if out.Counts.Online != 5 || out.Counts.Offline != 2 || out.Counts.Total != 9 {
+		t.Errorf("counts = %+v, want online=5 offline=2 total=9", out.Counts)
+	}
+	byKey := map[string]string{}
+	for _, it := range out.Items {
+		byKey[it.Kind+"/"+it.ID] = it.Status
+	}
+	if byKey["camera/cam-2"] != "offline" || byKey["sensor/sen-1"] != "online" {
+		t.Errorf("protect statuses wrong: %v", byKey)
+	}
+}
+
+// POST /a/settings/protect stores the key encrypted; the settings page
+// only ever shows "gesetzt", never the key itself.
+func TestAdminSettings_ProtectStoresKeyEncrypted(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	resp, err := env.client.PostForm(env.ts.URL+"/a/settings/protect", url.Values{
+		"protect_controller_url": {"https://protect.local"},
+		"protect_api_key":        {"super-secret-test-key"},
+		"protect_enabled":        {"1"},
+	})
+	if err != nil {
+		t.Fatalf("POST protect settings: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "super-secret-test-key") {
+		t.Errorf("API key echoed back into the page")
+	}
+
+	stored, err := env.platformCfg.GetSecret(context.Background(), platformconfig.KeyProtectAPIKey)
+	if err != nil || stored != "super-secret-test-key" {
+		t.Errorf("stored key = %q, err=%v", stored, err)
+	}
+	if v, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyProtectEnabled); v != "1" {
+		t.Errorf("protect_enabled = %q, want 1", v)
+	}
+	// The plaintext column must NOT hold the key (it lives encrypted).
+	if v, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyProtectAPIKey); v == "super-secret-test-key" {
+		t.Errorf("API key stored in plaintext")
+	}
+
+	page := getBody(t, env, "/a/settings")
+	if !strings.Contains(page, "UniFi Protect Integration") || !strings.Contains(page, "(gesetzt)") {
+		t.Errorf("protect settings section incomplete")
+	}
+	if strings.Contains(page, "super-secret-test-key") {
+		t.Errorf("API key leaked into the settings page")
+	}
 }

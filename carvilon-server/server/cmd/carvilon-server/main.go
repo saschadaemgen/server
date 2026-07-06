@@ -48,6 +48,7 @@ import (
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
@@ -263,6 +264,22 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		log.Info("ua api not yet configured; admin must set base URL + token under /a/settings")
 	}
 
+	// Saison 21 - Protect Etappe 1: the UniFi Protect Integration
+	// client, same lazy pattern as UA (host + X-API-KEY from the
+	// encrypted platform_config; the key never reaches a log line).
+	var protectClient *protectapi.Client
+	protectURL, _ := platformCfg.Get(ctx, platformconfig.KeyProtectAPIBaseURL)
+	protectKey, _ := platformCfg.GetSecret(ctx, platformconfig.KeyProtectAPIKey)
+	if protectURL != "" && protectKey != "" {
+		protectClient = protectapi.New(protectapi.Options{BaseURL: protectURL, APIKey: protectKey})
+		// Deliberately no base_url attribute: the Protect briefing
+		// forbids the configured host in any log line (the log also
+		// reaches the admin System Log console via the logbuf tee).
+		log.Info("protect api client configured")
+	} else {
+		log.Info("protect api not yet configured; admin can set host + api key under /a/settings")
+	}
+
 	// access.UserStore-Adapter um den uaapi-Client. Nil-Client ist
 	// erlaubt; der Adapter liefert dann access.ErrNotConfigured und
 	// das Admin-UI zeigt einen Hinweis-Karten statt einer leeren
@@ -413,6 +430,7 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		ViewerLimiter:   viewerLimiter,
 		AdminLimiter:    adminLimiter,
 		UA:              uaClient,
+		Protect:         protectClient,
 		UserStore:       userStore,
 		NativeUsers:     nativeUserStore,
 		Hub:             hub,

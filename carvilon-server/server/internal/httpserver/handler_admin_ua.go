@@ -29,7 +29,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/uaapi"
 )
 
@@ -43,12 +45,20 @@ type uaOverviewData struct {
 	Enabled    bool // "UA aktiv"-Schalter an
 	Configured bool // + client wired (base URL + token stored)
 
-	// Terminal error states (devices could not be listed at all).
+	// Protect Etappe 1: whether the UniFi Protect integration is on
+	// AND wired. When true the page always renders the table (never a
+	// UA gate card) and UA trouble degrades to the UANotice banner.
+	ProtectAvailable bool
+
+	// Terminal error states (devices could not be listed at all AND
+	// Protect cannot fill the page either) -> full-page gate cards.
 	Unauthorized bool   // 401 from the UDM -> token hint
 	LoadError    string // any other devices-fetch failure -> unreachable hint
 
-	// Section-level, non-fatal: devices loaded but doors did not.
-	DoorsError string
+	// Section-level, non-fatal banners.
+	DoorsError   string // devices loaded but doors did not
+	UANotice     string // UA off/unconfigured/failed while Protect still fills the page
+	ProtectError string // cameras/sensors could not be loaded (page keeps the UA rows)
 
 	Emergency *uaEmergencyView
 
@@ -156,22 +166,22 @@ type uaSection struct {
 
 // categoryOrder ranks the natures for the flat table (hubs first, doors
 // last) so the pre-sorted rows read top-down like the topology.
-var categoryOrder = map[string]int{"hub": 0, "reader": 1, "viewer": 2, "other": 3, "door": 4}
+var categoryOrder = map[string]int{
+	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "other": 5, "door": 6,
+}
 
 // handleAdminUA renders the read-only Device Center.
 func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := uaOverviewData{
-		User:    adminUser{Name: username, Initials: initialsOf(username)},
-		Enabled: s.uaEnabled(r.Context()),
+		User:             adminUser{Name: username, Initials: initialsOf(username)},
+		Enabled:          s.uaEnabled(r.Context()),
+		ProtectAvailable: s.protectReady(r.Context()),
 	}
-	// UA off -> no calls at all, just the hint (Etappe-1 contract).
-	if !data.Enabled {
-		s.renderAdminPage(w, "ua", data)
-		return
-	}
-	data.Configured = s.ua != nil
-	if !data.Configured {
+	data.Configured = data.Enabled && s.ua != nil
+	// Neither integration ready -> no calls at all, just the gate
+	// hints (Etappe-1 contract, now covering both sources).
+	if !(data.Enabled && data.Configured) && !data.ProtectAvailable {
 		s.renderAdminPage(w, "ua", data)
 		return
 	}
@@ -179,56 +189,108 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	s.renderAdminPage(w, "ua", data)
 }
 
-// buildUAOverview fetches devices (with ?refresh=true), doors and the
-// emergency status and flattens them into rows + facets. Each fetch is
-// isolated: a doors failure does not blank the (already loaded)
-// devices, and an emergency failure just drops the banner.
+// buildUAOverview fetches UA devices (with ?refresh=true), doors and
+// the emergency status plus - Protect Etappe 1 - the Protect cameras
+// and sensors, and flattens everything into rows + facets. Each fetch
+// is isolated: a doors failure does not blank the (already loaded)
+// devices, a Protect failure only drops a banner, and with Protect
+// available a UA failure degrades to a banner instead of a gate.
 func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
-	devices, err := s.ua.ListDevicesRefresh(ctx)
-	if err != nil {
-		if errors.Is(err, uaapi.ErrUnauthorized) {
-			data.Unauthorized = true
-		} else {
+	var devices []uaapi.Device
+	var doors []uaapi.Door
+	switch {
+	case data.Enabled && data.Configured:
+		var err error
+		devices, err = s.ua.ListDevicesRefresh(ctx)
+		if err != nil {
+			if !data.ProtectAvailable {
+				// Terminal, as before Protect existed: gate card.
+				if errors.Is(err, uaapi.ErrUnauthorized) {
+					data.Unauthorized = true
+				} else {
+					s.log.Warn("device center: list devices failed", "err", err)
+					data.LoadError = uaFriendlyError(err)
+				}
+				return
+			}
 			s.log.Warn("device center: list devices failed", "err", err)
-			data.LoadError = uaFriendlyError(err)
+			data.UANotice = "UniFi Access devices could not be loaded. " + uaFriendlyError(err)
+			devices = nil
+		} else {
+			var derr error
+			doors, derr = s.ua.ListDoors(ctx)
+			if derr != nil {
+				s.log.Warn("device center: list doors failed", "err", derr)
+				data.DoorsError = uaFriendlyError(derr)
+				doors = nil
+			}
+			if em, eerr := s.ua.EmergencySettings(ctx); eerr != nil {
+				s.log.Warn("device center: emergency status failed", "err", eerr)
+			} else if em != nil {
+				data.Emergency = buildEmergencyView(em)
+			}
 		}
-		return
+	case data.ProtectAvailable:
+		data.UANotice = "UniFi Access is disabled or not configured - only UniFi Protect devices are shown."
 	}
 
-	doors, derr := s.ua.ListDoors(ctx)
-	if derr != nil {
-		s.log.Warn("device center: list doors failed", "err", derr)
-		data.DoorsError = uaFriendlyError(derr)
-		doors = nil
+	var cams []protectapi.Camera
+	var sens []protectapi.Sensor
+	if data.ProtectAvailable {
+		var cerr, serr error
+		cams, cerr = s.protect.ListCameras(ctx)
+		sens, serr = s.protect.ListSensors(ctx)
+		if cerr != nil {
+			s.log.Warn("device center: list cameras failed", "err", cerr)
+			cams = nil
+		}
+		if serr != nil {
+			s.log.Warn("device center: list sensors failed", "err", serr)
+			sens = nil
+		}
+		if cerr != nil || serr != nil {
+			ferr := cerr
+			if ferr == nil {
+				ferr = serr
+			}
+			data.ProtectError = protectFriendlyError(ferr)
+		}
 	}
 
-	if em, eerr := s.ua.EmergencySettings(ctx); eerr != nil {
-		s.log.Warn("device center: emergency status failed", "err", eerr)
-	} else if em != nil {
-		data.Emergency = buildEmergencyView(em)
-	}
-
-	s.buildRows(data, devices, doors, s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, cams, sens, s.viewerMACSet(ctx))
 }
 
-// buildRows turns devices + doors into the flat, pre-sorted row list and
-// computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, mockMACs map[string]bool) {
+// buildRows turns devices + doors + Protect cameras/sensors into the
+// flat, pre-sorted row list and computes the facet counts.
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, mockMACs map[string]bool) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
-	for _, d := range devices {
-		row := makeDeviceRow(d, mockMACs)
+	// addDeviceRow folds one online/offline-style row into the list
+	// and every counter (doors have their own path: lock state, no
+	// online/offline contribution).
+	addDeviceRow := func(row uaRow, online bool) {
 		data.Rows = append(data.Rows, row)
 		catCount[row.Category]++
 		if row.Model != "" {
 			modelCount[row.Model]++
 		}
-		if d.IsOnline {
+		if online {
 			data.OnlineCount++
 		} else {
 			data.OfflineCount++
 		}
+	}
+
+	for _, d := range devices {
+		addDeviceRow(makeDeviceRow(d, mockMACs), d.IsOnline)
+	}
+	now := time.Now()
+	for _, c := range cams {
+		addDeviceRow(makeCameraRow(c), c.IsOnline())
+	}
+	for _, sn := range sens {
+		addDeviceRow(makeSensorRow(sn, now), sn.IsOnline())
 	}
 	for _, dr := range doors {
 		row := makeDoorRow(dr)
@@ -263,20 +325,26 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	data.OfflinePad = pad2(data.OfflineCount)
 	data.UpdatesPad = pad2(data.UpdatesCount)
 
-	// Category facet: the real natures present, then the not-yet-wired
-	// Cameras/Sensors as disabled shell entries (no invented data).
+	// Category facet: the real natures present. Cameras/Sensors are
+	// real (enabled, live counts) once the Protect integration is
+	// available; without it they stay the disabled shell entries of
+	// Etappe 1 - no invented data either way.
 	for _, c := range []struct{ key, label string }{
 		{"hub", "Hubs"}, {"reader", "Readers"}, {"viewer", "Viewers"},
+		{"camera", "Cameras"}, {"sensor", "Sensors"},
 		{"other", "Other devices"}, {"door", "Doors"},
 	} {
-		if n := catCount[c.key]; n > 0 {
-			data.CategoryFacets = append(data.CategoryFacets, uaFacet{Key: c.key, Label: c.label, Count: n})
+		n := catCount[c.key]
+		switch c.key {
+		case "camera", "sensor":
+			data.CategoryFacets = append(data.CategoryFacets,
+				uaFacet{Key: c.key, Label: c.label, Count: n, Disabled: !data.ProtectAvailable})
+		default:
+			if n > 0 {
+				data.CategoryFacets = append(data.CategoryFacets, uaFacet{Key: c.key, Label: c.label, Count: n})
+			}
 		}
 	}
-	data.CategoryFacets = append(data.CategoryFacets,
-		uaFacet{Key: "camera", Label: "Cameras", Count: 0, Disabled: true},
-		uaFacet{Key: "sensor", Label: "Sensors", Count: 0, Disabled: true},
-	)
 
 	// Source facet: only UniFi is real today. Further sources appear
 	// here once their device backends exist.
@@ -364,6 +432,94 @@ func makeDeviceRow(d uaapi.Device, mockMACs map[string]bool) uaRow {
 	return row
 }
 
+// makeCameraRow builds the flat row for a Protect camera. Only name,
+// state and MAC are reliably present in the Integration API; model,
+// IP and firmware degrade to "-" via their empty labels - nothing is
+// invented (Protect Etappe 1 contract).
+func makeCameraRow(c protectapi.Camera) uaRow {
+	row := uaRow{
+		ID:          c.ID,
+		Kind:        "camera",
+		Category:    "camera",
+		TypeLabel:   "Camera",
+		Name:        c.DisplayName(),
+		Source:      "unifi",
+		SourceLabel: "UniFi",
+		Model:       c.ModelLabel(),
+		IP:          c.IPLabel(),
+		Firmware:    c.FirmwareLabel(),
+		MAC:         c.MACLabel(),
+	}
+	if c.IsOnline() {
+		row.StatusState, row.StatusText = "online", "Online"
+	} else {
+		row.StatusState, row.StatusText = "offline", "Offline"
+	}
+
+	det := []kvRow{
+		{Key: "Type", Value: "Camera"},
+		{Key: "Status", Value: row.StatusText},
+		{Key: "Source", Value: row.SourceLabel},
+	}
+	det = appendKVDash(det, "Model", row.Model)
+	det = appendKVDash(det, "IP address", row.IP)
+	det = appendKVDash(det, "Firmware", row.Firmware)
+	det = appendKVDash(det, "MAC", row.MAC)
+	det = appendKVDash(det, "Video mode", c.VideoModeLabel())
+	det = appendKVDash(det, "HDR type", c.HDRTypeLabel())
+	det = appendKVDash(det, "Package camera", c.PackageCameraLabel())
+	det = append(det, kvRow{Key: "Camera ID", Value: c.ID})
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.IP, row.MAC, row.TypeLabel}, " "))
+	return row
+}
+
+// makeSensorRow builds the flat row for a Protect sensor. The
+// measurements live in the panel's Overview block (the shared table
+// columns stay identical across every category, like the doors do);
+// absent readings render "-" instead of invented values.
+func makeSensorRow(sn protectapi.Sensor, now time.Time) uaRow {
+	row := uaRow{
+		ID:          sn.ID,
+		Kind:        "sensor",
+		Category:    "sensor",
+		TypeLabel:   "Sensor",
+		Name:        sn.DisplayName(),
+		Source:      "unifi",
+		SourceLabel: "UniFi",
+		Model:       sn.ModelLabel(),
+		MAC:         sn.MACLabel(),
+	}
+	if sn.IsOnline() {
+		row.StatusState, row.StatusText = "online", "Online"
+	} else {
+		row.StatusState, row.StatusText = "offline", "Offline"
+	}
+
+	det := []kvRow{
+		{Key: "Type", Value: "Sensor"},
+		{Key: "Status", Value: row.StatusText},
+		{Key: "Source", Value: row.SourceLabel},
+	}
+	det = appendKVDash(det, "Model", row.Model)
+	det = appendKVDash(det, "MAC", row.MAC)
+	det = appendKVDash(det, "Temperature", sn.TemperatureLabel())
+	det = appendKVDash(det, "Humidity", sn.HumidityLabel())
+	det = appendKVDash(det, "Light", sn.LightLabel())
+	det = appendKVDash(det, "Motion", sn.MotionLabel())
+	det = appendKVDash(det, "Water leak", sn.LeakLabel(now))
+	det = appendKVDash(det, "Tamper", sn.TamperLabel(now))
+	det = appendKVDash(det, "Signal", sn.SignalLabel())
+	det = appendKVDash(det, "Battery", sn.BatteryLabel())
+	det = appendKVDash(det, "Connected to", sn.BridgeLabel())
+	det = appendKVDash(det, "Mount type", sn.MountTypeLabel())
+	det = appendKVDash(det, "Opened", sn.OpenedLabel())
+	det = append(det, kvRow{Key: "Sensor ID", Value: sn.ID})
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.MAC, row.TypeLabel}, " "))
+	return row
+}
+
 // makeDoorRow builds the flat row for a door.
 func makeDoorRow(d uaapi.Door) uaRow {
 	row := uaRow{
@@ -428,6 +584,16 @@ func appendKV(rows []kvRow, key, val string) []kvRow {
 	return append(rows, kvRow{Key: key, Value: val})
 }
 
+// appendKVDash always appends the line, degrading an absent value to
+// "-" - the Protect rows show every briefed field honestly instead of
+// hiding what the NVR did not send.
+func appendKVDash(rows []kvRow, key, val string) []kvRow {
+	if strings.TrimSpace(val) == "" {
+		val = "-"
+	}
+	return append(rows, kvRow{Key: key, Value: val})
+}
+
 // categoryPlural is the group-heading label for a category slug.
 func categoryPlural(cat string) string {
 	switch cat {
@@ -437,6 +603,10 @@ func categoryPlural(cat string) string {
 		return "Readers"
 	case "viewer":
 		return "Viewers"
+	case "camera":
+		return "Cameras"
+	case "sensor":
+		return "Sensors"
 	case "door":
 		return "Doors"
 	default:
@@ -454,6 +624,24 @@ func uaTypeLabel(nature string) string {
 		return "Viewer"
 	default:
 		return "Device"
+	}
+}
+
+func (s *Server) protectReady(ctx context.Context) bool {
+	return s.protectEnabled(ctx) && s.protect != nil
+}
+
+// protectFriendlyError maps a protectapi error to a fixed English
+// message. Like uaFriendlyError it never embeds the underlying error
+// text - the host/key must never reach the HTML or JSON.
+func protectFriendlyError(err error) string {
+	switch {
+	case errors.Is(err, protectapi.ErrUnauthorized):
+		return "Access denied - please check the Protect API key (401)."
+	case errors.Is(err, protectapi.ErrNotFound):
+		return "Not found."
+	default:
+		return "Protect API unreachable or the response was invalid."
 	}
 }
 
@@ -554,50 +742,91 @@ type uaStatusItem struct {
 // polls it so an online/offline (or lock-state) change shows up
 // without a manual reload. It uses the UDM's cached device list (no
 // refresh=true): this runs every few seconds and must stay cheap.
+//
+// Each source is isolated: a failing fetch drops its items for this
+// poll (the client keeps their last state) and marks the snapshot
+// incomplete, which suppresses the counters - partial numbers would
+// make the flip displays lie.
 func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	if !s.uaReady(r.Context()) {
-		writeUADetailError(w, "UniFi Access is not active or not configured.")
+	uaOK := s.uaReady(r.Context())
+	protectOK := s.protectReady(r.Context())
+	if !uaOK && !protectOK {
+		writeUADetailError(w, "Neither UniFi Access nor UniFi Protect is active and configured.")
 		return
 	}
-	devices, err := s.ua.ListDevices(r.Context())
-	if err != nil {
-		// Friendly string only; the client keeps its last state and
-		// simply retries on the next poll.
-		writeUADetailError(w, uaFriendlyError(err))
-		return
-	}
-	items := make([]uaStatusItem, 0, len(devices))
-	online, offline := 0, 0
-	for _, d := range devices {
+	var items []uaStatusItem
+	online, offline, total := 0, 0, 0
+	complete := true
+	addOnline := func(kind, id string, isOnline bool) {
 		st, txt := "offline", "Offline"
-		if d.IsOnline {
+		if isOnline {
 			st, txt = "online", "Online"
 			online++
 		} else {
 			offline++
 		}
-		items = append(items, uaStatusItem{Kind: "device", ID: d.ID, Status: st, Text: txt})
+		total++
+		items = append(items, uaStatusItem{Kind: kind, ID: id, Status: st, Text: txt})
 	}
-	counts := map[string]any{"online": online, "offline": offline, "updates": 0}
-	// Doors are secondary here: a doors failure drops the door items
-	// and the total (the client then leaves both untouched) but never
-	// blocks the device statuses.
-	if doors, derr := s.ua.ListDoors(r.Context()); derr == nil {
-		for _, dr := range doors {
-			var row uaRow
-			row.LockFromDoor(dr)
-			items = append(items, uaStatusItem{
-				Kind: "door", ID: dr.ID, Status: row.StatusState, Text: row.StatusText,
-				Pos: uaPositionLabel(dr.PositionState(), dr.PositionRaw()),
-			})
+
+	if uaOK {
+		if devices, err := s.ua.ListDevices(r.Context()); err != nil {
+			s.log.Warn("device center: status poll devices failed", "err", err)
+			complete = false
+		} else {
+			for _, d := range devices {
+				addOnline("device", d.ID, d.IsOnline)
+			}
+			if doors, derr := s.ua.ListDoors(r.Context()); derr != nil {
+				s.log.Warn("device center: status poll doors failed", "err", derr)
+				complete = false
+			} else {
+				for _, dr := range doors {
+					var row uaRow
+					row.LockFromDoor(dr)
+					items = append(items, uaStatusItem{
+						Kind: "door", ID: dr.ID, Status: row.StatusState, Text: row.StatusText,
+						Pos: uaPositionLabel(dr.PositionState(), dr.PositionRaw()),
+					})
+					total++
+				}
+			}
 		}
-		counts["total"] = len(devices) + len(doors)
-	} else {
-		s.log.Warn("device center: status poll doors failed", "err", derr)
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "counts": counts, "items": items})
+	if protectOK {
+		if cams, err := s.protect.ListCameras(r.Context()); err != nil {
+			s.log.Warn("device center: status poll cameras failed", "err", err)
+			complete = false
+		} else {
+			for _, c := range cams {
+				addOnline("camera", c.ID, c.IsOnline())
+			}
+		}
+		if sens, err := s.protect.ListSensors(r.Context()); err != nil {
+			s.log.Warn("device center: status poll sensors failed", "err", err)
+			complete = false
+		} else {
+			for _, sn := range sens {
+				addOnline("sensor", sn.ID, sn.IsOnline())
+			}
+		}
+	}
+
+	// sources tells the client which integrations this snapshot covers,
+	// so it can suppress the counters when the page still shows rows
+	// from a source that has since been disabled (stale rows + fresh
+	// counts would contradict each other).
+	out := map[string]any{
+		"ok":      true,
+		"items":   items,
+		"sources": map[string]bool{"ua": uaOK, "protect": protectOK},
+	}
+	if complete {
+		out["counts"] = map[string]any{"online": online, "offline": offline, "updates": 0, "total": total}
+	}
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // handleAdminUADeviceSettings lazily serves the /devices/:id/settings
@@ -644,6 +873,88 @@ func (s *Server) handleAdminUADoorDetail(w http.ResponseWriter, r *http.Request)
 		rule.Rows = flattenUADetail(v)
 	}
 	writeUADetail(w, detail, rule)
+}
+
+// handleAdminUAProtectCamera lazily serves one camera's full record
+// (flattened) as JSON when its panel opens. Served from a fresh list
+// fetch - the Integration API's per-id endpoints stay untouched, the
+// page needs nothing beyond what the list already carries.
+func (s *Server) handleAdminUAProtectCamera(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.protectDetailPrelude(w, r)
+	if !ok {
+		return
+	}
+	sec := uaSection{Title: "Camera details"}
+	if cams, err := s.protect.ListCameras(r.Context()); err != nil {
+		s.log.Warn("device center: camera detail failed", "err", err)
+		sec.Error = protectFriendlyError(err)
+	} else {
+		found := false
+		for _, c := range cams {
+			if c.ID == id {
+				sec.Rows = flattenUADetail(anyMap(c.Raw))
+				found = true
+				break
+			}
+		}
+		if !found {
+			sec.Error = "Not found."
+		}
+	}
+	writeUADetail(w, sec)
+}
+
+// handleAdminUAProtectSensor lazily serves one sensor's full record
+// (flattened) as JSON when its panel opens.
+func (s *Server) handleAdminUAProtectSensor(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.protectDetailPrelude(w, r)
+	if !ok {
+		return
+	}
+	sec := uaSection{Title: "Sensor details"}
+	if sens, err := s.protect.ListSensors(r.Context()); err != nil {
+		s.log.Warn("device center: sensor detail failed", "err", err)
+		sec.Error = protectFriendlyError(err)
+	} else {
+		found := false
+		for _, sn := range sens {
+			if sn.ID == id {
+				sec.Rows = flattenUADetail(anyMap(sn.Raw))
+				found = true
+				break
+			}
+		}
+		if !found {
+			sec.Error = "Not found."
+		}
+	}
+	writeUADetail(w, sec)
+}
+
+// anyMap widens a typed nil map to a JSON-flattenable any (a nil map
+// flattens to no rows instead of a "-" scalar).
+func anyMap(m map[string]any) any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+// protectDetailPrelude mirrors uaDetailPrelude for the Protect lazy
+// detail endpoints (JSON headers, protect-ready gate, id validation).
+func (s *Server) protectDetailPrelude(w http.ResponseWriter, r *http.Request) (string, bool) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if !s.protectReady(r.Context()) {
+		writeUADetailError(w, "UniFi Protect is not active or not configured.")
+		return "", false
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !uaValidID(id) {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return "", false
+	}
+	return id, true
 }
 
 // uaDetailPrelude gates a lazy detail request: sets JSON headers,

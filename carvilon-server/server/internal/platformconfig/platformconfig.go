@@ -54,6 +54,17 @@ const (
 	// Default-off: no outbound connection until the admin enables it.
 	KeyTelegramEnabled  = "telegram_enabled"   // "1" / "0"
 	KeyTelegramBotToken = "telegram_bot_token" // secret (SetSecret/GetSecret)
+	// Saison 21 - Protect Etappe 1: UniFi Protect Integration API
+	// (rein lesende Kameras + Sensoren im Device Center). Der API-Key
+	// ist ein Secret (SetSecret/GetSecret, AES-256-GCM) und erreicht
+	// nie eine Seite oder ein Log - die UI sieht nur "gesetzt". Der
+	// Schalter folgt dem UA-Muster: fehlt der Wert, gilt an-wenn-Key-
+	// gesetzt (siehe Server.protectEnabled). Diese Config ist die
+	// EINZIGE Quelle fuer den Device-Center-Pfad; der Stream-Server
+	// liest seinen Key weiterhin aus seinen Env-Variablen.
+	KeyProtectAPIBaseURL = "protect_api_base_url"
+	KeyProtectAPIKey     = "protect_api_key" // secret (SetSecret/GetSecret)
+	KeyProtectEnabled    = "protect_enabled" // "1" / "0"
 )
 
 // Service combines the DB and the secrets service.

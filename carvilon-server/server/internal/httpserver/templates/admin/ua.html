@@ -292,14 +292,19 @@
 {{end}}
 
 {{define "content"}}
-<div class="dc-root" data-dc>
-  {{if not .Page.Enabled}}
+<div class="dc-root" data-dc{{if or .Page.UANotice .Page.ProtectError .Page.DoorsError}} data-dc-degraded="1"{{end}}>
+  {{/* Gate cards only when Protect cannot fill the page either; with
+       Protect available UA trouble degrades to a banner over the table.
+       data-dc-degraded marks a render that KNOWS it is incomplete - the
+       status poller then never auto-reloads (a degraded render plus a
+       healthy poll would otherwise reload in a loop). */}}
+  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
       <h2>UniFi Access is disabled</h2>
       <p>The UniFi Access integration is turned off. Turn it on under <a href="/a/settings">Settings</a> once UA credentials are stored, and the device and door overview appears here.</p>
     </div>
-  {{else if not .Page.Configured}}
+  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>
       <h2>No UA credentials stored</h2>
@@ -427,6 +432,8 @@
         </div>
       {{end}}
       {{if .Page.DoorsError}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>Doors could not be loaded</strong> {{.Page.DoorsError}}</div></div>{{end}}
+      {{if .Page.UANotice}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>UniFi Access</strong> {{.Page.UANotice}}</div></div>{{end}}
+      {{if .Page.ProtectError}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>Cameras and sensors could not be loaded</strong> {{.Page.ProtectError}}</div></div>{{end}}
 
       <div class="dc-scroll">
         <div class="dc-table">
@@ -486,7 +493,7 @@
             {{end}}
           </div>
           <div class="dc-empty-rows" data-dc-noresults hidden>No devices match the current filters.</div>
-          {{if not .Page.Rows}}<div class="dc-empty-rows">The connection is up, but the UDM reports no adopted Access devices. Once a hub, reader or viewer is adopted it appears here.</div>{{end}}
+          {{if not .Page.Rows}}<div class="dc-empty-rows">The connection is up, but the configured integrations report no devices yet. Once a device is adopted it appears here.</div>{{end}}
         </div>
       </div>
     </main>
@@ -597,7 +604,7 @@
     function updateMode() {
       var cats = Array.from(filters.category);
       if (cats.length === 1) {
-        var lbl = { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', door: 'Doors', other: 'Other devices' }[cats[0]] || 'Devices';
+        var lbl = { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', door: 'Doors', other: 'Other devices' }[cats[0]] || 'Devices';
         modeEl.textContent = lbl;
       } else {
         modeEl.textContent = 'All devices';
@@ -791,8 +798,9 @@
       if (det && det.content) leftCol.appendChild(det.content.cloneNode(true));
 
       // right column: lazy sections
+      var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
       rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
-        + (kind === 'door' ? 'Door details' : 'Access methods')
+        + lazyTitle
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
 
       var id = row.getAttribute('data-id');
@@ -822,8 +830,9 @@
     }
 
     function loadDetail(kind, id, target) {
-      var url = kind === 'door'
-        ? '/a/ua/doors/' + encodeURIComponent(id)
+      var url = kind === 'door' ? '/a/ua/doors/' + encodeURIComponent(id)
+        : kind === 'camera' ? '/a/ua/protect/cameras/' + encodeURIComponent(id)
+        : kind === 'sensor' ? '/a/ua/protect/sensors/' + encodeURIComponent(id)
         : '/a/ua/devices/' + encodeURIComponent(id) + '/settings';
       fetch(url, { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
@@ -870,8 +879,12 @@
     // matched by kind+id; the flip counters re-roll only when a digit
     // actually changes. Paused while the tab is hidden.
     var rowByKey = {};
+    var hasUARows = false, hasProtectRows = false;
     rows.forEach(function (r) {
-      rowByKey[r.getAttribute('data-kind') + ' ' + r.getAttribute('data-id')] = r;
+      var kind = r.getAttribute('data-kind');
+      rowByKey[kind + ' ' + r.getAttribute('data-id')] = r;
+      if (kind === 'camera' || kind === 'sensor') hasProtectRows = true;
+      else hasUARows = true;
     });
     var statTiles = {};
     Array.prototype.forEach.call(root.querySelectorAll('[data-dc-stat]'), function (el) {
@@ -879,7 +892,22 @@
     });
     var fleetTotalEl = root.querySelector('.dc-fleet-total');
     var toolbarTotalEl = root.querySelector('.dc-count .dc-total');
+    // Auto-reload guards: never from a knowingly-incomplete render
+    // (banner shown), only once per page life, and rate-limited across
+    // reloads (sessionStorage) - a render-vs-poll disagreement must
+    // never turn into a reload loop.
+    var degradedRender = root.hasAttribute('data-dc-degraded');
     var reloadedForNewDevices = false;
+    function mayAutoReload() {
+      if (degradedRender || reloadedForNewDevices) return false;
+      var last = 0;
+      try { last = parseInt(sessionStorage.getItem('cv_dc_reload') || '0', 10) || 0; } catch (e) {}
+      return Date.now() - last > 120000;
+    }
+    function markAutoReload() {
+      reloadedForNewDevices = true;
+      try { sessionStorage.setItem('cv_dc_reload', String(Date.now())); } catch (e) {}
+    }
 
     function padCount(n) {
       n = Math.max(0, Math.min(99, Math.round(n)));
@@ -912,16 +940,17 @@
       if (el) el.textContent = n;
     }
 
-    // Refresh the "Status"/"Lock" line inside a rendered kv container
-    // (the pre-rendered overview template or the open panel's clone).
-    function setStatusKV(container, text) {
+    // Refresh the status (and, for doors, the position) lines inside a
+    // rendered kv container (the pre-rendered overview template or the
+    // open panel's clone).
+    function setDetailKVs(container, item) {
       if (!container) return;
       Array.prototype.forEach.call(container.querySelectorAll('.dc-kv'), function (kv) {
         var k = kv.querySelector('.dc-k');
-        if (k && (k.textContent === 'Status' || k.textContent === 'Lock')) {
-          var v = kv.querySelector('.dc-v');
-          if (v) v.textContent = text;
-        }
+        var v = kv.querySelector('.dc-v');
+        if (!k || !v) return;
+        if (k.textContent === 'Status' || k.textContent === 'Lock') v.textContent = item.text;
+        else if (item.pos && k.textContent === 'Door position (DPS)') v.textContent = item.pos;
       });
     }
 
@@ -937,17 +966,23 @@
       }
       var txtEl = row.querySelector('.dc-stat-txt');
       if (txtEl && txtEl.textContent !== item.text) txtEl.textContent = item.text;
+      var posChanged = false;
       if (item.pos) {
         var posEl = row.querySelector('.dc-pos');
-        if (posEl) posEl.textContent = '· ' + item.pos;
+        if (posEl && posEl.textContent !== '· ' + item.pos) {
+          posEl.textContent = '· ' + item.pos;
+          posChanged = true;
+        }
       }
-      if (changed) {
+      if (changed || posChanged) {
         var det = tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
-        if (det && det.content) setStatusKV(det.content, item.text);
+        if (det && det.content) setDetailKVs(det.content, item);
         if (selectedRow === row) {
-          phStatus.className = 'dc-ph-status ' + item.status;
-          phStatus.textContent = item.text;
-          setStatusKV(leftCol, item.text);
+          if (changed) {
+            phStatus.className = 'dc-ph-status ' + item.status;
+            phStatus.textContent = item.text;
+          }
+          setDetailKVs(leftCol, item);
         }
       }
       return changed;
@@ -956,29 +991,37 @@
     function applySnapshot(d) {
       var anyChanged = false, sawUnknown = false;
       (d.items || []).forEach(function (item) {
-        var row = rowByKey[item.kind + ' ' + item.id];
+        var row = rowByKey[item.kind + ' ' + item.id];
         if (!row) { sawUnknown = true; return; }
         if (updateRowStatus(row, item)) anyChanged = true;
       });
-      var c = d.counts || {};
-      setCounter('online', c.online);
-      setCounter('offline', c.offline);
-      setCounter('updates', c.updates);
-      setFacetCount('online', c.online);
-      setFacetCount('offline', c.offline);
-      if (c.total != null) {
-        if (fleetTotalEl) fleetTotalEl.textContent = c.total + ' units';
-        if (toolbarTotalEl) toolbarTotalEl.textContent = '/ ' + c.total;
+      // Counters only while the snapshot covers every source the page
+      // rendered rows for - after an integration was switched off its
+      // rows are stale, and fresh counts would contradict them.
+      var src = d.sources || {};
+      var sourceMismatch = (hasUARows && src.ua === false) || (hasProtectRows && src.protect === false);
+      if (!sourceMismatch) {
+        var c = d.counts || {};
+        setCounter('online', c.online);
+        setCounter('offline', c.offline);
+        setCounter('updates', c.updates);
+        setFacetCount('online', c.online);
+        setFacetCount('offline', c.offline);
+        if (c.total != null) {
+          if (fleetTotalEl) fleetTotalEl.textContent = c.total + ' units';
+          if (toolbarTotalEl) toolbarTotalEl.textContent = '/ ' + c.total;
+        }
       }
       // re-run filters/sort so a status-filtered view stays truthful
       if (anyChanged) apply();
       // A device the page never rendered appeared (fresh adoption):
-      // reload once, but only while nothing user-held would be lost.
-      if (sawUnknown && !reloadedForNewDevices && !document.hidden
+      // reload, but only while nothing user-held would be lost and
+      // only within the guard rails (see mayAutoReload).
+      if (sawUnknown && mayAutoReload() && !document.hidden
           && layer && !layer.classList.contains('is-open')
           && !query && !sort.key
           && !Object.keys(filters).some(function (k) { return filters[k].size > 0; })) {
-        reloadedForNewDevices = true;
+        markAutoReload();
         window.location.reload();
       }
     }

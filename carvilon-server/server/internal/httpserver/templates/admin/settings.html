@@ -69,6 +69,40 @@
     </section>
 
     <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">UniFi Protect Integration</div>
+      <form class="set-card" method="post" action="/a/settings/protect">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Protect aktiv</span>
+            <span class="set-row-sub">Blendet Kameras und Sensoren der Protect-Anlage zusaetzlich im Device Center ein (rein lesend, kein Steuern). Ohne gesetzten Key ist der Vorgabewert aus.</span>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
+            <input type="checkbox" name="protect_enabled" value="1" {{if .Page.Protect.Enabled}}checked{{end}} style="width:18px; height:18px; accent-color: var(--color-accent, var(--accent)); cursor:pointer;"/>
+            <span class="set-row-sub" style="margin:0;">UniFi Protect nutzen</span>
+          </label>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Controller-URL</span>
+            <span class="set-row-sub">Die UDM im lokalen Netz, z.B. https://192.168.1.1 (die Integration-API haengt unter /proxy/protect/integration).</span>
+          </div>
+          <input class="input" name="protect_controller_url" type="url" value="{{.Page.Protect.BaseURL}}" placeholder="https://192.168.1.1" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">API-Key</span>
+            <span class="set-row-sub">X-API-KEY aus den Protect-Einstellungen (Control Plane, Integrations). Wird AES-256-GCM-verschluesselt gespeichert. Bei Austausch hier neu eintragen.</span>
+          </div>
+          <input class="input" name="protect_api_key" type="password" value="" placeholder="{{if .Page.Protect.HasKey}}* * * (gesetzt){{else}}noch nicht gesetzt{{end}}" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main"></div>
+          <button class="btn btn-primary" type="submit">Speichern</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
       <div class="set-section-title">Standort fuer Wetter-Anzeige</div>
       <form class="set-card" method="post" action="/a/settings/station">
         <div class="set-row">

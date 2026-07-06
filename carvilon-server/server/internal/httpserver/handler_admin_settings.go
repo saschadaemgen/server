@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"carvilon.local/server/internal/auth/loginaudit"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/uaapi"
 )
 
@@ -18,6 +20,7 @@ import (
 type adminSettingsData struct {
 	User      adminUser
 	UA        uaSettingsBlock
+	Protect   protectSettingsBlock
 	Station   stationSettingsBlock
 	Accent    accentSettingsBlock
 	Audit     []auditRow
@@ -41,6 +44,15 @@ type uaSettingsBlock struct {
 	// Enabled ist der effektive "UA aktiv"-Schalter. Steuert nur die
 	// Benutzer-Seite (blendet den UA-Abschnitt ein/aus); CARVILONs
 	// eigene Benutzer sind davon unberuehrt.
+	Enabled bool
+}
+
+// protectSettingsBlock mirrors uaSettingsBlock for the UniFi Protect
+// Integration (Saison 21 - Protect Etappe 1). Der API-Key selbst
+// erreicht die Seite nie - nur HasKey ("gesetzt").
+type protectSettingsBlock struct {
+	BaseURL string
+	HasKey  bool
 	Enabled bool
 }
 
@@ -113,6 +125,77 @@ func (s *Server) handleAdminSettingsPost(w http.ResponseWriter, r *http.Request)
 	data.Flash = "Gespeichert."
 	data.FlashType = "green"
 	s.renderAdminPage(w, "settings", data)
+}
+
+// handleAdminProtectSettingsPost speichert Host + X-API-KEY + den
+// "Protect aktiv"-Schalter der UniFi-Protect-Integration (eigenes
+// Formular in /a/settings, Muster wie beim UA-Token). Der Key landet
+// AES-256-GCM-verschluesselt in platform_config und wird nie geloggt
+// oder zurueckgerendert; danach wird der Client sofort neu gebaut.
+func (s *Server) handleAdminProtectSettingsPost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	baseURL := strings.TrimSpace(r.PostForm.Get("protect_controller_url"))
+	apiKey := r.PostForm.Get("protect_api_key")
+
+	if baseURL != "" {
+		if err := s.platformCfg.Set(r.Context(), platformconfig.KeyProtectAPIBaseURL, baseURL); err != nil {
+			s.log.Error("save protect base_url failed", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+	if apiKey != "" {
+		if err := s.platformCfg.SetSecret(r.Context(), platformconfig.KeyProtectAPIKey, apiKey); err != nil {
+			s.log.Error("save protect api key failed", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Wie beim UA-Schalter: die Checkbox sendet ihren Namen nur wenn
+	// angehakt; wir schreiben immer explizit "1"/"0", damit der
+	// Key-abhaengige Default danach nicht mehr greift.
+	enabledVal := "0"
+	if r.PostForm.Get("protect_enabled") != "" {
+		enabledVal = "1"
+	}
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyProtectEnabled, enabledVal); err != nil {
+		s.log.Error("save protect_enabled failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	storedURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyProtectAPIBaseURL)
+	storedKey, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyProtectAPIKey)
+	if storedURL != "" && storedKey != "" {
+		s.protect = protectapi.New(protectapi.Options{BaseURL: storedURL, APIKey: storedKey})
+	}
+
+	data := s.buildSettingsData(r)
+	data.Flash = "Gespeichert."
+	data.FlashType = "green"
+	s.renderAdminPage(w, "settings", data)
+}
+
+// protectEnabled ist der effektive "Protect aktiv"-Schalter, gleiche
+// Semantik wie uaEnabled: explizites "1"/"0" gewinnt; fehlt der Wert,
+// gilt an-wenn-Key-gesetzt.
+func (s *Server) protectEnabled(ctx context.Context) bool {
+	if s.platformCfg == nil {
+		return false
+	}
+	switch raw, _ := s.platformCfg.Get(ctx, platformconfig.KeyProtectEnabled); raw {
+	case "1":
+		return true
+	case "0":
+		return false
+	default:
+		key, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyProtectAPIKey)
+		return strings.TrimSpace(key) != ""
+	}
 }
 
 // handleAdminPasswordPost lets the logged-in admin change their
@@ -207,6 +290,9 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	stationLat, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLat)
 	stationLon, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyStationLon)
 
+	protectURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyProtectAPIBaseURL)
+	protectKey, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyProtectAPIKey)
+
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 		UA: uaSettingsBlock{
@@ -214,6 +300,11 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 			Status:   status,
 			HasToken: tokenEnc != "",
 			Enabled:  s.uaEnabled(r.Context()),
+		},
+		Protect: protectSettingsBlock{
+			BaseURL: protectURL,
+			HasKey:  protectKey != "",
+			Enabled: s.protectEnabled(r.Context()),
 		},
 		Station: stationSettingsBlock{
 			Lat: stationLat,
