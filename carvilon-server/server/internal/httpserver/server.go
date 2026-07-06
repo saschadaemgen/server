@@ -52,6 +52,7 @@ import (
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/readerstore"
+	"carvilon.local/server/internal/shellyapi"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
@@ -101,6 +102,10 @@ type Deps struct {
 	// Protect Etappe 1, read-only cameras + sensors in the Device
 	// Center). Built lazily like UA; nil means "not configured yet".
 	Protect *protectapi.Client
+	// Shelly holds one client per configured Shelly device address
+	// (Saison 21 - Shelly Etappe 1, read-only switches in the Device
+	// Center). Built lazily like UA; empty means "not configured yet".
+	Shelly []*shellyapi.Client
 	// UserStore is the UserStore wrapper around the UA client
 	// (see access/ua). Nil = UA not configured yet; the admin UI
 	// then shows a hint instead of an empty list.
@@ -218,6 +223,7 @@ type Server struct {
 	adminLimiter    *ratelimit.Limiter
 	ua              *uaapi.Client
 	protect         *protectapi.Client
+	shelly          *shellyFleet
 	userStore       UserStoreLike
 	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
@@ -350,6 +356,7 @@ func New(deps Deps) (*Server, error) {
 		tpl:             tpl,
 	}
 	srv.designerRuns = newDesignerRunSet()
+	srv.SetShellyClients(deps.Shelly)
 	srv.routes()
 	return srv, nil
 }
@@ -509,6 +516,11 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/settings/station", s.requireAdminSession(http.HandlerFunc(s.handleAdminStationPost)))
 	// Protect Etappe 1: its own settings form (host + X-API-KEY + toggle).
 	s.mux.Handle("POST /a/settings/protect", s.requireAdminSession(http.HandlerFunc(s.handleAdminProtectSettingsPost)))
+	// Shelly Etappe 1: its own settings form (addresses + auth password
+	// + toggle) plus the async "Connection" probe for the block's
+	// status line (counts only - never addresses).
+	s.mux.Handle("POST /a/settings/shelly", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellySettingsPost)))
+	s.mux.Handle("GET /a/settings/shelly/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyStatus)))
 	// Saison 20: admin UI accent color (single platform_config value).
 	s.mux.Handle("POST /a/settings/accent", s.requireAdminSession(http.HandlerFunc(s.handleAdminAccentPost)))
 	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))
@@ -574,6 +586,10 @@ func (s *Server) routes() {
 	// Protect Etappe 1: lazy camera/sensor detail for the same page.
 	s.mux.Handle("GET /a/ua/protect/cameras/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectCamera)))
 	s.mux.Handle("GET /a/ua/protect/sensors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectSensor)))
+	// Shelly Etappe 1: lazy live channel detail for the same page. The
+	// {id} is the configured device address; the handler only ever
+	// dials addresses that are part of the stored configuration.
+	s.mux.Handle("GET /a/ua/shelly/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyDetail)))
 
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))

@@ -280,6 +280,19 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		log.Info("protect api not yet configured; admin can set host + api key under /a/settings")
 	}
 
+	// Saison 21 - Shelly Etappe 1: one client per configured device
+	// address (lazy like UA/Protect; addresses + optional digest-auth
+	// password from platform_config). Neither the addresses nor the
+	// password reach a log line - only the device count does.
+	shellyAddrs, _ := platformCfg.Get(ctx, platformconfig.KeyShellyAddresses)
+	shellyPassword, _ := platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
+	shellyClients := httpserver.BuildShellyClients(shellyAddrs, shellyPassword)
+	if len(shellyClients) > 0 {
+		log.Info("shelly api clients configured", "devices", len(shellyClients))
+	} else {
+		log.Info("shelly api not yet configured; admin can set device addresses under /a/settings")
+	}
+
 	// access.UserStore-Adapter um den uaapi-Client. Nil-Client ist
 	// erlaubt; der Adapter liefert dann access.ErrNotConfigured und
 	// das Admin-UI zeigt einen Hinweis-Karten statt einer leeren
@@ -432,6 +445,7 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		AdminLimiter:    adminLimiter,
 		UA:              uaClient,
 		Protect:         protectClient,
+		Shelly:          shellyClients,
 		UserStore:       userStore,
 		NativeUsers:     nativeUserStore,
 		Hub:             hub,

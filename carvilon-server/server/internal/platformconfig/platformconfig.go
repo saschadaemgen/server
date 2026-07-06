@@ -65,6 +65,18 @@ const (
 	KeyProtectAPIBaseURL = "protect_api_base_url"
 	KeyProtectAPIKey     = "protect_api_key" // secret (SetSecret/GetSecret)
 	KeyProtectEnabled    = "protect_enabled" // "1" / "0"
+	// Saison 21 - Shelly Etappe 1: Shelly-Geraete (Gen2+ lokale RPC,
+	// rein lesend) als Source "Shelly" im Device Center. Die Adressen
+	// sind eine kommaseparierte IPv4[:port]-Liste im LAN (mDNS-
+	// Discovery ist eine spaetere Bequemlichkeit). Das optionale
+	// Digest-Auth-Passwort ist ein Secret (SetSecret/GetSecret,
+	// AES-256-GCM) und erreicht nie eine Seite oder ein Log - die UI
+	// sieht nur "gesetzt". Der Schalter folgt dem UA/Protect-Muster:
+	// fehlt der Wert, gilt an-wenn-Adressen-gesetzt (siehe
+	// Server.shellyEnabled).
+	KeyShellyEnabled   = "shelly_enabled"          // "1" / "0"
+	KeyShellyAddresses = "shelly_device_addresses" // comma-separated IPv4[:port]
+	KeyShellyPassword  = "shelly_auth_password"    // secret (SetSecret/GetSecret)
 )
 
 // Service combines the DB and the secrets service.

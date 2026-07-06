@@ -103,6 +103,47 @@
     </section>
 
     <section class="set-section" style="margin-top: var(--space-6);">
+      <div class="set-section-title">Shelly Integration</div>
+      <form class="set-card" method="post" action="/a/settings/shelly">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Shelly enabled</span>
+            <span class="set-row-sub">Shows the configured Shelly devices as their own category in the Device Center (read only, no switching). Without stored addresses the default is off.</span>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
+            <input type="checkbox" name="shelly_enabled" value="1" {{if .Page.Shelly.Enabled}}checked{{end}} style="width:18px; height:18px; accent-color: var(--color-accent, var(--accent)); cursor:pointer;"/>
+            <span class="set-row-sub" style="margin:0;">Use Shelly devices</span>
+          </label>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Device addresses</span>
+            <span class="set-row-sub">LAN IPv4 addresses of the Shelly devices (Gen2 or newer), separated by commas, e.g. 192.168.1.51, 192.168.1.52. Saving an empty list removes all devices.</span>
+          </div>
+          <input class="input" name="shelly_addresses" type="text" value="{{.Page.Shelly.Addresses}}" placeholder="192.168.1.51, 192.168.1.52" autocomplete="off" spellcheck="false" style="max-width: 420px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Auth password</span>
+            <span class="set-row-sub">Only needed when the devices are password protected (digest authentication, user "admin"). Stored AES-256-GCM encrypted and never shown again - enter a new value to replace it.</span>
+          </div>
+          <input class="input" name="shelly_password" type="password" value="" placeholder="{{if .Page.Shelly.HasPassword}}* * * (set){{else}}not set yet{{end}}" autocomplete="new-password" style="max-width: 320px;"/>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Connection</span>
+            <span class="set-row-sub">Live reachability of the configured devices.</span>
+          </div>
+          <span class="status-pill" data-shelly-conn><span class="status-dot"></span><span data-shelly-conn-text>Checking&hellip;</span></span>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main"></div>
+          <button class="btn btn-primary" type="submit">Save</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="set-section" style="margin-top: var(--space-6);">
       <div class="set-section-title">Standort fuer Wetter-Anzeige</div>
       <form class="set-card" method="post" action="/a/settings/station">
         <div class="set-row">
@@ -272,5 +313,29 @@
   </main>
 
   <script src="{{asset "/static/interactions.js"}}"></script>
+  <script>
+    // Shelly "Connection" line: probed asynchronously so the settings
+    // page itself renders instantly even when a device is down. The
+    // endpoint returns counts only - no addresses.
+    (function () {
+      var pill = document.querySelector('[data-shelly-conn]');
+      var text = document.querySelector('[data-shelly-conn-text]');
+      if (!pill || !text) return;
+      function set(label, ok) {
+        text.textContent = label;
+        pill.classList.toggle('is-ok', !!ok);
+      }
+      fetch('/a/settings/shelly/status', { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.ok) { set('Status unavailable', false); return; }
+          if (!d.enabled) { set('Disabled', false); return; }
+          if (!d.total) { set('No devices configured', false); return; }
+          var n = d.reachable == null ? 0 : d.reachable;
+          set(n + ' / ' + d.total + ' devices reachable', n === d.total);
+        })
+        .catch(function () { set('Status unavailable', false); });
+    })();
+  </script>
 </body>
 </html>

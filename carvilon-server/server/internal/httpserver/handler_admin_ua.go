@@ -20,6 +20,11 @@
 // editor jump) in the detail panel while everything UniFi stays
 // read-only.
 //
+// Shelly Etappe 1 adds the fourth source: the admin-configured Shelly
+// devices (Gen2+ local RPC, category "switch", source "Shelly") -
+// read-only rows whose panel lazily fetches the live channel
+// measurements. See handler_admin_shelly.go.
+//
 // Gating: the page only talks to the UDM when the "UA aktiv" toggle is
 // on AND a client is configured (base URL + token). Everything else is
 // a clean hint - but the RPi source is NOT behind that gate: with a
@@ -63,6 +68,11 @@ type uaOverviewData struct {
 	// screen and degrades UA trouble to a banner - the local source
 	// is independent of any UniFi configuration.
 	LocalAvailable bool
+
+	// ShellyAvailable: the Shelly integration is on AND device
+	// addresses are configured (Shelly Etappe 1). Independent of every
+	// UniFi integration, same page-keeping role as the other sources.
+	ShellyAvailable bool
 
 	// Flash is the outcome banner after a reader rename (the page's
 	// only write). Set from a stable code in the redirect query -
@@ -192,7 +202,7 @@ type uaSection struct {
 // categoryOrder ranks the natures for the flat table (hubs first, doors
 // last) so the pre-sorted rows read top-down like the topology.
 var categoryOrder = map[string]int{
-	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "other": 5, "door": 6,
+	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "other": 6, "door": 7,
 }
 
 // handleAdminUA renders the Device Center (read-only except for the
@@ -203,6 +213,7 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 		User:             adminUser{Name: username, Initials: initialsOf(username)},
 		Enabled:          s.uaEnabled(r.Context()),
 		ProtectAvailable: s.protectReady(r.Context()),
+		ShellyAvailable:  s.shellyReady(r.Context()),
 	}
 	data.Configured = data.Enabled && s.ua != nil
 	if f, ok := uaFlash[r.URL.Query().Get("flash")]; ok {
@@ -211,8 +222,8 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	readers := s.localReaders(r.Context())
 	data.LocalAvailable = len(readers) > 0
 	// No source can fill the page -> no calls at all, just the gate
-	// hints (Etappe-1 contract, now covering all three sources).
-	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable {
+	// hints (Etappe-1 contract, now covering all four sources).
+	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyAvailable {
 		s.renderAdminPage(w, "ua", data)
 		return
 	}
@@ -228,6 +239,17 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 // failure only drops a banner, and with another source available a UA
 // failure degrades to a banner instead of a gate.
 func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader) {
+	// The Shelly probe fans out over the configured devices with its
+	// own per-device timeout; run it alongside the UniFi fetches so a
+	// dead box delays the page by max(sources), not their sum. The
+	// channel is buffered - the goroutine can never leak.
+	shellyCh := make(chan []shellyProbe, 1)
+	if data.ShellyAvailable {
+		go func() { shellyCh <- s.probeShelly(ctx) }()
+	} else {
+		shellyCh <- nil
+	}
+
 	var devices []uaapi.Device
 	var doors []uaapi.Door
 	switch {
@@ -235,7 +257,7 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		var err error
 		devices, err = s.ua.ListDevicesRefresh(ctx)
 		if err != nil {
-			if !data.ProtectAvailable && !data.LocalAvailable {
+			if !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyAvailable {
 				// Terminal, as before other sources existed: gate card.
 				if errors.Is(err, uaapi.ErrUnauthorized) {
 					data.Unauthorized = true
@@ -290,13 +312,13 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, readers, s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.viewerMACSet(ctx))
 }
 
 // buildRows turns devices + doors + Protect cameras/sensors + local
-// readers into the flat, pre-sorted row list and computes the facet
-// counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, mockMACs map[string]bool) {
+// readers + Shelly devices into the flat, pre-sorted row list and
+// computes the facet counts.
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, mockMACs map[string]bool) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -328,6 +350,9 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	}
 	for _, rd := range readers {
 		addDeviceRow(makeReaderRow(rd), rd.Online)
+	}
+	for _, p := range shellies {
+		addDeviceRow(makeShellyRow(p), p.err == nil)
 	}
 	for _, dr := range doors {
 		row := makeDoorRow(dr)
@@ -371,7 +396,7 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	// Etappe 1 - no invented data either way.
 	for _, c := range []struct{ key, label string }{
 		{"hub", "Hubs"}, {"reader", "Readers"}, {"viewer", "Viewers"},
-		{"camera", "Cameras"}, {"sensor", "Sensors"},
+		{"camera", "Cameras"}, {"sensor", "Sensors"}, {"switch", "Switches"},
 		{"other", "Other devices"}, {"door", "Doors"},
 	} {
 		n := catCount[c.key]
@@ -387,9 +412,10 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	}
 
 	// Source facet: every source with at least one row. UniFi covers
-	// the UA + Protect rows, RPi the local reader registry.
+	// the UA + Protect rows, RPi the local reader registry, Shelly
+	// the configured Shelly devices.
 	for _, sc := range []struct{ key, label string }{
-		{"unifi", "UniFi"}, {"rpi", "RPi"},
+		{"unifi", "UniFi"}, {"rpi", "RPi"}, {"shelly", "Shelly"},
 	} {
 		if n := srcCount[sc.key]; n > 0 {
 			data.SourceFacets = append(data.SourceFacets, uaFacet{Key: sc.key, Label: sc.label, Count: n})
@@ -769,6 +795,8 @@ func categoryPlural(cat string) string {
 		return "Cameras"
 	case "sensor":
 		return "Sensors"
+	case "switch":
+		return "Switches"
 	case "door":
 		return "Doors"
 	default:
@@ -918,6 +946,18 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	uaOK := s.uaReady(r.Context())
 	protectOK := s.protectReady(r.Context())
+	shellyOK := s.shellyReady(r.Context())
+	// Shelly devices are polled directly (one cheap RPC each); start
+	// the fan-out now so it overlaps the UniFi fetches below. A device
+	// that does not answer IS the offline signal - per-device failure
+	// never marks the snapshot incomplete, unlike a failing UniFi
+	// list fetch. Buffered channel: the goroutine can never leak.
+	shellyCh := make(chan []shellyProbe, 1)
+	if shellyOK {
+		go func() { shellyCh <- s.probeShelly(r.Context()) }()
+	} else {
+		shellyCh <- nil
+	}
 	// The local reader registry is a source of its own: readers keep
 	// their live status even with every UniFi integration off. The
 	// list is a local SQLite read - cheap enough for the poll. A read
@@ -931,8 +971,8 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	localOK := len(localReaders) > 0
-	if !uaOK && !protectOK && !localOK {
-		writeUADetailError(w, "No device source is available - UniFi Access and UniFi Protect are off and no local reader is registered.")
+	if !uaOK && !protectOK && !localOK && !shellyOK {
+		writeUADetailError(w, "No device source is available - UniFi Access, UniFi Protect and Shelly are off and no local reader is registered.")
 		return
 	}
 	var items []uaStatusItem
@@ -1003,6 +1043,9 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 			it.TagSeen = readerLastSeenLabel(rd)
 		}
 	}
+	for _, p := range <-shellyCh {
+		addOnline("shelly", p.client.Address(), p.err == nil)
+	}
 
 	// sources tells the client which integrations this snapshot covers,
 	// so it can suppress the counters when the page still shows rows
@@ -1011,7 +1054,7 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"ok":      true,
 		"items":   items,
-		"sources": map[string]bool{"ua": uaOK, "protect": protectOK, "rpi": localOK},
+		"sources": map[string]bool{"ua": uaOK, "protect": protectOK, "rpi": localOK, "shelly": shellyOK},
 	}
 	if complete {
 		out["counts"] = map[string]any{"online": online, "offline": offline, "updates": 0, "total": total}

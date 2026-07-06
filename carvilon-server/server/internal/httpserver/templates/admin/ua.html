@@ -318,13 +318,13 @@
        it is incomplete - the status poller then never auto-reloads (a
        degraded render plus a healthy poll would otherwise reload in a
        loop). */}}
-  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable)}}
+  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
       <h2>UniFi Access is disabled</h2>
       <p>The UniFi Access integration is turned off. Turn it on under <a href="/a/settings">Settings</a> once UA credentials are stored, and the device and door overview appears here.</p>
     </div>
-  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable)}}
+  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyAvailable)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>
       <h2>No UA credentials stored</h2>
@@ -573,7 +573,7 @@
 
 {{define "dc-check"}}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{end}}
 
-{{define "dc-icon"}}{{if eq . "hub"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>{{else if eq . "reader"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h5"/></svg>{{else if eq . "viewer"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>{{else if eq . "door"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M14 12h.01"/></svg>{{else if eq . "camera"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L8 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-4z"/><circle cx="12" cy="13" r="3.2"/></svg>{{else if eq . "sensor"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>{{else}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>{{end}}{{end}}
+{{define "dc-icon"}}{{if eq . "hub"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>{{else if eq . "switch"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="2.6"/></svg>{{else if eq . "reader"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h5"/></svg>{{else if eq . "viewer"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>{{else if eq . "door"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M14 12h.01"/></svg>{{else if eq . "camera"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L8 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-4z"/><circle cx="12" cy="13" r="3.2"/></svg>{{else if eq . "sensor"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>{{else}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>{{end}}{{end}}
 
 {{define "scripts"}}
 <script>
@@ -644,7 +644,7 @@
     function updateMode() {
       var cats = Array.from(filters.category);
       if (cats.length === 1) {
-        var lbl = { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', door: 'Doors', other: 'Other devices' }[cats[0]] || 'Devices';
+        var lbl = { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', switch: 'Switches', door: 'Doors', other: 'Other devices' }[cats[0]] || 'Devices';
         modeEl.textContent = lbl;
       } else {
         modeEl.textContent = 'All devices';
@@ -846,7 +846,7 @@
         var act = tbody.querySelector('[data-dc-actions="' + idx + '"]');
         if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
       } else {
-        var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
+        var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details', shelly: 'Switch channels' }[kind] || 'Access methods';
         rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
           + lazyTitle
           + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
@@ -882,6 +882,7 @@
       var url = kind === 'door' ? '/a/ua/doors/' + encodeURIComponent(id)
         : kind === 'camera' ? '/a/ua/protect/cameras/' + encodeURIComponent(id)
         : kind === 'sensor' ? '/a/ua/protect/sensors/' + encodeURIComponent(id)
+        : kind === 'shelly' ? '/a/ua/shelly/' + encodeURIComponent(id)
         : '/a/ua/devices/' + encodeURIComponent(id) + '/settings';
       // A slow response must never clobber the panel after the user has
       // opened another row (the right column can hold the local reader's
@@ -933,12 +934,13 @@
     // matched by kind+id; the flip counters re-roll only when a digit
     // actually changes. Paused while the tab is hidden.
     var rowByKey = {};
-    var hasUARows = false, hasProtectRows = false, hasLocalRows = false;
+    var hasUARows = false, hasProtectRows = false, hasLocalRows = false, hasShellyRows = false;
     rows.forEach(function (r) {
       var kind = r.getAttribute('data-kind');
       rowByKey[kind + ' ' + r.getAttribute('data-id')] = r;
       if (kind === 'camera' || kind === 'sensor') hasProtectRows = true;
       else if (kind === 'rpi-reader') hasLocalRows = true;
+      else if (kind === 'shelly') hasShellyRows = true;
       else hasUARows = true;
     });
     var statTiles = {};
@@ -1069,7 +1071,7 @@
       // rows are stale, and fresh counts would contradict them.
       var src = d.sources || {};
       var sourceMismatch = (hasUARows && src.ua === false) || (hasProtectRows && src.protect === false)
-        || (hasLocalRows && src.rpi === false);
+        || (hasLocalRows && src.rpi === false) || (hasShellyRows && src.shelly === false);
       if (!sourceMismatch) {
         var c = d.counts || {};
         setCounter('online', c.online);

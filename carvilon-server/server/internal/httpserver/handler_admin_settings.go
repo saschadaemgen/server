@@ -21,6 +21,7 @@ type adminSettingsData struct {
 	User      adminUser
 	UA        uaSettingsBlock
 	Protect   protectSettingsBlock
+	Shelly    shellySettingsBlock
 	Station   stationSettingsBlock
 	Accent    accentSettingsBlock
 	Audit     []auditRow
@@ -54,6 +55,16 @@ type protectSettingsBlock struct {
 	BaseURL string
 	HasKey  bool
 	Enabled bool
+}
+
+// shellySettingsBlock mirrors the pattern for the Shelly integration
+// (Saison 21 - Shelly Etappe 1). Addresses render back into the form
+// (they are the admin's own list); the auth password never does -
+// only HasPassword ("set").
+type shellySettingsBlock struct {
+	Addresses   string
+	HasPassword bool
+	Enabled     bool
 }
 
 type auditRow struct {
@@ -293,6 +304,9 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	protectURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyProtectAPIBaseURL)
 	protectKey, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyProtectAPIKey)
 
+	shellyAddrs, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyShellyAddresses)
+	shellyPw, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyShellyPassword)
+
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
 		UA: uaSettingsBlock{
@@ -305,6 +319,11 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 			BaseURL: protectURL,
 			HasKey:  protectKey != "",
 			Enabled: s.protectEnabled(r.Context()),
+		},
+		Shelly: shellySettingsBlock{
+			Addresses:   shellyAddrs,
+			HasPassword: shellyPw != "",
+			Enabled:     s.shellyEnabled(r.Context()),
 		},
 		Station: stationSettingsBlock{
 			Lat: stationLat,
