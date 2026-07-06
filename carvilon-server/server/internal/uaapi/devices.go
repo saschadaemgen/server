@@ -39,7 +39,58 @@ type Device struct {
 	LocationID     string   `json:"location_id,omitempty"`
 	ConnectedUAHID string   `json:"connected_uah_id,omitempty"`
 	Capabilities   []string `json:"capabilities,omitempty"`
+
+	// Saison 21 - Device Center: extra read-only hardware fields the
+	// flat device table shows (IP, firmware, version, model, uptime).
+	// They are already part of the /devices payload but were not typed
+	// by Etappe 1. Each uses flexVal so a firmware that spells a field
+	// differently (object vs string, int vs string) can never break the
+	// whole list decode - an absent/odd field just renders as "-".
+	// The exact key spelling can vary by UDM firmware; the accessor
+	// methods below prefer the first non-empty of a few known spellings.
+	IP              flexVal `json:"ip"`
+	IPAddress       flexVal `json:"ip_address"`
+	FirmwareVersion flexVal `json:"firmware_version"`
+	Firmware        flexVal `json:"firmware"`
+	Version         flexVal `json:"version"`
+	Model           flexVal `json:"model"`
+	Uptime          flexVal `json:"uptime"`
 }
+
+// firstNonEmpty returns the first flexVal display string that is not
+// empty, or "" when all are absent.
+func firstNonEmpty(vals ...flexVal) string {
+	for _, v := range vals {
+		if !v.Empty() {
+			if s := strings.TrimSpace(v.String()); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// IPLabel returns the device IP as a display string ("" when absent).
+func (d Device) IPLabel() string { return firstNonEmpty(d.IP, d.IPAddress) }
+
+// FirmwareLabel returns the firmware version as a display string, trying
+// the known spellings in order ("" when absent).
+func (d Device) FirmwareLabel() string { return firstNonEmpty(d.FirmwareVersion, d.Firmware) }
+
+// VersionLabel returns the device/software version ("" when absent).
+func (d Device) VersionLabel() string { return firstNonEmpty(d.Version) }
+
+// ModelLabel returns the device model, preferring an explicit model
+// field and falling back to the type string ("" when both absent).
+func (d Device) ModelLabel() string {
+	if s := firstNonEmpty(d.Model); s != "" {
+		return s
+	}
+	return strings.TrimSpace(d.Type)
+}
+
+// UptimeLabel returns the uptime as a display string ("" when absent).
+func (d Device) UptimeLabel() string { return firstNonEmpty(d.Uptime) }
 
 // DisplayName picks the best human label: alias when present,
 // otherwise the bare id as a last resort.

@@ -1,11 +1,19 @@
-// Saison 21 - UA-Integration Etappe 1: a strictly READ-ONLY overview
-// of the UniFi Access installation (hubs, readers, viewers, doors),
-// grouped by hub, fetched live from the UA developer API.
+// Saison 21 - Device Center (UA-Integration Etappe 1, presentation
+// redesign): a strictly READ-ONLY overview of the UniFi Access
+// installation (hubs, readers, viewers, doors), rendered as one flat,
+// filterable device table with a left filter column and a right
+// slide-out detail panel.
 //
 // CARVILON is the master database; UA is only hardware we read here -
 // nothing on this page controls a door, changes a setting, or adopts
 // a device into any carvilon registry. Later etappes add control,
 // reader adoption and events; this one just shows what is there.
+//
+// The design ships a "Cameras" and "Sensors" category too, but there is
+// no backend for them yet (UniFi Protect / sensors are a later ticket),
+// so those categories render empty/disabled - no invented data. Only
+// the "UniFi" source is real; the Source facet is built so further
+// sources are pure additions later.
 //
 // Gating: the page only talks to the UDM when the "UA aktiv" toggle is
 // on AND a client is configured (base URL + token). Everything else is
@@ -25,7 +33,10 @@ import (
 	"carvilon.local/server/internal/uaapi"
 )
 
-// uaOverviewData is the payload for templates/admin/ua.html.
+// uaOverviewData is the payload for templates/admin/ua.html (the Device
+// Center). Rows are a flat, pre-sorted device+door list; facets carry
+// the server-computed initial counts for the left filter column. All
+// live filtering/sorting is client-side over the rendered rows.
 type uaOverviewData struct {
 	User adminUser
 
@@ -41,65 +52,84 @@ type uaOverviewData struct {
 
 	Emergency *uaEmergencyView
 
-	Hubs         []uaHubGroup
-	Ungrouped    uaHubGroup
-	HasUngrouped bool
+	Rows []uaRow
 
-	HubCount    int
-	ReaderCount int
-	ViewerCount int
-	DoorCount   int
-	DeviceCount int
+	CategoryFacets []uaFacet
+	SourceFacets   []uaFacet
+	StatusFacets   []uaFacet
+	ModelFacets    []uaFacet
+
+	// Fleet-status counters (two-digit displays in the left column).
+	OnlineCount  int
+	OfflineCount int
+	UpdatesCount int
+	TotalCount   int
+
+	// Two-char, clamped forms for the flip-digit displays (00..99).
+	OnlinePad  string
+	OfflinePad string
+	UpdatesPad string
 }
 
-// uaHubGroup is one hub with everything attached to it. For the
-// Ungrouped pseudo-group Hub is nil.
-type uaHubGroup struct {
-	Hub     *uaDeviceRow
-	Readers []uaDeviceRow
-	Viewers []uaDeviceRow
-	Others  []uaDeviceRow
-	Doors   []uaDoorRow
+// uaFacet is one filter row in the left column: a value, its display
+// label and its current count. Disabled facets (Cameras/Sensors) are
+// part of the shell but carry no data yet.
+type uaFacet struct {
+	Key      string
+	Label    string
+	Count    int
+	Disabled bool
 }
 
-// uaDeviceRow is the display shape of one UA device. The collapsed row
-// shows Name/Type/Nature/Online; the expanded panel shows the IDs,
-// state flags, capabilities (all already in the page) plus the lazily
-// fetched /settings.
-type uaDeviceRow struct {
-	ID             string // bare id / MAC (path for the settings fetch)
-	MAC            string // colon form, for display
-	Name           string
-	Type           string
-	Nature         string // "hub" | "reader" | "viewer" | "other"
-	NatureLabel    string
-	Online         bool
-	Adopted        bool
-	Managed        bool
-	Connected      bool
-	LocationID     string
-	ConnectedUAHID string
-	Capabilities   []string
+// uaRow is one row in the flat device table. It carries both the
+// display fields and the lowercased search haystack + filter keys the
+// client uses. Kind selects the lazy detail endpoint and the panel
+// behaviour ("device" vs "door").
+type uaRow struct {
+	ID   string // bare id / MAC (path for the lazy detail fetch)
+	Kind string // "device" | "door"
 
-	// Viewer-only: is this UA-reported viewer one of CARVILON's own
-	// mock viewers (its MAC is in our viewers table) or a foreign UA
-	// viewer?
-	ViewerKind      string // "" | "mock" | "ua"
-	ViewerKindLabel string
-}
+	Category  string // "hub" | "reader" | "viewer" | "other" | "door"
+	TypeLabel string // singular type label: "Hub" | "Reader" | ...
 
-// uaDoorRow is the display shape of one door under a hub.
-type uaDoorRow struct {
-	ID            string
-	Name          string
-	Type          string
-	HubID         string
-	Floor         string
-	Position      string // "geöffnet" | "geschlossen" | raw | "unbekannt"
+	Index int // 1-based position in the (pre-sorted) flat list
+
+	// Group-header markers: the first row of each category carries the
+	// group label and the category's total count so the template can
+	// emit a group heading before it.
+	GroupStart bool
+	GroupLabel string
+	GroupCount int
+
+	Name string
+	Mock bool // viewer that is one of CARVILON's own mock viewers
+
+	// Status. Devices use "online"/"offline"; doors use the lock state
+	// ("locked"/"unlocked"/"unknown"). StatusText is the display string.
+	StatusState string
+	StatusText  string
+
+	// Door-only secondary status (door-position sensor).
+	Position      string
 	PositionState string // "open" | "closed" | "unknown"
-	Lock          string // "verriegelt" | "entriegelt" | raw | "unbekannt"
-	LockState     string // "locked" | "unlocked" | "unknown"
-	BoundToHub    string // "ja" | "nein" | "unbekannt"
+
+	Source      string // "unifi"
+	SourceLabel string // "UniFi"
+
+	Model    string // device model / type (also the Model facet key)
+	IP       string
+	Firmware string
+	Version  string
+	MAC      string
+	Uptime   string
+
+	// Panel: the known fields shown immediately (the lazy /settings,
+	// door-detail and lock-rule sections load when the panel opens).
+	Detail       []kvRow
+	Capabilities []string
+
+	// Lowercased "name model ip mac" for the client search box.
+	Search string
 }
 
 // uaEmergencyView is the global emergency banner state.
@@ -109,7 +139,7 @@ type uaEmergencyView struct {
 	Rows         []kvRow
 }
 
-// kvRow is one key/value line in an expanded detail panel. Rendered by
+// kvRow is one key/value line in a detail panel. Rendered by
 // html/template as escaped text, so raw UA field values are safe.
 type kvRow struct {
 	Key   string `json:"key"`
@@ -124,7 +154,11 @@ type uaSection struct {
 	Error string  `json:"error,omitempty"`
 }
 
-// handleAdminUA renders the read-only UA device + door overview.
+// categoryOrder ranks the natures for the flat table (hubs first, doors
+// last) so the pre-sorted rows read top-down like the topology.
+var categoryOrder = map[string]int{"hub": 0, "reader": 1, "viewer": 2, "other": 3, "door": 4}
+
+// handleAdminUA renders the read-only Device Center.
 func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	username := AdminUserFromContext(r.Context())
 	data := uaOverviewData{
@@ -146,16 +180,16 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildUAOverview fetches devices (with ?refresh=true), doors and the
-// emergency status and groups them. Each fetch is isolated: a doors
-// failure does not blank the (already loaded) devices, and an
-// emergency failure just drops the banner.
+// emergency status and flattens them into rows + facets. Each fetch is
+// isolated: a doors failure does not blank the (already loaded)
+// devices, and an emergency failure just drops the banner.
 func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
 	devices, err := s.ua.ListDevicesRefresh(ctx)
 	if err != nil {
 		if errors.Is(err, uaapi.ErrUnauthorized) {
 			data.Unauthorized = true
 		} else {
-			s.log.Warn("ua overview: list devices failed", "err", err)
+			s.log.Warn("device center: list devices failed", "err", err)
 			data.LoadError = uaFriendlyError(err)
 		}
 		return
@@ -163,180 +197,288 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData) {
 
 	doors, derr := s.ua.ListDoors(ctx)
 	if derr != nil {
-		s.log.Warn("ua overview: list doors failed", "err", derr)
+		s.log.Warn("device center: list doors failed", "err", derr)
 		data.DoorsError = uaFriendlyError(derr)
 		doors = nil
 	}
 
 	if em, eerr := s.ua.EmergencySettings(ctx); eerr != nil {
-		s.log.Warn("ua overview: emergency status failed", "err", eerr)
+		s.log.Warn("device center: emergency status failed", "err", eerr)
 	} else if em != nil {
 		data.Emergency = buildEmergencyView(em)
 	}
 
-	s.groupUA(data, devices, doors, s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, s.viewerMACSet(ctx))
 }
 
-// groupUA sorts devices and doors under their hubs. Hubs are created
-// first (as group anchors) so the slice never grows while element
-// pointers are held.
-func (s *Server) groupUA(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, mockMACs map[string]bool) {
-	data.DeviceCount = len(devices)
-	data.DoorCount = len(doors)
-
-	hubIndex := make(map[string]int) // hub device id -> data.Hubs index
-	for _, d := range devices {
-		if d.Nature() != "hub" {
-			continue
-		}
-		row := makeUADeviceRow(d, mockMACs)
-		data.Hubs = append(data.Hubs, uaHubGroup{Hub: &row})
-		hubIndex[d.ID] = len(data.Hubs) - 1
-		data.HubCount++
-	}
-
-	ungrouped := &uaHubGroup{}
-	groupFor := func(hubID string) *uaHubGroup {
-		if hubID != "" {
-			if idx, ok := hubIndex[hubID]; ok {
-				return &data.Hubs[idx]
-			}
-		}
-		return ungrouped
-	}
+// buildRows turns devices + doors into the flat, pre-sorted row list and
+// computes the facet counts.
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, mockMACs map[string]bool) {
+	catCount := map[string]int{}
+	modelCount := map[string]int{}
 
 	for _, d := range devices {
-		if d.Nature() == "hub" {
-			continue
+		row := makeDeviceRow(d, mockMACs)
+		data.Rows = append(data.Rows, row)
+		catCount[row.Category]++
+		if row.Model != "" {
+			modelCount[row.Model]++
 		}
-		row := makeUADeviceRow(d, mockMACs)
-		grp := groupFor(d.ConnectedUAHID)
-		switch row.Nature {
-		case "reader":
-			grp.Readers = append(grp.Readers, row)
-			data.ReaderCount++
-		case "viewer":
-			grp.Viewers = append(grp.Viewers, row)
-			data.ViewerCount++
-		default:
-			grp.Others = append(grp.Others, row)
-		}
-	}
-
-	for _, dr := range doors {
-		hubID := dr.HubID
-		if hubID == "" {
-			// some firmwares carry the binding hub id in is_bind_hub.
-			if cand := dr.BindHubRaw(); cand != "" {
-				if _, ok := hubIndex[cand]; ok {
-					hubID = cand
-				}
-			}
-		}
-		grp := groupFor(hubID)
-		grp.Doors = append(grp.Doors, makeUADoorRow(dr))
-	}
-
-	if len(ungrouped.Readers)+len(ungrouped.Viewers)+len(ungrouped.Others)+len(ungrouped.Doors) > 0 {
-		data.Ungrouped = *ungrouped
-		data.HasUngrouped = true
-	}
-}
-
-// makeUADeviceRow builds the display row for a device, tagging viewers
-// as CARVILON mock vs foreign UA by MAC.
-func makeUADeviceRow(d uaapi.Device, mockMACs map[string]bool) uaDeviceRow {
-	row := uaDeviceRow{
-		ID:             d.ID,
-		MAC:            d.DisplayMAC(),
-		Name:           d.DisplayName(),
-		Type:           d.Type,
-		Nature:         d.Nature(),
-		NatureLabel:    uaNatureLabel(d.Nature()),
-		Online:         d.IsOnline,
-		Adopted:        d.IsAdopted,
-		Managed:        d.IsManaged,
-		Connected:      d.IsConnected,
-		LocationID:     d.LocationID,
-		ConnectedUAHID: d.ConnectedUAHID,
-		Capabilities:   d.Capabilities,
-	}
-	if row.Nature == "viewer" {
-		if mockMACs[normalizeMACToColonForm(d.ID)] {
-			row.ViewerKind, row.ViewerKindLabel = "mock", "CARVILON Mock-Viewer"
+		if d.IsOnline {
+			data.OnlineCount++
 		} else {
-			row.ViewerKind, row.ViewerKindLabel = "ua", "UA-Viewer"
+			data.OfflineCount++
 		}
 	}
-	return row
-}
-
-// makeUADoorRow builds the display row for a door.
-func makeUADoorRow(d uaapi.Door) uaDoorRow {
-	row := uaDoorRow{
-		ID:            d.ID,
-		Name:          d.DisplayName(),
-		Type:          d.Type,
-		HubID:         d.HubID,
-		Floor:         d.FloorLabel(),
-		PositionState: d.PositionState(),
-		LockState:     d.LockState(),
-		Position:      uaPositionLabel(d.PositionState(), d.PositionRaw()),
-		Lock:          uaLockLabel(d.LockState(), d.LockRaw()),
-		BoundToHub:    uaBoundLabel(d),
+	for _, dr := range doors {
+		row := makeDoorRow(dr)
+		data.Rows = append(data.Rows, row)
+		catCount["door"]++
 	}
+
+	// Stable order: category rank, then name (case-insensitive).
+	sort.SliceStable(data.Rows, func(i, j int) bool {
+		ci, cj := categoryOrder[data.Rows[i].Category], categoryOrder[data.Rows[j].Category]
+		if ci != cj {
+			return ci < cj
+		}
+		return strings.ToLower(data.Rows[i].Name) < strings.ToLower(data.Rows[j].Name)
+	})
+
+	// Number the rows and mark the first of each category as a group
+	// start (label + total count) for the table's group headings.
+	lastCat := ""
+	for i := range data.Rows {
+		data.Rows[i].Index = i + 1
+		if data.Rows[i].Category != lastCat {
+			lastCat = data.Rows[i].Category
+			data.Rows[i].GroupStart = true
+			data.Rows[i].GroupLabel = categoryPlural(data.Rows[i].Category)
+			data.Rows[i].GroupCount = catCount[data.Rows[i].Category]
+		}
+	}
+
+	data.TotalCount = len(data.Rows)
+	data.OnlinePad = pad2(data.OnlineCount)
+	data.OfflinePad = pad2(data.OfflineCount)
+	data.UpdatesPad = pad2(data.UpdatesCount)
+
+	// Category facet: the real natures present, then the not-yet-wired
+	// Cameras/Sensors as disabled shell entries (no invented data).
+	for _, c := range []struct{ key, label string }{
+		{"hub", "Hubs"}, {"reader", "Readers"}, {"viewer", "Viewers"},
+		{"other", "Other devices"}, {"door", "Doors"},
+	} {
+		if n := catCount[c.key]; n > 0 {
+			data.CategoryFacets = append(data.CategoryFacets, uaFacet{Key: c.key, Label: c.label, Count: n})
+		}
+	}
+	data.CategoryFacets = append(data.CategoryFacets,
+		uaFacet{Key: "camera", Label: "Cameras", Count: 0, Disabled: true},
+		uaFacet{Key: "sensor", Label: "Sensors", Count: 0, Disabled: true},
+	)
+
+	// Source facet: only UniFi is real today. Further sources appear
+	// here once their device backends exist.
+	if data.TotalCount > 0 {
+		data.SourceFacets = append(data.SourceFacets, uaFacet{Key: "unifi", Label: "UniFi", Count: data.TotalCount})
+	}
+
+	// Status facet: device reachability (doors carry no online/offline).
+	if data.OnlineCount > 0 {
+		data.StatusFacets = append(data.StatusFacets, uaFacet{Key: "online", Label: "Online", Count: data.OnlineCount})
+	}
+	if data.OfflineCount > 0 {
+		data.StatusFacets = append(data.StatusFacets, uaFacet{Key: "offline", Label: "Offline", Count: data.OfflineCount})
+	}
+
+	// Model facet: distinct device models, most common first.
+	for m, n := range modelCount {
+		data.ModelFacets = append(data.ModelFacets, uaFacet{Key: m, Label: m, Count: n})
+	}
+	sort.SliceStable(data.ModelFacets, func(i, j int) bool {
+		if data.ModelFacets[i].Count != data.ModelFacets[j].Count {
+			return data.ModelFacets[i].Count > data.ModelFacets[j].Count
+		}
+		return data.ModelFacets[i].Label < data.ModelFacets[j].Label
+	})
+}
+
+// makeDeviceRow builds the flat row for a device, tagging viewers as
+// CARVILON mock vs foreign UA by MAC and folding the known fields into
+// the panel Detail list.
+func makeDeviceRow(d uaapi.Device, mockMACs map[string]bool) uaRow {
+	nature := d.Nature()
+	row := uaRow{
+		ID:          d.ID,
+		Kind:        "device",
+		Category:    nature,
+		TypeLabel:   uaTypeLabel(nature),
+		Name:        d.DisplayName(),
+		Source:      "unifi",
+		SourceLabel: "UniFi",
+		Model:       d.ModelLabel(),
+		IP:          d.IPLabel(),
+		Firmware:    d.FirmwareLabel(),
+		Version:     d.VersionLabel(),
+		MAC:         d.DisplayMAC(),
+		Uptime:      d.UptimeLabel(),
+		Capabilities: d.Capabilities,
+	}
+	if d.IsOnline {
+		row.StatusState, row.StatusText = "online", "Online"
+	} else {
+		row.StatusState, row.StatusText = "offline", "Offline"
+	}
+	if nature == "viewer" {
+		row.Mock = mockMACs[normalizeMACToColonForm(d.ID)]
+	}
+
+	det := []kvRow{
+		{Key: "Type", Value: row.TypeLabel},
+		{Key: "Status", Value: row.StatusText},
+		{Key: "Source", Value: row.SourceLabel},
+	}
+	det = appendKV(det, "Model", row.Model)
+	det = appendKV(det, "IP address", row.IP)
+	det = appendKV(det, "Firmware", row.Firmware)
+	det = appendKV(det, "Device version", row.Version)
+	det = appendKV(det, "MAC", row.MAC)
+	det = appendKV(det, "Uptime", row.Uptime)
+	det = append(det,
+		kvRow{Key: "Adopted", Value: uaBoolLabel(d.IsAdopted)},
+		kvRow{Key: "Managed", Value: uaBoolLabel(d.IsManaged)},
+		kvRow{Key: "Connected", Value: uaBoolLabel(d.IsConnected)},
+	)
+	det = appendKV(det, "Hub (connected_uah_id)", d.ConnectedUAHID)
+	det = appendKV(det, "Location (location_id)", d.LocationID)
+	if nature == "viewer" {
+		if row.Mock {
+			det = appendKV(det, "Viewer origin", "CARVILON mock viewer")
+		} else {
+			det = appendKV(det, "Viewer origin", "UniFi Access viewer")
+		}
+	}
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.IP, row.MAC, row.TypeLabel}, " "))
 	return row
 }
 
-func uaNatureLabel(nature string) string {
+// makeDoorRow builds the flat row for a door.
+func makeDoorRow(d uaapi.Door) uaRow {
+	row := uaRow{
+		ID:          d.ID,
+		Kind:        "door",
+		Category:    "door",
+		TypeLabel:   "Door",
+		Name:        d.DisplayName(),
+		Source:      "unifi",
+		SourceLabel: "UniFi",
+		Model:       strings.TrimSpace(d.Type),
+	}
+	row.LockFromDoor(d)
+	row.PositionState = d.PositionState()
+	row.Position = uaPositionLabel(d.PositionState(), d.PositionRaw())
+
+	det := []kvRow{
+		{Key: "Type", Value: "Door"},
+		{Key: "Lock", Value: row.StatusText},
+		{Key: "Door position (DPS)", Value: row.Position},
+		{Key: "Bound to hub (is_bind_hub)", Value: uaBoundLabel(d)},
+	}
+	det = appendKV(det, "Model", row.Model)
+	det = appendKV(det, "Floor (floor_id)", d.FloorLabel())
+	det = appendKV(det, "Hub (hub_id)", d.HubID)
+	det = append(det, kvRow{Key: "Door ID", Value: d.ID})
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.TypeLabel}, " "))
+	return row
+}
+
+// LockFromDoor sets the row's status to the door's lock state.
+func (r *uaRow) LockFromDoor(d uaapi.Door) {
+	r.StatusState = d.LockState()
+	switch r.StatusState {
+	case "locked":
+		r.StatusText = "Locked"
+	case "unlocked":
+		r.StatusText = "Unlocked"
+	default:
+		r.StatusState = "unknown"
+		r.StatusText = "Unknown"
+	}
+}
+
+// pad2 renders a count as a two-digit string for the flip displays,
+// clamping to 99 (the display has room for two digits only).
+func pad2(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	if n > 99 {
+		n = 99
+	}
+	return strconv.Itoa(100 + n)[1:]
+}
+
+func appendKV(rows []kvRow, key, val string) []kvRow {
+	if strings.TrimSpace(val) == "" {
+		return rows
+	}
+	return append(rows, kvRow{Key: key, Value: val})
+}
+
+// categoryPlural is the group-heading label for a category slug.
+func categoryPlural(cat string) string {
+	switch cat {
+	case "hub":
+		return "Hubs"
+	case "reader":
+		return "Readers"
+	case "viewer":
+		return "Viewers"
+	case "door":
+		return "Doors"
+	default:
+		return "Other devices"
+	}
+}
+
+func uaTypeLabel(nature string) string {
 	switch nature {
 	case "hub":
-		return "Hub / Tür-Controller"
+		return "Hub"
 	case "reader":
 		return "Reader"
 	case "viewer":
 		return "Viewer"
 	default:
-		return "Gerät"
+		return "Device"
 	}
 }
 
 func uaPositionLabel(state, raw string) string {
 	switch state {
 	case "open":
-		return "geöffnet"
+		return "Open"
 	case "closed":
-		return "geschlossen"
+		return "Closed"
 	default:
 		if raw != "" {
 			return raw
 		}
-		return "unbekannt"
-	}
-}
-
-func uaLockLabel(state, raw string) string {
-	switch state {
-	case "locked":
-		return "verriegelt"
-	case "unlocked":
-		return "entriegelt"
-	default:
-		if raw != "" {
-			return raw
-		}
-		return "unbekannt"
+		return "Unknown"
 	}
 }
 
 func uaBoundLabel(d uaapi.Door) string {
 	if v, ok := d.BoundToHub(); ok {
 		if v {
-			return "ja"
+			return "Yes"
 		}
-		return "nein"
+		return "No"
 	}
-	return "unbekannt"
+	return "Unknown"
 }
 
 // viewerMACSet reads every MAC in our viewers table (the "mock" table)
@@ -350,7 +492,7 @@ func (s *Server) viewerMACSet(ctx context.Context) map[string]bool {
 	}
 	rows, err := s.platformCfg.DB().QueryContext(ctx, `SELECT mac FROM viewers`)
 	if err != nil {
-		s.log.Warn("ua overview: viewer mac lookup failed", "err", err)
+		s.log.Warn("device center: viewer mac lookup failed", "err", err)
 		return set
 	}
 	defer rows.Close()
@@ -398,15 +540,15 @@ func uaEmergencyFlag(val any) bool {
 }
 
 // handleAdminUADeviceSettings lazily serves the /devices/:id/settings
-// detail for one device as JSON, loaded when its row is expanded.
+// detail for one device as JSON, loaded when its panel opens.
 func (s *Server) handleAdminUADeviceSettings(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.uaDetailPrelude(w, r)
 	if !ok {
 		return
 	}
-	sec := uaSection{Title: "Zutrittsmethoden"}
+	sec := uaSection{Title: "Access methods"}
 	if v, err := s.ua.DeviceSettings(r.Context(), id); err != nil {
-		s.log.Warn("ua overview: device settings failed", "err", err)
+		s.log.Warn("device center: device settings failed", "err", err)
 		sec.Error = uaFriendlyError(err)
 	} else {
 		sec.Rows = flattenUADetail(v)
@@ -415,26 +557,26 @@ func (s *Server) handleAdminUADeviceSettings(w http.ResponseWriter, r *http.Requ
 }
 
 // handleAdminUADoorDetail lazily serves the full door record plus its
-// lock rule as JSON, loaded when a door row is expanded.
+// lock rule as JSON, loaded when a door panel opens.
 func (s *Server) handleAdminUADoorDetail(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.uaDetailPrelude(w, r)
 	if !ok {
 		return
 	}
-	detail := uaSection{Title: "Tür-Details"}
+	detail := uaSection{Title: "Door details"}
 	if v, err := s.ua.DoorDetail(r.Context(), id); err != nil {
-		s.log.Warn("ua overview: door detail failed", "err", err)
+		s.log.Warn("device center: door detail failed", "err", err)
 		detail.Error = uaFriendlyError(err)
 	} else {
 		detail.Rows = flattenUADetail(v)
 	}
 
-	rule := uaSection{Title: "Sperrregel"}
+	rule := uaSection{Title: "Lock rule"}
 	if v, err := s.ua.DoorLockRule(r.Context(), id); err != nil {
 		// A door with no rule set answers not-found; that is a clean
-		// "keine Regel", not an error.
+		// "no rule", not an error.
 		if !errors.Is(err, uaapi.ErrNotFound) {
-			s.log.Warn("ua overview: door lock rule failed", "err", err)
+			s.log.Warn("device center: door lock rule failed", "err", err)
 			rule.Error = uaFriendlyError(err)
 		}
 	} else {
@@ -450,7 +592,7 @@ func (s *Server) uaDetailPrelude(w http.ResponseWriter, r *http.Request) (string
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	if !s.uaReady(r.Context()) {
-		writeUADetailError(w, "UA ist nicht aktiv oder nicht konfiguriert.")
+		writeUADetailError(w, "UniFi Access is not active or not configured.")
 		return "", false
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
@@ -498,17 +640,17 @@ func writeUADetailError(w http.ResponseWriter, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": msg})
 }
 
-// uaFriendlyError maps a uaapi error to a fixed German message. It
+// uaFriendlyError maps a uaapi error to a fixed English message. It
 // never embeds the underlying error text, which can carry the UDM host
 // - the token/host must never reach the HTML or JSON.
 func uaFriendlyError(err error) string {
 	switch {
 	case errors.Is(err, uaapi.ErrUnauthorized):
-		return "Zugriff verweigert – bitte den UA-API-Token prüfen (401)."
+		return "Access denied - please check the UA API token (401)."
 	case errors.Is(err, uaapi.ErrNotFound):
-		return "Nicht gefunden."
+		return "Not found."
 	default:
-		return "UDM nicht erreichbar oder Antwort ungültig."
+		return "UDM unreachable or the response was invalid."
 	}
 }
 
@@ -551,7 +693,7 @@ func flattenUAInto(prefix string, v any, out *[]kvRow) {
 			flattenUAInto(prefix+"["+strconv.Itoa(i)+"]", val, out)
 		}
 	case nil:
-		*out = append(*out, kvRow{Key: prefix, Value: "—"})
+		*out = append(*out, kvRow{Key: prefix, Value: "-"})
 	case bool:
 		*out = append(*out, kvRow{Key: prefix, Value: uaBoolLabel(t)})
 	case float64:
@@ -567,7 +709,7 @@ func flattenUAInto(prefix string, v any, out *[]kvRow) {
 
 func uaBoolLabel(b bool) string {
 	if b {
-		return "ja"
+		return "Yes"
 	}
-	return "nein"
+	return "No"
 }

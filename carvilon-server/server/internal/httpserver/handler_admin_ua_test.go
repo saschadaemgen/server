@@ -75,7 +75,7 @@ func TestAdminUA_DisabledMakesNoCalls(t *testing.T) {
 	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
 
 	body := getBody(t, env, "/a/ua")
-	if !strings.Contains(body, "UniFi Access ist deaktiviert") {
+	if !strings.Contains(body, "UniFi Access is disabled") {
 		t.Errorf("disabled hint missing:\n%s", firstLines(body))
 	}
 	if h := atomic.LoadInt32(&stub.hits); h != 0 {
@@ -86,9 +86,10 @@ func TestAdminUA_DisabledMakesNoCalls(t *testing.T) {
 	}
 }
 
-// UA on + reachable: devices are grouped by hub, the three natures show,
-// mock vs UA viewers are distinguished, and doors carry DPS/lock status.
-func TestAdminUA_GroupedOverview(t *testing.T) {
+// UA on + reachable: the flat device table lists every device + door,
+// grouped by category, mock vs UA viewers are distinguished, and doors
+// carry the lock/position status.
+func TestAdminUA_FlatOverview(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	stub := newUAStub(t)
@@ -103,11 +104,12 @@ func TestAdminUA_GroupedOverview(t *testing.T) {
 
 	body := getBody(t, env, "/a/ua")
 	for _, want := range []string{
-		"Haupt-Hub", "Leser Eingang", "Mock Cam", "UA Cam",
-		"CARVILON Mock-Viewer", "UA-Viewer",
-		"Hauseingang", "geöffnet", "verriegelt",
-		"Hub / Tür-Controller",
-		"Ohne Hub-Zuordnung", // door-2 has no hub
+		"Haupt-Hub", "Leser Eingang", "Mock Cam", "UA Cam", // device names (data)
+		"Hauseingang", "Kellertür", // door names (data)
+		">Hubs<", ">Readers<", ">Viewers<", ">Doors<", // group headings (English)
+		"CARVILON mock viewer", // viewer-origin detail (mock)
+		"Read only",            // read-only indicator
+		"Fleet status", "UniFi", // left column + source facet
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)
@@ -115,12 +117,14 @@ func TestAdminUA_GroupedOverview(t *testing.T) {
 	}
 	// Mock detection must be exact: the UA-reported "UA Cam" (aabbccddee02)
 	// is NOT in the viewers table, so exactly one viewer carries the mock
-	// badge and exactly one carries the foreign-UA badge.
-	if n := strings.Count(body, `class="ua-badge kind mock"`); n != 1 {
+	// badge.
+	if n := strings.Count(body, `class="dc-mock"`); n != 1 {
 		t.Errorf("mock badge count = %d, want 1", n)
 	}
-	if n := strings.Count(body, `class="ua-badge kind ua"`); n != 1 {
-		t.Errorf("ua-viewer badge count = %d, want 1", n)
+	// Cameras/Sensors are shell-only until a Protect backend exists: their
+	// facets render disabled and no invented rows appear.
+	if !strings.Contains(body, `data-dc-value="camera"`) || !strings.Contains(body, `data-dc-value="sensor"`) {
+		t.Errorf("camera/sensor shell facets missing")
 	}
 }
 
@@ -140,7 +144,7 @@ func TestAdminUA_Unauthorized(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: ts.URL, Token: "bad"}))
 
 	body := getBody(t, env, "/a/ua")
-	if !strings.Contains(body, "Zugriff verweigert") {
+	if !strings.Contains(body, "Access denied") {
 		t.Errorf("401 card missing")
 	}
 	if strings.Contains(body, ts.URL) {
@@ -173,14 +177,17 @@ func TestAdminUA_DeviceSettingsLazy(t *testing.T) {
 	if !out.OK || len(out.Sections) != 1 {
 		t.Fatalf("bad response: %+v", out)
 	}
+	if out.Sections[0].Title != "Access methods" {
+		t.Errorf("section title = %q, want %q", out.Sections[0].Title, "Access methods")
+	}
 	var sawNFC bool
 	for _, kv := range out.Sections[0].Rows {
-		if kv.Key == "nfc" && kv.Value == "ja" {
+		if kv.Key == "nfc" && kv.Value == "Yes" {
 			sawNFC = true
 		}
 	}
 	if !sawNFC {
-		t.Errorf("nfc=ja row missing: %+v", out.Sections[0].Rows)
+		t.Errorf("nfc=Yes row missing: %+v", out.Sections[0].Rows)
 	}
 }
 
@@ -208,7 +215,7 @@ func TestAdminUA_DoorDetailLazy(t *testing.T) {
 	if !out.OK || len(out.Sections) != 2 {
 		t.Fatalf("want detail+lock-rule sections, got %+v", out)
 	}
-	if out.Sections[0].Title != "Tür-Details" || out.Sections[1].Title != "Sperrregel" {
+	if out.Sections[0].Title != "Door details" || out.Sections[1].Title != "Lock rule" {
 		t.Errorf("section titles = %q/%q", out.Sections[0].Title, out.Sections[1].Title)
 	}
 }
