@@ -42,8 +42,9 @@
     --orange-700: color-mix(in srgb, var(--acc) 62%, black);
     --amber-glow: color-mix(in srgb, var(--acc) 45%, transparent);
     --amber-haze: color-mix(in srgb, var(--acc) 13%, transparent);
-    /* Device-name titles: a light tint of the accent (follows Settings). */
-    --title-blue: color-mix(in srgb, var(--acc) 55%, var(--white));
+    /* Device-name titles: a very soft hint of the accent over white
+       (follows Settings) - just barely tinted, not a saturated blue. */
+    --title-blue: color-mix(in srgb, var(--acc) 18%, var(--white));
     /* Fixed signal colors (never follow the accent) */
     --live-500:#34E29B; --live-glow:rgba(52,226,155,0.45);
     --lock-500:#FF5C4D; --lock-glow:rgba(255,92,77,0.45); --lock-haze:rgba(255,92,77,0.11);
