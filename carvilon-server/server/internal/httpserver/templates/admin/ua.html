@@ -114,7 +114,7 @@
   .dc-facet[disabled] { cursor:default; opacity:0.4; }
   .dc-cb { width:15px; height:15px; flex:0 0 auto; border-radius:3px; border:1px solid var(--border-strong); background:var(--field-bg); box-shadow:var(--well); display:flex; align-items:center; justify-content:center; color:var(--text-on-accent); }
   .dc-cb svg { opacity:0; }
-  .dc-facet.is-active .dc-cb { border-color:var(--orange-500); background:linear-gradient(180deg,var(--orange-400),var(--orange-600)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.28); }
+  .dc-facet.is-active .dc-cb { border-color:var(--orange-500); background:linear-gradient(180deg,var(--orange-400),var(--orange-600)); box-shadow:0 0 8px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,0.28); }
   .dc-facet.is-active .dc-cb svg { opacity:1; }
   .dc-facet-ico { color:var(--text-tertiary); display:flex; flex:0 0 auto; }
   .dc-facet.is-active .dc-facet-ico { color:var(--orange-400); }
@@ -256,6 +256,9 @@
   @keyframes dc-contentin { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
   @keyframes dc-dockflash { 0%{opacity:0;} 12%{opacity:1;} 100%{opacity:0;} }
   @keyframes dc-flip { 0%{transform:rotateX(0);} 49%{transform:rotateX(88deg);} 51%{transform:rotateX(-88deg);} 100%{transform:rotateX(0);} }
+  /* facet shimmer when the filter set changes (design: catflash) */
+  @keyframes dc-catflash { 26%{color:var(--orange-400);text-shadow:0 0 6px var(--amber-glow);} 44%{color:var(--text-secondary);text-shadow:0 0 1px var(--amber-haze);} 62%{color:var(--orange-300);text-shadow:0 0 8px var(--amber-glow);} }
+  @media (prefers-reduced-motion: reduce) { .dc-facet-ico, .dc-facet-label { animation:none !important; } }
   @keyframes dc-scanfulll { 0%{transform:translateX(-130%);opacity:0;} 10%{opacity:0.9;} 70%{opacity:0.45;} 100%{transform:translateX(460%);opacity:0;} }
   @keyframes dc-scanfullr { 0%{transform:translateX(460%);opacity:0;} 10%{opacity:0.9;} 70%{opacity:0.45;} 100%{transform:translateX(-130%);opacity:0;} }
   @keyframes dc-scanpartl { 0%{transform:translateX(-130%);opacity:0;} 16%{opacity:0.8;} 60%{opacity:0.4;} 100%{transform:translateX(180%);opacity:0;} }
@@ -583,8 +586,28 @@
       }
     }
 
+    // Facet shimmer: when the filter set changes, every facet's icon + label
+    // does a brief staggered accent flash (design: catflash). Disabled under
+    // prefers-reduced-motion.
+    var facetBtns = Array.prototype.slice.call(root.querySelectorAll('[data-dc-facet]'));
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function flashFacets() {
+      if (reduceMotion) return;
+      facetBtns.forEach(function (btn) {
+        Array.prototype.forEach.call(btn.querySelectorAll('.dc-facet-ico, .dc-facet-label'), function (el) {
+          el.style.animation = 'none';
+        });
+      });
+      void root.offsetWidth; // one reflow, then (re)start the animations
+      facetBtns.forEach(function (btn, i) {
+        Array.prototype.forEach.call(btn.querySelectorAll('.dc-facet-ico, .dc-facet-label'), function (el) {
+          el.style.animation = 'dc-catflash 620ms ease-out ' + (i * 95) + 'ms 1 backwards';
+        });
+      });
+    }
+
     // ---- facets ----
-    root.querySelectorAll('[data-dc-facet]').forEach(function (btn) {
+    facetBtns.forEach(function (btn) {
       if (btn.disabled) return;
       btn.addEventListener('click', function () {
         var dim = btn.getAttribute('data-dc-facet');
@@ -592,6 +615,7 @@
         var set = filters[dim];
         if (set.has(val)) { set.delete(val); btn.classList.remove('is-active'); }
         else { set.add(val); btn.classList.add('is-active'); }
+        flashFacets();
         apply();
       });
     });
@@ -612,6 +636,7 @@
       if (searchInput) searchInput.value = '';
       query = '';
       clearSort();
+      flashFacets();
       apply();
     });
 
