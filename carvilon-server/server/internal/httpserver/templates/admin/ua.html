@@ -326,15 +326,17 @@
           <span class="dc-fleet-total dc-mono">{{.Page.TotalCount}} units</span>
         </div>
         <div class="dc-fleet-grid">
-          <div class="dc-stat">
+          <div class="dc-stat" data-dc-stat="online">
             <div class="dc-digits"><span class="dc-digit" style="animation-delay:0ms">{{slice .Page.OnlinePad 0 1}}</span><span class="dc-digit" style="animation-delay:80ms">{{slice .Page.OnlinePad 1 2}}</span></div>
             <span class="dc-stat-label">online</span>
           </div>
-          <div class="dc-stat off">
+          {{/* the red "off" treatment only applies while something IS offline;
+               at zero the tile reads calm like its neighbours */}}
+          <div class="dc-stat{{if gt .Page.OfflineCount 0}} off{{end}}" data-dc-stat="offline">
             <div class="dc-digits"><span class="dc-digit" style="animation-delay:160ms">{{slice .Page.OfflinePad 0 1}}</span><span class="dc-digit" style="animation-delay:240ms">{{slice .Page.OfflinePad 1 2}}</span></div>
             <span class="dc-stat-label">offline</span>
           </div>
-          <div class="dc-stat">
+          <div class="dc-stat" data-dc-stat="updates">
             <div class="dc-digits"><span class="dc-digit" style="animation-delay:320ms">{{slice .Page.UpdatesPad 0 1}}</span><span class="dc-digit" style="animation-delay:400ms">{{slice .Page.UpdatesPad 1 2}}</span></div>
             <span class="dc-stat-label">updates</span>
           </div>
@@ -861,6 +863,146 @@
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePanel(); });
 
     apply();
+
+    // ---- live status ----
+    // Poll a lightweight snapshot (/a/ua/status) so an online/offline
+    // or lock-state change shows up without a manual reload. Rows are
+    // matched by kind+id; the flip counters re-roll only when a digit
+    // actually changes. Paused while the tab is hidden.
+    var rowByKey = {};
+    rows.forEach(function (r) {
+      rowByKey[r.getAttribute('data-kind') + ' ' + r.getAttribute('data-id')] = r;
+    });
+    var statTiles = {};
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dc-stat]'), function (el) {
+      statTiles[el.getAttribute('data-dc-stat')] = el;
+    });
+    var fleetTotalEl = root.querySelector('.dc-fleet-total');
+    var toolbarTotalEl = root.querySelector('.dc-count .dc-total');
+    var reloadedForNewDevices = false;
+
+    function padCount(n) {
+      n = Math.max(0, Math.min(99, Math.round(n)));
+      return (n < 10 ? '0' : '') + n;
+    }
+
+    function setCounter(name, n) {
+      var tile = statTiles[name];
+      if (!tile || n == null) return;
+      var str = padCount(n);
+      var digitEls = tile.querySelectorAll('.dc-digit');
+      if (digitEls.length !== 2) return;
+      var changed = digitEls[0].textContent !== str[0] || digitEls[1].textContent !== str[1];
+      digitEls[0].textContent = str[0];
+      digitEls[1].textContent = str[1];
+      // the red "off" treatment only while something IS offline
+      if (name === 'offline') tile.classList.toggle('off', n > 0);
+      if (changed && !reduceMotion) {
+        Array.prototype.forEach.call(digitEls, function (el) { el.style.animation = 'none'; });
+        void tile.offsetWidth;
+        Array.prototype.forEach.call(digitEls, function (el, i) {
+          el.style.animation = 'dc-flip 560ms ease-in-out ' + (i * 80) + 'ms 1 backwards';
+        });
+      }
+    }
+
+    function setFacetCount(value, n) {
+      if (n == null) return;
+      var el = root.querySelector('[data-dc-facet="status"][data-dc-value="' + value + '"] .dc-facet-count');
+      if (el) el.textContent = n;
+    }
+
+    // Refresh the "Status"/"Lock" line inside a rendered kv container
+    // (the pre-rendered overview template or the open panel's clone).
+    function setStatusKV(container, text) {
+      if (!container) return;
+      Array.prototype.forEach.call(container.querySelectorAll('.dc-kv'), function (kv) {
+        var k = kv.querySelector('.dc-k');
+        if (k && (k.textContent === 'Status' || k.textContent === 'Lock')) {
+          var v = kv.querySelector('.dc-v');
+          if (v) v.textContent = text;
+        }
+      });
+    }
+
+    function updateRowStatus(row, item) {
+      var oldSt = row.getAttribute('data-status') || '';
+      var changed = oldSt !== item.status;
+      if (changed) {
+        if (oldSt) row.classList.remove(oldSt);
+        row.classList.add(item.status);
+        row.setAttribute('data-status', item.status);
+        var dot = row.querySelector('.dc-stat-dot');
+        if (dot) dot.className = 'dc-stat-dot ' + item.status;
+      }
+      var txtEl = row.querySelector('.dc-stat-txt');
+      if (txtEl && txtEl.textContent !== item.text) txtEl.textContent = item.text;
+      if (item.pos) {
+        var posEl = row.querySelector('.dc-pos');
+        if (posEl) posEl.textContent = '· ' + item.pos;
+      }
+      if (changed) {
+        var det = tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
+        if (det && det.content) setStatusKV(det.content, item.text);
+        if (selectedRow === row) {
+          phStatus.className = 'dc-ph-status ' + item.status;
+          phStatus.textContent = item.text;
+          setStatusKV(leftCol, item.text);
+        }
+      }
+      return changed;
+    }
+
+    function applySnapshot(d) {
+      var anyChanged = false, sawUnknown = false;
+      (d.items || []).forEach(function (item) {
+        var row = rowByKey[item.kind + ' ' + item.id];
+        if (!row) { sawUnknown = true; return; }
+        if (updateRowStatus(row, item)) anyChanged = true;
+      });
+      var c = d.counts || {};
+      setCounter('online', c.online);
+      setCounter('offline', c.offline);
+      setCounter('updates', c.updates);
+      setFacetCount('online', c.online);
+      setFacetCount('offline', c.offline);
+      if (c.total != null) {
+        if (fleetTotalEl) fleetTotalEl.textContent = c.total + ' units';
+        if (toolbarTotalEl) toolbarTotalEl.textContent = '/ ' + c.total;
+      }
+      // re-run filters/sort so a status-filtered view stays truthful
+      if (anyChanged) apply();
+      // A device the page never rendered appeared (fresh adoption):
+      // reload once, but only while nothing user-held would be lost.
+      if (sawUnknown && !reloadedForNewDevices && !document.hidden
+          && layer && !layer.classList.contains('is-open')
+          && !query && !sort.key
+          && !Object.keys(filters).some(function (k) { return filters[k].size > 0; })) {
+        reloadedForNewDevices = true;
+        window.location.reload();
+      }
+    }
+
+    var POLL_MS = 5000;
+    var pollTimer = 0;
+    function schedulePoll(ms) {
+      window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(pollStatus, ms);
+    }
+    function pollStatus() {
+      if (document.hidden) { schedulePoll(POLL_MS); return; }
+      fetch('/a/ua/status', { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (d && d.ok) applySnapshot(d);
+          schedulePoll(POLL_MS);
+        })
+        .catch(function () { schedulePoll(3 * POLL_MS); });
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) schedulePoll(250);
+    });
+    schedulePoll(POLL_MS);
   })();
 
   // Group-header scan sweep: every 8s at most one visible group's trailing

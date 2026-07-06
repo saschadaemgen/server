@@ -285,12 +285,12 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	}
 
 	// Status facet: device reachability (doors carry no online/offline).
-	if data.OnlineCount > 0 {
-		data.StatusFacets = append(data.StatusFacets, uaFacet{Key: "online", Label: "Online", Count: data.OnlineCount})
-	}
-	if data.OfflineCount > 0 {
-		data.StatusFacets = append(data.StatusFacets, uaFacet{Key: "offline", Label: "Offline", Count: data.OfflineCount})
-	}
+	// Both facets always render (even at count 0) so the live status
+	// poll can move a device between them without a page re-render.
+	data.StatusFacets = append(data.StatusFacets,
+		uaFacet{Key: "online", Label: "Online", Count: data.OnlineCount},
+		uaFacet{Key: "offline", Label: "Offline", Count: data.OfflineCount},
+	)
 
 	// Model facet: distinct device models, most common first.
 	for m, n := range modelCount {
@@ -537,6 +537,67 @@ func uaEmergencyFlag(val any) bool {
 		}
 	}
 	return false
+}
+
+// uaStatusItem is one row's live status in the /a/ua/status payload,
+// addressed by kind+id (matching the row's data attributes).
+type uaStatusItem struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Text   string `json:"text"`
+	Pos    string `json:"pos,omitempty"`
+}
+
+// handleAdminUAStatus serves a lightweight live snapshot of every
+// row's status plus the fleet counters as JSON. The Device Center
+// polls it so an online/offline (or lock-state) change shows up
+// without a manual reload. It uses the UDM's cached device list (no
+// refresh=true): this runs every few seconds and must stay cheap.
+func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if !s.uaReady(r.Context()) {
+		writeUADetailError(w, "UniFi Access is not active or not configured.")
+		return
+	}
+	devices, err := s.ua.ListDevices(r.Context())
+	if err != nil {
+		// Friendly string only; the client keeps its last state and
+		// simply retries on the next poll.
+		writeUADetailError(w, uaFriendlyError(err))
+		return
+	}
+	items := make([]uaStatusItem, 0, len(devices))
+	online, offline := 0, 0
+	for _, d := range devices {
+		st, txt := "offline", "Offline"
+		if d.IsOnline {
+			st, txt = "online", "Online"
+			online++
+		} else {
+			offline++
+		}
+		items = append(items, uaStatusItem{Kind: "device", ID: d.ID, Status: st, Text: txt})
+	}
+	counts := map[string]any{"online": online, "offline": offline, "updates": 0}
+	// Doors are secondary here: a doors failure drops the door items
+	// and the total (the client then leaves both untouched) but never
+	// blocks the device statuses.
+	if doors, derr := s.ua.ListDoors(r.Context()); derr == nil {
+		for _, dr := range doors {
+			var row uaRow
+			row.LockFromDoor(dr)
+			items = append(items, uaStatusItem{
+				Kind: "door", ID: dr.ID, Status: row.StatusState, Text: row.StatusText,
+				Pos: uaPositionLabel(dr.PositionState(), dr.PositionRaw()),
+			})
+		}
+		counts["total"] = len(devices) + len(doors)
+	} else {
+		s.log.Warn("device center: status poll doors failed", "err", derr)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "counts": counts, "items": items})
 }
 
 // handleAdminUADeviceSettings lazily serves the /devices/:id/settings

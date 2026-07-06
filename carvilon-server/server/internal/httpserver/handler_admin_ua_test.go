@@ -152,6 +152,86 @@ func TestAdminUA_Unauthorized(t *testing.T) {
 	}
 }
 
+// The live-status poll returns the counters plus one status item per
+// device and door, keyed the way the client matches rows (kind+id).
+func TestAdminUA_StatusSnapshot(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	stub := newUAStub(t)
+	wireUA(t, env, stub)
+
+	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	if err != nil {
+		t.Fatalf("GET status: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Online  int `json:"online"`
+			Offline int `json:"offline"`
+			Total   int `json:"total"`
+		} `json:"counts"`
+		Items []struct {
+			Kind   string `json:"kind"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Text   string `json:"text"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("ok=false: %+v", out)
+	}
+	// Stub: 3 devices online, 1 without is_online -> offline; 2 doors.
+	if out.Counts.Online != 3 || out.Counts.Offline != 1 || out.Counts.Total != 6 {
+		t.Errorf("counts = %+v, want online=3 offline=1 total=6", out.Counts)
+	}
+	byKey := map[string]string{}
+	for _, it := range out.Items {
+		byKey[it.Kind+"/"+it.ID] = it.Status
+	}
+	for key, want := range map[string]string{
+		"device/0cea14000001": "online",
+		"device/aabbccddee02": "offline",
+		"door/0cea-door-1":    "locked",
+		"door/0cea-door-2":    "unknown",
+	} {
+		if got := byKey[key]; got != want {
+			t.Errorf("status[%s] = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// UA off: the status poll answers ok:false and makes ZERO UDM calls.
+func TestAdminUA_StatusDisabledMakesNoCalls(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	stub := newUAStub(t)
+	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: stub.ts.URL, Token: "t"}))
+	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
+
+	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	if err != nil {
+		t.Fatalf("GET status: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.OK {
+		t.Errorf("ok=true while UA disabled")
+	}
+	if h := atomic.LoadInt32(&stub.hits); h != 0 {
+		t.Errorf("UDM was called %d times while UA disabled, want 0", h)
+	}
+}
+
 // The lazy device-settings endpoint returns the flattened detail as JSON.
 func TestAdminUA_DeviceSettingsLazy(t *testing.T) {
 	env := newTestServer(t)
