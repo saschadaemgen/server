@@ -194,7 +194,9 @@
 
   /* ============ Detail panel ============ */
   .dc-detail-layer { position:absolute; top:0; bottom:0; left:264px; right:0; overflow:hidden; pointer-events:none; z-index:20; }
-  .dc-scrim { position:absolute; inset:0; background:rgba(4,5,7,0.55); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); opacity:0; transition:opacity 340ms var(--ease-tactile); pointer-events:none; }
+  /* solid dim only (no backdrop-filter): a per-frame blur re-composite made
+     the slide stutter; the dark scrim keeps the focus effect without it. */
+  .dc-scrim { position:absolute; inset:0; background:rgba(4,5,7,0.58); opacity:0; transition:opacity 300ms var(--ease-tactile); pointer-events:none; }
   .dc-panel { position:absolute; top:0; bottom:0; right:0; width:80%; min-width:min(700px,100%); transform:translateX(102%); background:var(--screen); display:flex; flex-direction:column; border-left:1px solid color-mix(in srgb, var(--acc) 50%, transparent); box-shadow:-34px 0 90px -24px rgba(0,0,0,0.92); will-change:transform; pointer-events:none; }
   /* left-edge accent seam that flashes as the panel docks (design: dockflash) */
   .dc-seam { position:absolute; top:0; bottom:0; left:0; width:2px; background:linear-gradient(180deg,rgba(7,8,10,0) 0%,var(--orange-400) 16%,var(--orange-400) 84%,rgba(7,8,10,0) 100%); box-shadow:0 0 18px 2px var(--amber-glow); opacity:0; pointer-events:none; z-index:3; }
@@ -728,10 +730,23 @@
         + (kind === 'door' ? 'Door details' : 'Access methods')
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
 
+      var id = row.getAttribute('data-id');
       layer.classList.remove('is-closing');
-      layer.classList.add('is-open');
-      if (closeBtn) closeBtn.focus();
-      loadDetail(kind, row.getAttribute('data-id'), rightCol);
+      // Flush the freshly injected panel content's layout NOW, then start the
+      // transform on the next frame so the slide runs on a settled layer
+      // (no first-frame reflow stutter).
+      void layer.offsetWidth;
+      requestAnimationFrame(function () {
+        layer.classList.add('is-open');
+        // preventScroll: focusing inside the panel must not scroll-into-view
+        // mid-slide (that was a jank source).
+        if (closeBtn) { try { closeBtn.focus({ preventScroll: true }); } catch (e) { closeBtn.focus(); } }
+        // Defer the lazy fetch+inject until the slide has essentially
+        // finished, so injecting detail rows never reflows during the slide.
+        setTimeout(function () {
+          if (selectedRow === row) loadDetail(kind, id, rightCol);
+        }, 360);
+      });
     }
 
     function closePanel() {
@@ -813,9 +828,8 @@
 
   // Search-field ambient animation: a faint dot field (in the configured
   // admin accent) behind the input. Typed text pushes the dots aside (a
-  // "magnet"); after a few idle seconds a soft pair of eyes may
-  // blink/glance in the empty space. Canvas-only, purely decorative,
-  // disabled under prefers-reduced-motion.
+  // "magnet"). Canvas-only, purely decorative, disabled under
+  // prefers-reduced-motion.
   (function () {
     var box = document.querySelector('.dc-search');
     var cv = box && box.querySelector('[data-dc-search-canvas]');
@@ -827,7 +841,6 @@
     var dpr = window.devicePixelRatio || 1;
     var PAD = 34;                                 // where the input text starts
     var FONT = '13px "IBM Plex Sans", system-ui, sans-serif';
-    var PLACEHOLDER = input.getAttribute('placeholder') || '';
 
     // Dot colour = the configurable admin accent (--accent). Parse it once;
     // fall back to the design orange if it is unset or non-hex.
@@ -845,13 +858,8 @@
       }
     })();
 
-    var R = 15, MAX = 11;                                  // magnet reach / strength
-    var EYE_D = 3600, AW = 13, AH = 7, PR = 2.4, SEP = 30; // idle eyes
-
-    var ss = function (a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-
+    var R = 15, MAX = 11;                          // magnet reach / strength
     var W, H, cols, rows, cx, cy, dots = null;
-    var lastAct = performance.now(), nextEye = 0, eye = null;
 
     function build() {
       var r = cv.getBoundingClientRect();
@@ -869,10 +877,6 @@
       }
     }
 
-    function act() { lastAct = performance.now(); eye = null; }
-    input.addEventListener('input', act);
-    input.addEventListener('focus', act);
-
     function draw(t) {
       if (!dots) { build(); if (!dots) { requestAnimationFrame(draw); return; } }
       ctx.clearRect(0, 0, W, H);
@@ -883,33 +887,6 @@
       ctx.font = FONT;
       var tw2 = val ? ctx.measureText(val).width : 0;
       var x0 = PAD, x1 = PAD + tw2, yc = H / 2;
-
-      // eyes only in clear space right of the placeholder; if it is long
-      // and leaves no room, let them roam the inner width instead.
-      var phW = ctx.measureText(PLACEHOLDER).width;
-      var halfSpan = SEP / 2 + AW + 4;
-      var minX = PAD + phW + 14 + halfSpan;
-      var maxX = W - 12 - halfSpan;
-      if (maxX <= minX) { minX = PAD + halfSpan; maxX = W - 12 - halfSpan; }
-
-      var idle = !val && (t - lastAct) > 5000;
-      if (!idle) { eye = null; }
-      else if (!eye && t > nextEye && maxX > minX) {
-        eye = { x: minX + Math.random() * (maxX - minX), t0: t, gp: Math.random() * 6.283, gd: Math.random() < 0.5 ? -1 : 1 };
-        nextEye = t + EYE_D + 4000 + Math.random() * 6000;
-      }
-
-      var ef = null;
-      if (eye) {
-        var e = (t - eye.t0) / EYE_D;
-        if (e >= 1) { eye = null; }
-        else {
-          var fade = ss(0, 0.22, e) * (1 - ss(0.78, 1, e));
-          var lid = 0;
-          if (e > 0.46 && e < 0.76) { lid = Math.sin((e - 0.46) / 0.30 * Math.PI); }
-          ef = { x: eye.x, fade: fade, lid: lid, glance: Math.sin(e * 2.6 + eye.gp) * 3 * eye.gd };
-        }
-      }
 
       for (var k = 0; k < dots.length; k++) {
         var d = dots[k];
@@ -932,34 +909,6 @@
         // dim -> full accent ramp across the field (dim ~47% of the accent)
         var dim = 0.47 + d.bias * 0.53;
         var rC = ACC[0] * dim, gC = ACC[1] * dim, bC = ACC[2] * dim, s = 1.8;
-
-        if (ef) {
-          var best = 0;
-          var centers = [ef.x - SEP / 2, ef.x + SEP / 2];
-          for (var c = 0; c < 2; c++) {
-            var ecx = centers[c];
-            var dxE = d.hx - ecx, dyE = d.hy - yc;
-            var rr = (dxE / AW) * (dxE / AW) + (dyE / AH) * (dyE / AH);
-            var soft = Math.pow(Math.max(0, 1 - rr), 1.2);
-            if (soft > 0) {
-              var lidLine = -AH + ef.lid * 2 * AH;
-              var vis = ss(lidLine, lidLine + 2.5, dyE);
-              var pd = Math.hypot(d.hx - (ecx + ef.glance), dyE);
-              var pupilDim = pd < PR ? 0.12 : (pd < PR + 3 ? 0.12 + (pd - PR) / 3 * 0.88 : 1);
-              var b = ef.fade * soft * vis * pupilDim * 0.75;
-              if (b > best) best = b;
-            }
-          }
-          if (best > 0) {
-            // the eyes lift the accent toward white so they read as brighter
-            var lift = Math.min(1, best) * 0.85;
-            a = Math.min(1, a + best);
-            rC = rC + (255 - rC) * lift;
-            gC = gC + (255 - gC) * lift;
-            bC = bC + (255 - bC) * lift;
-            s = 1.8 + best * 0.5;
-          }
-        }
 
         ctx.fillStyle = 'rgba(' + Math.round(rC) + ',' + Math.round(gC) + ',' + Math.round(bC) + ',' + a.toFixed(3) + ')';
         ctx.fillRect(px - s / 2, py - s / 2, s, s);
