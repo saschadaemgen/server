@@ -192,6 +192,8 @@ func navSlotFor(name string) string {
 		return "designer"
 	case "nfc":
 		return "nfc"
+	case "ua":
+		return "ua"
 	case "mqtt":
 		return "mqtt"
 	case "telegram":
@@ -244,6 +246,8 @@ func extractUser(data any) adminUser {
 	case mqttPageData:
 		return v.User
 	case telegramPageData:
+		return v.User
+	case uaOverviewData:
 		return v.User
 	case placeholderData:
 		return v.User

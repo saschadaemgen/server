@@ -549,6 +549,13 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/nfc", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFC)))
 	s.mux.Handle("GET /a/nfc.json", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFCJSON)))
 	s.mux.Handle("POST /a/nfc/name", s.requireAdminSession(http.HandlerFunc(s.handleAdminNFCRename)))
+
+	// Saison 21 - UA read-only device + door overview (Etappe 1). The
+	// two detail routes are lazily fetched when a row is expanded.
+	s.mux.Handle("GET /a/ua", s.requireAdminSession(http.HandlerFunc(s.handleAdminUA)))
+	s.mux.Handle("GET /a/ua/devices/{id}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADeviceSettings)))
+	s.mux.Handle("GET /a/ua/doors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADoorDetail)))
+
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
 	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))

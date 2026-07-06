@@ -50,6 +50,48 @@ func (d Device) DisplayName() string {
 	return d.ID
 }
 
+// HasCapability reports whether the device advertises the named
+// capability (case-insensitive, whitespace-trimmed). Saison 21 uses
+// this to tell the three device natures apart; the UA API reports
+// them as tokens in the `capabilities` array (is_hub, is_reader,
+// support_continuous_monitoring, ...).
+func (d Device) HasCapability(name string) bool {
+	want := strings.TrimSpace(name)
+	for _, c := range d.Capabilities {
+		if strings.EqualFold(strings.TrimSpace(c), want) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsHub reports whether the device is a hub / door controller.
+func (d Device) IsHub() bool { return d.HasCapability("is_hub") }
+
+// IsReader reports whether the device is a card/NFC reader.
+func (d Device) IsReader() bool { return d.HasCapability("is_reader") }
+
+// IsViewer reports whether the device is a camera/viewer (a device
+// that supports continuous monitoring).
+func (d Device) IsViewer() bool { return d.HasCapability("support_continuous_monitoring") }
+
+// Nature returns a stable slug for the device's primary nature:
+// "hub" | "reader" | "viewer" | "other". Hub takes precedence so a
+// composite device (a hub that also reports reader/viewer bits) is
+// grouped as its hub anchor rather than nested under itself.
+func (d Device) Nature() string {
+	switch {
+	case d.IsHub():
+		return "hub"
+	case d.IsReader():
+		return "reader"
+	case d.IsViewer():
+		return "viewer"
+	default:
+		return "other"
+	}
+}
+
 // DisplayMAC returns the device's MAC in canonical lowercase
 // colon form, derived from the bare-12-hex id. Used by the
 // admin template to render a stable string AND by the
@@ -85,8 +127,24 @@ func (d Device) DisplayMAC() string {
 // hub-grouped and wrapper-object shapes so future firmware
 // revisions don't need another code change.
 func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.baseURL+"/api/v1/developer/devices", nil)
+	return c.listDevices(ctx, false)
+}
+
+// ListDevicesRefresh is ListDevices with `?refresh=true`, which asks
+// the UDM to re-probe the topology before answering (used by the
+// read-only admin overview so a freshly (un)plugged device shows up).
+// Slower than the cached list, so callers on a hot path keep using
+// ListDevices.
+func (c *Client) ListDevicesRefresh(ctx context.Context) ([]Device, error) {
+	return c.listDevices(ctx, true)
+}
+
+func (c *Client) listDevices(ctx context.Context, refresh bool) ([]Device, error) {
+	u := c.baseURL + "/api/v1/developer/devices"
+	if refresh {
+		u += "?refresh=true"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}

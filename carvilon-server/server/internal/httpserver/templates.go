@@ -68,6 +68,7 @@ var adminLibraryFor = map[string][]string{
 	"viewer-detail":   {},
 	"designer":        {},
 	"nfc":             {},
+	"ua":              {},
 	"mqtt":            {},
 	"telegram":        {},
 }
@@ -82,6 +83,7 @@ var newDesignPages = map[string]bool{
 	"viewer-detail": true,
 	"designer":      true,
 	"nfc":           true,
+	"ua":            true,
 	"mqtt":          true,
 	"telegram":      true,
 }

@@ -48,6 +48,69 @@ type Door struct {
 	HubID    string     `json:"hub_id,omitempty"`
 	Type     string     `json:"type,omitempty"`
 	Extras   DoorExtras `json:"extras,omitempty"`
+
+	// Saison 21 (UA read-only overview): live door status. These use
+	// flexVal so a firmware that returns an int enum / 0-1 bool for a
+	// status can never break the whole /doors list decode (see
+	// flexval.go). door_position_status is the DPS (open/closed) from
+	// the door-position sensor; door_lock_relay_status is the relay
+	// state; is_bind_hub says whether the door is bound to a hub;
+	// floor_id is its location on the site plan.
+	DoorPositionStatus  flexVal `json:"door_position_status"`
+	DoorLockRelayStatus flexVal `json:"door_lock_relay_status"`
+	IsBindHub           flexVal `json:"is_bind_hub"`
+	FloorID             flexVal `json:"floor_id"`
+}
+
+// BoundToHub reports whether the door advertises a binding to a hub.
+// ok is false when is_bind_hub is absent or not a recognisable bool.
+func (d Door) BoundToHub() (val, ok bool) { return d.IsBindHub.Bool() }
+
+// BindHubRaw returns the raw is_bind_hub value, which on some firmware
+// carries a hub id string rather than a bool (used as a grouping
+// fallback when hub_id is empty).
+func (d Door) BindHubRaw() string { return d.IsBindHub.String() }
+
+// FloorLabel returns the raw floor_id as a display string ("" when
+// absent).
+func (d Door) FloorLabel() string { return d.FloorID.String() }
+
+// PositionRaw / LockRaw return the raw status strings the UDM sent,
+// for the detail view (before PositionState/LockState normalise them).
+func (d Door) PositionRaw() string { return d.DoorPositionStatus.String() }
+func (d Door) LockRaw() string     { return d.DoorLockRelayStatus.String() }
+
+// PositionState normalises door_position_status to a stable slug the
+// UI styles on: "open" | "closed" | "unknown".
+func (d Door) PositionState() string {
+	s := strings.ToLower(strings.TrimSpace(d.DoorPositionStatus.String()))
+	switch {
+	case s == "":
+		return "unknown"
+	case strings.Contains(s, "open"):
+		return "open"
+	case strings.Contains(s, "close"):
+		return "closed"
+	default:
+		return "unknown"
+	}
+}
+
+// LockState normalises door_lock_relay_status to "locked" |
+// "unlocked" | "unknown". "unlock" is tested before "lock" because it
+// contains that substring.
+func (d Door) LockState() string {
+	s := strings.ToLower(strings.TrimSpace(d.DoorLockRelayStatus.String()))
+	switch {
+	case s == "":
+		return "unknown"
+	case strings.Contains(s, "unlock"):
+		return "unlocked"
+	case strings.Contains(s, "lock"):
+		return "locked"
+	default:
+		return "unknown"
+	}
 }
 
 // DoorExtras isolates the nested extras object so the

@@ -1,0 +1,330 @@
+{{define "title"}}UA-Geräte{{end}}
+
+{{define "head-extra"}}
+<style>
+  /* Saison 21 - UniFi Access read-only overview. Reuses the admin
+     tokens (admin-tokens.css / admin-components.css); layout-only rules
+     live here, mirroring the NFC / Telegram page vocabulary. */
+  .ua-wrap { max-width:1080px; margin:0 auto; display:flex; flex-direction:column; gap:var(--space-7); }
+  .ua-head { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-6); flex-wrap:wrap; padding-bottom:var(--space-6); border-bottom:1px solid var(--divider); }
+  .ua-head h1 { margin:0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); }
+  .ua-ico { width:34px; height:34px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
+  .ua-head-right { display:flex; align-items:center; gap:var(--space-4); flex-wrap:wrap; }
+  .ua-ro-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:999px; font:var(--type-eyebrow); letter-spacing:var(--tracking-label); background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .ua-pill { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:999px; font:var(--type-label); background:var(--surface-raised); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .ua-pill b { color:var(--text-primary); font-weight:600; }
+  .ua-intro { font:var(--type-data); color:var(--text-tertiary); margin:-4px 0 0; max-width:82ch; }
+
+  /* emergency banner */
+  .ua-emg { display:flex; gap:var(--space-5); padding:12px 16px; border-radius:var(--radius-md); background:var(--surface-raised); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .ua-emg.active { background:color-mix(in srgb,#ff6b6b 14%,transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 45%,transparent); }
+  .ua-emg-ico { flex:none; color:var(--text-tertiary); }
+  .ua-emg.active .ua-emg-ico { color:#ff9b9b; }
+  .ua-emg-body { min-width:0; display:flex; flex-direction:column; gap:6px; font:var(--type-data); color:var(--text-secondary); }
+  .ua-emg-body strong { color:var(--text-primary); }
+  .ua-emg-det summary { cursor:pointer; color:var(--text-tertiary); font:var(--type-label); }
+
+  /* section-level note (doors failed but devices loaded) */
+  .ua-note { padding:10px 14px; border-radius:var(--radius-md); font:var(--type-label); background:color-mix(in srgb,#ffb020 12%,transparent); color:#ffcf8f; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ffb020 38%,transparent); }
+
+  /* hub groups */
+  .ua-group { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); overflow:hidden; }
+  .ua-group-hub { border-bottom:1px solid var(--divider); }
+  .ua-group-body { padding:var(--space-5) var(--space-6) var(--space-6); display:flex; flex-direction:column; gap:var(--space-6); }
+  .ua-sub-h { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); margin:0 0 var(--space-4); text-transform:uppercase; }
+  .ua-sub { display:flex; flex-direction:column; gap:6px; }
+  .ua-none { font:var(--type-data); color:var(--text-tertiary); margin:0; }
+
+  /* one expandable item (device or door) */
+  .ua-item { border-radius:var(--radius-md); background:var(--surface-raised); box-shadow:inset 0 0 0 1px var(--border-default); overflow:hidden; }
+  .ua-group-hub .ua-item { border-radius:0; background:transparent; box-shadow:none; }
+  .ua-item-head { width:100%; display:flex; align-items:center; gap:var(--space-4); padding:10px 14px; background:transparent; border:none; cursor:pointer; text-align:left; color:var(--text-primary); font:inherit; }
+  .ua-group-hub .ua-item-head { padding:14px 18px; }
+  .ua-item-head:hover { background:color-mix(in srgb, var(--accent) 6%, transparent); }
+  .ua-item-head:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  .ua-chev { flex:none; color:var(--text-tertiary); transition:transform 140ms; font-size:18px; line-height:1; width:14px; text-align:center; }
+  .ua-item.is-open > .ua-item-head .ua-chev { transform:rotate(90deg); }
+  .ua-item-name { font:var(--type-value); font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34ch; }
+  .ua-group-hub .ua-item-name { font:var(--type-subheading); }
+  .ua-item-type { font:var(--type-data); color:var(--text-tertiary); font-family:var(--font-mono); }
+  .ua-spacer { flex:1 1 auto; }
+  .ua-mac { font-family:var(--font-mono); font:var(--type-data); color:var(--text-tertiary); }
+  .mono { font-family:var(--font-mono); }
+
+  /* badges */
+  .ua-badge { flex:none; display:inline-flex; align-items:center; padding:3px 9px; border-radius:999px; font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; }
+  .ua-badge.nat { background:var(--surface-panel); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .ua-nat-hub  .ua-item-head > .ua-badge.nat { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .ua-nat-reader .ua-item-head > .ua-badge.nat { background:color-mix(in srgb,#2ecc71 15%,transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 42%,transparent); }
+  .ua-nat-viewer .ua-item-head > .ua-badge.nat { background:color-mix(in srgb,#9b7bff 16%,transparent); color:#c3b0ff; box-shadow:inset 0 0 0 1px color-mix(in srgb,#9b7bff 42%,transparent); }
+  .ua-badge.nat.door { background:color-mix(in srgb,#4aa8ff 15%,transparent); color:#9fd0ff; box-shadow:inset 0 0 0 1px color-mix(in srgb,#4aa8ff 42%,transparent); }
+  .ua-badge.kind { text-transform:none; }
+  .ua-badge.kind.mock { background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
+  .ua-badge.kind.ua { background:var(--surface-panel); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+
+  .ua-status { flex:none; display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font:var(--type-eyebrow); letter-spacing:var(--tracking-label); }
+  .ua-status.online { background:color-mix(in srgb,#2ecc71 16%,transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
+  .ua-status.offline { background:var(--surface-panel); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .ua-dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+
+  .ua-door-stat { flex:none; padding:3px 10px; border-radius:999px; font:var(--type-eyebrow); letter-spacing:var(--tracking-label); background:var(--surface-panel); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .ua-door-stat.pos-open { background:color-mix(in srgb,#ffb020 15%,transparent); color:#ffcf8f; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ffb020 40%,transparent); }
+  .ua-door-stat.pos-closed { background:color-mix(in srgb,#2ecc71 14%,transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 40%,transparent); }
+  .ua-door-stat.lock-unlocked { background:color-mix(in srgb,#ff6b6b 14%,transparent); color:#ffb0b0; box-shadow:inset 0 0 0 1px color-mix(in srgb,#ff6b6b 40%,transparent); }
+
+  /* expanded body */
+  .ua-item-body { padding:2px 16px 16px 30px; display:flex; flex-direction:column; gap:var(--space-6); }
+  .ua-item-body[hidden] { display:none; } /* CSS display must not defeat the hidden attr */
+  .ua-group-hub .ua-item-body { padding:2px 20px 18px 40px; }
+  .ua-kv-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:8px 20px; }
+  .ua-kv-grid.tight { gap:4px 20px; }
+  .ua-kv { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .ua-kv .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); word-break:break-word; }
+  .ua-kv .v { font:var(--type-value); color:var(--text-primary); word-break:break-word; }
+  .ua-caps { display:flex; flex-direction:column; gap:6px; }
+  .ua-caps .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
+  .ua-cap-list { display:flex; flex-wrap:wrap; gap:5px; }
+  .ua-cap { font-family:var(--font-mono); font-size:11.5px; padding:2px 7px; border-radius:var(--radius-sm); background:var(--surface-panel); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+
+  .ua-lazy { border-top:1px dashed var(--divider); padding-top:var(--space-5); display:flex; flex-direction:column; gap:var(--space-5); }
+  .ua-lazy-hint { font:var(--type-data); color:var(--text-tertiary); }
+  .ua-lazy-err { font:var(--type-label); color:#ffb0b0; }
+  .ua-sec { display:flex; flex-direction:column; gap:6px; }
+  .ua-sec-h { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); text-transform:uppercase; color:var(--accent); }
+
+  /* empty / error states */
+  .ua-empty { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-10) var(--space-8); text-align:center; display:flex; flex-direction:column; align-items:center; gap:var(--space-5); }
+  .ua-empty .ua-empty-ico { width:52px; height:52px; border-radius:var(--radius-lg); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--text-tertiary); }
+  .ua-empty.err .ua-empty-ico { color:#ffb0b0; background:color-mix(in srgb,#ff6b6b 12%,transparent); }
+  .ua-empty h2 { margin:0; font:var(--type-subheading); color:var(--text-secondary); }
+  .ua-empty p { margin:0; font:var(--type-data); color:var(--text-tertiary); max-width:60ch; }
+  .ua-empty a { color:var(--accent); text-decoration:none; }
+  .ua-empty a:hover { text-decoration:underline; }
+
+  @media (max-width:640px){
+    .ua-item-head { flex-wrap:wrap; }
+    .ua-spacer { flex-basis:100%; height:0; }
+    .ua-item-name { max-width:100%; }
+  }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="ua-wrap">
+  <div class="ua-head">
+    <h1>
+      <span class="ua-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4M8 8h.01M12 8h4"/></svg></span>
+      UniFi Access
+    </h1>
+    <div class="ua-head-right">
+      <span class="ua-ro-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Nur-Lese-Ansicht</span>
+      {{if and .Page.Enabled .Page.Configured (not .Page.Unauthorized) (not .Page.LoadError)}}
+        <span class="ua-pill"><b>{{.Page.HubCount}}</b> Hubs</span>
+        <span class="ua-pill"><b>{{.Page.ReaderCount}}</b> Reader</span>
+        <span class="ua-pill"><b>{{.Page.ViewerCount}}</b> Viewer</span>
+        <span class="ua-pill"><b>{{.Page.DoorCount}}</b> Türen</span>
+      {{end}}
+    </div>
+  </div>
+
+  <p class="ua-intro">Live von der UniFi-Access-Anlage gelesen und nach Hub gruppiert: unter jedem Hub seine Reader, Viewer und Türen. Ausschließlich lesend — nichts hier steuert, entriegelt oder ändert etwas. Eine Zeile aufklappen lädt die vollständigen Details (Zutrittsmethoden bzw. Sperrregel) nach.</p>
+
+  {{if not .Page.Enabled}}
+    <div class="ua-empty">
+      <span class="ua-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
+      <h2>UniFi Access ist deaktiviert</h2>
+      <p>Der Schalter „UA aktiv" ist aus. Aktiviere ihn unter <a href="/a/settings">Einstellungen</a>, sobald UA-Zugangsdaten hinterlegt sind — dann erscheint hier die Geräte- und Tür-Übersicht.</p>
+    </div>
+  {{else if not .Page.Configured}}
+    <div class="ua-empty">
+      <span class="ua-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>
+      <h2>Keine UA-Zugangsdaten hinterlegt</h2>
+      <p>UA ist aktiv, aber es sind noch keine Controller-Adresse und kein API-Token gespeichert. Trage beides unter <a href="/a/settings">Einstellungen</a> ein.</p>
+    </div>
+  {{else if .Page.Unauthorized}}
+    <div class="ua-empty err">
+      <span class="ua-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+      <h2>Zugriff verweigert (401)</h2>
+      <p>Die UDM hat den API-Token abgelehnt. Prüfe den Token unter <a href="/a/settings">Einstellungen</a> — er muss ein gültiger UniFi-Access-Developer-Token sein.</p>
+    </div>
+  {{else if .Page.LoadError}}
+    <div class="ua-empty err">
+      <span class="ua-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+      <h2>UDM nicht erreichbar</h2>
+      <p>{{.Page.LoadError}} Prüfe die Controller-Adresse und die Netzverbindung zur UDM.</p>
+    </div>
+  {{else}}
+    {{with .Page.Emergency}}
+      <div class="ua-emg {{if .Active}}active{{end}}">
+        <span class="ua-emg-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7v6c0 5 3.5 8 10 9 6.5-1 10-4 10-9V7z"/><path d="M12 8v4M12 16h.01"/></svg></span>
+        <div class="ua-emg-body">
+          {{if .Active}}<strong>Notfall aktiv</strong>{{if .ActiveLabels}} · {{range $i,$l := .ActiveLabels}}{{if $i}}, {{end}}{{$l}}{{end}}{{end}}
+          {{else}}<strong>Kein Notfall aktiv</strong>{{end}}
+          {{if .Rows}}<details class="ua-emg-det"><summary>Rohdaten anzeigen</summary><div class="ua-kv-grid tight" style="margin-top:8px">{{range .Rows}}<div class="ua-kv"><span class="k mono">{{.Key}}</span><span class="v">{{.Value}}</span></div>{{end}}</div></details>{{end}}
+        </div>
+      </div>
+    {{end}}
+
+    {{if .Page.DoorsError}}<div class="ua-note">Türen konnten nicht geladen werden: {{.Page.DoorsError}}</div>{{end}}
+
+    {{if and (not .Page.Hubs) (not .Page.HasUngrouped)}}
+      <div class="ua-empty">
+        <span class="ua-empty-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/></svg></span>
+        <h2>Keine Geräte gemeldet</h2>
+        <p>Die Verbindung steht, aber die UDM meldet keine adoptierten Access-Geräte. Sobald ein Hub, Reader oder Viewer adoptiert ist, erscheint er hier.</p>
+      </div>
+    {{else}}
+      {{range .Page.Hubs}}
+        <section class="ua-group">
+          <div class="ua-group-hub">{{template "ua-device-row" .Hub}}</div>
+          <div class="ua-group-body">{{template "ua-group-children" .}}</div>
+        </section>
+      {{end}}
+      {{if .Page.HasUngrouped}}
+        <section class="ua-group">
+          <div class="ua-group-hub" style="padding:14px 18px">
+            <div class="ua-sub-h" style="margin:0">Ohne Hub-Zuordnung</div>
+          </div>
+          <div class="ua-group-body">{{template "ua-group-children" .Page.Ungrouped}}</div>
+        </section>
+      {{end}}
+    {{end}}
+  {{end}}
+</div>
+{{end}}
+
+{{define "ua-group-children"}}
+  {{if .Readers}}<div class="ua-sub"><div class="ua-sub-h">Reader ({{len .Readers}})</div>{{range .Readers}}{{template "ua-device-row" .}}{{end}}</div>{{end}}
+  {{if .Viewers}}<div class="ua-sub"><div class="ua-sub-h">Viewer ({{len .Viewers}})</div>{{range .Viewers}}{{template "ua-device-row" .}}{{end}}</div>{{end}}
+  {{if .Others}}<div class="ua-sub"><div class="ua-sub-h">Weitere Geräte ({{len .Others}})</div>{{range .Others}}{{template "ua-device-row" .}}{{end}}</div>{{end}}
+  {{if .Doors}}<div class="ua-sub"><div class="ua-sub-h">Türen ({{len .Doors}})</div>{{range .Doors}}{{template "ua-door-row" .}}{{end}}</div>{{end}}
+  {{if and (not .Readers) (not .Viewers) (not .Others) (not .Doors)}}<p class="ua-none">Keine verknüpften Geräte oder Türen.</p>{{end}}
+{{end}}
+
+{{define "ua-device-row"}}
+<div class="ua-item ua-nat-{{.Nature}}" data-ua-kind="device" data-ua-id="{{.ID}}">
+  <button type="button" class="ua-item-head" aria-expanded="false">
+    <span class="ua-chev">›</span>
+    <span class="ua-badge nat">{{.NatureLabel}}</span>
+    <span class="ua-item-name">{{.Name}}</span>
+    {{if .ViewerKindLabel}}<span class="ua-badge kind {{.ViewerKind}}">{{.ViewerKindLabel}}</span>{{end}}
+    {{if .Type}}<span class="ua-item-type">{{.Type}}</span>{{end}}
+    <span class="ua-spacer"></span>
+    <span class="ua-status {{if .Online}}online{{else}}offline{{end}}"><span class="ua-dot"></span>{{if .Online}}online{{else}}offline{{end}}</span>
+    {{if .MAC}}<span class="ua-mac">{{.MAC}}</span>{{end}}
+  </button>
+  <div class="ua-item-body" hidden>
+    <div class="ua-kv-grid">
+      {{if .MAC}}<div class="ua-kv"><span class="k">MAC / ID</span><span class="v mono">{{.MAC}}</span></div>{{end}}
+      {{if .Type}}<div class="ua-kv"><span class="k">Typ</span><span class="v">{{.Type}}</span></div>{{end}}
+      <div class="ua-kv"><span class="k">Natur</span><span class="v">{{.NatureLabel}}</span></div>
+      <div class="ua-kv"><span class="k">Online</span><span class="v">{{if .Online}}ja{{else}}nein{{end}}</span></div>
+      <div class="ua-kv"><span class="k">Adoptiert</span><span class="v">{{if .Adopted}}ja{{else}}nein{{end}}</span></div>
+      <div class="ua-kv"><span class="k">Verwaltet</span><span class="v">{{if .Managed}}ja{{else}}nein{{end}}</span></div>
+      <div class="ua-kv"><span class="k">Verbunden</span><span class="v">{{if .Connected}}ja{{else}}nein{{end}}</span></div>
+      {{if .ConnectedUAHID}}<div class="ua-kv"><span class="k">Hub (connected_uah_id)</span><span class="v mono">{{.ConnectedUAHID}}</span></div>{{end}}
+      {{if .LocationID}}<div class="ua-kv"><span class="k">Ort (location_id)</span><span class="v mono">{{.LocationID}}</span></div>{{end}}
+      {{if .ViewerKindLabel}}<div class="ua-kv"><span class="k">Viewer-Herkunft</span><span class="v">{{.ViewerKindLabel}}</span></div>{{end}}
+    </div>
+    {{if .Capabilities}}
+    <div class="ua-caps"><span class="k">Fähigkeiten (capabilities)</span><div class="ua-cap-list">{{range .Capabilities}}<span class="ua-cap">{{.}}</span>{{end}}</div></div>
+    {{end}}
+    <div class="ua-lazy" data-ua-lazy><div class="ua-lazy-hint">Zutrittsmethoden werden beim Aufklappen geladen …</div></div>
+  </div>
+</div>
+{{end}}
+
+{{define "ua-door-row"}}
+<div class="ua-item ua-nat-door" data-ua-kind="door" data-ua-id="{{.ID}}">
+  <button type="button" class="ua-item-head" aria-expanded="false">
+    <span class="ua-chev">›</span>
+    <span class="ua-badge nat door">Tür</span>
+    <span class="ua-item-name">{{.Name}}</span>
+    {{if .Type}}<span class="ua-item-type">{{.Type}}</span>{{end}}
+    <span class="ua-spacer"></span>
+    <span class="ua-door-stat pos-{{.PositionState}}">{{.Position}}</span>
+    <span class="ua-door-stat lock-{{.LockState}}">{{.Lock}}</span>
+  </button>
+  <div class="ua-item-body" hidden>
+    <div class="ua-kv-grid">
+      <div class="ua-kv"><span class="k">Tür-ID</span><span class="v mono">{{.ID}}</span></div>
+      {{if .Type}}<div class="ua-kv"><span class="k">Typ</span><span class="v">{{.Type}}</span></div>{{end}}
+      <div class="ua-kv"><span class="k">Türposition (DPS)</span><span class="v">{{.Position}}</span></div>
+      <div class="ua-kv"><span class="k">Verriegelung</span><span class="v">{{.Lock}}</span></div>
+      <div class="ua-kv"><span class="k">An Hub gebunden (is_bind_hub)</span><span class="v">{{.BoundToHub}}</span></div>
+      {{if .HubID}}<div class="ua-kv"><span class="k">Hub (hub_id)</span><span class="v mono">{{.HubID}}</span></div>{{end}}
+      {{if .Floor}}<div class="ua-kv"><span class="k">Etage (floor_id)</span><span class="v mono">{{.Floor}}</span></div>{{end}}
+    </div>
+    <div class="ua-lazy" data-ua-lazy><div class="ua-lazy-hint">Details &amp; Sperrregel werden beim Aufklappen geladen …</div></div>
+  </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+  // Read-only UA overview: expand/collapse a row and lazily fetch its
+  // detail (device /settings, or door detail + lock rule) on first open.
+  // A per-item fetch failure is shown inline and never breaks the page.
+  (function () {
+    var wrap = document.querySelector('.ua-wrap');
+    if (!wrap) return;
+    wrap.addEventListener('click', function (e) {
+      var head = e.target.closest('.ua-item-head');
+      if (!head || !wrap.contains(head)) return;
+      var item = head.closest('.ua-item');
+      var body = item.querySelector('.ua-item-body');
+      var open = head.getAttribute('aria-expanded') === 'true';
+      head.setAttribute('aria-expanded', String(!open));
+      if (body) body.hidden = open;
+      item.classList.toggle('is-open', !open);
+      if (!open) loadDetail(item);
+    });
+
+    function loadDetail(item) {
+      var lazy = item.querySelector('[data-ua-lazy]');
+      if (!lazy || lazy.dataset.loaded === '1' || lazy.dataset.loading === '1') return;
+      var kind = item.getAttribute('data-ua-kind');
+      var id = item.getAttribute('data-ua-id');
+      var url = kind === 'door'
+        ? '/a/ua/doors/' + encodeURIComponent(id)
+        : '/a/ua/devices/' + encodeURIComponent(id) + '/settings';
+      lazy.dataset.loading = '1';
+      lazy.innerHTML = '<div class="ua-lazy-hint">lädt …</div>';
+      fetch(url, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          lazy.dataset.loading = '';
+          if (!d || d.ok === false) {
+            lazy.innerHTML = '<div class="ua-lazy-err">' + esc((d && d.error) || 'Konnte nicht geladen werden.') + '</div>';
+            return;
+          }
+          lazy.innerHTML = renderSections(d.sections || []);
+          lazy.dataset.loaded = '1';
+        })
+        .catch(function () {
+          lazy.dataset.loading = '';
+          lazy.innerHTML = '<div class="ua-lazy-err">Konnte nicht geladen werden.</div>';
+        });
+    }
+
+    function renderSections(secs) {
+      if (!secs.length) return '<div class="ua-lazy-hint">Keine weiteren Angaben.</div>';
+      return secs.map(function (s) {
+        var h = '<div class="ua-sec-h">' + esc(s.title) + '</div>';
+        if (s.error) return '<div class="ua-sec">' + h + '<div class="ua-lazy-err">' + esc(s.error) + '</div></div>';
+        if (!s.rows || !s.rows.length) return '<div class="ua-sec">' + h + '<div class="ua-lazy-hint">Keine Angaben.</div></div>';
+        var rows = s.rows.map(function (kv) {
+          return '<div class="ua-kv"><span class="k mono">' + esc(kv.key) + '</span><span class="v">' + esc(kv.value) + '</span></div>';
+        }).join('');
+        return '<div class="ua-sec">' + h + '<div class="ua-kv-grid tight">' + rows + '</div></div>';
+      }).join('');
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+  })();
+</script>
+{{end}}
