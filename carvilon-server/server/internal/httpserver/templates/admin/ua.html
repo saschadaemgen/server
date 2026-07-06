@@ -77,6 +77,18 @@
   }
   .dc-mono { font-family:var(--font-mono); }
 
+  /* Dark, thin scrollbars for every scroll area in the page (left filter
+     column, center table, right detail panel) - the native light scrollbar
+     broke the anthracite look. scrollbar-color inherits, so setting it on
+     .dc-root covers Firefox; the ::-webkit rules cover Chromium/Edge. */
+  .dc-root, .dc-root * { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.2) transparent; }
+  .dc-root ::-webkit-scrollbar { width:10px; height:10px; }
+  .dc-root ::-webkit-scrollbar-track { background:transparent; }
+  .dc-root ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.16); border-radius:6px; border:2px solid transparent; background-clip:padding-box; }
+  .dc-root ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.3); }
+  .dc-root ::-webkit-scrollbar-button { display:none; width:0; height:0; }
+  .dc-root ::-webkit-scrollbar-corner { background:transparent; }
+
   /* ============ Left column ============ */
   .dc-aside { flex:0 0 264px; display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border-default); background:linear-gradient(180deg,#0d0f12,#0a0c0e); }
   .dc-fleet { padding:15px 15px 16px; border-bottom:1px solid var(--divider); }
