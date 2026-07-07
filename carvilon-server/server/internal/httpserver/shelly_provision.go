@@ -2,8 +2,8 @@
 // Shelly is approved, CARVILON creates a per-device account on the embedded
 // broker (Argon2id credential + the implicit carvilon/<user>/# ACL subtree)
 // and writes, over the device's local HTTP RPC, the config that points it
-// at the CARVILON broker over TLS (verifying our self-signed cert via an
-// uploaded user-CA) and turns on status + control. In the same pass it
+// at the CARVILON broker over TLS (verifying our CA-signed broker leaf via
+// the uploaded internal CA) and turns on status + control. In the same pass it
 // hardens the device: Shelly cloud off by default, HTTP auth set.
 //
 // This is the first WRITE to the device (approval is when we start

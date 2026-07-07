@@ -89,10 +89,14 @@ type Manager struct {
 	wsAddr   string
 	wsSecure bool
 	certSrc  string
-	// certFile is the resolved TLS cert path and advertHost the LAN host a
-	// device should dial for TLS (a cert SAN). Both are needed to provision
-	// a Shelly onto the broker (push the CA + point it at the address).
+	// certFile is the resolved TLS leaf the listener presents; caCertFile is
+	// the trust anchor a device pins (the internal CA that signed the leaf,
+	// or the leaf itself for an operator cert). advertHost is the LAN host a
+	// device should dial for TLS (a cert SAN). All three are needed to
+	// provision a Shelly onto the broker (push the CA + point it at the
+	// address).
 	certFile   string
+	caCertFile string
 	advertHost string
 	lastErr    string
 }
@@ -190,6 +194,7 @@ func (m *Manager) stopLocked() {
 	m.wsSecure = false
 	m.certSrc = ""
 	m.certFile = ""
+	m.caCertFile = ""
 	m.advertHost = ""
 }
 
@@ -241,7 +246,7 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	}
 
 	// --- TLS listener ---
-	certFile, keyFile, certSrc, err := m.resolveCert(lanHost)
+	certFile, keyFile, caFile, certSrc, err := m.resolveCert(lanHost)
 	if err != nil {
 		_ = srv.Close()
 		return m.fail(fmt.Errorf("tls cert: %w", err))
@@ -289,6 +294,7 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	m.wsSecure = m.settings.WSEnabled && m.settings.WSUseTLS
 	m.certSrc = certSrc
 	m.certFile = certFile
+	m.caCertFile = caFile
 	m.advertHost = lanHost
 	m.log.Info("mqtt broker started", "plaintext", tcpAddr, "tls", tlsAddr, "ws", wsAddr, "cert", certSrc)
 	return nil
@@ -306,17 +312,19 @@ func (m *Manager) TLSServerAddr() (string, bool) {
 	return net.JoinHostPort(m.advertHost, strconv.Itoa(m.settings.TLSPort)), true
 }
 
-// CACertPEM returns the broker's TLS certificate as PEM, for uploading to
-// a device as its user CA so it can verify the (self-signed) broker cert.
+// CACertPEM returns the broker's CA certificate as PEM, for uploading to a
+// device as its user CA so it can verify the CA-signed broker leaf. This is
+// the CA, never the leaf: a Shelly rejects a self-signed leaf pinned as a CA,
+// and pinning the CA lets the leaf rotate without re-provisioning.
 // Errors are returned to the caller; the path itself never leaks upward.
 func (m *Manager) CACertPEM() (string, error) {
 	m.mu.Lock()
-	certFile := m.certFile
+	caFile := m.caCertFile
 	m.mu.Unlock()
-	if certFile == "" {
+	if caFile == "" {
 		return "", errors.New("mqttbroker: no resolved certificate (broker not started)")
 	}
-	pem, err := os.ReadFile(certFile)
+	pem, err := os.ReadFile(caFile)
 	if err != nil {
 		return "", errors.New("mqttbroker: read certificate failed")
 	}
@@ -330,40 +338,44 @@ func (m *Manager) fail(err error) error {
 	return err
 }
 
-// resolveCert returns the cert+key paths to use and a human label for
-// the source. An operator pair is used verbatim; otherwise a
-// self-signed pair is generated once under <stateDir>/mqtt/.
-func (m *Manager) resolveCert(lanHost string) (certFile, keyFile, source string, err error) {
+// resolveCert returns the leaf cert+key the listener presents, the CA cert a
+// device should pin, and a human label for the source. An operator pair is
+// used verbatim (the leaf doubles as the pin); otherwise an internal CA signs
+// a broker leaf under <stateDir>/mqtt/ - a Shelly rejects a self-signed leaf,
+// so it must pin the CA and see a CA-signed leaf (see cert.go).
+func (m *Manager) resolveCert(lanHost string) (certFile, keyFile, caFile, source string, err error) {
 	if m.settings.CertFile != "" && m.settings.KeyFile != "" {
-		return m.settings.CertFile, m.settings.KeyFile, "operator", nil
+		// Operator manages their own chain; we present it and hand the same
+		// cert to devices as the pin (unchanged behaviour).
+		return m.settings.CertFile, m.settings.KeyFile, m.settings.CertFile, "operator", nil
 	}
 	dir := filepath.Join(m.stateDir, "mqtt")
-	certFile = filepath.Join(dir, "tls.crt")
-	keyFile = filepath.Join(dir, "tls.key")
 	hosts := []string{lanHost, "localhost", "127.0.0.1"}
 	if m.settings.TLSHost != "" {
 		hosts = append(hosts, m.settings.TLSHost)
 	}
-	generated, err := ensureSelfSigned(certFile, keyFile, hosts)
+	certFile, keyFile, caFile, leafRegenerated, err := ensureCertChain(dir, hosts)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
-	// Log the SANs the broker will actually present. A device dialing the
-	// broker by its LAN IP over TLS fails verification unless that IP is an
-	// IP SAN here, so this line is the first thing to check when a Shelly
-	// won't connect (see cert.go: the cert now self-heals a missing SAN).
-	source = "self-signed"
+	// Log the leaf's SANs + issuer. A device dialing the broker by its LAN IP
+	// over TLS fails verification unless that IP is an IP SAN here; the issuer
+	// line confirms the leaf is CA-signed (not the legacy self-signed leaf a
+	// Shelly rejects). First thing to check when a device won't connect.
+	source = "internal-ca"
 	if leaf, lerr := loadCert(certFile); lerr == nil {
-		m.log.Info("mqtt broker tls cert", "source", source, "sans", sanSummary(leaf), "not_after", leaf.NotAfter.Format("2006-01-02"))
+		m.log.Info("mqtt broker tls leaf", "source", source, "sans", sanSummary(leaf),
+			"issuer", leaf.Issuer.CommonName, "not_after", leaf.NotAfter.Format("2006-01-02"))
 	}
-	if generated {
-		source = "self-signed (generated)"
-		// Regeneration produces a new leaf. Devices provisioned against the
-		// old one pinned it via Shelly.PutUserCA and will now reject the
-		// broker until re-provisioned (which re-pushes the fresh cert).
-		m.log.Warn("mqtt broker regenerated its self-signed cert; already-provisioned devices must be re-provisioned to trust the new certificate", "hosts", hosts)
+	if leafRegenerated {
+		source = "internal-ca (leaf re-signed)"
+		// Leaf rotation is safe: devices pin the CA, not the leaf, so a
+		// re-signed leaf needs no re-provisioning. (The one-time migration
+		// off the OLD self-signed leaf DOES: those devices pinned that leaf
+		// and must be re-provisioned once to receive the CA.)
+		m.log.Info("mqtt broker re-signed its TLS leaf from the internal CA", "hosts", hosts)
 	}
-	return certFile, keyFile, source, nil
+	return certFile, keyFile, caFile, source, nil
 }
 
 func loadTLSConfig(certFile, keyFile string) (*tls.Config, error) {

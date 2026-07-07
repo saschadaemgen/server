@@ -68,8 +68,10 @@ func (c *Client) SetMQTTConfig(ctx context.Context, p MQTTProvision) (restartReq
 	return c.setConfig(ctx, "MQTT.SetConfig", cfg)
 }
 
-// PutUserCA uploads a CA/cert PEM to the device's user CA slot, so a later
-// ssl_ca="user_ca.pem" verifies the broker's (self-signed) certificate.
+// PutUserCA uploads a CA PEM to the device's user CA slot, so a later
+// ssl_ca="user_ca.pem" verifies the broker's CA-signed leaf. The uploaded
+// PEM must be the internal CA, not the leaf: a Shelly rejects a self-signed
+// receiver cert even when it is pinned as the CA.
 // A single call replaces the slot (append=false); an empty pem clears it.
 //
 // It returns the byte length the device reports it now has stored (its

@@ -1,98 +1,224 @@
 package mqttbroker
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-// TestSelfSignedCarriesLANIP is the regression for the Shelly-TLS bug: a cert
-// generated with the LAN IP among its hosts must carry that IP as an IP SAN,
-// or a device dialing the broker by IP fails hostname verification.
-func TestSelfSignedCarriesLANIP(t *testing.T) {
+// TestCertChainLeafIsCASigned is the core regression for the Shelly-TLS bug:
+// the broker must present a leaf SIGNED BY the internal CA (not a self-signed
+// leaf, which a Shelly rejects), and that leaf must carry the LAN IP as a SAN.
+func TestCertChainLeafIsCASigned(t *testing.T) {
 	dir := t.TempDir()
-	cert := filepath.Join(dir, "tls.crt")
-	key := filepath.Join(dir, "tls.key")
-
-	gen, err := ensureSelfSigned(cert, key, []string{"192.168.1.42", "localhost", "127.0.0.1"})
+	leafPath, _, caPath, regen, err := ensureCertChain(dir, []string{"192.168.1.42", "localhost", "127.0.0.1"})
 	if err != nil {
-		t.Fatalf("ensureSelfSigned: %v", err)
+		t.Fatalf("ensureCertChain: %v", err)
 	}
-	if !gen {
-		t.Fatal("first generation should report generated=true")
+	if !regen {
+		t.Fatal("first call should report the leaf was generated")
 	}
-	leaf, err := loadCert(cert)
+	ca, err := loadCert(caPath)
 	if err != nil {
-		t.Fatalf("loadCert: %v", err)
+		t.Fatalf("loadCert ca: %v", err)
+	}
+	leaf, err := loadCert(leafPath)
+	if err != nil {
+		t.Fatalf("loadCert leaf: %v", err)
+	}
+	if !ca.IsCA {
+		t.Error("ca.crt must be a CA (IsCA)")
+	}
+	if leaf.CheckSignatureFrom(ca) != nil {
+		t.Fatal("leaf must be signed by the CA (not self-signed)")
+	}
+	if leaf.Issuer.CommonName == leaf.Subject.CommonName {
+		t.Error("leaf issuer must differ from subject (a self-signed leaf is what Shelly rejects)")
 	}
 	if leaf.VerifyHostname("192.168.1.42") != nil {
-		t.Fatalf("cert does not serve 192.168.1.42; SANs=%s", sanSummary(leaf))
+		t.Fatalf("leaf does not serve 192.168.1.42; SANs=%s", sanSummary(leaf))
 	}
 }
 
-// TestSelfSignedIsIdempotent proves a cert that already covers the hosts is
-// NOT regenerated - regeneration would invalidate devices' pinned CA.
-func TestSelfSignedIsIdempotent(t *testing.T) {
+// TestCertChainDeviceVerifiesByIP proves the device's view end-to-end: pin the
+// CA (what PutUserCA uploads), dial the broker BY IP, and the CA-signed leaf
+// verifies - the exact check a Shelly performs with ssl_ca="user_ca.pem".
+func TestCertChainDeviceVerifiesByIP(t *testing.T) {
 	dir := t.TempDir()
-	cert := filepath.Join(dir, "tls.crt")
-	key := filepath.Join(dir, "tls.key")
-	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+	leafPath, keyPath, caPath, _, err := ensureCertChain(dir, []string{"192.168.1.42", "localhost", "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("ensureCertChain: %v", err)
+	}
+	keyPair, err := tls.LoadX509KeyPair(leafPath, keyPath)
+	if err != nil {
+		t.Fatalf("LoadX509KeyPair: %v", err)
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{keyPair}, MinVersion: tls.VersionTLS12,
+	})
+	if err != nil {
+		t.Fatalf("tls.Listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		if c, aerr := ln.Accept(); aerr == nil {
+			_ = c.(*tls.Conn).Handshake()
+			c.Close()
+		}
+	}()
 
-	if _, err := ensureSelfSigned(cert, key, hosts); err != nil {
+	ca, err := loadCert(caPath)
+	if err != nil {
+		t.Fatalf("loadCert ca: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca) // exactly what Shelly.PutUserCA(caPEM) pins on the device
+
+	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{
+		RootCAs: roots, ServerName: "192.168.1.42", MinVersion: tls.VersionTLS12,
+	})
+	if err != nil {
+		t.Fatalf("device-style dial (pin CA, verify leaf by IP) failed: %v", err)
+	}
+	conn.Close()
+}
+
+// TestCertChainCAStableAcrossLeafRegen proves the leaf can rotate (new SANs)
+// while the CA - the thing devices pin - stays the same, so no re-provisioning
+// is needed when the leaf re-signs.
+func TestCertChainCAStableAcrossLeafRegen(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, _, _, err := ensureCertChain(dir, []string{"192.168.1.42", "localhost", "127.0.0.1"}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	first, err := loadCert(cert)
+	caBefore, err := loadCert(filepath.Join(dir, caCertName))
 	if err != nil {
-		t.Fatalf("loadCert: %v", err)
+		t.Fatalf("loadCert ca before: %v", err)
 	}
-	gen, err := ensureSelfSigned(cert, key, hosts)
+	leafBefore, err := loadCert(filepath.Join(dir, leafCertName))
+	if err != nil {
+		t.Fatalf("loadCert leaf before: %v", err)
+	}
+
+	// A new host forces the leaf to re-sign.
+	_, _, _, regen, err := ensureCertChain(dir, []string{"192.168.1.42", "10.0.0.1", "localhost", "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
-	if gen {
-		t.Fatal("a cert that already covers the hosts must not be regenerated")
+	if !regen {
+		t.Fatal("a new required SAN must re-sign the leaf")
 	}
-	second, err := loadCert(cert)
-	if err != nil {
-		t.Fatalf("loadCert: %v", err)
+	caAfter, _ := loadCert(filepath.Join(dir, caCertName))
+	leafAfter, _ := loadCert(filepath.Join(dir, leafCertName))
+	if caBefore.SerialNumber.Cmp(caAfter.SerialNumber) != 0 {
+		t.Fatal("CA must stay stable across a leaf re-sign (devices pin it)")
 	}
-	if first.SerialNumber.Cmp(second.SerialNumber) != 0 {
-		t.Fatal("serial changed: the cert was needlessly regenerated")
+	if leafBefore.SerialNumber.Cmp(leafAfter.SerialNumber) == 0 {
+		t.Fatal("leaf serial should change on re-sign")
+	}
+	if leafAfter.CheckSignatureFrom(caAfter) != nil {
+		t.Fatal("re-signed leaf must still chain to the same CA")
+	}
+	if leafAfter.VerifyHostname("10.0.0.1") != nil {
+		t.Fatal("re-signed leaf must serve the new host")
 	}
 }
 
-// TestStaleCertSelfHeals reproduces the deployed failure: a cert first
-// generated WITHOUT the LAN IP (e.g. CARVILON_SERVER_IPV4 unset at the time)
-// must be regenerated once the LAN IP becomes a required host.
-func TestStaleCertSelfHeals(t *testing.T) {
+// TestCertChainIdempotent proves a leaf that already chains to the CA and
+// covers the hosts is kept as-is (no needless re-sign).
+func TestCertChainIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	cert := filepath.Join(dir, "tls.crt")
-	key := filepath.Join(dir, "tls.key")
+	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	before, _ := loadCert(filepath.Join(dir, leafCertName))
+	_, _, _, regen, err := ensureCertChain(dir, hosts)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if regen {
+		t.Fatal("a valid leaf must not be re-signed")
+	}
+	after, _ := loadCert(filepath.Join(dir, leafCertName))
+	if before.SerialNumber.Cmp(after.SerialNumber) != 0 {
+		t.Fatal("leaf serial changed: needlessly re-signed")
+	}
+}
 
-	// First run: LAN IP empty -> only localhost/127.0.0.1 SANs (the stale cert).
-	if _, err := ensureSelfSigned(cert, key, []string{"", "localhost", "127.0.0.1"}); err != nil {
-		t.Fatalf("stale gen: %v", err)
-	}
-	stale, err := loadCert(cert)
+// TestCertChainMigratesLegacySelfSignedLeaf reproduces the deployed migration:
+// an OLD self-signed leaf (from before the CA existed) is detected as not
+// chained to the CA and re-signed from it on the next start.
+func TestCertChainMigratesLegacySelfSignedLeaf(t *testing.T) {
+	dir := t.TempDir()
+	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+
+	// Plant a legacy self-signed leaf where the broker keeps its leaf.
+	writeLegacySelfSigned(t, filepath.Join(dir, leafCertName), filepath.Join(dir, leafKeyName), hosts)
+	legacy, err := loadCert(filepath.Join(dir, leafCertName))
 	if err != nil {
-		t.Fatalf("loadCert: %v", err)
+		t.Fatalf("loadCert legacy: %v", err)
 	}
-	if stale.VerifyHostname("192.168.1.42") == nil {
-		t.Fatal("precondition: stale cert should NOT already serve the LAN IP")
+	if legacy.Issuer.String() != legacy.Subject.String() {
+		t.Fatal("precondition: planted leaf should be self-signed (issuer==subject)")
 	}
 
-	// Second run: LAN IP now known -> the stale cert must self-heal.
-	gen, err := ensureSelfSigned(cert, key, []string{"192.168.1.42", "localhost", "127.0.0.1"})
+	// ensureCertChain must mint a CA and re-sign the leaf from it.
+	leafPath, _, caPath, regen, err := ensureCertChain(dir, hosts)
 	if err != nil {
-		t.Fatalf("heal gen: %v", err)
+		t.Fatalf("ensureCertChain: %v", err)
 	}
-	if !gen {
-		t.Fatal("a cert missing the LAN-IP SAN must be regenerated, not kept")
+	if !regen {
+		t.Fatal("a legacy self-signed leaf must be re-signed from the new CA")
 	}
-	healed, err := loadCert(cert)
+	ca, _ := loadCert(caPath)
+	leaf, _ := loadCert(leafPath)
+	if leaf.CheckSignatureFrom(ca) != nil {
+		t.Fatal("migrated leaf must chain to the CA")
+	}
+	if leaf.VerifyHostname("192.168.1.42") != nil {
+		t.Fatal("migrated leaf must still serve the LAN IP")
+	}
+}
+
+// writeLegacySelfSigned plants a self-signed leaf exactly like the pre-CA
+// broker produced (issuer==subject, TLS-server EKU, LAN SANs).
+func writeLegacySelfSigned(t *testing.T, certPath, keyPath string, hosts []string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("loadCert: %v", err)
+		t.Fatalf("legacy key: %v", err)
 	}
-	if healed.VerifyHostname("192.168.1.42") != nil {
-		t.Fatalf("healed cert still does not serve 192.168.1.42; SANs=%s", sanSummary(healed))
+	serial, err := randSerial()
+	if err != nil {
+		t.Fatalf("legacy serial: %v", err)
+	}
+	now := time.Now()
+	tmpl := x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{Organization: []string{"carvilon mqtt broker"}},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	applyHosts(&tmpl, hosts)
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key) // self-signed
+	if err != nil {
+		t.Fatalf("legacy create: %v", err)
+	}
+	if err := writePEM(certPath, &pem.Block{Type: "CERTIFICATE", Bytes: der}, 0o644); err != nil {
+		t.Fatalf("legacy write cert: %v", err)
+	}
+	if err := writeECKey(keyPath, key); err != nil {
+		t.Fatalf("legacy write key: %v", err)
 	}
 }
