@@ -87,10 +87,14 @@ func TestSetMQTTConfig(t *testing.T) {
 }
 
 func TestPutUserCA(t *testing.T) {
-	rs := newRecordingServer(t, "{}")
+	rs := newRecordingServer(t, `{"len":128}`)
 	pem := "-----BEGIN CERTIFICATE-----\nMII...\n-----END CERTIFICATE-----\n"
-	if err := rs.client().PutUserCA(context.Background(), pem); err != nil {
+	n, err := rs.client().PutUserCA(context.Background(), pem)
+	if err != nil {
 		t.Fatalf("PutUserCA: %v", err)
+	}
+	if n != 128 {
+		t.Fatalf("storedLen = %d, want the device-reported 128", n)
 	}
 	req := rs.last()
 	if req.Method != "Shelly.PutUserCA" {
@@ -99,12 +103,37 @@ func TestPutUserCA(t *testing.T) {
 	if req.Params["data"] != pem || req.Params["append"] != false {
 		t.Fatalf("params = %+v", req.Params)
 	}
-	// Empty PEM clears the slot (data=null).
-	if err := rs.client().PutUserCA(context.Background(), "  "); err != nil {
+	// Empty PEM clears the slot (data=null); a clear is not a failed upload.
+	if _, err := rs.client().PutUserCA(context.Background(), "  "); err != nil {
 		t.Fatalf("PutUserCA clear: %v", err)
 	}
 	if d, ok := rs.last().Params["data"]; !ok || d != nil {
 		t.Fatalf("clear should send data=null, got %v", d)
+	}
+}
+
+// TestPutUserCAZeroStoredFails is the regression for "Invalid SSL config:
+// -10496": a device that reports it stored 0 bytes of a non-empty CA has a
+// failed upload, and provisioning must NOT go on to set ssl_ca at it.
+func TestPutUserCAZeroStoredFails(t *testing.T) {
+	rs := newRecordingServer(t, `{"len":0}`)
+	pem := "-----BEGIN CERTIFICATE-----\nMII...\n-----END CERTIFICATE-----\n"
+	if _, err := rs.client().PutUserCA(context.Background(), pem); err == nil {
+		t.Fatal("a non-empty CA stored as 0 bytes must be reported as a failed upload")
+	}
+}
+
+// TestPutUserCAMissingLenTolerated proves firmware that omits len on success
+// is not treated as a failure (we cannot verify, so we do not block).
+func TestPutUserCAMissingLenTolerated(t *testing.T) {
+	rs := newRecordingServer(t, "{}")
+	pem := "-----BEGIN CERTIFICATE-----\nMII...\n-----END CERTIFICATE-----\n"
+	n, err := rs.client().PutUserCA(context.Background(), pem)
+	if err != nil {
+		t.Fatalf("missing len must be tolerated, got err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("storedLen = %d, want 0 when the device omits len", n)
 	}
 }
 

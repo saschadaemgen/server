@@ -71,15 +71,41 @@ func (c *Client) SetMQTTConfig(ctx context.Context, p MQTTProvision) (restartReq
 // PutUserCA uploads a CA/cert PEM to the device's user CA slot, so a later
 // ssl_ca="user_ca.pem" verifies the broker's (self-signed) certificate.
 // A single call replaces the slot (append=false); an empty pem clears it.
-func (c *Client) PutUserCA(ctx context.Context, pemData string) error {
+//
+// It returns the byte length the device reports it now has stored (its
+// {"len"} reply). This is the upload's only success signal: a non-empty PEM
+// that ends up storing 0 bytes is a FAILED upload and is reported as an
+// error here - otherwise provisioning would go on to set ssl_ca="user_ca.pem"
+// pointing at an empty slot, and the device answers the next TLS connect with
+// mbedTLS -0x2900 (X509_FILE_IO_ERROR: the CA data can't be read), which is
+// the "Invalid SSL config: -10496" a Shelly logs. Firmware that omits len on
+// success is not failed on that basis (len 0 is only fatal for a non-empty
+// upload when the field is actually present and zero).
+func (c *Client) PutUserCA(ctx context.Context, pemData string) (storedLen int, err error) {
+	trimmed := strings.TrimSpace(pemData)
 	var data any // JSON null clears the slot
-	if strings.TrimSpace(pemData) != "" {
+	if trimmed != "" {
 		data = pemData
 	}
-	_, err := c.callParams(ctx, "Shelly.PutUserCA", map[string]any{
+	raw, err := c.callParams(ctx, "Shelly.PutUserCA", map[string]any{
 		"data": data, "append": false,
 	})
-	return err
+	if err != nil {
+		return 0, err
+	}
+	// Response is {"len": <total bytes stored>}. Absent/unparsable len leaves
+	// have (present=false) so we don't fail firmware that answers otherwise.
+	var res struct {
+		Len *int `json:"len"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	if trimmed != "" && res.Len != nil && *res.Len == 0 {
+		return 0, errors.New("shellyapi: device stored 0 bytes of the user CA (upload did not land)")
+	}
+	if res.Len != nil {
+		return *res.Len, nil
+	}
+	return 0, nil
 }
 
 // SetCloudEnabled turns the Shelly cloud connection on or off (hardening

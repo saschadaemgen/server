@@ -184,10 +184,16 @@ func (s *Server) provisionShellyDevice(ctx context.Context, id int64) {
 	// Push the config to the device. Order matters: upload the CA first so
 	// the ssl_ca reference resolves, then MQTT, then hardening. Auth is set
 	// LAST (to the same shared password, so it never locks us out mid-run).
-	if err := client.PutUserCA(ctx, caPEM); err != nil {
+	caLen, err := client.PutUserCA(ctx, caPEM)
+	if err != nil {
 		fail("uploading the broker CA to the device failed")
 		return
 	}
+	// Log what the device says it stored. A non-empty CA that stores far
+	// fewer bytes than we sent (or 0) is the root of "Invalid SSL config:
+	// -10496": the ssl_ca reference below would then point at an empty slot.
+	// No address/secret here, only the byte counts.
+	s.log.Info("shelly user CA uploaded", "component", "shelly-provision", "stored_bytes", caLen, "sent_bytes", len(caPEM))
 	restart, err := client.SetMQTTConfig(ctx, shellyapi.MQTTProvision{
 		Server:      server,
 		ClientID:    username,
