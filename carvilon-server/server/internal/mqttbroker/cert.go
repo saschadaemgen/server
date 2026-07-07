@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -64,10 +65,20 @@ func ensureCertChain(dir string, hosts []string) (leafCert, leafKey, caCert stri
 	if fileExists(leafCert) && fileExists(leafKey) {
 		if leaf, lerr := loadCert(leafCert); lerr == nil &&
 			leaf.CheckSignatureFrom(ca) == nil && certCoversHosts(leaf, hosts) {
-			return leafCert, leafKey, caCert, false, nil
+			// The cert is good; also require the private key to parse AND
+			// match it. A present-but-corrupt/mismatched key would otherwise
+			// pass here and then fail tls.LoadX509KeyPair in startLocked,
+			// which brings down BOTH listeners (the whole broker), with no
+			// self-heal on restart. Re-signing a fresh pair is safe: devices
+			// pin the CA, not the leaf. (A torn write during a re-sign can
+			// leave a new cert beside the old key; this catches it.)
+			if _, kerr := tls.LoadX509KeyPair(leafCert, leafKey); kerr == nil {
+				return leafCert, leafKey, caCert, false, nil
+			}
 		}
-		// Missing key, unreadable, a SAN gap, or the legacy self-signed leaf:
-		// fall through and re-sign a fresh leaf from the CA.
+		// Missing/unreadable/mismatched key, a SAN gap, the legacy self-signed
+		// leaf, or a leaf not chained to the CA: fall through and re-sign a
+		// fresh leaf from the CA.
 	}
 	if err = signLeaf(ca, caPriv, leafCert, leafKey, hosts); err != nil {
 		return "", "", "", false, err
@@ -76,17 +87,29 @@ func ensureCertChain(dir string, hosts []string) (leafCert, leafKey, caCert stri
 }
 
 // ensureCA loads the internal CA, generating a fresh self-signed CA cert+key
-// when either file is missing or unreadable. The CA is the stable trust
-// anchor devices pin, so it is generated once and left alone thereafter.
+// ONLY when both files are genuinely absent (a fresh install). The CA is the
+// stable trust anchor every provisioned device pins, so it must never be
+// silently re-minted: doing so would present a leaf chained to a CA no device
+// trusts and drop the whole fleet off TLS. Therefore if anything is on disk
+// but the pair is not fully usable (half-present, corrupt, transiently
+// unreadable), ensureCA FAILS CLOSED with an error - a loud startup failure
+// the operator can fix (restore from backup, or deliberately delete both
+// files to re-key) - rather than regenerating.
 func ensureCA(certPath, keyPath string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	if fileExists(certPath) && fileExists(keyPath) {
-		if cert, err := loadCert(certPath); err == nil {
-			if key, kerr := loadECKey(keyPath); kerr == nil {
-				return cert, key, nil
-			}
+	certThere, keyThere := fileExists(certPath), fileExists(keyPath)
+	if certThere || keyThere {
+		if !certThere || !keyThere {
+			return nil, nil, fmt.Errorf("mqttbroker: CA is half-present (cert=%v key=%v); refusing to re-mint the pinned CA - restore or delete both files", certThere, keyThere)
 		}
-		// Unreadable pair: regenerate. Any leaf signed by the old CA stops
-		// verifying and will be re-signed below on the same start.
+		cert, err := loadCert(certPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("mqttbroker: existing CA cert unreadable, refusing to re-mint the pinned CA: %w", err)
+		}
+		key, err := loadECKey(keyPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("mqttbroker: existing CA key unreadable, refusing to re-mint the pinned CA: %w", err)
+		}
+		return cert, key, nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -264,11 +287,31 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// writePEM writes a PEM block atomically: encode into a temp file in the same
+// directory, fsync, then rename over the target. A crash/power-loss can then
+// only leave the old file or the new file, never a truncated one - so a torn
+// write cannot masquerade as a corrupt-but-present cert/key.
 func writePEM(path string, block *pem.Block, mode os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".pem-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return pem.Encode(f, block)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := pem.Encode(tmp, block); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

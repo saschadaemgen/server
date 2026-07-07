@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -185,6 +186,87 @@ func TestCertChainMigratesLegacySelfSignedLeaf(t *testing.T) {
 	}
 	if leaf.VerifyHostname("192.168.1.42") != nil {
 		t.Fatal("migrated leaf must still serve the LAN IP")
+	}
+}
+
+// TestEnsureCAFailsClosedOnCorruptKey proves the CA is never silently
+// re-minted: a present-but-unreadable ca.key hard-fails instead of orphaning
+// every device that pinned the old CA.
+func TestEnsureCAFailsClosedOnCorruptKey(t *testing.T) {
+	dir := t.TempDir()
+	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	caBefore, _ := loadCert(filepath.Join(dir, caCertName))
+
+	// Corrupt ca.key (present but unparseable).
+	if err := os.WriteFile(filepath.Join(dir, caKeyName), []byte("not a key\n"), 0o600); err != nil {
+		t.Fatalf("corrupt ca.key: %v", err)
+	}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err == nil {
+		t.Fatal("a present-but-unreadable CA key must fail closed, not re-mint the CA")
+	}
+	// The CA on disk must be untouched (not re-minted).
+	caAfter, err := loadCert(filepath.Join(dir, caCertName))
+	if err != nil {
+		t.Fatalf("ca.crt should be untouched: %v", err)
+	}
+	if caBefore.SerialNumber.Cmp(caAfter.SerialNumber) != 0 {
+		t.Fatal("CA cert must not be re-minted on a corrupt key")
+	}
+}
+
+// TestEnsureCAFailsClosedOnHalfPresent proves a half-present CA pair (cert
+// without key) fails closed rather than regenerating.
+func TestEnsureCAFailsClosedOnHalfPresent(t *testing.T) {
+	dir := t.TempDir()
+	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, caKeyName)); err != nil {
+		t.Fatalf("remove ca.key: %v", err)
+	}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err == nil {
+		t.Fatal("a half-present CA (cert, no key) must fail closed")
+	}
+}
+
+// TestCertChainReSignsOnKeyMismatch proves a leaf cert sitting next to a
+// mismatched key (e.g. a torn write during re-sign) is re-signed rather than
+// returned as good (which would brick the whole broker at LoadX509KeyPair).
+func TestCertChainReSignsOnKeyMismatch(t *testing.T) {
+	dir := t.TempDir()
+	hosts := []string{"192.168.1.42", "localhost", "127.0.0.1"}
+	if _, _, _, _, err := ensureCertChain(dir, hosts); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	caBefore, _ := loadCert(filepath.Join(dir, caCertName))
+
+	// Overwrite tls.key with a DIFFERENT, valid EC key (mismatched with the leaf).
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("other key: %v", err)
+	}
+	if err := writeECKey(filepath.Join(dir, leafKeyName), other); err != nil {
+		t.Fatalf("write mismatched key: %v", err)
+	}
+
+	leafPath, keyPath, _, regen, err := ensureCertChain(dir, hosts)
+	if err != nil {
+		t.Fatalf("re-sign: %v", err)
+	}
+	if !regen {
+		t.Fatal("a leaf whose key does not match must be re-signed")
+	}
+	// The re-signed pair must load cleanly, and the CA must be unchanged.
+	if _, err := tls.LoadX509KeyPair(leafPath, keyPath); err != nil {
+		t.Fatalf("re-signed keypair must be valid: %v", err)
+	}
+	caAfter, _ := loadCert(filepath.Join(dir, caCertName))
+	if caBefore.SerialNumber.Cmp(caAfter.SerialNumber) != 0 {
+		t.Fatal("CA must stay stable while only the leaf re-signs")
 	}
 }
 

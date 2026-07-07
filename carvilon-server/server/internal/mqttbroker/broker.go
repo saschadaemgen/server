@@ -346,7 +346,14 @@ func (m *Manager) fail(err error) error {
 func (m *Manager) resolveCert(lanHost string) (certFile, keyFile, caFile, source string, err error) {
 	if m.settings.CertFile != "" && m.settings.KeyFile != "" {
 		// Operator manages their own chain; we present it and hand the same
-		// cert to devices as the pin (unchanged behaviour).
+		// cert to devices as the pin. If that cert is self-signed, a Shelly
+		// rejects it pinned-as-CA and TLS provisioning fails with -10496 -
+		// warn so it is diagnosable (leave mqtt_tls_cert empty for the
+		// internal CA, which Shelly does accept).
+		if leaf, lerr := loadCert(m.settings.CertFile); lerr == nil &&
+			leaf.Issuer.String() == leaf.Subject.String() {
+			m.log.Warn("mqtt operator cert is self-signed; a Shelly rejects a self-signed cert pinned as its CA and TLS provisioning will fail (-10496). Leave mqtt_tls_cert empty to use the internal CA.")
+		}
 		return m.settings.CertFile, m.settings.KeyFile, m.settings.CertFile, "operator", nil
 	}
 	dir := filepath.Join(m.stateDir, "mqtt")
