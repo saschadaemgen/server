@@ -78,6 +78,9 @@ func TestSetMQTTConfig(t *testing.T) {
 		"pass": "secret", "ssl_ca": "user_ca.pem", "topic_prefix": "carvilon/shelly-abc",
 		"client_id": "shelly-abc", "status_ntf": true, "rpc_ntf": true,
 		"enable_rpc": true, "enable_control": true,
+		// Must disable client-cert mTLS or the device fails SSL-config build
+		// with -10496 (we authenticate with username+password only).
+		"use_client_cert": false,
 	}
 	for k, v := range want {
 		if cfg[k] != v {

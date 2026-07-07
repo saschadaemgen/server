@@ -190,9 +190,10 @@ func (s *Server) provisionShellyDevice(ctx context.Context, id int64) {
 		return
 	}
 	// Log what the device says it stored. A non-empty CA that stores far
-	// fewer bytes than we sent (or 0) is the root of "Invalid SSL config:
-	// -10496": the ssl_ca reference below would then point at an empty slot.
-	// No address/secret here, only the byte counts.
+	// fewer bytes than we sent (or 0) would leave the ssl_ca reference below
+	// pointing at an empty slot - one way to get an "Invalid SSL config:
+	// -10496" (the confirmed root cause was use_client_cert; this guards a
+	// different mbedTLS -0x2900 path). No address/secret here, only counts.
 	s.log.Info("shelly user CA uploaded", "component", "shelly-provision", "stored_bytes", caLen, "sent_bytes", len(caPEM))
 	restart, err := client.SetMQTTConfig(ctx, shellyapi.MQTTProvision{
 		Server:      server,

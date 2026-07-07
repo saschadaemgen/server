@@ -54,6 +54,14 @@ func (c *Client) SetMQTTConfig(ctx context.Context, p MQTTProvision) (restartReq
 		"rpc_ntf":        true,
 		"enable_rpc":     true,
 		"enable_control": true,
+		// We authenticate the device with username+password, NOT client-cert
+		// mTLS. use_client_cert MUST be false: if it is true the device tries
+		// to build its SSL config around a client certificate we never upload
+		// and fails at config-build time with "Invalid SSL config: -10496" -
+		// in EVERY ssl_ca mode, even "*". Send it unconditionally to actively
+		// clear any lingering true left on the device (confirmed on hardware
+		// as the actual root cause of the TLS-never-connects blocker).
+		"use_client_cert": false,
 	}
 	if p.ClientID != "" {
 		cfg["client_id"] = p.ClientID
