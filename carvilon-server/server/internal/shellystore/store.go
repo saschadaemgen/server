@@ -90,7 +90,21 @@ type Device struct {
 	Model       string // last-seen model; "" allowed
 	FirstSeenAt int64  // ms epoch
 	UpdatedAt   int64  // ms epoch
+
+	// MQTT provisioning (Etappe 3, Phase 1). MQTTUsername is the broker
+	// device account assigned to this Shelly ("" until provisioned);
+	// MQTTState is "" | "provisioning" | "linked" | "failed".
+	MQTTUsername string
+	MQTTState    string
+	MQTTUpdated  int64 // ms epoch of the last MQTT state change
 }
+
+// MQTT provisioning states.
+const (
+	MQTTStateProvisioning = "provisioning"
+	MQTTStateLinked       = "linked"
+	MQTTStateFailed       = "failed"
+)
 
 // Detected is one device an announcement (or a probe) reported, in the
 // neutral shape Adopt understands. Address must already be a canonical,
@@ -122,7 +136,8 @@ func (s *Store) ListManualActive(ctx context.Context) ([]Device, error) {
 
 func (s *Store) query(ctx context.Context, whereOrder string, args ...any) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mac, address, origin, state, name, model, first_seen_at, updated_at
+		`SELECT id, mac, address, origin, state, name, model, first_seen_at, updated_at,
+		        mqtt_username, mqtt_state, mqtt_updated_at
 		   FROM shelly_devices `+whereOrder, args...)
 	if err != nil {
 		return nil, fmt.Errorf("shellystore: list: %w", err)
@@ -132,7 +147,8 @@ func (s *Store) query(ctx context.Context, whereOrder string, args ...any) ([]De
 	for rows.Next() {
 		var d Device
 		if err := rows.Scan(&d.ID, &d.MAC, &d.Address, &d.Origin, &d.State,
-			&d.Name, &d.Model, &d.FirstSeenAt, &d.UpdatedAt); err != nil {
+			&d.Name, &d.Model, &d.FirstSeenAt, &d.UpdatedAt,
+			&d.MQTTUsername, &d.MQTTState, &d.MQTTUpdated); err != nil {
 			return nil, fmt.Errorf("shellystore: scan: %w", err)
 		}
 		out = append(out, d)
@@ -325,6 +341,57 @@ func (s *Store) CountPending(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("shellystore: count pending: %w", err)
 	}
 	return n, nil
+}
+
+// ResetStaleProvisioning flips any device left mid-provision (state
+// "provisioning") to "failed" - called at startup, since a provision that
+// was in flight when the process exited is not resumed and would otherwise
+// strand the row at "provisioning" forever. The operator can retry.
+func (s *Store) ResetStaleProvisioning(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE shelly_devices SET mqtt_state = ?, mqtt_updated_at = ? WHERE mqtt_state = ?`,
+		MQTTStateFailed, s.now().UnixMilli(), MQTTStateProvisioning)
+	if err != nil {
+		return fmt.Errorf("shellystore: reset stale provisioning: %w", err)
+	}
+	return nil
+}
+
+// Get returns one device by id (ErrNotFound when absent).
+func (s *Store) Get(ctx context.Context, id int64) (Device, error) {
+	devs, err := s.query(ctx, `WHERE id = ?`, id)
+	if err != nil {
+		return Device{}, err
+	}
+	if len(devs) == 0 {
+		return Device{}, ErrNotFound
+	}
+	return devs[0], nil
+}
+
+// SetMQTTState records a device's MQTT provisioning outcome: the assigned
+// broker username (kept as-is when username is "") and the state. Returns
+// ErrNotFound for an unknown id.
+func (s *Store) SetMQTTState(ctx context.Context, id int64, username, state string) error {
+	now := s.now().UnixMilli()
+	var res sql.Result
+	var err error
+	if username != "" {
+		res, err = s.db.ExecContext(ctx,
+			`UPDATE shelly_devices SET mqtt_username = ?, mqtt_state = ?, mqtt_updated_at = ? WHERE id = ?`,
+			username, state, now, id)
+	} else {
+		res, err = s.db.ExecContext(ctx,
+			`UPDATE shelly_devices SET mqtt_state = ?, mqtt_updated_at = ? WHERE id = ?`,
+			state, now, id)
+	}
+	if err != nil {
+		return fmt.Errorf("shellystore: set mqtt state: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ApprovePending activates a pending device (it joins the fleet and is

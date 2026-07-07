@@ -1,10 +1,15 @@
 // Package shellyapi talks to the local Gen2+ RPC API of Shelly devices
 // (JSON-RPC 2.0 over HTTP, http://<ip>/rpc) on behalf of the carvilon
-// admin UI. Saison 21 - Shelly Etappe 1 scope: strictly read-only -
+// admin UI. Saison 21 - Shelly Etappe 1 scope: read-only -
 // Shelly.GetDeviceInfo, Shelly.GetStatus and Shelly.GetConfig fill the
-// Device Center's Switches category. No control calls (Switch.Set /
-// Switch.Toggle are a later etappe) and no Cloud.* methods - the
-// client only ever speaks to the one configured LAN address.
+// Device Center's Switches category.
+//
+// Shelly Etappe 3 adds a WRITE path used ONLY at device approval to
+// provision the device onto the CARVILON MQTT broker and harden it
+// (MQTT.SetConfig, Shelly.PutUserCA, Cloud.SetConfig, Shelly.SetAuth,
+// Shelly.Reboot - see control.go). It is still not switch CONTROL: on/off
+// runs over MQTT once the device is on the broker, not over this HTTP RPC.
+// The client only ever speaks to the one configured LAN address.
 //
 // One Client per configured device address (the uaapi/protectapi
 // mirror). Auth, when a device has a password set, is HTTP digest
@@ -108,13 +113,24 @@ type rpcError struct {
 	Message flexVal `json:"message"`
 }
 
-// call performs one JSON-RPC method call (no params - the three
-// read-only methods need none) and returns the raw result. A 401 with
-// a configured password triggers exactly one digest-authenticated
-// retry. Errors never embed the URL, the address or foreign response
-// text - only coarse, fixed failure kinds.
+// call performs one read JSON-RPC method call (no params) and returns
+// the raw result.
 func (c *Client) call(ctx context.Context, method string) (json.RawMessage, error) {
-	body, err := json.Marshal(map[string]any{"id": 1, "method": method})
+	return c.callParams(ctx, method, nil)
+}
+
+// callParams performs one JSON-RPC method call with optional params
+// (Saison 21 - Shelly Etappe 3: the write path for MQTT provisioning +
+// hardening on approval, e.g. MQTT.SetConfig / Shelly.PutUserCA). A 401
+// with a configured password triggers exactly one digest-authenticated
+// retry. Errors never embed the URL, the address or foreign response
+// text - only coarse, fixed failure kinds. params is nil for read calls.
+func (c *Client) callParams(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	req := map[string]any{"id": 1, "method": method}
+	if params != nil {
+		req["params"] = params
+	}
+	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("shellyapi: marshal request: %w", err)
 	}

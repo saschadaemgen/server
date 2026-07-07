@@ -73,6 +73,9 @@ type shellySettingsBlock struct {
 	// AutoAdopt is the approval-gate toggle: false (default) = discovered
 	// devices wait as pending; true = auto-activate.
 	AutoAdopt bool
+	// KeepCloud is the "keep Shelly cloud" opt-in used during provisioning:
+	// false (default) disables the device cloud connection as hardening.
+	KeepCloud bool
 	// Pending is the "awaiting approval" list: devices found by discovery
 	// while the gate is on. Records only - never polled.
 	Pending []shellyPendingRow
@@ -339,6 +342,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	shellyBlock.HasPassword = shellyPw != ""
 	shellyBlock.Enabled = s.shellyEnabled(r.Context())
 	shellyBlock.AutoAdopt = s.shellyAutoAdopt(r.Context())
+	shellyBlock.KeepCloud = s.shellyKeepCloud(r.Context())
 
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},

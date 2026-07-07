@@ -167,6 +167,19 @@
         </div>
         <div class="set-row">
           <div class="set-row-main">
+            <span class="set-row-label">Keep Shelly cloud</span>
+            <span class="set-row-sub">When a device is approved it is provisioned onto the CARVILON MQTT broker (TLS) and hardened. Off (recommended): the device's Shelly-cloud connection is turned off. On: it is left enabled (Gen2+ can run the cloud and our broker in parallel). Applies at the next provisioning.</span>
+          </div>
+          <form method="post" action="/a/settings/shelly/keepcloud" style="margin:0;">
+            <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
+              <input type="checkbox" name="shelly_keep_cloud" value="1" {{if .Page.Shelly.KeepCloud}}checked{{end}} onchange="this.form.submit()" style="width:18px; height:18px; accent-color: var(--color-accent, var(--accent)); cursor:pointer;"/>
+              <span class="set-row-sub" style="margin:0;">Keep cloud on</span>
+            </label>
+            <noscript><button class="btn btn-secondary btn-sm" type="submit" style="margin-left:8px;">Save</button></noscript>
+          </form>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
             <span class="set-row-label">Pending approval</span>
             <span class="set-row-sub">Devices found on the network waiting for your approval. They are not contacted or polled until you approve them, so a pending row shows only what the announcement carried (MAC + address). Approve to start polling it, or reject to keep it out.</span>
           </div>

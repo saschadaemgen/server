@@ -525,13 +525,19 @@
                      itself is never written to (control stays read only). */}}
                 {{if eq $r.Kind "shelly"}}
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Device controls</span><span class="dc-hr"></span></div>
-                  <form class="dc-act-form" method="post" action="/a/ua/shelly/remove">
-                    <input type="hidden" name="address" value="{{$r.ID}}">
+                  <div class="dc-act-form">
                     <div class="dc-act-row">
-                      <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
+                      <form method="post" action="/a/ua/shelly/provision" style="margin:0;">
+                        <input type="hidden" name="address" value="{{$r.ID}}">
+                        <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>{{if eq $r.MQTTState "linked"}}Re-provision MQTT{{else}}Provision MQTT{{end}}</button>
+                      </form>
+                      <form method="post" action="/a/ua/shelly/remove" style="margin:0;">
+                        <input type="hidden" name="address" value="{{$r.ID}}">
+                        <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
+                      </form>
                     </div>
-                    <p class="dc-act-hint">Removing forgets this device on the CARVILON side and stops it from being re-discovered (sticky). The device itself is not changed - control stays read only. Release it again under Settings &rsaquo; Shelly.</p>
-                  </form>
+                    <p class="dc-act-hint">Provisioning points this device at the CARVILON MQTT broker over TLS and hardens it (cloud off, HTTP auth set) - it runs automatically on approval; use it to retry or re-apply. Removing forgets the device on the CARVILON side and stops re-discovery (sticky); the device itself is not otherwise changed. Release it again under Settings &rsaquo; Shelly.</p>
+                  </div>
                 {{end}}
               </template>
 

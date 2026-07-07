@@ -293,3 +293,19 @@ func TestNormalizeMAC(t *testing.T) {
 		}
 	}
 }
+
+// TestShellyMQTTUsername: the broker account name is stable, lowercase and
+// within the broker's username charset, from MAC (preferred) or address.
+func TestShellyMQTTUsername(t *testing.T) {
+	cases := []struct{ storedMAC, liveMAC, addr, want string }{
+		{"08F9E0E5C790", "", "192.168.1.51", "shelly-08f9e0e5c790"},
+		{"", "A8:03:2A:B1:C2:D3", "192.168.1.52", "shelly-a8032ab1c2d3"},
+		{"", "", "192.168.1.53:8080", "shelly-192.168.1.53-8080"}, // no MAC -> sanitized address
+	}
+	for _, c := range cases {
+		got := shellyMQTTUsername(c.storedMAC, c.liveMAC, c.addr)
+		if got != c.want {
+			t.Errorf("shellyMQTTUsername(%q,%q,%q) = %q, want %q", c.storedMAC, c.liveMAC, c.addr, got, c.want)
+		}
+	}
+}

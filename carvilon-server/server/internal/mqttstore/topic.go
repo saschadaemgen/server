@@ -104,3 +104,11 @@ func FilterCovers(a, b string) bool {
 func DefaultSubtree(username string) string {
 	return "carvilon/" + username + "/#"
 }
+
+// DefaultPrefix is the base (no wildcard) of a device's implicit subtree:
+// carvilon/<username>. A device configured with this as its MQTT topic
+// prefix publishes/subscribes under carvilon/<username>/... - exactly what
+// DefaultSubtree's ACL covers.
+func DefaultPrefix(username string) string {
+	return "carvilon/" + username
+}

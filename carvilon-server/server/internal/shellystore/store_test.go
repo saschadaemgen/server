@@ -532,6 +532,48 @@ func TestApproveAtCapRejected(t *testing.T) {
 	}
 }
 
+// TestMQTTStateAndReaper: SetMQTTState records username+state; the startup
+// reaper flips a stranded "provisioning" to "failed" and leaves others.
+func TestMQTTStateAndReaper(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.Adopt(ctx, Detected{MAC: "08F9E0E5C790", Address: "192.168.1.51"}, capN, true); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if _, err := s.Adopt(ctx, Detected{MAC: "08F9E0A11223", Address: "192.168.1.52"}, capN, true); err != nil {
+		t.Fatalf("adopt2: %v", err)
+	}
+	active, _ := s.ListActive(ctx)
+	// One device stuck "provisioning", one "linked".
+	if err := s.SetMQTTState(ctx, active[0].ID, "shelly-08f9e0e5c790", MQTTStateProvisioning); err != nil {
+		t.Fatalf("set provisioning: %v", err)
+	}
+	if err := s.SetMQTTState(ctx, active[1].ID, "shelly-08f9e0a11223", MQTTStateLinked); err != nil {
+		t.Fatalf("set linked: %v", err)
+	}
+	// The reaper flips only the stranded one.
+	if err := s.ResetStaleProvisioning(ctx); err != nil {
+		t.Fatalf("reaper: %v", err)
+	}
+	got, _ := s.Get(ctx, active[0].ID)
+	if got.MQTTState != MQTTStateFailed || got.MQTTUsername != "shelly-08f9e0e5c790" {
+		t.Fatalf("stranded device = %q/%q, want failed + username kept", got.MQTTState, got.MQTTUsername)
+	}
+	got2, _ := s.Get(ctx, active[1].ID)
+	if got2.MQTTState != MQTTStateLinked {
+		t.Fatalf("linked device = %q, want unchanged", got2.MQTTState)
+	}
+	// The MQTT username survives a sticky removal (so the remove handler can
+	// still find and delete the broker credential).
+	if err := s.RemoveByAddress(ctx, "192.168.1.52"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	ign, _ := s.ListIgnored(ctx)
+	if len(ign) != 1 || ign[0].MQTTUsername != "shelly-08f9e0a11223" {
+		t.Fatalf("ignored row lost its mqtt username: %+v", ign)
+	}
+}
+
 func keys(m map[string]Device) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

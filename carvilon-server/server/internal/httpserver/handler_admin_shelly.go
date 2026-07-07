@@ -328,7 +328,7 @@ func (s *Server) probeShelly(ctx context.Context) []shellyProbe {
 // the CONFIGURED address - stable whether or not the device answers.
 // An offline device keeps its row with the address as its name and
 // "-" everywhere else; nothing is invented.
-func makeShellyRow(p shellyProbe, origin string) uaRow {
+func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 	addr := p.client.Address()
 	row := uaRow{
 		ID:          addr,
@@ -339,7 +339,8 @@ func makeShellyRow(p shellyProbe, origin string) uaRow {
 		Source:      "shelly",
 		SourceLabel: "Shelly",
 		IP:          addr,
-		Origin:      origin,
+		Origin:      info.Origin,
+		MQTTState:   info.MQTTState,
 	}
 	if p.err == nil {
 		row.StatusState, row.StatusText = "online", "Online"
@@ -370,7 +371,8 @@ func makeShellyRow(p shellyProbe, origin string) uaRow {
 	} else {
 		det = appendKVDash(det, "Device ID", "")
 	}
-	det = appendKV(det, "Origin", shellyOriginLabel(origin))
+	det = appendKV(det, "Origin", shellyOriginLabel(info.Origin))
+	det = appendKV(det, "MQTT link", shellyMQTTStateLabel(info.MQTTState))
 	row.Detail = det
 	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.IP, row.MAC, row.TypeLabel, "shelly"}, " "))
 	return row
@@ -384,6 +386,21 @@ func shellyOriginLabel(origin string) string {
 		return "Manual (configured IP)"
 	case shellystore.OriginDiscovered:
 		return "Discovered (mDNS)"
+	default:
+		return ""
+	}
+}
+
+// shellyMQTTStateLabel renders the MQTT provisioning state for the panel
+// ("" hides the line for a device that was never provisioned).
+func shellyMQTTStateLabel(state string) string {
+	switch state {
+	case shellystore.MQTTStateProvisioning:
+		return "Provisioning…"
+	case shellystore.MQTTStateLinked:
+		return "Linked to broker"
+	case shellystore.MQTTStateFailed:
+		return "Provisioning failed - retry below"
 	default:
 		return ""
 	}
@@ -590,6 +607,25 @@ func (s *Server) handleAdminShellyAutoAdopt(w http.ResponseWriter, r *http.Reque
 	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
 }
 
+// handleAdminShellyKeepCloud saves the "keep Shelly cloud" opt-in used
+// during provisioning. Default off disables the device cloud as hardening.
+func (s *Server) handleAdminShellyKeepCloud(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	val := "0"
+	if r.PostForm.Get("shelly_keep_cloud") != "" {
+		val = "1"
+	}
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyShellyKeepCloud, val); err != nil {
+		s.log.Error("save shelly keep-cloud failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+}
+
 // handleAdminShellyApprove activates a pending (discovered) device: it joins
 // the polled fleet. This is the one-click approval - the first time we ever
 // talk to the device. Rebuilds the fleet so the poll picks it up.
@@ -606,6 +642,9 @@ func (s *Server) handleAdminShellyApprove(w http.ResponseWriter, r *http.Request
 			return err
 		}
 		s.rebuildShellyClients(ctx)
+		// Etappe 3, Phase 1: approval is when we first talk to the device -
+		// provision it onto the MQTT broker (async; the row shows the state).
+		s.startShellyProvision(id)
 		return nil
 	})
 }
@@ -668,6 +707,18 @@ func (s *Server) handleAdminUAShellyRemove(w http.ResponseWriter, r *http.Reques
 		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
+	// Learn the device's broker account (if provisioned) BEFORE removing, so
+	// removal can also drop the credential - a forgotten device must not
+	// leave a live broker login behind.
+	var mqttUser string
+	if active, lerr := s.shellystore.ListActive(r.Context()); lerr == nil {
+		for _, d := range active {
+			if d.Address == norm {
+				mqttUser = d.MQTTUsername
+				break
+			}
+		}
+	}
 	err := s.shellystore.RemoveByAddress(r.Context(), norm)
 	switch {
 	case errors.Is(err, shellystore.ErrNotFound):
@@ -677,6 +728,9 @@ func (s *Server) handleAdminUAShellyRemove(w http.ResponseWriter, r *http.Reques
 		s.log.Error("shelly: remove device failed", "err", err)
 		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
 		return
+	}
+	if mqttUser != "" {
+		s.deprovisionShellyCredential(mqttUser)
 	}
 	s.rebuildShellyClients(r.Context())
 	http.Redirect(w, r, "/a/ua?flash=shelly-removed", http.StatusSeeOther)
@@ -690,6 +744,39 @@ func (s *Server) handleAdminUAShellyScan(w http.ResponseWriter, r *http.Request)
 		s.shellyDisco.ScanNow()
 	}
 	http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+}
+
+// handleAdminUAShellyProvision (re)runs MQTT provisioning for one active
+// device from the Device Center panel - the retry path when auto-
+// provisioning on approval failed, and the way to provision a manually
+// added device. Address must match a CONFIGURED active device.
+func (s *Server) handleAdminUAShellyProvision(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil || s.shellystore == nil {
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	norm, ok := normalizeShellyAddr(r.PostForm.Get("address"))
+	if !ok || norm == "" {
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	if !s.shellyProvisionReady() {
+		http.Redirect(w, r, "/a/ua?flash=shelly-noprov", http.StatusSeeOther)
+		return
+	}
+	active, err := s.shellystore.ListActive(r.Context())
+	if err != nil {
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	for _, d := range active {
+		if d.Address == norm {
+			s.startShellyProvision(d.ID)
+			http.Redirect(w, r, "/a/ua?flash=shelly-provisioning", http.StatusSeeOther)
+			return
+		}
+	}
+	http.Redirect(w, r, "/a/ua?flash=shelly-notfd", http.StatusSeeOther)
 }
 
 // buildShellySettingsBlock fills the settings block's Shelly section from

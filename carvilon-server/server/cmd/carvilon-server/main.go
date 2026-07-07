@@ -290,6 +290,12 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// reach a log line - only the device count does).
 	shellyStore := shellystore.New(database.DB)
 	httpserver.SeedShellyManualFromLegacy(ctx, shellyStore, platformCfg, log)
+	// A provision that was in flight when the process last exited is not
+	// resumed; clear any stale "provisioning" state so it shows as failed
+	// (retryable) instead of hanging forever.
+	if err := shellyStore.ResetStaleProvisioning(ctx); err != nil {
+		log.Warn("shelly: reset stale provisioning state failed", "err", err)
+	}
 	shellyPassword, _ := platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
 	shellyActive, err := shellyStore.ListActive(ctx)
 	if err != nil {

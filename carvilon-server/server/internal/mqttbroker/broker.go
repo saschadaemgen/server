@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -88,7 +89,12 @@ type Manager struct {
 	wsAddr   string
 	wsSecure bool
 	certSrc  string
-	lastErr  string
+	// certFile is the resolved TLS cert path and advertHost the LAN host a
+	// device should dial for TLS (a cert SAN). Both are needed to provision
+	// a Shelly onto the broker (push the CA + point it at the address).
+	certFile   string
+	advertHost string
+	lastErr    string
 }
 
 // New builds a Manager. stateDir is where the self-signed TLS cert is
@@ -183,6 +189,8 @@ func (m *Manager) stopLocked() {
 	m.wsAddr = ""
 	m.wsSecure = false
 	m.certSrc = ""
+	m.certFile = ""
+	m.advertHost = ""
 }
 
 func (m *Manager) startLocked(ctx context.Context) error {
@@ -280,8 +288,39 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	m.wsAddr = wsAddr
 	m.wsSecure = m.settings.WSEnabled && m.settings.WSUseTLS
 	m.certSrc = certSrc
+	m.certFile = certFile
+	m.advertHost = lanHost
 	m.log.Info("mqtt broker started", "plaintext", tcpAddr, "tls", tlsAddr, "ws", wsAddr, "cert", certSrc)
 	return nil
+}
+
+// TLSServerAddr returns the "host:port" a LAN device should dial for the
+// broker's TLS listener - the advertised LAN host (a cert SAN), not the
+// possibly-wildcard bind host. ok is false when the broker is not running.
+func (m *Manager) TLSServerAddr() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.running || m.advertHost == "" {
+		return "", false
+	}
+	return net.JoinHostPort(m.advertHost, strconv.Itoa(m.settings.TLSPort)), true
+}
+
+// CACertPEM returns the broker's TLS certificate as PEM, for uploading to
+// a device as its user CA so it can verify the (self-signed) broker cert.
+// Errors are returned to the caller; the path itself never leaks upward.
+func (m *Manager) CACertPEM() (string, error) {
+	m.mu.Lock()
+	certFile := m.certFile
+	m.mu.Unlock()
+	if certFile == "" {
+		return "", errors.New("mqttbroker: no resolved certificate (broker not started)")
+	}
+	pem, err := os.ReadFile(certFile)
+	if err != nil {
+		return "", errors.New("mqttbroker: read certificate failed")
+	}
+	return string(pem), nil
 }
 
 func (m *Manager) fail(err error) error {

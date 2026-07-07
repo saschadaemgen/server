@@ -222,25 +222,31 @@ type Deps struct {
 
 // Server owns the mux and references the auth services.
 type Server struct {
-	cfg             config.Config
-	sessions        *session.Service
-	adminSessions   *adminsession.Service
-	viewerMgr       *viewermanager.Manager
-	admin           *admin.Service
-	platformCfg     *platformconfig.Service
-	audit           *loginaudit.Service
-	viewerLimiter   *ratelimit.Limiter
-	adminLimiter    *ratelimit.Limiter
-	ua              *uaapi.Client
-	protect         *protectapi.Client
-	shelly          *shellyFleet
+	cfg           config.Config
+	sessions      *session.Service
+	adminSessions *adminsession.Service
+	viewerMgr     *viewermanager.Manager
+	admin         *admin.Service
+	platformCfg   *platformconfig.Service
+	audit         *loginaudit.Service
+	viewerLimiter *ratelimit.Limiter
+	adminLimiter  *ratelimit.Limiter
+	ua            *uaapi.Client
+	protect       *protectapi.Client
+	shelly        *shellyFleet
 	// shellystore is the persistent Shelly device set + ignore list
 	// (migration 038, Etappe 2). Nil keeps Shelly on the Etappe-1 read
 	// paths with no discovery/removal.
 	shellystore *shellystore.Store
 	// shellyDisco is the mDNS auto-discovery coordinator; nil disables
 	// discovery (the manual list + read paths still work).
-	shellyDisco     *shellyDiscovery
+	shellyDisco *shellyDiscovery
+	// shellyProvisioning is the per-device singleflight guard for MQTT
+	// provisioning: at most one provision runs per device id, so two
+	// overlapping triggers (retry double-click, approve + manual) cannot
+	// mint two broker passwords that diverge from what the device holds.
+	shellyProvMu    sync.Mutex
+	shellyProvo     map[int64]bool
 	userStore       UserStoreLike
 	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
@@ -563,6 +569,7 @@ func (s *Server) routes() {
 	// Shelly Etappe 2b: the discovery approval gate - toggle auto-adopt, and
 	// approve/reject a pending (discovered, not-yet-polled) device.
 	s.mux.Handle("POST /a/settings/shelly/autoadopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyAutoAdopt)))
+	s.mux.Handle("POST /a/settings/shelly/keepcloud", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyKeepCloud)))
 	s.mux.Handle("POST /a/settings/shelly/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyApprove)))
 	s.mux.Handle("POST /a/settings/shelly/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyReject)))
 	// Saison 20: admin UI accent color (single platform_config value).
@@ -639,6 +646,8 @@ func (s *Server) routes() {
 	// never writes to the device - control stays read-only.
 	s.mux.Handle("POST /a/ua/shelly/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRemove)))
 	s.mux.Handle("POST /a/ua/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyScan)))
+	// Shelly Etappe 3, Phase 1: (re)provision a device onto the MQTT broker.
+	s.mux.Handle("POST /a/ua/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
 	// Dev-only: feed a synthetic mDNS announcement through the real discovery
 	// path so the adopt/sticky-remove/release chain can be driven without a
 	// live device or OS multicast. Registered ONLY in DevMode - never in a

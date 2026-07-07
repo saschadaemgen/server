@@ -90,6 +90,13 @@ const (
 	// device becomes active immediately), for operators with a segmented
 	// VLAN. Only affects NEW finds; existing pending entries are untouched.
 	KeyShellyAutoAdopt = "shelly_auto_adopt" // "1" = auto-activate discovered devices; default off (gate on)
+	// Saison 21 - Shelly Etappe 3, Phase 1: MQTT auto-provisioning on
+	// approval. KeyShellyKeepCloud is the "keep Shelly cloud" opt-in:
+	// default off (unset/"0") disables the device's cloud connection as
+	// part of hardening; "1" leaves it on (Gen2+ can run cloud + our broker
+	// in parallel). The broker address/CA the device is pointed at are
+	// derived from the running broker (never hardcoded), not from a key.
+	KeyShellyKeepCloud = "shelly_keep_cloud" // "1" = keep the Shelly cloud connection; default off
 )
 
 // Service combines the DB and the secrets service.
