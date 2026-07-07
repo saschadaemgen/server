@@ -18,7 +18,7 @@ type fakeSource struct {
 	scans int
 }
 
-func newFakeSource() *fakeSource { return &fakeSource{ch: make(chan dnssd.Entry, 8)} }
+func newFakeSource() *fakeSource                  { return &fakeSource{ch: make(chan dnssd.Entry, 8)} }
 func (f *fakeSource) Entries() <-chan dnssd.Entry { return f.ch }
 func (f *fakeSource) Scan(context.Context)        { f.scans++ }
 
@@ -47,22 +47,51 @@ func entry(id, ip string, port uint16, txt map[string]string) dnssd.Entry {
 	}
 }
 
-func newDisco(t *testing.T, enabled *bool) (*shellyDiscovery, *shellystore.Store, *int) {
+func newDisco(t *testing.T, enabled, autoAdopt *bool) (*shellyDiscovery, *shellystore.Store, *int) {
 	t.Helper()
 	store := newDiscoTestStore(t)
 	src := newFakeSource()
 	rebuilds := 0
 	d := newShellyDiscovery(store, src, nil,
 		func(context.Context) bool { return *enabled },
+		func(context.Context) bool { return *autoAdopt },
 		func(context.Context) { rebuilds++ })
 	return d, store, &rebuilds
 }
 
-// TestDiscoveryAutoAdopt: a discovered Gen2 device is adopted and triggers a
-// client rebuild; a re-announcement does not re-trigger.
-func TestDiscoveryAutoAdopt(t *testing.T) {
-	on := true
-	d, store, rebuilds := newDisco(t, &on)
+// TestDiscoveryPendingByDefault: with the approval gate on (default) a
+// discovered device lands as pending - not active, not polled, no rebuild.
+func TestDiscoveryPendingByDefault(t *testing.T) {
+	on, auto := true, false
+	d, store, rebuilds := newDisco(t, &on, &auto)
+	ctx := context.Background()
+
+	d.observe(ctx, entry("shellyplus1pm-a8032ab1c2d3", "192.168.1.51", 80, nil))
+	if active, _ := store.ListActive(ctx); len(active) != 0 {
+		t.Fatalf("active = %d, want 0 (gate on: device must be pending)", len(active))
+	}
+	pending, _ := store.ListPending(ctx)
+	if len(pending) != 1 || pending[0].MAC != "A8032AB1C2D3" {
+		t.Fatalf("pending = %+v, want the device", pending)
+	}
+	if *rebuilds != 0 {
+		t.Fatalf("rebuilds = %d, want 0 (pending is not polled)", *rebuilds)
+	}
+	// Approving it activates it and rebuilds the fleet.
+	if err := store.ApprovePending(ctx, pending[0].ID, 0); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if active, _ := store.ListActive(ctx); len(active) != 1 {
+		t.Fatalf("active after approve = %d, want 1", len(active))
+	}
+}
+
+// TestDiscoveryAutoAdoptWhenGateOff: with the gate off a discovered Gen2
+// device is activated immediately and triggers a client rebuild; a
+// re-announcement does not re-trigger.
+func TestDiscoveryAutoAdoptWhenGateOff(t *testing.T) {
+	on, auto := true, true
+	d, store, rebuilds := newDisco(t, &on, &auto)
 	ctx := context.Background()
 
 	d.observe(ctx, entry("shellyplus1pm-a8032ab1c2d3", "192.168.1.51", 80, nil))
@@ -86,8 +115,8 @@ func TestDiscoveryAutoAdopt(t *testing.T) {
 // TestDiscoveryStickyRemoval: the coordinator never re-adopts a device that
 // was removed (ignore list), even across the dedupe window.
 func TestDiscoveryStickyRemoval(t *testing.T) {
-	on := true
-	d, store, _ := newDisco(t, &on)
+	on, auto := true, true
+	d, store, _ := newDisco(t, &on, &auto)
 	ctx := context.Background()
 
 	d.observe(ctx, entry("shellypro4pm-08f9e0e5c790", "192.168.1.52", 80, nil))
@@ -106,8 +135,8 @@ func TestDiscoveryStickyRemoval(t *testing.T) {
 // TestDiscoveryOffLANRejected: an announcement carrying a public / off-LAN
 // address is dropped - it must never inject a foreign dial target.
 func TestDiscoveryOffLANRejected(t *testing.T) {
-	on := true
-	d, store, rebuilds := newDisco(t, &on)
+	on, auto := true, true
+	d, store, rebuilds := newDisco(t, &on, &auto)
 	ctx := context.Background()
 
 	// Public, metadata, loopback and link-local are all rejected on the
@@ -125,10 +154,77 @@ func TestDiscoveryOffLANRejected(t *testing.T) {
 	}
 }
 
+// TestDiscoveryGateToggleAffectsNewFinds: flipping the gate at runtime
+// changes only NEW finds - an existing pending device is not activated, and
+// a fresh find under auto-adopt goes straight to active.
+func TestDiscoveryGateToggleAffectsNewFinds(t *testing.T) {
+	on, auto := true, false // gate on
+	d, store, _ := newDisco(t, &on, &auto)
+	ctx := context.Background()
+
+	// Device A found under the gate -> pending.
+	d.observe(ctx, entry("shellyplus1pm-a8032ab1c2d3", "192.168.1.51", 80, nil))
+	if p, _ := store.ListPending(ctx); len(p) != 1 {
+		t.Fatalf("A pending = %d, want 1", len(p))
+	}
+
+	// Operator turns auto-adopt on.
+	auto = true
+
+	// Device B found under auto-adopt -> active immediately.
+	d.observe(ctx, entry("shellypro4pm-08f9e0b44556", "192.168.1.52", 80, nil))
+	if active, _ := store.ListActive(ctx); len(active) != 1 || active[0].Address != "192.168.1.52" {
+		t.Fatalf("B should be active; got %+v", active)
+	}
+	// A stays pending - the toggle does not mass-activate existing pendings.
+	if p, _ := store.ListPending(ctx); len(p) != 1 || p[0].Address != "192.168.1.51" {
+		t.Fatalf("A must remain pending; got %+v", p)
+	}
+}
+
+// TestDiscoveryDedupeMapBounded: a flood of DISTINCT announced identities
+// must not grow the in-memory dedupe map without bound (memory flood guard).
+func TestDiscoveryDedupeMapBounded(t *testing.T) {
+	on, auto := true, false
+	d, _, _ := newDisco(t, &on, &auto)
+	ctx := context.Background()
+	// Many distinct identities (distinct MACs) all at one LAN address, so the
+	// DB stays at ~1 row (each supersedes the last at that address) while the
+	// dedupe map is hammered with distinct keys - far more than the cap.
+	for i := 0; i < dedupeMaxEntries*3; i++ {
+		mac := normalizeMAC("02" + hex10(i))
+		d.observe(ctx, dnssd.Entry{
+			Instance: "shellyx-" + mac + "._shelly._tcp.local.",
+			Service:  "_shelly._tcp.local.",
+			TXT:      map[string]string{"gen": "2", "mac": mac},
+			Addrs:    []netip.Addr{netip.MustParseAddr("10.0.0.1")},
+			Port:     80,
+		})
+	}
+	d.mu.Lock()
+	n := len(d.lastSeen)
+	d.mu.Unlock()
+	if n > dedupeMaxEntries {
+		t.Fatalf("lastSeen map grew to %d, want <= %d (unbounded flood!)", n, dedupeMaxEntries)
+	}
+}
+
+// hex10 renders i as a 10-hex-digit string (pairs with a 2-digit prefix to
+// make a 12-hex MAC).
+func hex10(i int) string {
+	const d = "0123456789ABCDEF"
+	b := make([]byte, 10)
+	for j := 9; j >= 0; j-- {
+		b[j] = d[i&0xf]
+		i >>= 4
+	}
+	return string(b)
+}
+
 // TestDiscoveryGen1Rejected: a device announcing gen=1 is out of scope.
 func TestDiscoveryGen1Rejected(t *testing.T) {
-	on := true
-	d, store, _ := newDisco(t, &on)
+	on, auto := true, true
+	d, store, _ := newDisco(t, &on, &auto)
 	ctx := context.Background()
 	d.observe(ctx, entry("shelly1-112233445566", "192.168.1.70", 80, map[string]string{"gen": "1"}))
 	if active, _ := store.ListActive(ctx); len(active) != 0 {
@@ -139,8 +235,8 @@ func TestDiscoveryGen1Rejected(t *testing.T) {
 // TestDiscoveryDisabledNoAdopt: while the integration is off, nothing is
 // adopted even though the announcement is valid.
 func TestDiscoveryDisabledNoAdopt(t *testing.T) {
-	on := false
-	d, store, _ := newDisco(t, &on)
+	on, auto := false, true
+	d, store, _ := newDisco(t, &on, &auto)
 	ctx := context.Background()
 	d.observe(ctx, entry("shellyplus1pm-a8032ab1c2d3", "192.168.1.51", 80, nil))
 	if active, _ := store.ListActive(ctx); len(active) != 0 {

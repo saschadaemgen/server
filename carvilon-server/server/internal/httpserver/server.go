@@ -380,7 +380,7 @@ func New(deps Deps) (*Server, error) {
 	// owns the source's lifecycle.
 	if deps.ShellyStore != nil && deps.ShellyDiscovery != nil {
 		srv.shellyDisco = newShellyDiscovery(deps.ShellyStore, deps.ShellyDiscovery,
-			deps.Log, srv.shellyEnabled, srv.rebuildShellyClients)
+			deps.Log, srv.shellyEnabled, srv.shellyAutoAdopt, srv.rebuildShellyClients)
 	}
 	srv.routes()
 	return srv, nil
@@ -560,6 +560,11 @@ func (s *Server) routes() {
 	// sticky ignore list (both from the settings block).
 	s.mux.Handle("POST /a/settings/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScan)))
 	s.mux.Handle("POST /a/settings/shelly/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyRelease)))
+	// Shelly Etappe 2b: the discovery approval gate - toggle auto-adopt, and
+	// approve/reject a pending (discovered, not-yet-polled) device.
+	s.mux.Handle("POST /a/settings/shelly/autoadopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyAutoAdopt)))
+	s.mux.Handle("POST /a/settings/shelly/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyApprove)))
+	s.mux.Handle("POST /a/settings/shelly/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyReject)))
 	// Saison 20: admin UI accent color (single platform_config value).
 	s.mux.Handle("POST /a/settings/accent", s.requireAdminSession(http.HandlerFunc(s.handleAdminAccentPost)))
 	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))

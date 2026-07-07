@@ -559,6 +559,93 @@ func (s *Server) handleAdminShellyRelease(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
 }
 
+// shellyAutoAdopt is the effective "auto-activate discovered devices"
+// setting. Default OFF (the approval gate is on): a discovered device waits
+// as pending until approved. "1" restores Etappe-2 auto-adopt.
+func (s *Server) shellyAutoAdopt(ctx context.Context) bool {
+	if s.platformCfg == nil {
+		return false
+	}
+	v, _ := s.platformCfg.Get(ctx, platformconfig.KeyShellyAutoAdopt)
+	return v == "1"
+}
+
+// handleAdminShellyAutoAdopt saves the approval-gate toggle. It only changes
+// the behaviour of NEW finds; existing pending devices are untouched (no
+// surprise mass-activation when flipping the switch).
+func (s *Server) handleAdminShellyAutoAdopt(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	val := "0"
+	if r.PostForm.Get("shelly_auto_adopt") != "" {
+		val = "1"
+	}
+	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyShellyAutoAdopt, val); err != nil {
+		s.log.Error("save shelly auto-adopt failed", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+}
+
+// handleAdminShellyApprove activates a pending (discovered) device: it joins
+// the polled fleet. This is the one-click approval - the first time we ever
+// talk to the device. Rebuilds the fleet so the poll picks it up.
+func (s *Server) handleAdminShellyApprove(w http.ResponseWriter, r *http.Request) {
+	s.shellyPendingAction(w, r, func(ctx context.Context, id int64) error {
+		// The active cap (Etappe-1 limit) holds across approval too: a flood
+		// is bounded via the pending cap, but manual approvals must not push
+		// the polled fleet past maxShellyAddresses either.
+		if err := s.shellystore.ApprovePending(ctx, id, maxShellyAddresses); err != nil {
+			if errors.Is(err, shellystore.ErrAtCap) {
+				s.log.Warn("shelly: approval rejected, active device cap reached",
+					"cap", maxShellyAddresses)
+			}
+			return err
+		}
+		s.rebuildShellyClients(ctx)
+		return nil
+	})
+}
+
+// handleAdminShellyReject sends a pending device to the sticky ignore list
+// so discovery does not surface it again (releasable later like any ignored
+// device). No fleet change - a rejected device was never polled.
+func (s *Server) handleAdminShellyReject(w http.ResponseWriter, r *http.Request) {
+	s.shellyPendingAction(w, r, func(ctx context.Context, id int64) error {
+		return s.shellystore.RejectPending(ctx, id)
+	})
+}
+
+// shellyPendingAction is the shared body of the approve/reject handlers:
+// parse the id, run the action, redirect back. A missing pending row (double
+// click, already handled) is not an error - it just redirects.
+func (s *Server) shellyPendingAction(w http.ResponseWriter, r *http.Request, action func(context.Context, int64) error) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if s.shellystore == nil {
+		http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("id")), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	// ErrNotFound (double-click / already handled) and ErrAtCap (already
+	// logged specifically by the approve handler) are expected outcomes, not
+	// failures - just redirect back.
+	if err := action(r.Context(), id); err != nil &&
+		!errors.Is(err, shellystore.ErrNotFound) && !errors.Is(err, shellystore.ErrAtCap) {
+		s.log.Error("shelly: pending action failed", "err", err)
+	}
+	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+}
+
 // handleAdminUAShellyRemove is the sticky per-device removal from the Device
 // Center panel: the device is forgotten from our active set and its identity
 // (MAC when known, else the configured address) goes onto the ignore list so
@@ -628,6 +715,13 @@ func (s *Server) buildShellySettingsBlock(ctx context.Context) shellySettingsBlo
 			if d.Origin == shellystore.OriginDiscovered {
 				block.DiscoveredCount++
 			}
+		}
+	}
+	if pending, err := s.shellystore.ListPending(ctx); err == nil {
+		for _, d := range pending {
+			block.Pending = append(block.Pending, shellyPendingRow{
+				ID: d.ID, MAC: d.MAC, Addr: d.Address,
+			})
 		}
 	}
 	if ignored, err := s.shellystore.ListIgnored(ctx); err == nil {

@@ -39,12 +39,21 @@ import (
 // ErrNotFound is returned when a device id/address has no matching row.
 var ErrNotFound = errors.New("shellystore: device not found")
 
+// ErrAtCap is returned when approving would push the active set past its cap.
+var ErrAtCap = errors.New("shellystore: active device cap reached")
+
 // Origins and states as stored in the table.
 const (
 	OriginManual     = "manual"
 	OriginDiscovered = "discovered"
 	StateActive      = "active"
 	StateIgnored     = "ignored"
+	// StatePending is a device found by discovery while the approval gate is
+	// on: a stored record only. A pending device is NEVER polled, gets NO
+	// request/credentials and is NOT in the active client fleet - it waits
+	// for the operator to Approve (-> active) or Reject (-> ignored). We do
+	// not talk to a device before a human approves it.
+	StatePending = "pending"
 )
 
 // Store is the SQL gateway for the Shelly device set.
@@ -151,33 +160,41 @@ func (s *Store) CountActive(ctx context.Context) (int, error) {
 type AdoptResult int
 
 const (
-	// AdoptedNew - a fresh device was added to the active set.
+	// AdoptedNew - a fresh device was auto-activated (approval gate off).
 	AdoptedNew AdoptResult = iota
-	// AdoptedKnown - the device was already configured; only its
-	// last-seen fields were refreshed (or nothing changed).
+	// AdoptedPending - a fresh device was recorded as pending approval
+	// (approval gate on, the default). It is NOT polled and NOT in the fleet.
+	AdoptedPending
+	// AdoptedKnown - the device was already configured (active or pending);
+	// only its last-seen fields were refreshed, state unchanged.
 	AdoptedKnown
 	// AdoptSkippedIgnored - the device is on the ignore list; skipped.
 	AdoptSkippedIgnored
-	// AdoptSkippedFull - the active set is at the cap; skipped.
+	// AdoptSkippedFull - the target set (active, or pending) is at the cap;
+	// skipped.
 	AdoptSkippedFull
 )
 
-// Adopt folds one discovered device into the set (the auto-adopt path).
+// Adopt folds one discovered device into the set, honouring the approval
+// gate:
 //
-//   - If the device is ignored (by MAC when known, else by the exact
-//     address), it is skipped: AdoptSkippedIgnored. This is the sticky
-//     guarantee - a removed device stays gone.
-//   - If it is already known (an active row by MAC, or by address when the
-//     MAC is unknown), its address/name/model are refreshed and it reports
-//     AdoptedKnown. A discovered MAC also upgrades a matching manual row
-//     that had no MAC yet (so the two never split into duplicates).
-//   - Otherwise, when the active set is below cap, it is inserted as a
-//     discovered, active device: AdoptedNew. At the cap it is skipped
-//     (AdoptSkippedFull) so an announcement flood cannot blow the list up.
+//   - Ignored (by MAC when known, else the exact address) -> skipped
+//     (AdoptSkippedIgnored). The sticky guarantee: a removed device stays
+//     gone.
+//   - Already known (a non-ignored row - active OR pending - by MAC, or by
+//     address when the MAC is unknown) -> its address/name/model are
+//     refreshed in place, state UNCHANGED (a pending device is never
+//     silently activated by a re-announcement): AdoptedKnown. A discovered
+//     MAC also fills in a matching mac-less row so the two never split.
+//   - Otherwise a fresh device: when autoAdopt is true (the gate is off) it
+//     is inserted active (AdoptedNew, joins the fleet); when false (the
+//     default gate) it is inserted pending (AdoptedPending, stored only,
+//     never polled). Either way the target set is capped (AdoptSkippedFull)
+//     so an announcement flood cannot blow the list up.
 //
-// cap is the maximum number of active devices (Etappe-1 limit). A MAC, when
-// present, must be pre-normalised by the caller.
-func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, error) {
+// limit caps the target set (active OR pending). A MAC, when present, must be
+// pre-normalised by the caller.
+func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool) (AdoptResult, error) {
 	if d.Address == "" {
 		return AdoptSkippedFull, errors.New("shellystore: adopt without address")
 	}
@@ -193,19 +210,22 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, 
 		return AdoptSkippedIgnored, nil
 	}
 
-	// 2. Already known? A MAC match is authoritative; without a MAC, match
-	//    the address among active rows. Refresh the last-seen fields and,
-	//    when we now know the MAC, adopt it onto a matching manual row.
+	// 2. Already known among the NON-ignored rows (active or pending)? A MAC
+	//    match is authoritative (the MAC is globally unique); without a MAC,
+	//    match the address. Refresh in place, never touching the state.
 	if d.MAC != "" {
 		var id int64
+		var rowState string
 		err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM shelly_devices WHERE mac = ? AND state = ?`, d.MAC, StateActive).Scan(&id)
+			`SELECT id, state FROM shelly_devices WHERE mac = ? AND state <> ?`, d.MAC, StateIgnored).Scan(&id, &rowState)
 		switch {
 		case err == nil:
-			// The device now lives at d.Address; drop any stale active row
-			// still claiming that address (the IP's previous occupant), so a
-			// DHCP move never leaves two active rows sharing one address.
-			if err := s.clearActiveAddressExcept(ctx, d.Address, id); err != nil {
+			// The device now lives at d.Address; drop the stale occupant of
+			// that address so a DHCP move never leaves two rows at one
+			// address. Crucially, a device MOVING as pending only evicts
+			// another PENDING occupant - an unapproved find must never delete
+			// an approved (active) device that happens to share the IP.
+			if err := s.clearAddressForState(ctx, d.Address, rowState, id); err != nil {
 				return AdoptSkippedFull, err
 			}
 			_, err = s.db.ExecContext(ctx,
@@ -218,13 +238,13 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, 
 		case !errors.Is(err, sql.ErrNoRows):
 			return AdoptSkippedFull, fmt.Errorf("shellystore: adopt mac lookup: %w", err)
 		}
-		// No MAC row yet: an active row at this address (a manual pin that
-		// was never reached) is the same physical device - upgrade it with
-		// the MAC instead of adding a duplicate discovered row.
+		// No MAC row yet: a mac-less non-ignored row at this address (a manual
+		// pin, or an earlier pending find without a parseable MAC) is the same
+		// physical device - fill in the MAC instead of adding a duplicate.
 		var mid int64
 		err = s.db.QueryRowContext(ctx,
-			`SELECT id FROM shelly_devices WHERE address = ? AND mac = '' AND state = ?`,
-			d.Address, StateActive).Scan(&mid)
+			`SELECT id FROM shelly_devices WHERE address = ? AND mac = '' AND state <> ?`,
+			d.Address, StateIgnored).Scan(&mid)
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
@@ -238,10 +258,10 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, 
 			return AdoptSkippedFull, fmt.Errorf("shellystore: adopt addr lookup: %w", err)
 		}
 	} else {
-		// Unknown MAC: dedupe by address only.
+		// Unknown MAC: dedupe by address among the non-ignored rows.
 		var id int64
 		err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM shelly_devices WHERE address = ? AND state = ?`, d.Address, StateActive).Scan(&id)
+			`SELECT id FROM shelly_devices WHERE address = ? AND state <> ?`, d.Address, StateIgnored).Scan(&id)
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
@@ -256,16 +276,24 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, 
 		}
 	}
 
-	// 3. New device. First drop any stale active row still at this address
-	//    (a different device that used to hold the IP): the address-match
-	//    steps above only fire for THIS device's identity, so a different-MAC
-	//    occupant would otherwise leave a duplicate active row at the address.
-	if err := s.clearActiveAddressExcept(ctx, d.Address, 0); err != nil {
+	// 3. Fresh device. The gate decides the target state; each set is capped
+	//    independently.
+	targetState, result := StatePending, AdoptedPending
+	countFn := s.CountPending
+	if autoAdopt {
+		targetState, result = StateActive, AdoptedNew
+		countFn = s.CountActive
+	}
+	// Drop the stale occupant of this address (a different device that used
+	// to hold the IP). A device arriving as ACTIVE claims the address and
+	// evicts any prior non-ignored occupant; a device arriving as PENDING
+	// only evicts another PENDING occupant - it must never delete an approved
+	// (active) device on the strength of an unapproved find. Counted AFTER
+	// the cleanup so a replaced device does not consume a slot.
+	if err := s.clearAddressForState(ctx, d.Address, targetState, 0); err != nil {
 		return AdoptSkippedFull, err
 	}
-	// Honour the cap (counted AFTER the stale-row cleanup so a replaced
-	// device does not consume a slot).
-	n, err := s.CountActive(ctx)
+	n, err := countFn(ctx)
 	if err != nil {
 		return AdoptSkippedFull, err
 	}
@@ -275,26 +303,130 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int) (AdoptResult, 
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO shelly_devices (mac, address, origin, state, name, model, first_seen_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.MAC, d.Address, OriginDiscovered, StateActive, d.Name, d.Model, now, now)
+		d.MAC, d.Address, OriginDiscovered, targetState, d.Name, d.Model, now, now)
 	if err != nil {
 		return AdoptSkippedFull, fmt.Errorf("shellystore: adopt insert: %w", err)
 	}
-	return AdoptedNew, nil
+	return result, nil
 }
 
-// clearActiveAddressExcept deletes every ACTIVE row at address other than
-// exceptID (pass 0 to delete all active rows at the address). It enforces
-// the "one active row per address" invariant when a device moves onto an IP
-// that another active row still claims; ignored rows are never touched, so
-// the sticky list is preserved.
-func (s *Store) clearActiveAddressExcept(ctx context.Context, address string, exceptID int64) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM shelly_devices WHERE address = ? AND state = ? AND id <> ?`,
-		address, StateActive, exceptID)
+// ListPending returns the devices found by discovery that await approval,
+// most recently seen first. These are records ONLY - never polled.
+func (s *Store) ListPending(ctx context.Context) ([]Device, error) {
+	return s.query(ctx, `WHERE state = ? ORDER BY updated_at DESC, id`, StatePending)
+}
+
+// CountPending returns how many devices await approval (for the pending cap).
+func (s *Store) CountPending(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM shelly_devices WHERE state = ?`, StatePending).Scan(&n)
 	if err != nil {
-		return fmt.Errorf("shellystore: clear active address: %w", err)
+		return 0, fmt.Errorf("shellystore: count pending: %w", err)
+	}
+	return n, nil
+}
+
+// ApprovePending activates a pending device (it joins the fleet and is
+// polled). It honours the active cap (limit; 0 disables) so approvals cannot
+// push the polled set past it - ErrAtCap when full. Before the flip it drops
+// any stale active row at the same address so approval cannot create a
+// duplicate active address. Returns ErrNotFound when the id is not a pending
+// row.
+func (s *Store) ApprovePending(ctx context.Context, id int64, limit int) error {
+	now := s.now().UnixMilli()
+	var address string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT address FROM shelly_devices WHERE id = ? AND state = ?`, id, StatePending).Scan(&address)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("shellystore: approve lookup: %w", err)
+	}
+	if limit > 0 {
+		// Count active devices NOT at this address (this approval replaces
+		// any active row already there, so it does not add a net slot).
+		var n int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM shelly_devices WHERE state = ? AND address <> ?`,
+			StateActive, address).Scan(&n); err != nil {
+			return fmt.Errorf("shellystore: approve count: %w", err)
+		}
+		if n >= limit {
+			return ErrAtCap
+		}
+	}
+	if err := s.clearAddressExcept(ctx, address, id); err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE shelly_devices SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		StateActive, now, id, StatePending)
+	if err != nil {
+		return fmt.Errorf("shellystore: approve: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
 	}
 	return nil
+}
+
+// RejectPending sends a pending device to the ignore list (sticky, keeping
+// its MAC + address) so discovery does not surface it again. Returns
+// ErrNotFound when the id is not a pending row.
+func (s *Store) RejectPending(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE shelly_devices SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		StateIgnored, s.now().UnixMilli(), id, StatePending)
+	if err != nil {
+		return fmt.Errorf("shellystore: reject: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// clearAddressExcept deletes every NON-ignored row (active or pending) at
+// address other than exceptID (pass 0 to delete all). Used when an ACTIVE
+// device claims the address (a fresh auto-adopt, an active device's move, or
+// an approval): it evicts the IP's stale prior occupant. Ignored rows are
+// never touched, so the sticky list is preserved.
+func (s *Store) clearAddressExcept(ctx context.Context, address string, exceptID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM shelly_devices WHERE address = ? AND state <> ? AND id <> ?`,
+		address, StateIgnored, exceptID)
+	if err != nil {
+		return fmt.Errorf("shellystore: clear address: %w", err)
+	}
+	return nil
+}
+
+// clearPendingAddressExcept deletes only PENDING rows at address other than
+// exceptID. Used when a device arrives/moves as PENDING: it may supersede
+// another unapproved candidate at the same IP, but must NOT delete an
+// approved (active) device that happens to share the address - approval is
+// the operator's, not discovery's, to revoke.
+func (s *Store) clearPendingAddressExcept(ctx context.Context, address string, exceptID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM shelly_devices WHERE address = ? AND state = ? AND id <> ?`,
+		address, StatePending, exceptID)
+	if err != nil {
+		return fmt.Errorf("shellystore: clear pending address: %w", err)
+	}
+	return nil
+}
+
+// clearAddressForState dispatches to the right cleanup for a device arriving
+// at address in targetState: an ACTIVE arrival claims the IP (evicts any
+// non-ignored occupant); a PENDING arrival only supersedes another pending
+// candidate (leaving an approved active device intact).
+func (s *Store) clearAddressForState(ctx context.Context, address, targetState string, exceptID int64) error {
+	if targetState == StateActive {
+		return s.clearAddressExcept(ctx, address, exceptID)
+	}
+	return s.clearPendingAddressExcept(ctx, address, exceptID)
 }
 
 // isIgnored reports whether a device (mac when non-empty, plus address) is
@@ -440,9 +572,9 @@ func (s *Store) ReplaceManual(ctx context.Context, addresses []string) error {
 		}
 	}
 
-	// Insert wanted addresses that are not present at all yet. An address
-	// on the ignore list is skipped (Release is the way back), so a manual
-	// re-add cannot silently defeat a sticky removal.
+	// Insert wanted addresses that are not present as an active row yet. An
+	// address on the ignore list is skipped (Release is the way back), so a
+	// manual re-add cannot silently defeat a sticky removal.
 	for addr := range want {
 		if presentAddr[addr] {
 			continue
@@ -456,6 +588,13 @@ func (s *Store) ReplaceManual(ctx context.Context, addresses []string) error {
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("shellystore: replace ignore check: %w", err)
+		}
+		// A pending find at this address is superseded by the deliberate
+		// manual pin (the operator typing the IP is an explicit approval);
+		// drop it so the address does not end up both pending and active.
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM shelly_devices WHERE address = ? AND state = ?`, addr, StatePending); err != nil {
+			return fmt.Errorf("shellystore: replace clear pending: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO shelly_devices (mac, address, origin, state, name, model, first_seen_at, updated_at)

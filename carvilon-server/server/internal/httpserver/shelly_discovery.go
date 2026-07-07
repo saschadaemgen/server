@@ -107,18 +107,23 @@ const (
 	// capLogInterval rate-limits the "at cap" warning so a flood cannot spam
 	// the log.
 	capLogInterval = time.Minute
+	// dedupeMaxEntries bounds the in-memory recently-seen map so an
+	// announcement flood of distinct identities cannot exhaust memory.
+	// Generous headroom over any real LAN's device count.
+	dedupeMaxEntries = 4096
 )
 
 // shellyDiscovery consumes a dnssd source and reconciles finds into the
 // store. It is created once and run for the process lifetime.
 type shellyDiscovery struct {
-	store   *shellystore.Store
-	source  dnssd.Source
-	log     *slog.Logger
-	enabled func(context.Context) bool // Shelly integration on? (adoption gate)
-	rebuild func(context.Context)      // rebuild the live client fleet
-	limit   int
-	now     func() time.Time
+	store     *shellystore.Store
+	source    dnssd.Source
+	log       *slog.Logger
+	enabled   func(context.Context) bool // Shelly integration on? (adoption gate)
+	autoAdopt func(context.Context) bool // approval gate off? (auto-activate finds)
+	rebuild   func(context.Context)      // rebuild the live client fleet
+	limit     int
+	now       func() time.Time
 
 	mu         sync.Mutex
 	lastSeen   map[string]time.Time
@@ -134,21 +139,22 @@ type shellyDiscovery struct {
 }
 
 // newShellyDiscovery wires the coordinator. source may be a *dnssd.Browser
-// or a test fake; enabled/rebuild are Server methods.
-func newShellyDiscovery(store *shellystore.Store, source dnssd.Source, log *slog.Logger, enabled func(context.Context) bool, rebuild func(context.Context)) *shellyDiscovery {
+// or a test fake; enabled/autoAdopt/rebuild are Server methods.
+func newShellyDiscovery(store *shellystore.Store, source dnssd.Source, log *slog.Logger, enabled, autoAdopt func(context.Context) bool, rebuild func(context.Context)) *shellyDiscovery {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &shellyDiscovery{
-		store:    store,
-		source:   source,
-		log:      log,
-		enabled:  enabled,
-		rebuild:  rebuild,
-		limit:    maxShellyAddresses,
-		now:      time.Now,
-		lastSeen: map[string]time.Time{},
-		closed:   make(chan struct{}),
+		store:     store,
+		source:    source,
+		log:       log,
+		enabled:   enabled,
+		autoAdopt: autoAdopt,
+		rebuild:   rebuild,
+		limit:     maxShellyAddresses,
+		now:       time.Now,
+		lastSeen:  map[string]time.Time{},
+		closed:    make(chan struct{}),
 	}
 }
 
@@ -230,26 +236,49 @@ func (d *shellyDiscovery) observe(ctx context.Context, e dnssd.Entry) {
 	if key == "" {
 		key = "addr:" + det.Address
 	}
+	now := d.now()
 	d.mu.Lock()
-	if last, seen := d.lastSeen[key]; seen && d.now().Sub(last) < discoveryDedupeWindow {
+	if last, seen := d.lastSeen[key]; seen && now.Sub(last) < discoveryDedupeWindow {
 		d.mu.Unlock()
 		return
 	}
-	d.lastSeen[key] = d.now()
+	// Bound the map so an announcement flood of DISTINCT identities cannot
+	// grow it without limit (the DB rows and the log are already capped/rate-
+	// limited; this map was the last unbounded dimension). At the soft cap,
+	// drop entries older than the dedupe window (useless anyway); if a within-
+	// window flood still holds it at the cap, clear it entirely - the dedupe
+	// is only an optimisation, so correctness is unaffected and memory stays
+	// bounded.
+	if len(d.lastSeen) >= dedupeMaxEntries {
+		for k, t := range d.lastSeen {
+			if now.Sub(t) >= discoveryDedupeWindow {
+				delete(d.lastSeen, k)
+			}
+		}
+		if len(d.lastSeen) >= dedupeMaxEntries {
+			d.lastSeen = make(map[string]time.Time)
+		}
+	}
+	d.lastSeen[key] = now
 	d.mu.Unlock()
 
-	res, err := d.store.Adopt(ctx, det, d.limit)
+	autoAdopt := d.autoAdopt != nil && d.autoAdopt(ctx)
+	res, err := d.store.Adopt(ctx, det, d.limit, autoAdopt)
 	if err != nil {
 		d.log.Warn("shelly discovery: adopt failed", "component", "shelly-discovery", "err", err)
 		return
 	}
 	switch res {
 	case shellystore.AdoptedNew:
-		// No identity in the log - only that one device was adopted.
+		// Gate off: activated immediately. No identity in the log.
 		d.log.Info("shelly device auto-adopted via mdns", "component", "shelly-discovery")
 		if d.rebuild != nil {
 			d.rebuild(ctx)
 		}
+	case shellystore.AdoptedPending:
+		// Gate on (default): recorded, awaiting approval. NOT polled, so no
+		// fleet rebuild. Identity-free log.
+		d.log.Info("shelly device discovered, pending approval", "component", "shelly-discovery")
 	case shellystore.AdoptSkippedFull:
 		d.mu.Lock()
 		spam := d.now().Sub(d.lastCapLog) < capLogInterval

@@ -70,9 +70,23 @@ type shellySettingsBlock struct {
 	// DiscoveredCount is how many active devices came from mDNS (not the
 	// manual list) - the "found automatically" evidence.
 	DiscoveredCount int
-	// Ignored is the sticky ignore list: devices manually removed, each
-	// releasable back into discovery.
+	// AutoAdopt is the approval-gate toggle: false (default) = discovered
+	// devices wait as pending; true = auto-activate.
+	AutoAdopt bool
+	// Pending is the "awaiting approval" list: devices found by discovery
+	// while the gate is on. Records only - never polled.
+	Pending []shellyPendingRow
+	// Ignored is the sticky ignore list: devices manually removed or
+	// rejected, each releasable back into discovery.
 	Ignored []shellyIgnoredRow
+}
+
+// shellyPendingRow is one entry of the "Pending approval" view. It shows only
+// what the announcement carried (no poll happened): MAC + address.
+type shellyPendingRow struct {
+	ID   int64
+	MAC  string
+	Addr string
 }
 
 // shellyIgnoredRow is one entry of the "Ignored devices" view.
@@ -324,6 +338,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	shellyBlock := s.buildShellySettingsBlock(r.Context())
 	shellyBlock.HasPassword = shellyPw != ""
 	shellyBlock.Enabled = s.shellyEnabled(r.Context())
+	shellyBlock.AutoAdopt = s.shellyAutoAdopt(r.Context())
 
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},

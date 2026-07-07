@@ -83,6 +83,13 @@ const (
 	// list is imported into the table exactly once (and never resurrected
 	// after the admin later empties it). "1" once the seed has run.
 	KeyShellyMigrated = "shelly_devices_migrated" // "1" once legacy addresses were seeded
+	// Saison 21 - Shelly Etappe 2b: the approval gate for mDNS discovery.
+	// Default (unset/"0"): a discovered device waits as "pending approval"
+	// and is never polled until the operator approves it - safe out of the
+	// box, even on a flat network. "1" restores auto-adopt (a discovered
+	// device becomes active immediately), for operators with a segmented
+	// VLAN. Only affects NEW finds; existing pending entries are untouched.
+	KeyShellyAutoAdopt = "shelly_auto_adopt" // "1" = auto-activate discovered devices; default off (gate on)
 )
 
 // Service combines the DB and the secrets service.
