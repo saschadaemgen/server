@@ -75,8 +75,14 @@ const (
 	// fehlt der Wert, gilt an-wenn-Adressen-gesetzt (siehe
 	// Server.shellyEnabled).
 	KeyShellyEnabled   = "shelly_enabled"          // "1" / "0"
-	KeyShellyAddresses = "shelly_device_addresses" // comma-separated IPv4[:port]
+	KeyShellyAddresses = "shelly_device_addresses" // comma-separated IPv4[:port] (Etappe-1 legacy; seed source only)
 	KeyShellyPassword  = "shelly_auth_password"    // secret (SetSecret/GetSecret)
+	// Saison 21 - Shelly Etappe 2: the device set moved from the single
+	// comma-separated KeyShellyAddresses string to the shelly_devices table
+	// (migration 038). KeyShellyMigrated is the one-time guard so the legacy
+	// list is imported into the table exactly once (and never resurrected
+	// after the admin later empties it). "1" once the seed has run.
+	KeyShellyMigrated = "shelly_devices_migrated" // "1" once legacy addresses were seeded
 )
 
 // Service combines the DB and the secrets service.

@@ -32,6 +32,7 @@ import (
 	"carvilon.local/server/internal/consolestore"
 	"carvilon.local/server/internal/db"
 	"carvilon.local/server/internal/designerstore"
+	"carvilon.local/server/internal/dnssd"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
@@ -52,6 +53,7 @@ import (
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
@@ -280,18 +282,37 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		log.Info("protect api not yet configured; admin can set host + api key under /a/settings")
 	}
 
-	// Saison 21 - Shelly Etappe 1: one client per configured device
-	// address (lazy like UA/Protect; addresses + optional digest-auth
-	// password from platform_config). Neither the addresses nor the
-	// password reach a log line - only the device count does.
-	shellyAddrs, _ := platformCfg.Get(ctx, platformconfig.KeyShellyAddresses)
+	// Saison 21 - Shelly Etappe 2: the device set lives in the shelly_devices
+	// table (migration 038), the single source of truth for manual + mDNS-
+	// discovered devices plus the sticky ignore list. Seed the table from the
+	// Etappe-1 legacy address list exactly once, then build one client per
+	// active device (LAN-guarded; neither addresses nor the password ever
+	// reach a log line - only the device count does).
+	shellyStore := shellystore.New(database.DB)
+	httpserver.SeedShellyManualFromLegacy(ctx, shellyStore, platformCfg, log)
 	shellyPassword, _ := platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
-	shellyClients := httpserver.BuildShellyClients(shellyAddrs, shellyPassword)
+	shellyActive, err := shellyStore.ListActive(ctx)
+	if err != nil {
+		log.Warn("shelly: list active devices failed at startup", "err", err)
+	}
+	shellyAddrList := make([]string, 0, len(shellyActive))
+	for _, d := range shellyActive {
+		shellyAddrList = append(shellyAddrList, d.Address)
+	}
+	shellyClients := httpserver.BuildShellyClients(strings.Join(shellyAddrList, ", "), shellyPassword)
 	if len(shellyClients) > 0 {
 		log.Info("shelly api clients configured", "devices", len(shellyClients))
 	} else {
-		log.Info("shelly api not yet configured; admin can set device addresses under /a/settings")
+		log.Info("shelly api not yet configured; admin can add device addresses under /a/settings or let mDNS discovery find them")
 	}
+
+	// mDNS auto-discovery browser (Gen2+ _shelly._tcp). A passive multicast
+	// listener plus active queries; it coexists with a system responder
+	// (avahi) via address/port reuse and falls back to ephemeral-port active
+	// queries if it cannot bind 5353. Opened always (near-zero passive load);
+	// the coordinator only adopts + actively scans while Shelly is enabled.
+	shellyBrowser := dnssd.Open(httpserver.ShellyServiceType, log)
+	defer shellyBrowser.Close()
 
 	// access.UserStore-Adapter um den uaapi-Client. Nil-Client ist
 	// erlaubt; der Adapter liefert dann access.ErrNotConfigured und
@@ -446,6 +467,8 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		UA:              uaClient,
 		Protect:         protectClient,
 		Shelly:          shellyClients,
+		ShellyStore:     shellyStore,
+		ShellyDiscovery: shellyBrowser,
 		UserStore:       userStore,
 		NativeUsers:     nativeUserStore,
 		Hub:             hub,
@@ -475,6 +498,12 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		log.Error("httpserver init failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Shelly Etappe 2: run the mDNS auto-discovery coordinator for the
+	// process lifetime. It consumes the browser's announcements, auto-adopts
+	// Gen2+ devices into the set (while Shelly is enabled) and honours the
+	// sticky ignore list. Stops when ctx is cancelled.
+	go srv.RunShellyDiscovery(ctx)
 
 	// mDNS-Advertisement (Saison 13-02-FIX4-d). Adoptierte
 	// ESP-Viewer finden den Server via _carvilon._tcp.local statt

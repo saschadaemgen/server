@@ -58,13 +58,29 @@ type protectSettingsBlock struct {
 }
 
 // shellySettingsBlock mirrors the pattern for the Shelly integration
-// (Saison 21 - Shelly Etappe 1). Addresses render back into the form
-// (they are the admin's own list); the auth password never does -
-// only HasPassword ("set").
+// (Saison 21 - Shelly Etappe 1/2). Addresses render back into the form (the
+// admin's own MANUAL list, from the device table); the auth password never
+// does - only HasPassword ("set"). Etappe 2 adds the discovery summary and
+// the sticky ignore list so a removed device can be released again.
 type shellySettingsBlock struct {
 	Addresses   string
 	HasPassword bool
 	Enabled     bool
+
+	// DiscoveredCount is how many active devices came from mDNS (not the
+	// manual list) - the "found automatically" evidence.
+	DiscoveredCount int
+	// Ignored is the sticky ignore list: devices manually removed, each
+	// releasable back into discovery.
+	Ignored []shellyIgnoredRow
+}
+
+// shellyIgnoredRow is one entry of the "Ignored devices" view.
+type shellyIgnoredRow struct {
+	ID    int64
+	Label string // MAC when known, else the configured address
+	MAC   string
+	Addr  string
 }
 
 type auditRow struct {
@@ -304,8 +320,10 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 	protectURL, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyProtectAPIBaseURL)
 	protectKey, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyProtectAPIKey)
 
-	shellyAddrs, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyShellyAddresses)
 	shellyPw, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyShellyPassword)
+	shellyBlock := s.buildShellySettingsBlock(r.Context())
+	shellyBlock.HasPassword = shellyPw != ""
+	shellyBlock.Enabled = s.shellyEnabled(r.Context())
 
 	data := adminSettingsData{
 		User: adminUser{Name: username, Initials: initialsOf(username)},
@@ -320,11 +338,7 @@ func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
 			HasKey:  protectKey != "",
 			Enabled: s.protectEnabled(r.Context()),
 		},
-		Shelly: shellySettingsBlock{
-			Addresses:   shellyAddrs,
-			HasPassword: shellyPw != "",
-			Enabled:     s.shellyEnabled(r.Context()),
-		},
+		Shelly: shellyBlock,
 		Station: stationSettingsBlock{
 			Lat: stationLat,
 			Lon: stationLon,

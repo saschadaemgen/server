@@ -98,14 +98,14 @@ func TestAdminUA_ShellyRows(t *testing.T) {
 
 	body := getBody(t, env, "/a/ua")
 	for _, want := range []string{
-		">Switches<",              // group heading
-		"Growbox",                 // device name from GetDeviceInfo
-		"Shelly Pro4PM",           // model label
-		"08F9E0E5C790",            // MAC in the row
-		`data-dc-value="shelly"`,  // source facet
-		`data-source="shelly"`,    // row source key
-		`data-kind="shelly"`,      // row kind for the lazy panel
-		dead,                      // the dead device keeps its row (address as name)
+		">Switches<",             // group heading
+		"Growbox",                // device name from GetDeviceInfo
+		"Shelly Pro4PM",          // model label
+		"08F9E0E5C790",           // MAC in the row
+		`data-dc-value="shelly"`, // source facet
+		`data-source="shelly"`,   // row source key
+		`data-kind="shelly"`,     // row kind for the lazy panel
+		dead,                     // the dead device keeps its row (address as name)
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("shelly overview missing %q", want)
@@ -160,7 +160,7 @@ func TestAdminUA_ShellyDetailLazy(t *testing.T) {
 	var out struct {
 		OK       bool `json:"ok"`
 		Sections []struct {
-			Title string `json:"title"`
+			Title string                        `json:"title"`
 			Rows  []struct{ Key, Value string } `json:"rows"`
 		} `json:"sections"`
 	}
@@ -295,9 +295,18 @@ func TestAdminSettings_ShellyStoresPasswordEncrypted(t *testing.T) {
 		t.Errorf("password echoed back into the page")
 	}
 
-	// Normalised, deduped list (URL form stripped, port kept).
-	if v, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyShellyAddresses); v != "192.168.33.51, 192.168.33.52:8080" {
-		t.Errorf("stored addresses = %q", v)
+	// Normalised, deduped list is reconciled into the device table as
+	// manual devices (Etappe 2 - the set moved off the legacy key).
+	manual, err := env.srv.shellystore.ListManualActive(context.Background())
+	if err != nil {
+		t.Fatalf("list manual: %v", err)
+	}
+	gotAddrs := make([]string, 0, len(manual))
+	for _, d := range manual {
+		gotAddrs = append(gotAddrs, d.Address)
+	}
+	if got := strings.Join(gotAddrs, ", "); got != "192.168.33.51, 192.168.33.52:8080" {
+		t.Errorf("stored manual addresses = %q", got)
 	}
 	stored, err := env.platformCfg.GetSecret(context.Background(), platformconfig.KeyShellyPassword)
 	if err != nil || stored != "super-secret-shelly-pw" {
@@ -331,15 +340,27 @@ func TestAdminSettings_ShellyStoresPasswordEncrypted(t *testing.T) {
 func TestAdminSettings_ShellyRejectsBadAddresses(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	if err := env.platformCfg.Set(context.Background(), platformconfig.KeyShellyAddresses, "192.168.33.51"); err != nil {
+	if err := env.srv.shellystore.ReplaceManual(context.Background(), []string{"192.168.33.51"}); err != nil {
 		t.Fatalf("seed addresses: %v", err)
+	}
+
+	manualAddrs := func() string {
+		manual, err := env.srv.shellystore.ListManualActive(context.Background())
+		if err != nil {
+			t.Fatalf("list manual: %v", err)
+		}
+		out := make([]string, 0, len(manual))
+		for _, d := range manual {
+			out = append(out, d.Address)
+		}
+		return strings.Join(out, ", ")
 	}
 
 	for _, bad := range []string{
 		"8.8.8.8",             // public
 		"169.254.169.254",     // cloud metadata
 		"192.168.33.51:99999", // port out of range
-		"shelly.local",        // hostname (IPs only in Etappe 1)
+		"shelly.local",        // hostname (IPs only)
 		"2001:db8::1",         // not IPv4
 	} {
 		resp, err := env.client.PostForm(env.ts.URL+"/a/settings/shelly", url.Values{
@@ -354,8 +375,8 @@ func TestAdminSettings_ShellyRejectsBadAddresses(t *testing.T) {
 		if !strings.Contains(string(body), "Device addresses:") {
 			t.Errorf("%q: validation flash missing", bad)
 		}
-		if v, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyShellyAddresses); v != "192.168.33.51" {
-			t.Errorf("%q: stored addresses changed to %q", bad, v)
+		if v := manualAddrs(); v != "192.168.33.51" {
+			t.Errorf("%q: stored manual addresses changed to %q", bad, v)
 		}
 	}
 }
@@ -415,11 +436,11 @@ func TestParseShellyAddresses(t *testing.T) {
 		t.Errorf("empty input: %v / %v", list, err)
 	}
 	for _, bad := range []string{
-		"10.1.2.3:0",       // port out of range
-		"10.1.2.3:080",     // non-canonical port
-		"10.1.2.3:+80",     // signed port
-		"::ffff:10.1.2.3",  // IPv4-mapped IPv6 text (dial path can't use it)
-		"010.1.2.3",        // non-canonical host spelling
+		"10.1.2.3:0",      // port out of range
+		"10.1.2.3:080",    // non-canonical port
+		"10.1.2.3:+80",    // signed port
+		"::ffff:10.1.2.3", // IPv4-mapped IPv6 text (dial path can't use it)
+		"010.1.2.3",       // non-canonical host spelling
 	} {
 		if _, err := parseShellyAddresses(bad); err == nil {
 			t.Errorf("%q accepted, want error", bad)

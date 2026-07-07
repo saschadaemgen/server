@@ -40,6 +40,7 @@ import (
 	"carvilon.local/server/internal/normalize"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/readerstore"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/viewermanager"
 )
@@ -274,6 +275,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 	consoleStore := consolestore.New(d.DB, consoleSecrets)
 	consoleMgr := console.NewManager(quietLogger(), console.WithIdleTimeout(0))
 	readerStore := readerstore.New(d.DB)
+	shellyStore := shellystore.New(d.DB, shellystore.WithClock(clock.Now))
 
 	cfg := config.Config{
 		ListenAddr: ":0",
@@ -304,6 +306,7 @@ func newTestServerWithClock(t *testing.T, start time.Time) *testEnv {
 		MQTTStore:       mqttStore,
 		DesignerStore:   designerstore.New(d.DB),
 		ReaderStore:     readerStore,
+		ShellyStore:     shellyStore,
 		LogBuffer:       logBuffer,
 		Console:         consoleMgr,
 		ConsoleStore:    consoleStore,

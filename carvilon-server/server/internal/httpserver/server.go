@@ -39,6 +39,7 @@ import (
 	"carvilon.local/server/internal/console"
 	"carvilon.local/server/internal/consolestore"
 	"carvilon.local/server/internal/designerstore"
+	"carvilon.local/server/internal/dnssd"
 	"carvilon.local/server/internal/doorbellcalls"
 	"carvilon.local/server/internal/doorbellhub"
 	"carvilon.local/server/internal/doorhistory"
@@ -53,6 +54,7 @@ import (
 	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/shellyapi"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
 	"carvilon.local/server/internal/streamstore"
@@ -106,6 +108,14 @@ type Deps struct {
 	// (Saison 21 - Shelly Etappe 1, read-only switches in the Device
 	// Center). Built lazily like UA; empty means "not configured yet".
 	Shelly []*shellyapi.Client
+	// ShellyStore is the persistent Shelly device set + ignore list
+	// (migration 038, Etappe 2). Nil keeps Shelly on the Etappe-1 read
+	// paths with no discovery/removal.
+	ShellyStore *shellystore.Store
+	// ShellyDiscovery is the dnssd source (a *dnssd.Browser) the mDNS
+	// auto-discovery coordinator consumes. Nil disables discovery; main
+	// owns its lifecycle (Close on shutdown).
+	ShellyDiscovery dnssd.Source
 	// UserStore is the UserStore wrapper around the UA client
 	// (see access/ua). Nil = UA not configured yet; the admin UI
 	// then shows a hint instead of an empty list.
@@ -224,6 +234,13 @@ type Server struct {
 	ua              *uaapi.Client
 	protect         *protectapi.Client
 	shelly          *shellyFleet
+	// shellystore is the persistent Shelly device set + ignore list
+	// (migration 038, Etappe 2). Nil keeps Shelly on the Etappe-1 read
+	// paths with no discovery/removal.
+	shellystore *shellystore.Store
+	// shellyDisco is the mDNS auto-discovery coordinator; nil disables
+	// discovery (the manual list + read paths still work).
+	shellyDisco     *shellyDiscovery
 	userStore       UserStoreLike
 	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
@@ -356,9 +373,27 @@ func New(deps Deps) (*Server, error) {
 		tpl:             tpl,
 	}
 	srv.designerRuns = newDesignerRunSet()
+	srv.shellystore = deps.ShellyStore
 	srv.SetShellyClients(deps.Shelly)
+	// Shelly Etappe 2: wire the mDNS auto-discovery coordinator when a store
+	// and a dnssd source are present. main starts it (RunShellyDiscovery) and
+	// owns the source's lifecycle.
+	if deps.ShellyStore != nil && deps.ShellyDiscovery != nil {
+		srv.shellyDisco = newShellyDiscovery(deps.ShellyStore, deps.ShellyDiscovery,
+			deps.Log, srv.shellyEnabled, srv.rebuildShellyClients)
+	}
 	srv.routes()
 	return srv, nil
+}
+
+// RunShellyDiscovery runs the mDNS auto-discovery coordinator until ctx is
+// cancelled. main launches it in its own goroutine; a no-op when discovery
+// is not wired.
+func (s *Server) RunShellyDiscovery(ctx context.Context) {
+	if s.shellyDisco == nil {
+		return
+	}
+	s.shellyDisco.Run(ctx)
 }
 
 // SetUAClient lets main swap the UA client at runtime after the
@@ -521,6 +556,10 @@ func (s *Server) routes() {
 	// status line (counts only - never addresses).
 	s.mux.Handle("POST /a/settings/shelly", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellySettingsPost)))
 	s.mux.Handle("GET /a/settings/shelly/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyStatus)))
+	// Shelly Etappe 2: active mDNS "Scan now" + releasing a device from the
+	// sticky ignore list (both from the settings block).
+	s.mux.Handle("POST /a/settings/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScan)))
+	s.mux.Handle("POST /a/settings/shelly/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyRelease)))
 	// Saison 20: admin UI accent color (single platform_config value).
 	s.mux.Handle("POST /a/settings/accent", s.requireAdminSession(http.HandlerFunc(s.handleAdminAccentPost)))
 	s.mux.Handle("GET /a/weather", s.requireAdminSession(http.HandlerFunc(s.handleWeather)))
@@ -590,6 +629,18 @@ func (s *Server) routes() {
 	// {id} is the configured device address; the handler only ever
 	// dials addresses that are part of the stored configuration.
 	s.mux.Handle("GET /a/ua/shelly/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyDetail)))
+	// Shelly Etappe 2: sticky per-device removal + active "Scan now" from the
+	// Device Center. Removal forgets the device on OUR side (ignore list) and
+	// never writes to the device - control stays read-only.
+	s.mux.Handle("POST /a/ua/shelly/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRemove)))
+	s.mux.Handle("POST /a/ua/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyScan)))
+	// Dev-only: feed a synthetic mDNS announcement through the real discovery
+	// path so the adopt/sticky-remove/release chain can be driven without a
+	// live device or OS multicast. Registered ONLY in DevMode - never in a
+	// production build.
+	if s.cfg.DevMode {
+		s.mux.Handle("POST /a/ua/shelly/_dev/announce", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyDevAnnounce)))
+	}
 
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))

@@ -155,6 +155,10 @@
   .dc-spacer { flex:1; }
   .dc-readonly { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:var(--radius-pill); font-size:11px; letter-spacing:0.03em; color:var(--orange-300); background:var(--amber-haze); box-shadow:inset 0 0 0 1px var(--border-accent); }
   .dc-readonly svg { width:13px; height:13px; }
+  .dc-toolbtn { display:inline-flex; align-items:center; gap:6px; padding:4px 11px; border-radius:var(--radius-sm); font-family:var(--font-sans); font-size:11px; color:var(--text-secondary); background:var(--surface-cell); border:1px solid var(--border-default); cursor:pointer; }
+  .dc-toolbtn:hover { color:var(--white); border-color:var(--border-accent); }
+  .dc-toolbtn svg { width:13px; height:13px; }
+  .dc-toolform { margin:0; }
 
   .dc-scroll { flex:1; overflow:auto; }
   .dc-table { min-width:760px; }
@@ -438,6 +442,11 @@
         <div class="dc-count"><span class="dc-shown" data-dc-shown>{{.Page.TotalCount}}</span><span class="dc-total">/ {{.Page.TotalCount}}</span></div>
         <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
         <span class="dc-spacer"></span>
+        {{if .Page.ShellyAvailable}}
+        <form class="dc-toolform" method="post" action="/a/ua/shelly/scan" title="Actively scan the network for Shelly devices">
+          <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><path d="M12 4 9 7M12 20l3-3"/></svg>Scan Shelly</button>
+        </form>
+        {{end}}
         <span class="dc-readonly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Read only</span>
       </div>
 
@@ -509,6 +518,20 @@
                 {{if $r.Capabilities}}
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Capabilities</span><span class="dc-hr"></span></div>
                   <div class="dc-caps">{{range $r.Capabilities}}<span class="dc-cap">{{.}}</span>{{end}}</div>
+                {{end}}
+                {{/* Shelly devices are CARVILON's own config: their panel
+                     carries the sticky Remove control. Removing forgets the
+                     device on our side and stops re-discovery; the device
+                     itself is never written to (control stays read only). */}}
+                {{if eq $r.Kind "shelly"}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Device controls</span><span class="dc-hr"></span></div>
+                  <form class="dc-act-form" method="post" action="/a/ua/shelly/remove">
+                    <input type="hidden" name="address" value="{{$r.ID}}">
+                    <div class="dc-act-row">
+                      <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
+                    </div>
+                    <p class="dc-act-hint">Removing forgets this device on the CARVILON side and stops it from being re-discovered (sticky). The device itself is not changed - control stays read only. Release it again under Settings &rsaquo; Shelly.</p>
+                  </form>
                 {{end}}
               </template>
 

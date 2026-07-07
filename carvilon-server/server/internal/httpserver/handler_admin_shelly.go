@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/shellyapi"
+	"carvilon.local/server/internal/shellystore"
 )
 
 // shellyFleet is the immutable set of per-device clients. Swapped as
@@ -69,8 +71,14 @@ func (s *Server) shellyEnabled(ctx context.Context) bool {
 	case "0":
 		return false
 	default:
-		addrs, _ := s.platformCfg.Get(ctx, platformconfig.KeyShellyAddresses)
-		return strings.TrimSpace(addrs) != ""
+		// No explicit choice yet: on when at least one device is configured
+		// (the set now lives in the shelly_devices table, not the legacy
+		// address key). A store read error falls back to off.
+		if s.shellystore == nil {
+			return false
+		}
+		n, err := s.shellystore.CountActive(ctx)
+		return err == nil && n > 0
 	}
 }
 
@@ -111,36 +119,12 @@ func parseShellyAddresses(raw string) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 	for _, f := range fields {
-		addr := strings.TrimSpace(f)
-		for _, scheme := range []string{"http://", "https://"} {
-			addr = strings.TrimPrefix(addr, scheme)
+		norm, ok := normalizeShellyAddr(f)
+		if !ok {
+			return nil, shellyAddrError(strings.TrimSpace(f))
 		}
-		if i := strings.IndexByte(addr, '/'); i >= 0 {
-			addr = addr[:i]
-		}
-		if addr == "" {
+		if norm == "" { // an empty/whitespace field
 			continue
-		}
-		host, port := addr, ""
-		if h, p, err := net.SplitHostPort(addr); err == nil {
-			host, port = h, p
-		}
-		if port != "" {
-			n, err := strconv.Atoi(port)
-			if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
-				return nil, shellyAddrError(addr)
-			}
-			if n == 80 {
-				port = "" // the default http port IS the bare form
-			}
-		}
-		ip := net.ParseIP(host)
-		if ip == nil || ip.To4() == nil || ip.String() != host || !shellyLANIP(ip) {
-			return nil, shellyAddrError(addr)
-		}
-		norm := host
-		if port != "" {
-			norm = net.JoinHostPort(host, port)
 		}
 		if !seen[norm] {
 			seen[norm] = true
@@ -153,6 +137,49 @@ func parseShellyAddresses(raw string) ([]string, error) {
 	return out, nil
 }
 
+// normalizeShellyAddr canonicalises one address entry to the dial form used
+// everywhere (bare host, or host:port with a non-default port; the default
+// http port ":80" and a trailing ":" fold into the bare form). The host
+// must be a LAN IPv4 in plain dotted-quad spelling - no IPv4-mapped IPv6
+// text (the dial path could not use it) and never an off-LAN or metadata
+// address. Returns ("", true) for an empty/whitespace entry (skippable) and
+// (_, false) for an invalid one. Shared by the settings parser, the
+// store-backed client builder (defence in depth on a hand-edited row) and
+// mDNS discovery, so one guard governs every path an address can take.
+func normalizeShellyAddr(entry string) (string, bool) {
+	addr := strings.TrimSpace(entry)
+	for _, scheme := range []string{"http://", "https://"} {
+		addr = strings.TrimPrefix(addr, scheme)
+	}
+	if i := strings.IndexByte(addr, '/'); i >= 0 {
+		addr = addr[:i]
+	}
+	if addr == "" {
+		return "", true
+	}
+	host, port := addr, ""
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		host, port = h, p
+	}
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return "", false
+		}
+		if n == 80 {
+			port = "" // the default http port IS the bare form
+		}
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || ip.String() != host || !shellyLANIP(ip) {
+		return "", false
+	}
+	if port != "" {
+		return net.JoinHostPort(host, port), true
+	}
+	return host, true
+}
+
 func shellyAddrError(entry string) error {
 	return errors.New("entry " + strconv.Quote(entry) + " is not a LAN IPv4 address (optionally with :port)")
 }
@@ -160,7 +187,9 @@ func shellyAddrError(entry string) error {
 // shellyLANIP mirrors the console LAN guard: private (RFC 1918),
 // loopback or link-local targets only, and never the cloud
 // instance-metadata endpoint - an admin form must not become an SSRF
-// hop if this binary ever runs off the home LAN.
+// hop if this binary ever runs off the home LAN. This is the guard for
+// the MANUAL admin list: an authenticated operator may deliberately pin a
+// loopback/link-local target (e.g. a local dev stub).
 func shellyLANIP(ip net.IP) bool {
 	if ip.Equal(net.ParseIP("169.254.169.254")) {
 		return false
@@ -168,21 +197,97 @@ func shellyLANIP(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
 }
 
-// BuildShellyClients constructs one client per stored address (main
-// uses it at startup, the settings POST after a save). The stored
-// value is trusted to have passed parseShellyAddresses, but a
-// re-parse keeps a hand-edited database row from constructing clients
-// for arbitrary targets.
+// shellyDiscoverableIP is the STRICTER guard for the UNTRUSTED mDNS
+// discovery path: only genuine RFC 1918 private LAN addresses may be
+// auto-adopted. Unlike shellyLANIP it rejects loopback and link-local, so
+// a hostile announcement cannot make us auto-dial our own localhost
+// services (127.0.0.0/8) or a link-local target (169.254.0.0/16, incl. the
+// cloud metadata endpoint). ip.IsPrivate() is exactly 10/8, 172.16/12 and
+// 192.168/16 - the addresses a home/building LAN actually uses.
+func shellyDiscoverableIP(ip net.IP) bool {
+	return ip.IsPrivate()
+}
+
+// BuildShellyClients constructs one client per stored address (the legacy
+// comma-separated form, kept for the one-time seed). The stored value is
+// trusted to have passed parseShellyAddresses, but a re-parse keeps a
+// hand-edited database row from constructing clients for arbitrary targets.
 func BuildShellyClients(addresses, password string) []*shellyapi.Client {
 	parsed, err := parseShellyAddresses(addresses)
 	if err != nil {
 		return nil
 	}
-	clients := make([]*shellyapi.Client, 0, len(parsed))
-	for _, addr := range parsed {
-		clients = append(clients, shellyapi.New(shellyapi.Options{Address: addr, Password: password}))
+	return buildShellyClientsFromList(parsed, password)
+}
+
+// buildShellyClientsFromList constructs one client per address, re-checking
+// each through the LAN guard (defence in depth: the addresses come from the
+// shelly_devices table, which a hand-edit could poison). An address that
+// fails the guard is dropped, not dialled.
+func buildShellyClientsFromList(addresses []string, password string) []*shellyapi.Client {
+	clients := make([]*shellyapi.Client, 0, len(addresses))
+	for _, addr := range addresses {
+		norm, ok := normalizeShellyAddr(addr)
+		if !ok || norm == "" {
+			continue
+		}
+		clients = append(clients, shellyapi.New(shellyapi.Options{Address: norm, Password: password}))
 	}
 	return clients
+}
+
+// rebuildShellyClients rebuilds the live client fleet from the active
+// device set (manual + discovered) plus the shared digest password, and
+// swaps it in. Called after any change to the set: a settings save, a
+// manual removal, or an mDNS auto-adopt. A store/read error leaves the
+// current fleet in place (never blanks a working set on a transient error).
+func (s *Server) rebuildShellyClients(ctx context.Context) {
+	if s.shellystore == nil {
+		return
+	}
+	active, err := s.shellystore.ListActive(ctx)
+	if err != nil {
+		s.log.Warn("shelly: rebuild clients failed to list devices", "err", err)
+		return
+	}
+	password, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
+	addrs := make([]string, 0, len(active))
+	for _, d := range active {
+		addrs = append(addrs, d.Address)
+	}
+	s.SetShellyClients(buildShellyClientsFromList(addrs, password))
+}
+
+// SeedShellyManualFromLegacy imports the Etappe-1 comma-separated address
+// list into the shelly_devices table exactly once (as manual devices),
+// guarded by KeyShellyMigrated so a later-emptied set is never resurrected
+// on the next start. A no-op once the flag is set or when there is nothing
+// to import. Called by main before discovery starts.
+func SeedShellyManualFromLegacy(ctx context.Context, store *shellystore.Store, cfg *platformconfig.Service, log *slog.Logger) {
+	if store == nil || cfg == nil {
+		return
+	}
+	if done, _ := cfg.Get(ctx, platformconfig.KeyShellyMigrated); done == "1" {
+		return
+	}
+	// Set the migration flag BEFORE seeding. The legacy address key is never
+	// rewritten, so if the flag were only set after a successful seed, a
+	// failure here (or an admin who later removes a seeded address) could let
+	// the next start re-import the legacy list and resurrect a removed
+	// device. Flag-first trades that hazard for, at worst, a lost one-time
+	// import on a rare config-write failure (the admin re-adds the IPs).
+	if err := cfg.Set(ctx, platformconfig.KeyShellyMigrated, "1"); err != nil {
+		log.Warn("shelly: set migration flag failed; deferring legacy seed to next start", "err", err)
+		return
+	}
+	legacy, _ := cfg.Get(ctx, platformconfig.KeyShellyAddresses)
+	if parsed, err := parseShellyAddresses(legacy); err == nil && len(parsed) > 0 {
+		if err := store.ReplaceManual(ctx, parsed); err != nil {
+			log.Warn("shelly: seed manual devices from legacy list failed (re-add them under /a/settings)", "err", err)
+			return
+		}
+		log.Info("shelly: seeded manual devices from legacy address list", "count", len(parsed))
+	}
 }
 
 // shellyProbe is one device's poll outcome: its client (for the
@@ -223,7 +328,7 @@ func (s *Server) probeShelly(ctx context.Context) []shellyProbe {
 // the CONFIGURED address - stable whether or not the device answers.
 // An offline device keeps its row with the address as its name and
 // "-" everywhere else; nothing is invented.
-func makeShellyRow(p shellyProbe) uaRow {
+func makeShellyRow(p shellyProbe, origin string) uaRow {
 	addr := p.client.Address()
 	row := uaRow{
 		ID:          addr,
@@ -234,6 +339,7 @@ func makeShellyRow(p shellyProbe) uaRow {
 		Source:      "shelly",
 		SourceLabel: "Shelly",
 		IP:          addr,
+		Origin:      origin,
 	}
 	if p.err == nil {
 		row.StatusState, row.StatusText = "online", "Online"
@@ -264,9 +370,23 @@ func makeShellyRow(p shellyProbe) uaRow {
 	} else {
 		det = appendKVDash(det, "Device ID", "")
 	}
+	det = appendKV(det, "Origin", shellyOriginLabel(origin))
 	row.Detail = det
 	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.IP, row.MAC, row.TypeLabel, "shelly"}, " "))
 	return row
+}
+
+// shellyOriginLabel renders the stored origin for the panel ("" for a row
+// whose device is not in the store, e.g. a transient probe).
+func shellyOriginLabel(origin string) string {
+	switch origin {
+	case shellystore.OriginManual:
+		return "Manual (configured IP)"
+	case shellystore.OriginDiscovered:
+		return "Discovered (mDNS)"
+	default:
+		return ""
+	}
 }
 
 // handleAdminUAShellyDetail lazily serves one device's live switch
@@ -357,9 +477,10 @@ func (s *Server) handleAdminShellySettingsPost(w http.ResponseWriter, r *http.Re
 	rawAddrs := r.PostForm.Get("shelly_addresses")
 	password := r.PostForm.Get("shelly_password")
 
-	// The address list is always written (an emptied field means
-	// "no devices"), but only after validation - a bad entry keeps
-	// the stored list untouched and flashes red.
+	// The manual IP list is reconciled into the device table (an emptied
+	// field removes the manual pins; discovered and ignored devices are
+	// untouched), but only after validation - a bad entry keeps the stored
+	// set untouched and flashes red.
 	parsed, perr := parseShellyAddresses(rawAddrs)
 	if perr != nil {
 		data := s.buildSettingsData(r)
@@ -368,10 +489,12 @@ func (s *Server) handleAdminShellySettingsPost(w http.ResponseWriter, r *http.Re
 		s.renderAdminPage(w, "settings", data)
 		return
 	}
-	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyShellyAddresses, strings.Join(parsed, ", ")); err != nil {
-		s.log.Error("save shelly addresses failed", "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	if s.shellystore != nil {
+		if err := s.shellystore.ReplaceManual(r.Context(), parsed); err != nil {
+			s.log.Error("save shelly manual addresses failed", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 	if password != "" {
 		if err := s.platformCfg.SetSecret(r.Context(), platformconfig.KeyShellyPassword, password); err != nil {
@@ -394,14 +517,131 @@ func (s *Server) handleAdminShellySettingsPost(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	storedAddrs, _ := s.platformCfg.Get(r.Context(), platformconfig.KeyShellyAddresses)
-	storedPassword, _ := s.platformCfg.GetSecret(r.Context(), platformconfig.KeyShellyPassword)
-	s.SetShellyClients(BuildShellyClients(storedAddrs, storedPassword))
+	s.rebuildShellyClients(r.Context())
 
 	data := s.buildSettingsData(r)
 	data.Flash = "Saved."
 	data.FlashType = "green"
 	s.renderAdminPage(w, "settings", data)
+}
+
+// handleAdminShellyScan triggers one active mDNS scan from the settings
+// page ("Scan now"). Discovery adopts on its own timeline; this only nudges
+// the network. Redirects back so the async adoption surfaces on the next
+// settings render / device-center poll.
+func (s *Server) handleAdminShellyScan(w http.ResponseWriter, r *http.Request) {
+	if s.shellyDisco != nil {
+		s.shellyDisco.ScanNow()
+	}
+	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+}
+
+// handleAdminShellyRelease removes one device from the ignore list (the
+// "Ignored devices" view in settings), so a future announcement can adopt
+// it again. Sticky removal is reversible - a mis-click is not permanent.
+func (s *Server) handleAdminShellyRelease(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if s.shellystore == nil {
+		http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("id")), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := s.shellystore.ReleaseByID(r.Context(), id); err != nil && !errors.Is(err, shellystore.ErrNotFound) {
+		s.log.Error("shelly: release ignored device failed", "err", err)
+	}
+	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+}
+
+// handleAdminUAShellyRemove is the sticky per-device removal from the Device
+// Center panel: the device is forgotten from our active set and its identity
+// (MAC when known, else the configured address) goes onto the ignore list so
+// discovery does not re-adopt it. A CARVILON-side config action only - the
+// device itself is never written to. The address must match a CONFIGURED
+// active device (defence against a caller-chosen target). Redirects back to
+// /a/ua with a stable flash code.
+func (s *Server) handleAdminUAShellyRemove(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	if s.shellystore == nil {
+		http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+		return
+	}
+	addr := strings.TrimSpace(r.PostForm.Get("address"))
+	norm, ok := normalizeShellyAddr(addr)
+	if !ok || norm == "" {
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	err := s.shellystore.RemoveByAddress(r.Context(), norm)
+	switch {
+	case errors.Is(err, shellystore.ErrNotFound):
+		http.Redirect(w, r, "/a/ua?flash=shelly-notfd", http.StatusSeeOther)
+		return
+	case err != nil:
+		s.log.Error("shelly: remove device failed", "err", err)
+		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	s.rebuildShellyClients(r.Context())
+	http.Redirect(w, r, "/a/ua?flash=shelly-removed", http.StatusSeeOther)
+}
+
+// handleAdminUAShellyScan triggers an active mDNS scan from the Device
+// Center toolbar. The live status poll + auto-reload surface any fresh
+// adoption without a manual refresh.
+func (s *Server) handleAdminUAShellyScan(w http.ResponseWriter, r *http.Request) {
+	if s.shellyDisco != nil {
+		s.shellyDisco.ScanNow()
+	}
+	http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+}
+
+// buildShellySettingsBlock fills the settings block's Shelly section from
+// the device table: the manual IP list (origin=manual, active) rendered
+// back into the form, the count of auto-discovered devices, and the sticky
+// ignore list. HasPassword/Enabled are set by the caller. Nil-store safe.
+func (s *Server) buildShellySettingsBlock(ctx context.Context) shellySettingsBlock {
+	var block shellySettingsBlock
+	if s.shellystore == nil {
+		return block
+	}
+	if manual, err := s.shellystore.ListManualActive(ctx); err == nil {
+		addrs := make([]string, 0, len(manual))
+		for _, d := range manual {
+			addrs = append(addrs, d.Address)
+		}
+		block.Addresses = strings.Join(addrs, ", ")
+	} else {
+		s.log.Warn("shelly: list manual devices failed", "err", err)
+	}
+	if active, err := s.shellystore.ListActive(ctx); err == nil {
+		for _, d := range active {
+			if d.Origin == shellystore.OriginDiscovered {
+				block.DiscoveredCount++
+			}
+		}
+	}
+	if ignored, err := s.shellystore.ListIgnored(ctx); err == nil {
+		for _, d := range ignored {
+			label := d.MAC
+			if label == "" {
+				label = d.Address
+			}
+			block.Ignored = append(block.Ignored, shellyIgnoredRow{
+				ID: d.ID, Label: label, MAC: d.MAC, Addr: d.Address,
+			})
+		}
+	}
+	return block
 }
 
 // handleAdminShellyStatus serves the settings block's "Connection"

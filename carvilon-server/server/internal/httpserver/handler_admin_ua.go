@@ -173,6 +173,11 @@ type uaRow struct {
 	AutoName   string
 	CustomName string
 
+	// Shelly extras: how the device entered the set ("manual" |
+	// "discovered"), for the panel's origin line + the sticky Remove
+	// control. Empty for non-Shelly rows.
+	Origin string
+
 	// Lowercased "name model ip mac" for the client search box.
 	Search string
 }
@@ -312,13 +317,31 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyOriginMap(ctx), s.viewerMACSet(ctx))
+}
+
+// shellyOriginMap returns address -> origin ("manual" | "discovered") for
+// the active Shelly devices, so a row can show how the device entered the
+// set. Empty (nil-safe) on any store trouble - the row then omits origin.
+func (s *Server) shellyOriginMap(ctx context.Context) map[string]string {
+	m := map[string]string{}
+	if s.shellystore == nil {
+		return m
+	}
+	active, err := s.shellystore.ListActive(ctx)
+	if err != nil {
+		return m
+	}
+	for _, d := range active {
+		m[d.Address] = d.Origin
+	}
+	return m
 }
 
 // buildRows turns devices + doors + Protect cameras/sensors + local
 // readers + Shelly devices into the flat, pre-sorted row list and
 // computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, mockMACs map[string]bool) {
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyOrigins map[string]string, mockMACs map[string]bool) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -352,7 +375,7 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		addDeviceRow(makeReaderRow(rd), rd.Online)
 	}
 	for _, p := range shellies {
-		addDeviceRow(makeShellyRow(p), p.err == nil)
+		addDeviceRow(makeShellyRow(p, shellyOrigins[p.client.Address()]), p.err == nil)
 	}
 	for _, dr := range doors {
 		row := makeDoorRow(dr)
@@ -448,19 +471,19 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 func makeDeviceRow(d uaapi.Device, mockMACs map[string]bool) uaRow {
 	nature := d.Nature()
 	row := uaRow{
-		ID:          d.ID,
-		Kind:        "device",
-		Category:    nature,
-		TypeLabel:   uaTypeLabel(nature),
-		Name:        d.DisplayName(),
-		Source:      "unifi",
-		SourceLabel: "UniFi",
-		Model:       d.ModelLabel(),
-		IP:          d.IPLabel(),
-		Firmware:    d.FirmwareLabel(),
-		Version:     d.VersionLabel(),
-		MAC:         d.DisplayMAC(),
-		Uptime:      d.UptimeLabel(),
+		ID:           d.ID,
+		Kind:         "device",
+		Category:     nature,
+		TypeLabel:    uaTypeLabel(nature),
+		Name:         d.DisplayName(),
+		Source:       "unifi",
+		SourceLabel:  "UniFi",
+		Model:        d.ModelLabel(),
+		IP:           d.IPLabel(),
+		Firmware:     d.FirmwareLabel(),
+		Version:      d.VersionLabel(),
+		MAC:          d.DisplayMAC(),
+		Uptime:       d.UptimeLabel(),
 		Capabilities: d.Capabilities,
 	}
 	if d.IsOnline {
@@ -663,10 +686,13 @@ func (s *Server) localReaders(ctx context.Context) []readerstore.Reader {
 // uaFlash maps a stable flash code (carried in the redirect query,
 // never free text) to the banner after a reader rename.
 var uaFlash = map[string]struct{ msg, typ string }{
-	"renamed":   {"Reader name saved.", "ok"},
-	"reset":     {"Reader name reset to the auto-generated name.", "ok"},
-	"err-name":  {"Renaming failed.", "err"},
-	"err-notfd": {"Reader not found.", "err"},
+	"renamed":        {"Reader name saved.", "ok"},
+	"reset":          {"Reader name reset to the auto-generated name.", "ok"},
+	"err-name":       {"Renaming failed.", "err"},
+	"err-notfd":      {"Reader not found.", "err"},
+	"shelly-removed": {"Shelly device removed. It will not be re-discovered until released under Settings.", "ok"},
+	"shelly-notfd":   {"Shelly device not found.", "err"},
+	"shelly-err":     {"Removing the Shelly device failed.", "err"},
 }
 
 // handleAdminUAReaderRename sets or clears a local reader's custom name

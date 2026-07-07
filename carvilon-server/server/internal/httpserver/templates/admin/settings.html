@@ -108,7 +108,7 @@
         <div class="set-row">
           <div class="set-row-main">
             <span class="set-row-label">Shelly enabled</span>
-            <span class="set-row-sub">Shows the configured Shelly devices as their own category in the Device Center (read only, no switching). Without stored addresses the default is off.</span>
+            <span class="set-row-sub">Shows the configured Shelly devices as their own category in the Device Center (read only, no switching) and turns on mDNS auto-discovery. Without any configured device the default is off.</span>
           </div>
           <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
             <input type="checkbox" name="shelly_enabled" value="1" {{if .Page.Shelly.Enabled}}checked{{end}} style="width:18px; height:18px; accent-color: var(--color-accent, var(--accent)); cursor:pointer;"/>
@@ -117,8 +117,8 @@
         </div>
         <div class="set-row">
           <div class="set-row-main">
-            <span class="set-row-label">Device addresses</span>
-            <span class="set-row-sub">LAN IPv4 addresses of the Shelly devices (Gen2 or newer), separated by commas, e.g. 192.168.1.51, 192.168.1.52. Saving an empty list removes all devices.</span>
+            <span class="set-row-label">Manual IP addresses</span>
+            <span class="set-row-sub">Only needed as a fallback for devices in another subnet or VLAN, where multicast discovery cannot reach them. Gen2+ devices on the same LAN are found automatically. LAN IPv4 addresses, comma-separated, e.g. 192.168.1.51, 192.168.1.52. Saving an empty list removes the manual pins (discovered devices are kept).</span>
           </div>
           <input class="input" name="shelly_addresses" type="text" value="{{.Page.Shelly.Addresses}}" placeholder="192.168.1.51, 192.168.1.52" autocomplete="off" spellcheck="false" style="max-width: 420px;"/>
         </div>
@@ -141,6 +141,45 @@
           <button class="btn btn-primary" type="submit">Save</button>
         </div>
       </form>
+
+      <div class="set-card" style="margin-top: var(--space-3);">
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Auto-discovery</span>
+            <span class="set-row-sub">Gen2+ Shelly devices on the local network are found automatically over mDNS and adopted without entering an IP.{{if .Page.Shelly.DiscoveredCount}} Currently {{.Page.Shelly.DiscoveredCount}} discovered device{{if ne .Page.Shelly.DiscoveredCount 1}}s{{end}} in the set.{{end}} Removed devices stay removed - release them below to allow re-discovery.</span>
+          </div>
+          <form method="post" action="/a/settings/shelly/scan" style="margin:0;">
+            <button class="btn btn-secondary" type="submit">Scan now</button>
+          </form>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
+            <span class="set-row-label">Ignored devices</span>
+            <span class="set-row-sub">Devices you removed are on this list and are not re-adopted by discovery. Release one to allow it to be found again.</span>
+          </div>
+        </div>
+        {{if .Page.Shelly.Ignored}}
+          <table class="app-table">
+            <thead><tr><th>Identity</th><th>Last address</th><th></th></tr></thead>
+            <tbody>
+              {{range .Page.Shelly.Ignored}}
+                <tr>
+                  <td><code>{{.Label}}</code></td>
+                  <td><code>{{if .Addr}}{{.Addr}}{{else}}-{{end}}</code></td>
+                  <td>
+                    <form method="post" action="/a/settings/shelly/release" style="margin:0;">
+                      <input type="hidden" name="id" value="{{.ID}}"/>
+                      <button class="btn btn-secondary btn-sm" type="submit">Release</button>
+                    </form>
+                  </td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        {{else}}
+          <p class="set-row-sub" style="padding-left: var(--space-4);">No ignored devices.</p>
+        {{end}}
+      </div>
     </section>
 
     <section class="set-section" style="margin-top: var(--space-6);">
