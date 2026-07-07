@@ -348,10 +348,22 @@ func (m *Manager) resolveCert(lanHost string) (certFile, keyFile, source string,
 	if err != nil {
 		return "", "", "", err
 	}
-	if generated {
-		return certFile, keyFile, "self-signed (generated)", nil
+	// Log the SANs the broker will actually present. A device dialing the
+	// broker by its LAN IP over TLS fails verification unless that IP is an
+	// IP SAN here, so this line is the first thing to check when a Shelly
+	// won't connect (see cert.go: the cert now self-heals a missing SAN).
+	source = "self-signed"
+	if leaf, lerr := loadCert(certFile); lerr == nil {
+		m.log.Info("mqtt broker tls cert", "source", source, "sans", sanSummary(leaf), "not_after", leaf.NotAfter.Format("2006-01-02"))
 	}
-	return certFile, keyFile, "self-signed", nil
+	if generated {
+		source = "self-signed (generated)"
+		// Regeneration produces a new leaf. Devices provisioned against the
+		// old one pinned it via Shelly.PutUserCA and will now reject the
+		// broker until re-provisioned (which re-pushes the fresh cert).
+		m.log.Warn("mqtt broker regenerated its self-signed cert; already-provisioned devices must be re-provisioned to trust the new certificate", "hosts", hosts)
+	}
+	return certFile, keyFile, source, nil
 }
 
 func loadTLSConfig(certFile, keyFile string) (*tls.Config, error) {
