@@ -245,6 +245,8 @@ func extractUser(data any) adminUser {
 		return v.User
 	case mqttPageData:
 		return v.User
+	case mqttMonitorPageData:
+		return v.User
 	case telegramPageData:
 		return v.User
 	case uaOverviewData:

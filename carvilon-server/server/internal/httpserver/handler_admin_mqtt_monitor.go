@@ -32,6 +32,20 @@ type mqttMonitorPageData struct {
 	StatsOK bool
 
 	Devices []mqttMonitorDevice
+
+	// Device Center shell data, mirroring /a/devices: the fleet
+	// counters (+ their 2-digit split-flap pads) and the facet lists
+	// the shared dc shell renders in the left column.
+	TotalCount   int
+	OnlineCount  int
+	OfflineCount int
+	TopicsCount  int
+	OnlinePad    string
+	OfflinePad   string
+	TopicsPad    string
+	StatusFacets []uaFacet
+	ProvFacets   []uaFacet
+	ModelFacets  []uaFacet
 }
 
 // mqttMonitorDevice is one row of the device table: the broker account
@@ -56,6 +70,16 @@ type mqttMonitorDevice struct {
 
 	Connected bool  // a live broker session for this account exists now
 	LastSeen  int64 // newest retained message time under the prefix (ms; 0 none)
+
+	// Device Center row fields (the dc shell's vocabulary).
+	Index       int    // 1-based table row number (assigned after the sort)
+	Category    string // dc icon key: "switch" for Shelly-backed rows, else "other"
+	StatusState string // "online" | "offline" (Connected in dc terms)
+	StatusText  string // "Connected" | "Disconnected"
+	ProvKey     string // provisioning facet key: linked|provisioning|failed|none
+	ProvLabel   string // its English label for panel + facet
+	LastConnect string // rendered "Last connect" panel value ("never" when 0)
+	Search      string // lowercased filter haystack for the client-side search
 }
 
 // handleAdminMQTTMonitorPage renders the Device MQTT monitoring page with
@@ -69,7 +93,52 @@ func (s *Server) handleAdminMQTTMonitorPage(w http.ResponseWriter, r *http.Reque
 	if data.Available {
 		data.Status = s.mqtt.Status()
 		data.Stats, data.StatsOK = s.mqtt.Stats()
-		data.Devices = s.buildMQTTMonitorDevices(r.Context())
+		data.Devices, data.TopicsCount = s.buildMQTTMonitorDevices(r.Context())
+
+		// Fleet counters + facets for the shared dc shell (the
+		// /a/devices pattern: status facets always render, even at 0,
+		// so the live stream can move rows between them; provisioning
+		// and model facets only for values that exist).
+		data.TotalCount = len(data.Devices)
+		provCount := map[string]int{}
+		modelCount := map[string]int{}
+		for _, d := range data.Devices {
+			if d.Connected {
+				data.OnlineCount++
+			} else {
+				data.OfflineCount++
+			}
+			provCount[d.ProvKey]++
+			if d.Model != "" {
+				modelCount[d.Model]++
+			}
+		}
+		data.OnlinePad = pad2(data.OnlineCount)
+		data.OfflinePad = pad2(data.OfflineCount)
+		data.TopicsPad = pad2(data.TopicsCount)
+		data.StatusFacets = append(data.StatusFacets,
+			uaFacet{Key: "online", Label: "Connected", Count: data.OnlineCount},
+			uaFacet{Key: "offline", Label: "Disconnected", Count: data.OfflineCount},
+		)
+		for _, p := range []struct{ key, label string }{
+			{"linked", "Linked"}, {"provisioning", "Provisioning"},
+			{"failed", "Failed"}, {"none", "Not provisioned"},
+		} {
+			if n := provCount[p.key]; n > 0 {
+				data.ProvFacets = append(data.ProvFacets, uaFacet{Key: p.key, Label: p.label, Count: n})
+			}
+		}
+		// Model facet: distinct device models, most common first (the
+		// /a/devices ordering).
+		for m, n := range modelCount {
+			data.ModelFacets = append(data.ModelFacets, uaFacet{Key: m, Label: m, Count: n})
+		}
+		sort.SliceStable(data.ModelFacets, func(i, j int) bool {
+			if data.ModelFacets[i].Count != data.ModelFacets[j].Count {
+				return data.ModelFacets[i].Count > data.ModelFacets[j].Count
+			}
+			return data.ModelFacets[i].Label < data.ModelFacets[j].Label
+		})
 	}
 	s.renderAdminPage(w, "mqtt-monitor", data)
 }
@@ -79,12 +148,13 @@ func (s *Server) handleAdminMQTTMonitorPage(w http.ResponseWriter, r *http.Reque
 // the live connection + last-seen state read once at render. The broker
 // account list is authoritative for "which devices exist on the MQTT
 // layer"; a Shelly match only enriches a row, and a broker account with
-// no Shelly (e.g. a hand-created one) still shows honestly.
-func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevice {
+// no Shelly (e.g. a hand-created one) still shows honestly. The second
+// return is the retained-topic count under carvilon/# (the fleet tile).
+func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevice, int) {
 	accounts, err := s.mqttStore.ListDevices(ctx)
 	if err != nil {
 		s.log.Error("device mqtt: list broker devices", "err", err)
-		return nil
+		return nil, 0
 	}
 
 	// Shelly identity by broker username (its assigned MQTT account).
@@ -106,8 +176,9 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevic
 			connected[c.Username] = true
 		}
 	}
+	retained := s.mqtt.Retained("carvilon/#")
 	lastSeen := map[string]int64{}
-	for _, m := range s.mqtt.Retained("carvilon/#") {
+	for _, m := range retained {
 		prefix := topicDevicePrefix(m.Topic)
 		if prefix != "" && m.Time > lastSeen[prefix] {
 			lastSeen[prefix] = m.Time
@@ -126,6 +197,7 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevic
 			LastConnectAt: a.LastConnectAt,
 			Connected:     connected[a.Username],
 			LastSeen:      lastSeen[prefix],
+			Category:      "other",
 		}
 		if row.Name == "" {
 			row.Name = a.Username
@@ -136,6 +208,7 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevic
 			row.MAC = d.MAC
 			row.Address = d.Address
 			row.MQTTState = d.MQTTState
+			row.Category = "switch"
 			if d.Name != "" {
 				row.Name = d.Name
 			}
@@ -143,6 +216,18 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevic
 		if rules, rerr := s.mqttStore.ListACL(ctx, a.Username); rerr == nil {
 			row.ACLRules = len(rules)
 		}
+		// Device Center row vocabulary: connection state, provisioning
+		// facet, panel values and the search haystack.
+		if row.Connected {
+			row.StatusState, row.StatusText = "online", "Connected"
+		} else {
+			row.StatusState, row.StatusText = "offline", "Disconnected"
+		}
+		row.ProvKey, row.ProvLabel = mqttProvFacet(row.MQTTState)
+		row.LastConnect = mqttLastConnectLabel(row.LastConnectAt)
+		row.Search = strings.ToLower(strings.Join([]string{
+			row.Name, row.Model, row.Address, row.MAC, row.Username, "mqtt",
+		}, " "))
 		out = append(out, row)
 	}
 
@@ -153,7 +238,35 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) []mqttMonitorDevic
 		}
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
-	return out
+	for i := range out {
+		out[i].Index = i + 1
+	}
+	return out, len(retained)
+}
+
+// mqttProvFacet maps a Shelly provisioning state onto its facet key +
+// English label. A broker account with no Shelly (or one never
+// provisioned) reads "Not provisioned" - honest, not invented.
+func mqttProvFacet(state string) (key, label string) {
+	switch state {
+	case shellystore.MQTTStateLinked:
+		return "linked", "Linked"
+	case shellystore.MQTTStateProvisioning:
+		return "provisioning", "Provisioning"
+	case shellystore.MQTTStateFailed:
+		return "failed", "Failed"
+	default:
+		return "none", "Not provisioned"
+	}
+}
+
+// mqttLastConnectLabel renders the account's last CONNECT for the panel
+// ("never" when the account has not connected yet).
+func mqttLastConnectLabel(ms int64) string {
+	if ms <= 0 {
+		return "never"
+	}
+	return time.UnixMilli(ms).Format("2006-01-02 15:04")
 }
 
 // topicDevicePrefix returns the "carvilon/<user>" device prefix of a

@@ -1,392 +1,490 @@
 {{define "title"}}Device MQTT{{end}}
 
 {{define "head-extra"}}
+{{template "dc-styles"}}
 <style>
-  /* Device MQTT - device-facing broker monitoring. Reuses the Saison-20
-     admin tokens (admin-tokens.css / admin-components.css); only layout
-     rules live here. Distinct from /a/mqtt (broker configuration). */
-  .dm-wrap { max-width:1120px; margin:0 auto; display:flex; flex-direction:column; gap:var(--space-7); }
-  .dm-head { display:flex; align-items:center; justify-content:space-between; gap:var(--space-6); flex-wrap:wrap; padding-bottom:var(--space-6); border-bottom:1px solid var(--divider); }
-  .dm-head h1 { margin:0; font:var(--type-heading); letter-spacing:var(--tracking-tight); color:var(--text-primary); display:flex; align-items:center; gap:var(--space-5); }
-  .dm-ico { width:34px; height:34px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:var(--emboss-edge); color:var(--accent); }
-  .dm-head-right { display:flex; align-items:center; gap:var(--space-5); flex-wrap:wrap; }
-  .dm-link { font:var(--type-label); color:var(--text-secondary); text-decoration:none; padding:6px 11px; border-radius:var(--radius-md); box-shadow:inset 0 0 0 1px var(--border-default); background:var(--surface-raised); }
-  .dm-link:hover { color:var(--text-primary); }
+  /* Device MQTT - device-facing broker monitoring on the shared Device
+     Center shell (dc-styles / dc-core-js). Distinct from /a/mqtt (broker
+     configuration). This block carries only the page's own knobs: its
+     column grid, the offline-row highlight, the broker health strip and
+     the retained-topic tree in the detail panel.
 
-  .dm-pill { display:inline-flex; align-items:center; gap:var(--space-4); padding:5px 12px; border-radius:999px; font:var(--type-label); }
-  .dm-pill.on { background:color-mix(in srgb,#2ecc71 16%,transparent); color:#7be0a4; box-shadow:inset 0 0 0 1px color-mix(in srgb,#2ecc71 45%,transparent); }
-  .dm-pill.warn { background:color-mix(in srgb,#f5b74a 15%,transparent); color:#f2c777; box-shadow:inset 0 0 0 1px color-mix(in srgb,#f5b74a 42%,transparent); }
-  .dm-pill.off { background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
-  .dm-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
-
-  .dm-banner { padding:11px 15px; border-radius:var(--radius-md); font:var(--type-label); background:color-mix(in srgb,#f5b74a 13%,transparent); color:#f2c777; box-shadow:inset 0 0 0 1px color-mix(in srgb,#f5b74a 38%,transparent); }
-  .dm-banner a { color:inherit; }
-
-  .dm-card { background:var(--surface-panel); border-radius:var(--radius-lg); box-shadow:var(--elev-1); padding:var(--space-7); display:flex; flex-direction:column; gap:var(--space-6); }
-  .dm-card-h { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-5); }
-  .dm-card-h h2 { margin:0; font:var(--type-subheading); color:var(--text-primary); }
-  .dm-sub { font:var(--type-data); color:var(--text-tertiary); }
-  .dm-empty { font:var(--type-data); color:var(--text-tertiary); padding:var(--space-6) 0; }
-
-  /* Broker health strip */
-  .dm-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:var(--space-4); }
-  .dm-tile { background:var(--surface-cell); border-radius:var(--radius-md); padding:var(--space-5) var(--space-6); box-shadow:var(--elev-1); min-width:0; }
-  .dm-tile .k { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); }
-  .dm-tile .v { font:var(--type-value); color:var(--text-primary); font-family:var(--font-mono); margin-top:3px; word-break:break-word; }
-  .dm-tile .v.err { color:#ff8a8a; }
-
-  /* Device table (per-row CSS grid; detail panel spans full width) */
-  .dm-cols { --dm-grid: minmax(0,1.7fr) minmax(0,1fr) minmax(0,1fr) 150px 150px; }
-  .dm-th, .dm-row { display:grid; grid-template-columns:var(--dm-grid); align-items:center; gap:var(--space-5); }
-  .dm-th { padding:0 var(--space-5) var(--space-4); font:var(--type-eyebrow); letter-spacing:var(--tracking-label); color:var(--text-tertiary); border-bottom:1px solid var(--divider); }
-  .dm-row { padding:11px var(--space-5); border-radius:var(--radius-md); cursor:pointer; box-shadow:var(--elev-1); background:var(--surface-cell); margin-top:var(--space-4); }
-  .dm-row:hover { filter:brightness(1.05); }
-  .dm-row:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-  .dm-row.is-offline { box-shadow:var(--elev-1), inset 3px 0 0 0 #ff6b6b; background:color-mix(in srgb,#ff6b6b 7%,var(--surface-cell)); }
-
-  .dm-c-dev { display:flex; align-items:center; gap:var(--space-4); min-width:0; }
-  .dm-caret { flex:none; color:var(--text-tertiary); transition:transform .12s ease; font-size:11px; }
-  .dm-row.is-open .dm-caret { transform:rotate(90deg); }
-  .dm-devname { min-width:0; display:flex; flex-direction:column; }
-  .dm-name { font:var(--type-label); color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .dm-meta { font:var(--type-data); color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .mono { font-family:var(--font-mono); }
-  .dm-cell.mono, .dm-cell .mono { color:var(--text-secondary); font-size:var(--fs-sm,13px); word-break:break-all; }
-
-  .dm-conn { display:inline-flex; align-items:center; gap:var(--space-4); padding:3px 10px; border-radius:999px; font:var(--type-data); }
-  .dm-conn.on { background:color-mix(in srgb,#2ecc71 15%,transparent); color:#7be0a4; }
-  .dm-conn.off { background:var(--surface-raised); color:var(--text-tertiary); box-shadow:inset 0 0 0 1px var(--border-default); }
-  .dm-seen { font:var(--type-data); color:var(--text-tertiary); font-variant-numeric:tabular-nums; }
-
-  /* Expandable per-device detail: auth/ACL header + retained topic tree */
-  .dm-detail { margin-top:var(--space-4); padding:var(--space-6); background:var(--surface-raised); border-radius:var(--radius-md); box-shadow:inset 0 0 0 1px var(--border-default); display:flex; flex-direction:column; gap:var(--space-5); }
-  .dm-detail-head { display:flex; align-items:center; gap:var(--space-5); flex-wrap:wrap; font:var(--type-data); color:var(--text-tertiary); }
-  .dm-lock { display:inline-flex; align-items:center; gap:6px; color:#7be0a4; }
-  .dm-acl .mono { color:var(--text-secondary); }
-  .dm-tag { font:var(--type-eyebrow); letter-spacing:var(--tracking-label); padding:2px 8px; border-radius:999px; background:var(--surface-cell); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
-  .dm-topics-count { margin-left:auto; }
-
-  .dm-tree { display:flex; flex-direction:column; gap:var(--space-4); }
-  .dm-tree-empty { font:var(--type-data); color:var(--text-tertiary); }
-  .dm-topic { display:grid; grid-template-columns:minmax(120px,240px) 1fr; gap:var(--space-5); align-items:start; padding-bottom:var(--space-4); border-bottom:1px solid var(--divider); }
-  .dm-topic:last-child { border-bottom:none; padding-bottom:0; }
-  .dm-topic-key { font-family:var(--font-mono); color:var(--text-secondary); font-size:12px; word-break:break-all; display:flex; align-items:center; gap:6px; }
-  .dm-retain { font-size:9px; letter-spacing:.06em; padding:1px 5px; border-radius:4px; background:color-mix(in srgb,var(--accent) 20%,transparent); color:var(--accent); flex:none; }
-  .dm-topic-val { margin:0; font-family:var(--font-mono); font-size:12px; color:var(--text-primary); white-space:pre-wrap; word-break:break-word; }
-  .dm-topic.flash .dm-topic-val { animation:dm-flash 1s ease-out; }
-  @keyframes dm-flash { from { color:var(--accent); } to { color:var(--text-primary); } }
-
-  @media (max-width:760px){
-    .dm-cols { --dm-grid: minmax(0,1.5fr) 120px 120px; }
-    .dm-th .dm-hide, .dm-row .dm-hide { display:none; }
-    .dm-topic { grid-template-columns:1fr; gap:4px; }
+     Columns: No. | Name | Connection | Last message | Model | IP | Account */
+  .dc-root { --dc-grid:46px minmax(150px,1.4fr) 130px 110px minmax(100px,1fr) 126px minmax(130px,1.1fr); }
+  @media (max-width:820px) {
+    .dc-root { --dc-grid:28px minmax(120px,1.6fr) 120px 100px minmax(110px,1fr); }
+    .dc-th.col-model, .dc-th.col-ip, .dc-cell.col-model, .dc-cell.col-ip { display:none; }
   }
+
+  /* Offline rows highlighted - the operator's early warning (a device
+     that fell off the broker). The selected row's accent seam wins. */
+  .dc-row.offline:not(.is-selected) { box-shadow:inset 3px 0 0 var(--lock-500); background:var(--lock-haze); }
+  .dc-row.offline:not(.is-selected):hover { background:color-mix(in srgb, var(--lock-500) 16%, transparent); }
+
+  /* Broker health strip - the page header above the table. */
+  .dcm-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:1px; background:var(--divider); border-bottom:1px solid var(--border-default); }
+  .dcm-tile { padding:9px 14px 10px; background:linear-gradient(180deg,#0f1216,#0b0e11); min-width:0; }
+  .dcm-tile .k { font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dcm-tile .v { margin-top:3px; font-family:var(--font-mono); font-size:12.5px; color:var(--text-secondary); word-break:break-word; }
+  .dcm-tile .v.on { color:var(--orange-300); text-shadow:0 0 10px var(--amber-glow); }
+  .dcm-tile .v.warn { color:var(--orange-300); }
+  .dcm-tile .v.err { color:#ffb0b0; }
+
+  /* Retained-topic tree in the detail panel's right column. */
+  .dcm-count { font-family:var(--font-mono); font-size:10px; color:var(--text-tertiary); }
+  .dcm-tree { display:flex; flex-direction:column; }
+  .dcm-tree-empty { padding:14px 20px; font-size:12px; color:var(--text-tertiary); }
+  .dcm-topic { display:grid; grid-template-columns:minmax(120px,220px) 1fr; gap:14px; align-items:start; padding:8px 20px; border-bottom:1px solid var(--divider); }
+  .dcm-topic-key { font-family:var(--font-mono); font-size:11.5px; color:var(--text-secondary); word-break:break-all; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .dcm-ret { font-size:9px; letter-spacing:0.06em; padding:1px 5px; border-radius:3px; background:var(--amber-haze); color:var(--orange-300); flex:none; }
+  .dcm-topic-val { margin:0; font-family:var(--font-mono); font-size:11.5px; color:var(--text-primary); white-space:pre-wrap; word-break:break-word; }
+  .dcm-topic.flash .dcm-topic-val { animation:dcm-flash 1s ease-out; }
+  @keyframes dcm-flash { from { color:var(--orange-400); text-shadow:0 0 8px var(--amber-glow); } to { color:var(--text-primary); text-shadow:none; } }
+  @media (max-width:760px) { .dcm-topic { grid-template-columns:1fr; gap:4px; } }
 </style>
 {{end}}
 
 {{define "content"}}
-<div class="dm-wrap" id="dm-root">
-  <div class="dm-head">
-    <h1>
-      <span class="dm-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3" cy="21" r="1.4" fill="currentColor" stroke="none"/></svg></span>
-      Device MQTT
-    </h1>
-    <div class="dm-head-right">
-      <span class="dm-pill off" id="dm-broker-pill"><span class="dm-dot"></span><span>&hellip;</span></span>
-      <a class="dm-link" href="/a/mqtt">Broker configuration &rarr;</a>
-    </div>
-  </div>
-
+<div class="dc-root" data-dc>
   {{if not .Page.Available}}
-    <div class="dm-card"><div class="dm-empty">The MQTT subsystem is not enabled in this build.</div></div>
-  {{else}}
-
-  <div class="dm-banner" id="dm-offline-banner" hidden>The MQTT broker is not running. Start it under <a href="/a/mqtt">Broker configuration</a>.</div>
-
-  <!-- Broker health strip -->
-  <div class="dm-strip">
-    <div class="dm-tile"><div class="k">State</div><div class="v" id="st-state">&mdash;</div></div>
-    <div class="dm-tile"><div class="k">Plaintext (LAN)</div><div class="v" id="st-tcp">{{if .Page.Status.TCPAddr}}{{.Page.Status.TCPAddr}}{{else}}&mdash;{{end}}</div></div>
-    <div class="dm-tile"><div class="k">TLS</div><div class="v" id="st-tls">{{if .Page.Status.TLSAddr}}{{.Page.Status.TLSAddr}}{{else}}&mdash;{{end}}</div></div>
-    <div class="dm-tile"><div class="k">Connected clients</div><div class="v" id="st-clients">&mdash;</div></div>
-    <div class="dm-tile"><div class="k">Uptime</div><div class="v" id="st-uptime">&mdash;</div></div>
-    <div class="dm-tile"><div class="k">Messages in / out</div><div class="v" id="st-msgs">&mdash;</div></div>
-    <div class="dm-tile"><div class="k">Retained / subs</div><div class="v" id="st-retsub">&mdash;</div></div>
-    <div class="dm-tile"><div class="k">Certificate</div><div class="v" id="st-cert">{{if .Page.Status.CertSource}}{{.Page.Status.CertSource}}{{else}}&mdash;{{end}}</div></div>
-    <div class="dm-tile"><div class="k">Error</div><div class="v" id="st-error">{{if .Page.Status.Error}}<span class="err">{{.Page.Status.Error}}</span>{{else}}none{{end}}</div></div>
-  </div>
-
-  <!-- Device table -->
-  <div class="dm-card dm-cols">
-    <div class="dm-card-h">
-      <h2>Devices</h2>
-      <span class="dm-sub" id="dm-dev-count">{{len .Page.Devices}} account{{if ne (len .Page.Devices) 1}}s{{end}}</span>
+    <div class="dc-gate">
+      <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3" cy="21" r="1.4" fill="currentColor" stroke="none"/><path d="M4 4l16 16"/></svg></span>
+      <h2>MQTT is not available</h2>
+      <p>The MQTT subsystem is not enabled in this build.</p>
     </div>
+  {{else}}
+    <!-- ============ Left column ============ -->
+    <aside class="dc-aside">
+      <div class="dc-fleet">
+        <div class="dc-fleet-head">
+          <span class="dc-fleet-title">Fleet status</span>
+          <span class="dc-fleet-total dc-mono">{{.Page.TotalCount}} accounts</span>
+        </div>
+        <div class="dc-fleet-grid">
+          <div class="dc-stat" data-dc-stat="online">
+            <div class="dc-digits"><span class="dc-digit" style="animation-delay:0ms">{{slice .Page.OnlinePad 0 1}}</span><span class="dc-digit" style="animation-delay:80ms">{{slice .Page.OnlinePad 1 2}}</span></div>
+            <span class="dc-stat-label">online</span>
+          </div>
+          {{/* the red "off" treatment only applies while something IS offline;
+               at zero the tile reads calm like its neighbours */}}
+          <div class="dc-stat{{if gt .Page.OfflineCount 0}} off{{end}}" data-dc-stat="offline">
+            <div class="dc-digits"><span class="dc-digit" style="animation-delay:160ms">{{slice .Page.OfflinePad 0 1}}</span><span class="dc-digit" style="animation-delay:240ms">{{slice .Page.OfflinePad 1 2}}</span></div>
+            <span class="dc-stat-label">offline</span>
+          </div>
+          <div class="dc-stat" data-dc-stat="topics">
+            <div class="dc-digits"><span class="dc-digit" style="animation-delay:320ms">{{slice .Page.TopicsPad 0 1}}</span><span class="dc-digit" style="animation-delay:400ms">{{slice .Page.TopicsPad 1 2}}</span></div>
+            <span class="dc-stat-label">topics</span>
+          </div>
+        </div>
+      </div>
 
-    {{if not .Page.Devices}}
-      <div class="dm-empty">No MQTT device accounts yet. Provision a Shelly device, or add a broker account under <a class="dm-link" href="/a/mqtt">Broker configuration</a>.</div>
-    {{else}}
-      <div>
-        <div class="dm-th">
-          <span>Device</span>
-          <span class="dm-hide">Identity (MAC)</span>
-          <span class="dm-hide">Address</span>
-          <span>Connection</span>
-          <span>Last message</span>
+      <div class="dc-search-wrap">
+        <div class="dc-search">
+          <canvas class="dc-search-canvas" data-dc-search-canvas aria-hidden="true"></canvas>
+          <span class="dc-search-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+          <input type="text" data-dc-search placeholder="Search name, account, IP" autocomplete="off" spellcheck="false" aria-label="Search broker accounts">
         </div>
-        {{range .Page.Devices}}
-        <div class="dm-row{{if not .Connected}} is-offline{{end}}" role="button" tabindex="0"
-             data-username="{{.Username}}" data-prefix="{{.Prefix}}" data-lastseen="{{.LastSeen}}"
-             aria-expanded="false">
-          <div class="dm-cell dm-c-dev">
-            <span class="dm-caret">&#9654;</span>
-            <span class="dm-devname">
-              <span class="dm-name">{{.Name}}</span>
-              <span class="dm-meta">{{if .Model}}{{.Model}} &middot; {{end}}{{.Username}}</span>
-            </span>
-          </div>
-          <div class="dm-cell mono dm-hide">{{if .MAC}}{{.MAC}}{{else}}&mdash;{{end}}</div>
-          <div class="dm-cell mono dm-hide">{{if .Address}}{{.Address}}{{else}}&mdash;{{end}}</div>
-          <div class="dm-cell">
-            <span class="dm-conn {{if .Connected}}on{{else}}off{{end}}" data-conn>
-              <span class="dm-dot"></span><span data-conn-text>{{if .Connected}}Connected{{else}}Disconnected{{end}}</span>
-            </span>
-          </div>
-          <div class="dm-cell"><span class="dm-seen" data-seen>&mdash;</span></div>
+      </div>
+
+      <div class="dc-filters">
+        <div class="dc-filter-head">
+          <span class="dc-fh-label">Filter</span>
+          <span class="dc-hr"></span>
+          <button type="button" class="dc-clear" data-dc-clear>Clear</button>
         </div>
-        <div class="dm-detail" data-detail-for="{{.Username}}" hidden>
-          <div class="dm-detail-head">
-            <span class="dm-lock" title="This device has an authenticated broker account with a per-device ACL.">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Authenticated
-            </span>
-            <span class="dm-acl">ACL <span class="mono">{{.ACLSubtree}}</span>{{if .ACLRules}} &middot; +{{.ACLRules}} rule{{if ne .ACLRules 1}}s{{end}}{{end}}</span>
-            {{if .MQTTState}}<span class="dm-tag">{{.MQTTState}}</span>{{end}}
-            <span class="dm-topics-count" data-topic-count></span>
-          </div>
-          <div class="dm-tree" data-tree-for="{{.Prefix}}">
-            <div class="dm-tree-empty">Waiting for retained topics&hellip;</div>
-          </div>
-        </div>
+
+        {{if .Page.StatusFacets}}
+        <div class="dc-facet-group"><span class="dc-fg-label">Connection</span><span class="dc-hr"></span></div>
+        {{range .Page.StatusFacets}}
+          <button type="button" class="dc-facet status" data-dc-facet="status" data-dc-value="{{.Key}}">
+            <span class="dc-cb">{{template "dc-check"}}</span>
+            <span class="dc-facet-dot dc-stat-dot {{.Key}}"></span>
+            <span class="dc-facet-label">{{.Label}}</span>
+            <span class="dc-facet-count dc-mono">{{.Count}}</span>
+          </button>
+        {{end}}
+        {{end}}
+
+        {{if .Page.ProvFacets}}
+        <div class="dc-facet-group"><span class="dc-fg-label">Provisioning</span><span class="dc-hr"></span></div>
+        {{range .Page.ProvFacets}}
+          <button type="button" class="dc-facet prov" data-dc-facet="prov" data-dc-value="{{.Key}}">
+            <span class="dc-cb">{{template "dc-check"}}</span>
+            <span class="dc-facet-label">{{.Label}}</span>
+            <span class="dc-facet-count dc-mono">{{.Count}}</span>
+          </button>
+        {{end}}
+        {{end}}
+
+        {{if .Page.ModelFacets}}
+        <div class="dc-facet-group"><span class="dc-fg-label">Model</span><span class="dc-hr"></span></div>
+        {{range .Page.ModelFacets}}
+          <button type="button" class="dc-facet model" data-dc-facet="model" data-dc-value="{{.Key}}">
+            <span class="dc-cb">{{template "dc-check"}}</span>
+            <span class="dc-facet-label">{{.Label}}</span>
+            <span class="dc-facet-count dc-mono">{{.Count}}</span>
+          </button>
+        {{end}}
         {{end}}
       </div>
-    {{end}}
-  </div>
+    </aside>
 
+    <!-- ============ Center table ============ -->
+    <main class="dc-main">
+      {{/* Broker health strip - the page's header, above the table. Live
+           values ride the SSE stream; the first paint seeds what the
+           server knows synchronously. */}}
+      <div class="dcm-strip">
+        <div class="dcm-tile"><div class="k">State</div><div class="v" id="dcm-state">&mdash;</div></div>
+        <div class="dcm-tile"><div class="k">Plaintext (LAN)</div><div class="v" id="dcm-tcp">{{if .Page.Status.TCPAddr}}{{.Page.Status.TCPAddr}}{{else}}&mdash;{{end}}</div></div>
+        <div class="dcm-tile"><div class="k">TLS</div><div class="v" id="dcm-tls">{{if .Page.Status.TLSAddr}}{{.Page.Status.TLSAddr}}{{else}}&mdash;{{end}}</div></div>
+        <div class="dcm-tile"><div class="k">Connected clients</div><div class="v" id="dcm-clients">&mdash;</div></div>
+        <div class="dcm-tile"><div class="k">Uptime</div><div class="v" id="dcm-uptime">&mdash;</div></div>
+        <div class="dcm-tile"><div class="k">Messages in / out</div><div class="v" id="dcm-msgs">&mdash;</div></div>
+        <div class="dcm-tile"><div class="k">Retained / subs</div><div class="v" id="dcm-retsub">&mdash;</div></div>
+        <div class="dcm-tile"><div class="k">Certificate</div><div class="v" id="dcm-cert">{{if .Page.Status.CertSource}}{{.Page.Status.CertSource}}{{else}}&mdash;{{end}}</div></div>
+        <div class="dcm-tile"><div class="k">Error</div><div class="v{{if .Page.Status.Error}} err{{end}}" id="dcm-error">{{if .Page.Status.Error}}{{.Page.Status.Error}}{{else}}none{{end}}</div></div>
+      </div>
+
+      <div class="dc-toolbar">
+        <span class="dc-mode" data-dc-mode>All accounts</span>
+        <div class="dc-count"><span class="dc-shown" data-dc-shown>{{.Page.TotalCount}}</span><span class="dc-total">/ {{.Page.TotalCount}}</span></div>
+        <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
+        <span class="dc-spacer"></span>
+        <a class="dc-toolbtn" href="/a/mqtt" title="Broker settings, accounts and ACLs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg>Broker configuration</a>
+        <span class="dc-readonly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Read only</span>
+      </div>
+
+      <div class="dc-banner warn" id="dcm-offline-banner" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>The MQTT broker is not running.</strong> Start it under <a href="/a/mqtt">Broker configuration</a>.</div></div>
+
+      <div class="dc-scroll">
+        <div class="dc-table">
+          <div class="dc-thead">
+            <button type="button" class="dc-th num">No.</button>
+            <button type="button" class="dc-th" data-dc-sort="name">Name <span class="dc-ind" data-dc-ind></span></button>
+            <button type="button" class="dc-th" data-dc-sort="status">Connection <span class="dc-ind" data-dc-ind></span></button>
+            <button type="button" class="dc-th" data-dc-sort="seen">Last message <span class="dc-ind" data-dc-ind></span></button>
+            <button type="button" class="dc-th col-model" data-dc-sort="model">Model <span class="dc-ind" data-dc-ind></span></button>
+            <button type="button" class="dc-th col-ip" data-dc-sort="ip">IP address <span class="dc-ind" data-dc-ind></span></button>
+            <button type="button" class="dc-th" data-dc-sort="account">Account <span class="dc-ind" data-dc-ind></span></button>
+          </div>
+
+          <div class="dc-tbody" data-dc-tbody>
+            {{range $r := .Page.Devices}}
+              <div class="dc-row {{$r.StatusState}}" data-dc-row data-idx="{{$r.Index}}"
+                   data-cat="{{$r.Category}}" data-status="{{$r.StatusState}}" data-prov="{{$r.ProvKey}}"
+                   data-model="{{$r.Model}}" data-search="{{$r.Search}}"
+                   data-name="{{$r.Name}}" data-type="Broker account"
+                   data-ip="{{$r.Address}}" data-account="{{$r.Username}}"
+                   data-kind="mqtt" data-id="{{$r.Username}}"
+                   data-prefix="{{$r.Prefix}}" data-seen="{{$r.LastSeen}}"
+                   data-seen-sort="{{printf "%015d" $r.LastSeen}}">
+                <div class="dc-cell num">{{printf "%02d" $r.Index}}</div>
+                <div class="dc-cell">
+                  <span class="dc-row-ico">{{template "dc-icon" $r.Category}}</span>
+                  <span class="dc-name">{{$r.Name}}</span>
+                </div>
+                <div class="dc-cell">
+                  <span class="dc-stat-dot {{$r.StatusState}}"></span>
+                  <span class="dc-stat-txt">{{$r.StatusText}}</span>
+                </div>
+                <div class="dc-cell mono"><span data-dcm-seen>&mdash;</span></div>
+                <div class="dc-cell mono col-model{{if not $r.Model}} dim{{end}}">{{if $r.Model}}{{$r.Model}}{{else}}-{{end}}</div>
+                <div class="dc-cell mono col-ip{{if not $r.Address}} dim{{end}}">{{if $r.Address}}{{$r.Address}}{{else}}-{{end}}</div>
+                <div class="dc-cell mono">{{$r.Username}}</div>
+              </div>
+
+              <template data-dc-detail="{{$r.Index}}">
+                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Overview</span><span class="dc-hr"></span></div>
+                <div class="dc-kv"><span class="dc-k">Type</span><span class="dc-v">Broker account</span></div>
+                <div class="dc-kv"><span class="dc-k">Connection</span><span class="dc-v">{{$r.StatusText}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Account</span><span class="dc-v">{{$r.Username}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Topic prefix</span><span class="dc-v">{{$r.Prefix}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Model</span><span class="dc-v">{{if $r.Model}}{{$r.Model}}{{else}}-{{end}}</span></div>
+                <div class="dc-kv"><span class="dc-k">IP address</span><span class="dc-v">{{if $r.Address}}{{$r.Address}}{{else}}-{{end}}</span></div>
+                <div class="dc-kv"><span class="dc-k">MAC</span><span class="dc-v">{{if $r.MAC}}{{$r.MAC}}{{else}}-{{end}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Last connect</span><span class="dc-v">{{$r.LastConnect}}</span></div>
+                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Broker access</span><span class="dc-hr"></span></div>
+                <div class="dc-kv"><span class="dc-k">Authentication</span><span class="dc-v">Password (per-device account)</span></div>
+                <div class="dc-kv"><span class="dc-k">ACL subtree</span><span class="dc-v">{{$r.ACLSubtree}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Extra ACL rules</span><span class="dc-v">{{$r.ACLRules}}</span></div>
+                <div class="dc-kv"><span class="dc-k">Provisioning</span><span class="dc-v">{{$r.ProvLabel}}</span></div>
+              </template>
+            {{end}}
+          </div>
+          <div class="dc-empty-rows" data-dc-noresults hidden>No accounts match the current filters.</div>
+          {{if not .Page.Devices}}<div class="dc-empty-rows">No MQTT device accounts yet. Provision a Shelly device, or add a broker account under <a href="/a/mqtt">Broker configuration</a>.</div>{{end}}
+        </div>
+      </div>
+    </main>
+
+    {{template "dc-detail-layer"}}
   {{end}}
 </div>
 {{end}}
 
 {{define "scripts"}}
+{{template "dc-core-js"}}
 <script>
-(function(){
-  var root = document.getElementById('dm-root');
-  if (!root) return;
-  var available = !!document.querySelector('.dm-strip');
+  // Device MQTT - read-only. The shared shell (dc-core-js) drives
+  // search + facets + sort + the slide-out panel; this page script
+  // wires the MQTT-specific parts: the broker health strip, the
+  // per-account connection state, the "last message" ticker and the
+  // retained topic tree with live values in the panel's right column -
+  // all fed by the /a/mqtt-monitor/stream SSE feed.
+  (function () {
+    var topics = new Map();   // full topic -> {topic,payload,retain,binary,truncated,t}
+    var lastSeen = new Map(); // "carvilon/<user>" -> newest message time (ms)
 
-  // ---- state ----
-  var topics = new Map();       // full topic -> {topic,payload,retain,binary,truncated,t}
-  var lastSeen = new Map();     // "carvilon/<user>" -> newest message time (ms)
-  var connected = new Set();    // usernames with a live broker session
-  var open = new Set();         // open device prefixes
-  var rows = Array.prototype.slice.call(document.querySelectorAll('.dm-row'));
-
-  function devicePrefix(topic){
-    if (topic.indexOf('carvilon/') !== 0) return '';
-    var p = topic.split('/');
-    if (p.length < 2 || !p[1]) return '';
-    return p[0] + '/' + p[1];
-  }
-  function ago(ms){
-    if (!ms) return 'never';
-    var d = Math.max(0, Date.now() - ms);
-    var s = Math.floor(d/1000);
-    if (s < 2) return 'just now';
-    if (s < 60) return s + 's ago';
-    var m = Math.floor(s/60);
-    if (m < 60) return m + 'm ago';
-    var h = Math.floor(m/60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h/24) + 'd ago';
-  }
-  function fmtInt(n){ return (n==null? '—' : String(n)); }
-  function fmtBytes(n){
-    if (n==null) return '—';
-    var u=['B','KB','MB','GB'], i=0, v=n;
-    while (v>=1024 && i<u.length-1){ v/=1024; i++; }
-    return (i? v.toFixed(1): v) + ' ' + u[i];
-  }
-  function fmtUptime(sec){
-    if (sec==null || sec<=0) return '—';
-    var d=Math.floor(sec/86400); sec-=d*86400;
-    var h=Math.floor(sec/3600); sec-=h*3600;
-    var m=Math.floor(sec/60);
-    if (d) return d+'d '+h+'h';
-    if (h) return h+'h '+m+'m';
-    if (m) return m+'m';
-    return Math.floor(sec)+'s';
-  }
-  function setText(id, txt){ var el=document.getElementById(id); if (el) el.textContent = txt; }
-
-  // ---- broker strip + banner ----
-  function setBroker(b){
-    var pill = document.getElementById('dm-broker-pill');
-    var banner = document.getElementById('dm-offline-banner');
-    b = b || {};
-    var cls='off', txt='Disabled';
-    if (b.running){ cls='on'; txt='Running'; }
-    else if (b.enabled){ cls='warn'; txt='Enabled, stopped'; }
-    if (pill){ pill.className = 'dm-pill ' + cls; pill.lastElementChild.textContent = txt; }
-    if (banner) banner.hidden = !!b.running;
-    setText('st-state', txt);
-    if (b.tcp) setText('st-tcp', b.tcp);
-    if (b.tls) setText('st-tls', b.tls);
-    setText('st-cert', b.cert || '—');
-    var errEl = document.getElementById('st-error');
-    if (errEl){
-      if (b.error){ errEl.innerHTML=''; var s=document.createElement('span'); s.className='err'; s.textContent=b.error; errEl.appendChild(s); }
-      else errEl.textContent = 'none';
+    function fillRight(row, rightCol) {
+      // "Topics", not "Retained topics": the tree seeds from the retained
+      // store but live (non-retained) publishes join it too - the RET
+      // chip marks which entries the broker actually retains.
+      rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Topics</span><span class="dcm-count" data-dcm-panel-count></span><span class="dc-hr"></span></div><div class="dcm-tree" data-dcm-tree></div>';
+      renderTree(row.getAttribute('data-prefix'));
     }
-  }
-  function setStats(s){
-    if (!s){
-      setText('st-uptime','—'); setText('st-msgs','—'); setText('st-retsub','—');
-      return;
+
+    var dc = window.dcInit({
+      filterDims: { status: 'status', prov: 'prov', model: 'model' },
+      modeDefault: 'All accounts',
+      totalUnit: 'accounts',
+      sortAttrs: { name: 'name', status: 'status', seen: 'seen-sort', model: 'model', ip: 'ip', account: 'account' },
+      sortLabels: { name: 'name', status: 'connection', seen: 'last message', model: 'model', ip: 'IP address', account: 'account' },
+      fillRight: fillRight
+    });
+    if (!dc) return; // gated render (subsystem absent): no shell, no stream
+    var esc = dc.esc;
+
+    // ---- helpers ----
+    function devicePrefix(topic) {
+      if (topic.indexOf('carvilon/') !== 0) return '';
+      var p = topic.split('/');
+      if (p.length < 2 || !p[1]) return '';
+      return p[0] + '/' + p[1];
     }
-    setText('st-uptime', fmtUptime(s.uptime));
-    setText('st-msgs', fmtInt(s.messagesReceived) + ' / ' + fmtInt(s.messagesSent));
-    setText('st-retsub', fmtInt(s.retained) + ' / ' + fmtInt(s.subscriptions));
-  }
-  function setConnected(users){
-    connected = new Set(users || []);
-    setText('st-clients', String(connected.size));
-    rows.forEach(function(row){
-      var on = connected.has(row.dataset.username);
-      row.classList.toggle('is-offline', !on);
-      var chip = row.querySelector('[data-conn]');
-      var txt = row.querySelector('[data-conn-text]');
-      if (chip) chip.className = 'dm-conn ' + (on? 'on':'off');
-      if (txt) txt.textContent = on? 'Connected':'Disconnected';
-    });
-  }
-
-  // ---- topic tree ----
-  function noteLastSeen(m){
-    var pfx = devicePrefix(m.topic);
-    if (!pfx) return pfx;
-    var prev = lastSeen.get(pfx) || 0;
-    if (m.t > prev) lastSeen.set(pfx, m.t);
-    return pfx;
-  }
-  function treeEl(prefix){ return document.querySelector('.dm-tree[data-tree-for="'+cssEsc(prefix)+'"]'); }
-  function cssEsc(s){ return String(s).replace(/["\\]/g, '\\$&'); }
-
-  function fmtPayload(m){
-    if (m.binary) return m.payload;
-    var s = m.payload || '';
-    try { s = JSON.stringify(JSON.parse(s), null, 1); } catch(_){}
-    if (m.truncated) s += '\n…(truncated)';
-    return s;
-  }
-  function topicCount(prefix){
-    var n=0; var base=prefix+'/';
-    topics.forEach(function(_,t){ if (t===prefix || t.indexOf(base)===0) n++; });
-    return n;
-  }
-  function renderTree(prefix, flashTopic){
-    var el = treeEl(prefix);
-    if (!el) return;
-    var base = prefix + '/';
-    var list = [];
-    topics.forEach(function(m,t){ if (t===prefix || t.indexOf(base)===0) list.push(m); });
-    list.sort(function(a,b){ return a.topic < b.topic ? -1 : a.topic > b.topic ? 1 : 0; });
-    // topic-count badge in the detail head
-    var head = el.parentElement.querySelector('[data-topic-count]');
-    if (head) head.textContent = list.length + ' topic' + (list.length===1?'':'s');
-    if (!list.length){
-      el.innerHTML=''; var e=document.createElement('div'); e.className='dm-tree-empty';
-      e.textContent='No retained topics yet.'; el.appendChild(e); return;
+    function ago(ms) {
+      if (!ms) return 'never';
+      var d = Math.max(0, Date.now() - ms);
+      var s = Math.floor(d / 1000);
+      if (s < 2) return 'just now';
+      if (s < 60) return s + 's ago';
+      var m = Math.floor(s / 60);
+      if (m < 60) return m + 'm ago';
+      var h = Math.floor(m / 60);
+      if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
     }
-    var frag = document.createDocumentFragment();
-    list.forEach(function(m){
-      var rel = m.topic === prefix ? '(root)' : m.topic.slice(base.length);
-      var row = document.createElement('div');
-      row.className = 'dm-topic' + (flashTopic===m.topic ? ' flash':'');
-      var key = document.createElement('span');
-      key.className = 'dm-topic-key'; key.title = m.topic;
-      var kt = document.createElement('span'); kt.textContent = rel; key.appendChild(kt);
-      if (m.retain){ var rb=document.createElement('span'); rb.className='dm-retain'; rb.textContent='RET'; key.appendChild(rb); }
-      var val = document.createElement('pre');
-      val.className = 'dm-topic-val'; val.textContent = fmtPayload(m);
-      row.appendChild(key); row.appendChild(val);
-      frag.appendChild(row);
+    function fmtInt(n) { return (n == null ? '—' : String(n)); }
+    function fmtUptime(sec) {
+      if (sec == null || sec <= 0) return '—';
+      var d = Math.floor(sec / 86400); sec -= d * 86400;
+      var h = Math.floor(sec / 3600); sec -= h * 3600;
+      var m = Math.floor(sec / 60);
+      if (d) return d + 'd ' + h + 'h';
+      if (h) return h + 'h ' + m + 'm';
+      if (m) return m + 'm';
+      return Math.floor(sec) + 's';
+    }
+    function setText(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+    function padSort(t) {
+      var s = String(t || 0);
+      while (s.length < 15) s = '0' + s;
+      return s;
+    }
+
+    // ---- broker health strip + stopped banner ----
+    function setBroker(b) {
+      b = b || {};
+      var txt = 'Disabled', cls = '';
+      if (b.running) { txt = 'Running'; cls = ' on'; }
+      else if (b.enabled) { txt = 'Enabled, stopped'; cls = ' warn'; }
+      var st = document.getElementById('dcm-state');
+      if (st) { st.textContent = txt; st.className = 'v' + cls; }
+      var banner = document.getElementById('dcm-offline-banner');
+      if (banner) banner.hidden = !!b.running;
+      // Unconditional: a live broker stop clears the listener addresses,
+      // and the tiles must not keep showing the last-known ones.
+      setText('dcm-tcp', b.tcp || '—');
+      setText('dcm-tls', b.tls || '—');
+      setText('dcm-cert', b.cert || '—');
+      var errEl = document.getElementById('dcm-error');
+      if (errEl) {
+        errEl.className = 'v' + (b.error ? ' err' : '');
+        errEl.textContent = b.error || 'none';
+      }
+    }
+    function setStats(s) {
+      if (!s) {
+        setText('dcm-uptime', '—'); setText('dcm-msgs', '—'); setText('dcm-retsub', '—');
+        return;
+      }
+      setText('dcm-uptime', fmtUptime(s.uptime));
+      setText('dcm-msgs', fmtInt(s.messagesReceived) + ' / ' + fmtInt(s.messagesSent));
+      setText('dcm-retsub', fmtInt(s.retained) + ' / ' + fmtInt(s.subscriptions));
+    }
+
+    // ---- connection state onto rows (the /a/devices status-poll analogue) ----
+    function setConnKV(container, text) {
+      if (!container) return;
+      Array.prototype.forEach.call(container.querySelectorAll('.dc-kv'), function (kv) {
+        var k = kv.querySelector('.dc-k'), v = kv.querySelector('.dc-v');
+        if (k && v && k.textContent === 'Connection') v.textContent = text;
+      });
+    }
+    function setConnected(users) {
+      var connected = new Set(users || []);
+      setText('dcm-clients', String(connected.size));
+      var on = 0, off = 0, anyChanged = false;
+      dc.rows.forEach(function (row) {
+        var isOn = connected.has(row.getAttribute('data-account'));
+        if (isOn) on++; else off++;
+        var status = isOn ? 'online' : 'offline';
+        var text = isOn ? 'Connected' : 'Disconnected';
+        if ((row.getAttribute('data-status') || '') === status) return;
+        anyChanged = true;
+        row.classList.remove('online', 'offline');
+        row.classList.add(status);
+        row.setAttribute('data-status', status);
+        var dot = row.querySelector('.dc-stat-dot');
+        if (dot) dot.className = 'dc-stat-dot ' + status;
+        var txtEl = row.querySelector('.dc-stat-txt');
+        if (txtEl) txtEl.textContent = text;
+        // pre-rendered overview + the open panel stay truthful
+        var det = dc.tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
+        if (det && det.content) setConnKV(det.content, text);
+        if (dc.isCurrent(row)) {
+          dc.panel.phStatus.className = 'dc-ph-status ' + status;
+          dc.panel.phStatus.textContent = text;
+          setConnKV(dc.panel.leftCol, text);
+        }
+      });
+      dc.setCounter('online', on);
+      dc.setCounter('offline', off);
+      dc.setFacetCount('status', 'online', on);
+      dc.setFacetCount('status', 'offline', off);
+      // re-run filters/sort so a connection-filtered view stays truthful
+      if (anyChanged) dc.apply();
+    }
+
+    // ---- last message ("N ago") ----
+    function refreshSeenRow(row) {
+      var seen = row.querySelector('[data-dcm-seen]');
+      if (!seen) return;
+      var t = lastSeen.get(row.getAttribute('data-prefix')) || parseInt(row.getAttribute('data-seen') || '0', 10) || 0;
+      seen.textContent = ago(t);
+      seen.title = t ? new Date(t).toLocaleString() : '';
+    }
+    function refreshSeen() { dc.rows.forEach(refreshSeenRow); }
+    function bumpSeenSort(row) {
+      var t = lastSeen.get(row.getAttribute('data-prefix')) || 0;
+      if (t) row.setAttribute('data-seen-sort', padSort(t));
+    }
+    function noteLastSeen(m) {
+      var pfx = devicePrefix(m.topic);
+      if (!pfx) return pfx;
+      var prev = lastSeen.get(pfx) || 0;
+      if (m.t > prev) lastSeen.set(pfx, m.t);
+      return pfx;
+    }
+
+    // ---- retained topic tree (detail panel, right column) ----
+    function fmtPayload(m) {
+      if (m.binary) return m.payload;
+      var s = m.payload || '';
+      try { s = JSON.stringify(JSON.parse(s), null, 1); } catch (_) {}
+      if (m.truncated) s += '\n…(truncated)';
+      return s;
+    }
+    function renderTree(prefix, flashTopic) {
+      var cur = dc.current();
+      if (!cur || cur.getAttribute('data-prefix') !== prefix) return;
+      var el = dc.panel.rightCol.querySelector('[data-dcm-tree]');
+      if (!el) return;
+      var base = prefix + '/';
+      var list = [];
+      topics.forEach(function (m, t) { if (t === prefix || t.indexOf(base) === 0) list.push(m); });
+      list.sort(function (a, b) { return a.topic < b.topic ? -1 : a.topic > b.topic ? 1 : 0; });
+      var cnt = dc.panel.rightCol.querySelector('[data-dcm-panel-count]');
+      if (cnt) cnt.textContent = list.length + ' topic' + (list.length === 1 ? '' : 's');
+      if (!list.length) {
+        el.innerHTML = '';
+        var e = document.createElement('div');
+        e.className = 'dcm-tree-empty';
+        e.textContent = 'No retained topics yet.';
+        el.appendChild(e);
+        return;
+      }
+      var frag = document.createDocumentFragment();
+      list.forEach(function (m) {
+        var rel = m.topic === prefix ? '(root)' : m.topic.slice(base.length);
+        var row = document.createElement('div');
+        row.className = 'dcm-topic' + (flashTopic === m.topic ? ' flash' : '');
+        var key = document.createElement('span');
+        key.className = 'dcm-topic-key'; key.title = m.topic;
+        var kt = document.createElement('span'); kt.textContent = rel; key.appendChild(kt);
+        if (m.retain) { var rb = document.createElement('span'); rb.className = 'dcm-ret'; rb.textContent = 'RET'; key.appendChild(rb); }
+        var val = document.createElement('pre');
+        val.className = 'dcm-topic-val'; val.textContent = fmtPayload(m);
+        row.appendChild(key); row.appendChild(val);
+        frag.appendChild(row);
+      });
+      el.innerHTML = '';
+      el.appendChild(frag);
+    }
+
+    function applyMessage(m) {
+      // A retained publish with an empty payload DELETES the retained
+      // message (MQTT semantics; mochi drops it from the store, so the
+      // next snapshot won't carry it either) - mirror that here instead
+      // of pinning a stale empty entry into the tree.
+      if (m.retain && !m.binary && !m.payload) topics.delete(m.topic);
+      else topics.set(m.topic, m);
+      dc.setCounter('topics', topics.size);
+      var pfx = noteLastSeen(m);
+      if (!pfx) return;
+      for (var i = 0; i < dc.rows.length; i++) {
+        if (dc.rows[i].getAttribute('data-prefix') === pfx) {
+          refreshSeenRow(dc.rows[i]);
+          bumpSeenSort(dc.rows[i]);
+          break;
+        }
+      }
+      renderTree(pfx, m.topic);
+    }
+
+    // seed last-seen from the server's first paint, then tick
+    dc.rows.forEach(function (row) {
+      var ls = parseInt(row.getAttribute('data-seen') || '0', 10);
+      if (ls > 0) lastSeen.set(row.getAttribute('data-prefix'), ls);
     });
-    el.innerHTML=''; el.appendChild(frag);
-  }
-
-  function applyMessage(m){
-    topics.set(m.topic, m);
-    var pfx = noteLastSeen(m);
-    if (pfx && open.has(pfx)) renderTree(pfx, m.topic);
-    // keep this row's last-seen fresh immediately
-    var row = rowByPrefix(pfx);
-    if (row) refreshSeenRow(row);
-  }
-  function rowByPrefix(pfx){
-    for (var i=0;i<rows.length;i++){ if (rows[i].dataset.prefix===pfx) return rows[i]; }
-    return null;
-  }
-  function refreshSeenRow(row){
-    var seen = row.querySelector('[data-seen]');
-    if (!seen) return;
-    var t = lastSeen.get(row.dataset.prefix) || parseInt(row.dataset.lastseen||'0',10) || 0;
-    seen.textContent = ago(t);
-    seen.title = t ? new Date(t).toLocaleString() : '';
-  }
-  function refreshSeen(){ rows.forEach(refreshSeenRow); }
-
-  // ---- row expand / collapse ----
-  function toggle(row){
-    var detail = document.querySelector('.dm-detail[data-detail-for="'+cssEsc(row.dataset.username)+'"]');
-    if (!detail) return;
-    var willOpen = detail.hidden;
-    detail.hidden = !willOpen;
-    row.classList.toggle('is-open', willOpen);
-    row.setAttribute('aria-expanded', willOpen ? 'true':'false');
-    var pfx = row.dataset.prefix;
-    if (willOpen){ open.add(pfx); renderTree(pfx); }
-    else open.delete(pfx);
-  }
-  rows.forEach(function(row){
-    row.addEventListener('click', function(){ toggle(row); });
-    row.addEventListener('keydown', function(e){
-      if (e.key==='Enter' || e.key===' '){ e.preventDefault(); toggle(row); }
-    });
-    // seed last-seen from the server's first paint
-    var ls = parseInt(row.dataset.lastseen||'0',10);
-    if (ls>0) lastSeen.set(row.dataset.prefix, ls);
-  });
-  refreshSeen();
-  setInterval(refreshSeen, 1000);
-
-  // ---- SSE stream ----
-  if (!available) return;
-  var es = new EventSource('/a/mqtt-monitor/stream');
-  es.addEventListener('snapshot', function(e){
-    var d = JSON.parse(e.data);
-    topics.clear(); lastSeen.clear();
-    (d.retained || []).forEach(function(m){ topics.set(m.topic, m); noteLastSeen(m); });
-    setBroker(d.broker); setStats(d.stats); setConnected(d.clients || []);
-    open.forEach(function(p){ renderTree(p); });
     refreshSeen();
-  });
-  es.addEventListener('msg', function(e){ applyMessage(JSON.parse(e.data)); });
-  es.addEventListener('tick', function(e){
-    var d = JSON.parse(e.data);
-    setBroker(d.broker); setStats(d.stats); setConnected(d.clients || []);
-  });
-  // EventSource auto-reconnects; the server re-sends a fresh snapshot on
-  // each (re)connect, so state re-seeds without extra handling here.
-})();
+    setInterval(refreshSeen, 1000);
+
+    // ---- SSE stream ----
+    // EventSource auto-reconnects; the server re-sends a fresh snapshot
+    // on each (re)connect, so state re-seeds without extra handling.
+    var es = new EventSource('/a/mqtt-monitor/stream');
+    es.addEventListener('snapshot', function (e) {
+      var d = JSON.parse(e.data);
+      // topics re-seed from the retained store; lastSeen deliberately
+      // does NOT clear - noteLastSeen only ever moves forward, so the
+      // retained-only snapshot merges in without regressing rows whose
+      // newest traffic was non-retained (and the "Last message" sort
+      // key can never disagree with the displayed value).
+      topics.clear();
+      (d.retained || []).forEach(function (m) { topics.set(m.topic, m); noteLastSeen(m); });
+      setBroker(d.broker); setStats(d.stats); setConnected(d.clients || []);
+      dc.setCounter('topics', topics.size);
+      dc.rows.forEach(bumpSeenSort);
+      refreshSeen();
+      var cur = dc.current();
+      if (cur) renderTree(cur.getAttribute('data-prefix'));
+    });
+    es.addEventListener('msg', function (e) { applyMessage(JSON.parse(e.data)); });
+    es.addEventListener('tick', function (e) {
+      var d = JSON.parse(e.data);
+      setBroker(d.broker); setStats(d.stats); setConnected(d.clients || []);
+    });
+  })();
 </script>
 {{end}}
