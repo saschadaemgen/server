@@ -98,6 +98,15 @@ func main() {
 	}
 }
 
+// shutdownWatchdogTimeout caps how long runEdge's cleanup (its defer chain:
+// db, mqtt broker, telegram, nfc, console, mock manager) may take before the
+// process force-exits. It must exceed the longest legitimate cleanup so it
+// never fires on a healthy stop - viewerMgr.Shutdown already caps at ~5s, so
+// 8s leaves margin. A subsystem Stop()/Close() that blocks past this (e.g. the
+// broker writing a DISCONNECT to a half-open, dead-device MQTT socket, which
+// can stall on the OS TCP write timeout for ~2 min) is force-capped here.
+const shutdownWatchdogTimeout = 8 * time.Second
+
 // runEdge boots the full local stack (the RPi role): config, db,
 // auth, mock viewers, doorbell hub, HTTP/stream server, plus the
 // ADDITIVE side-channel client. This is the historical main() body;
@@ -554,6 +563,20 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	select {
 	case <-ctx.Done():
 		log.Info("shutdown signal received")
+		// Bound the whole cleanup path. runEdge is about to return and run
+		// its defer chain; a subsystem Stop()/Close() that blocks (the
+		// broker writing to a half-open dead-device socket is the known
+		// hazard) would stall the chain and hang `systemctl stop` until
+		// systemd's TimeoutStopSec SIGKILLs us (~2 min). This is a plain
+		// goroutine, NOT a defer: a blocked defer would run before a
+		// deferred watchdog could, so only an independent goroutine started
+		// BEFORE the defers can cap total shutdown time. If cleanup finishes
+		// first, the process exits normally (0) before this ever fires.
+		go func() {
+			time.Sleep(shutdownWatchdogTimeout)
+			log.Warn("shutdown watchdog fired - forcing exit", "after", shutdownWatchdogTimeout)
+			os.Exit(0)
+		}()
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server stopped", "err", err)
