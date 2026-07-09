@@ -69,6 +69,7 @@ var adminLibraryFor = map[string][]string{
 	"designer":        {},
 	"ua":              {},
 	"mqtt":            {},
+	"mqtt-monitor":    {},
 	"telegram":        {},
 }
 
@@ -83,6 +84,7 @@ var newDesignPages = map[string]bool{
 	"designer":      true,
 	"ua":            true,
 	"mqtt":          true,
+	"mqtt-monitor":  true,
 	"telegram":      true,
 }
 

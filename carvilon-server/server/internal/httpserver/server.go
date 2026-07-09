@@ -709,6 +709,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/mqtt/monitor", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTMonitor)))
 	s.mux.Handle("GET /a/mqtt/ws-info", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTWSInfo)))
 
+	// Device MQTT (device-facing broker monitoring): a read-only operator
+	// view of broker health + every device's live connection state and
+	// retained topic tree. Distinct from /a/mqtt above (configuration).
+	s.mux.Handle("GET /a/mqtt-monitor", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTMonitorPage)))
+	s.mux.Handle("GET /a/mqtt-monitor/stream", s.requireAdminSession(http.HandlerFunc(s.handleAdminMQTTMonitorStream)))
+
 	// Telegram bot admin: on/off + write-only token, chat allowlist,
 	// pending-chat approval (in-product chat-id discovery), test send,
 	// and the counter endpoint the page's auto-refresh polls.

@@ -76,6 +76,7 @@ type Status struct {
 type Manager struct {
 	store    *mqttstore.Store
 	console  *Console
+	monitor  *Monitor
 	log      *slog.Logger
 	stateDir string // base dir for the generated self-signed cert
 
@@ -107,6 +108,7 @@ func New(store *mqttstore.Store, console *Console, log *slog.Logger, stateDir st
 	return &Manager{
 		store:    store,
 		console:  console,
+		monitor:  NewMonitor(),
 		log:      log.With("component", "mqtt-broker"),
 		stateDir: stateDir,
 		settings: settings,
@@ -230,6 +232,12 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	}
 	if err := srv.AddHook(&consoleHook{console: m.console}, nil); err != nil {
 		return m.fail(fmt.Errorf("add console hook: %w", err))
+	}
+	// Device-monitoring fan-out: full-payload publishes under carvilon/#
+	// feed the Device MQTT page's live topic tree. Re-added on every start
+	// so a reconfigure keeps the stream alive.
+	if err := srv.AddHook(&monitorHook{monitor: m.monitor}, nil); err != nil {
+		return m.fail(fmt.Errorf("add monitor hook: %w", err))
 	}
 
 	// --- plaintext listener: LAN-only, never 0.0.0.0 ---

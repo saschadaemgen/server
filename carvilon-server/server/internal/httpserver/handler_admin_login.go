@@ -194,6 +194,8 @@ func navSlotFor(name string) string {
 		return "ua"
 	case "mqtt":
 		return "mqtt"
+	case "mqtt-monitor":
+		return "mqtt-monitor"
 	case "telegram":
 		return "telegram"
 	case "settings":
