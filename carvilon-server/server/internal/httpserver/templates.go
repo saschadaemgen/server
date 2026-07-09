@@ -115,7 +115,14 @@ func newAdminTemplates() (*adminTemplates, error) {
 			"templates/admin/_admin_topbar.html",
 		}
 		if newDesignPages[name] {
-			shellFiles = append(shellFiles, "templates/admin/_admin_layout.html")
+			// _device_center.html is the shared Device Center shell
+			// (dc-styles/dc-core-js/dc-detail-layer + icon helpers) used by
+			// /a/devices and the MQTT monitor; parsing it for every
+			// new-design page keeps this list simple - unused defines cost
+			// nothing.
+			shellFiles = append(shellFiles,
+				"templates/admin/_admin_layout.html",
+				"templates/admin/_device_center.html")
 		} else {
 			shellFiles = append(shellFiles, "templates/admin/_nav.html")
 		}

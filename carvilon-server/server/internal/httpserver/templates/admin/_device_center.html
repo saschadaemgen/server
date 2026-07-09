@@ -1,0 +1,902 @@
+{{/* _device_center.html - the shared Device Center shell.
+
+     The binding "Device Center" design (anthracite HMI, accent-driven
+     orange ramp, IBM Plex, faceted left column, CSS-grid table, slide-out
+     detail panel) started life on /a/devices (ua.html) and is reused 1:1
+     by other list pages, starting with the Device-MQTT monitor. This
+     partial carries everything that is page-INDEPENDENT:
+
+       dc-styles       - the complete .dc-* stylesheet. The one page knob
+                         is --dc-grid (the table's grid-template-columns),
+                         which each page sets in its own head-extra along
+                         with its responsive column overrides.
+       dc-check        - the facet checkbox tick SVG.
+       dc-icon         - the category icon switch (hub/switch/reader/...).
+       dc-detail-layer - the slide-out panel chrome (scrim, panel, head,
+                         two-column body).
+       dc-core-js      - window.dcInit(cfg): faceted filtering, search,
+                         column sort, the slide-out open/close mechanics
+                         and the ambient animations. Page-specific bits
+                         (which facet dims exist, sort keys, how the
+                         panel's right column is filled, live updates)
+                         come in via cfg / the returned api.
+
+     Columns, facet groups, banners, live updates (the /a/devices status
+     poll, the MQTT SSE stream) stay in the page templates - they differ
+     per page and are wired onto the api dcInit returns. */}}
+
+{{define "dc-styles"}}
+<style>
+  /* Device Center shell. A 1:1 port of the binding "Device Center"
+     design (anthracite HMI, orange accent, IBM Plex Sans + Mono), scoped
+     under .dc-root so its tokens never leak onto other admin pages. The
+     fonts are the same self-hosted IBM Plex woff2 the admin already ships
+     (no external requests). All labels are sentence case (no all-caps
+     blocks), the page is edge-to-edge. */
+
+  /* Self-hosted IBM Plex (Sans is also declared by the topbar; Mono is
+     added here). Local files only - no Google Fonts request. */
+  @font-face { font-family:'IBM Plex Sans'; font-weight:400; font-display:swap; src:url('/static/fonts/ibm-plex-sans-400.woff2') format('woff2'); }
+  @font-face { font-family:'IBM Plex Sans'; font-weight:500; font-display:swap; src:url('/static/fonts/ibm-plex-sans-500.woff2') format('woff2'); }
+  @font-face { font-family:'IBM Plex Sans'; font-weight:600; font-display:swap; src:url('/static/fonts/ibm-plex-sans-600.woff2') format('woff2'); }
+  @font-face { font-family:'IBM Plex Mono'; font-weight:400; font-display:swap; src:url('/static/fonts/ibm-plex-mono-400.woff2') format('woff2'); }
+  @font-face { font-family:'IBM Plex Mono'; font-weight:500; font-display:swap; src:url('/static/fonts/ibm-plex-mono-500.woff2') format('woff2'); }
+  @font-face { font-family:'IBM Plex Mono'; font-weight:600; font-display:swap; src:url('/static/fonts/ibm-plex-mono-600.woff2') format('woff2'); }
+
+  /* Full-bleed: clear the centered .page padding/margin/max-width for
+     this page only (higher specificity than the shared .page rule). */
+  body.admin-shell main.page { max-width:none; margin:0; padding:0; gap:0; display:block; }
+
+  /* ============ Design tokens (scoped) ============ */
+  .dc-root {
+    --black-950:#07080A; --black-900:#0A0C0E; --gray-900:#0E1013; --gray-850:#121519;
+    --gray-800:#171A1F; --gray-780:#1C2026; --gray-750:#21262C; --gray-700:#2A3038;
+    --gray-650:#333A43; --gray-600:#3D444E; --gray-500:#4E5660; --gray-450:#626B76;
+    --gray-400:#7B848F; --gray-300:#9AA3AE; --gray-200:#BFC6CF; --gray-100:#E2E6EB; --white:#F4F6F8;
+
+    /* The design's "orange" accent ramp is rebound to the CONFIGURABLE admin
+       accent (--accent, injected by renderAdminPage). We derive the whole
+       ramp from it so the page follows the color set in Settings; the
+       #FF7A1A fallback reproduces the design when no accent is injected.
+       We must NOT redefine --accent itself here - only consume it. */
+    --acc: var(--accent, #FF7A1A);
+    --orange-500: var(--acc);
+    --orange-400: color-mix(in srgb, var(--acc) 70%, white);
+    --orange-300: color-mix(in srgb, var(--acc) 48%, white);
+    --orange-600: color-mix(in srgb, var(--acc) 80%, black);
+    --orange-700: color-mix(in srgb, var(--acc) 62%, black);
+    --amber-glow: color-mix(in srgb, var(--acc) 45%, transparent);
+    --amber-haze: color-mix(in srgb, var(--acc) 13%, transparent);
+    /* Device-name titles: a very soft hint of the accent over white
+       (follows Settings) - just barely tinted, not a saturated blue. */
+    --title-blue: color-mix(in srgb, var(--acc) 18%, var(--white));
+    /* Fixed signal colors (never follow the accent) */
+    --live-500:#34E29B; --live-glow:rgba(52,226,155,0.45);
+    --lock-500:#FF5C4D; --lock-glow:rgba(255,92,77,0.45); --lock-haze:rgba(255,92,77,0.11);
+
+    --bg-page:var(--black-950); --bg-deep:var(--black-900);
+    --surface-panel:var(--gray-900); --surface-cell:var(--gray-850); --surface-raised:var(--gray-800);
+    --field-bg:#0a0c0f;
+    --text-primary:var(--white); --text-secondary:var(--gray-300); --text-tertiary:var(--gray-400);
+    --text-disabled:var(--gray-500); --text-on-accent:#1A0E02;
+    --accent-text:var(--orange-400);
+
+    --border-subtle:rgba(255,255,255,0.05); --border-default:rgba(255,255,255,0.09);
+    --border-strong:rgba(255,255,255,0.16); --border-accent:color-mix(in srgb, var(--acc) 65%, transparent); --divider:rgba(255,255,255,0.07);
+
+    --font-sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+
+    --radius-xs:3px; --radius-sm:4px; --radius-md:6px; --radius-lg:9px; --radius-pill:999px;
+    --well:inset 0 1px 2px rgba(0,0,0,0.6),inset 0 0 0 1px rgba(255,255,255,0.04);
+    --screen:radial-gradient(130% 90% at 50% -10%,#121519 0%,#0a0c0e 55%,#07080a 100%);
+    --ease-tactile:cubic-bezier(0.22,0.8,0.28,1); --ease-out:cubic-bezier(0.16,1,0.3,1);
+  }
+
+  .dc-root, .dc-root * { box-sizing:border-box; }
+  .dc-root {
+    position:relative;
+    display:flex;
+    height:calc(100vh - 58px - var(--admin-footer-h, 28px));
+    font-family:var(--font-sans);
+    color:var(--text-primary);
+    background:var(--screen);
+    overflow:hidden;
+  }
+  .dc-mono { font-family:var(--font-mono); }
+
+  /* Dark, thin scrollbars for every scroll area in the page (left filter
+     column, center table, right detail panel) - the native light scrollbar
+     broke the anthracite look. scrollbar-color inherits, so setting it on
+     .dc-root covers Firefox; the ::-webkit rules cover Chromium/Edge. */
+  .dc-root, .dc-root * { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.2) transparent; }
+  .dc-root ::-webkit-scrollbar { width:10px; height:10px; }
+  .dc-root ::-webkit-scrollbar-track { background:transparent; }
+  .dc-root ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.16); border-radius:6px; border:2px solid transparent; background-clip:padding-box; }
+  .dc-root ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.3); }
+  .dc-root ::-webkit-scrollbar-button { display:none; width:0; height:0; }
+  .dc-root ::-webkit-scrollbar-corner { background:transparent; }
+
+  /* ============ Left column ============ */
+  .dc-aside { flex:0 0 264px; display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border-default); background:linear-gradient(180deg,#0d0f12,#0a0c0e); }
+  .dc-fleet { padding:15px 15px 16px; border-bottom:1px solid var(--divider); }
+  .dc-fleet-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px; }
+  .dc-fleet-title { font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-tertiary); }
+  .dc-fleet-total { font-size:11.5px; color:var(--text-tertiary); letter-spacing:0.04em; }
+  .dc-fleet-grid { display:flex; align-items:stretch; justify-content:space-between; gap:8px; border-radius:var(--radius-md); background:linear-gradient(180deg,#13171e,#0c0f14); border:1px solid rgba(255,255,255,0.06); box-shadow:0 2px 6px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.05); padding:8px; }
+  .dc-stat { flex:1; display:flex; flex-direction:column; align-items:center; gap:7px; padding:8px 4px 7px; border-radius:6px; background:radial-gradient(130% 150% at 50% -10%,#0a0d11,#060708); box-shadow:inset 0 2px 6px rgba(0,0,0,0.85),inset 0 0 0 1px rgba(0,0,0,0.6); }
+  .dc-digits { display:flex; gap:2px; perspective:320px; }
+  .dc-digit { position:relative; width:28px; height:42px; border-radius:4px; background:linear-gradient(180deg,#1c222c 0%,#161b24 49.4%,#0b0f15 50.6%,#10151d 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 4px 8px rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; padding-bottom:4px; font-size:38px; font-weight:400; font-family:var(--font-sans); font-variant-numeric:tabular-nums; line-height:40px; color:var(--orange-300); text-shadow:0 0 14px var(--amber-glow); animation:dc-flip 560ms ease-in-out backwards; }
+  @media (prefers-reduced-motion: reduce) { .dc-digit { animation:none; } }
+  .dc-digit::after { content:""; position:absolute; left:1px; right:1px; top:50%; height:2px; margin-top:-1px; background:linear-gradient(180deg,rgba(0,0,0,0.75),rgba(255,255,255,0.06)); }
+  .dc-stat.off .dc-digit { color:var(--lock-500); text-shadow:0 0 14px var(--lock-glow); }
+  .dc-stat-label { font-size:11px; color:var(--text-tertiary); letter-spacing:0.08em; text-transform:uppercase; }
+
+  .dc-search-wrap { padding:12px 14px 10px; border-bottom:1px solid var(--divider); }
+  .dc-search { position:relative; border-radius:var(--radius-md); background:var(--field-bg); box-shadow:var(--well); overflow:hidden; }
+  .dc-search:focus-within { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dc-search-canvas { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+  .dc-search .dc-search-ico { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--text-tertiary); pointer-events:none; display:flex; z-index:2; }
+  .dc-search input { position:relative; z-index:2; width:100%; height:36px; padding:0 12px 0 36px; border:none; background:transparent; color:var(--white); font-family:var(--font-sans); font-size:14px; outline:none; }
+  .dc-search input::placeholder { color:var(--text-tertiary); }
+
+  .dc-filters { flex:1; overflow-y:auto; padding:2px 9px 20px; }
+  .dc-filter-head { display:flex; align-items:center; gap:8px; padding:11px 6px 3px; }
+  .dc-filter-head .dc-fh-label { font-size:11.5px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-tertiary); }
+  .dc-hr { flex:1; height:1px; background:var(--divider); }
+  .dc-clear { border:none; background:none; cursor:pointer; font-family:var(--font-sans); font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:var(--orange-400); padding:2px; }
+  .dc-clear:hover { color:var(--orange-300); }
+  .dc-facet-group { display:flex; align-items:center; gap:8px; padding:14px 6px 4px; }
+  .dc-facet-group .dc-fg-label { font-size:11px; font-weight:600; letter-spacing:0.11em; text-transform:uppercase; color:var(--gray-500); }
+
+  .dc-facet { width:100%; display:flex; align-items:center; gap:9px; height:33px; padding:0 6px; border:none; background:transparent; border-radius:var(--radius-xs); cursor:pointer; text-align:left; font-family:var(--font-sans); }
+  .dc-facet:hover:not([disabled]) { background:rgba(255,255,255,0.03); }
+  .dc-facet[disabled] { cursor:default; opacity:0.4; }
+  .dc-cb { width:17px; height:17px; flex:0 0 auto; border-radius:4px; border:1px solid var(--border-strong); background:var(--field-bg); box-shadow:var(--well); display:flex; align-items:center; justify-content:center; color:var(--text-on-accent); }
+  .dc-cb svg { opacity:0; width:11px; height:11px; }
+  .dc-facet.is-active .dc-cb { border-color:var(--orange-500); background:linear-gradient(180deg,var(--orange-400),var(--orange-600)); box-shadow:0 0 8px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,0.28); }
+  .dc-facet.is-active .dc-cb svg { opacity:1; }
+  .dc-facet-ico { color:var(--text-tertiary); display:flex; flex:0 0 auto; }
+  .dc-facet-ico svg { width:17px; height:17px; }
+  .dc-facet.is-active .dc-facet-ico { color:var(--orange-400); }
+  .dc-facet-dot { width:8px; height:8px; flex:0 0 auto; border-radius:50%; }
+  .dc-facet-label { flex:1; font-size:14px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dc-facet.is-active .dc-facet-label { color:var(--white); }
+  .dc-facet-count { font-size:12px; color:var(--text-tertiary); }
+  .dc-facet.is-active .dc-facet-count { color:var(--orange-300); }
+  .dc-facet.model .dc-facet-label { font-family:var(--font-mono); font-size:13px; }
+
+  /* ============ Center table ============ */
+  .dc-main { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--bg-page); }
+  .dc-toolbar { flex:0 0 auto; display:flex; align-items:center; gap:14px; height:44px; padding:0 20px; border-bottom:1px solid var(--border-default); background:linear-gradient(180deg,#0f1216,#0b0e11); }
+  .dc-mode { font-size:11px; font-weight:600; letter-spacing:0.07em; color:var(--text-tertiary); }
+  .dc-count { display:flex; align-items:baseline; gap:6px; padding:3px 9px; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); }
+  .dc-count .dc-shown { font-family:var(--font-mono); font-size:13px; font-weight:600; color:var(--orange-400); }
+  .dc-count .dc-total { font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary); }
+  .dc-sorted { display:none; align-items:center; gap:6px; border:1px solid var(--border-default); background:var(--surface-cell); border-radius:var(--radius-sm); padding:3px 8px; cursor:pointer; color:var(--text-secondary); font-family:var(--font-sans); font-size:11px; }
+  .dc-sorted.is-on { display:flex; }
+  .dc-sorted:hover { color:var(--white); }
+  .dc-sorted b { color:var(--orange-400); font-weight:600; }
+  .dc-spacer { flex:1; }
+  .dc-readonly { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:var(--radius-pill); font-size:11px; letter-spacing:0.03em; color:var(--orange-300); background:var(--amber-haze); box-shadow:inset 0 0 0 1px var(--border-accent); }
+  .dc-readonly svg { width:13px; height:13px; }
+  .dc-toolbtn { display:inline-flex; align-items:center; gap:6px; padding:4px 11px; border-radius:var(--radius-sm); font-family:var(--font-sans); font-size:11px; color:var(--text-secondary); background:var(--surface-cell); border:1px solid var(--border-default); cursor:pointer; text-decoration:none; }
+  .dc-toolbtn:hover { color:var(--white); border-color:var(--border-accent); }
+  .dc-toolbtn svg { width:13px; height:13px; }
+  .dc-toolform { margin:0; }
+
+  .dc-scroll { flex:1; overflow:auto; }
+  .dc-table { min-width:760px; }
+  .dc-thead { display:grid; grid-template-columns:var(--dc-grid); align-items:center; height:34px; padding:0 20px; border-bottom:1px solid var(--border-default); background:var(--bg-deep); position:sticky; top:0; z-index:2; }
+  .dc-th { border:none; background:none; cursor:pointer; display:flex; align-items:center; gap:3px; font-family:var(--font-sans); font-size:10px; font-weight:600; letter-spacing:0.04em; color:var(--text-tertiary); padding:0; min-width:0; white-space:nowrap; overflow:hidden; }
+  .dc-th.num { justify-content:center; cursor:default; }
+  .dc-th:not(.num):hover { color:var(--text-secondary); }
+  .dc-th .dc-ind { color:var(--orange-500); font-size:8px; }
+
+  .dc-group { display:flex; align-items:center; gap:10px; height:28px; padding:0 20px; background:linear-gradient(180deg,#0b0d10,#090b0d); border-bottom:1px solid var(--divider); }
+  .dc-group-ico { color:var(--orange-500); display:flex; }
+  .dc-group-label { font-size:11px; font-weight:600; letter-spacing:0.04em; color:var(--orange-400); text-shadow:0 0 10px var(--amber-glow); }
+  .dc-group-count { font-family:var(--font-mono); font-size:11px; color:var(--orange-300); padding:1px 7px; border-radius:var(--radius-xs); background:var(--amber-haze); }
+  /* the trailing hairline after each group label carries a periodic scan sweep (see JS) */
+  .dc-group-line { flex:1; height:1px; position:relative; overflow:hidden; background:var(--divider); margin-left:2px; }
+  .dc-scan { position:absolute; top:0; left:0; height:100%; width:26%; background:linear-gradient(90deg,transparent,var(--orange-400),transparent); opacity:0; }
+
+  .dc-row { display:grid; grid-template-columns:var(--dc-grid); align-items:center; height:33px; padding:0 20px; border-bottom:1px solid var(--divider); cursor:pointer; }
+  .dc-row:hover { background:rgba(255,255,255,0.032); }
+  .dc-row.is-selected { background:var(--amber-haze); box-shadow:inset 3px 0 0 var(--orange-500); }
+  .dc-cell { display:flex; align-items:center; gap:7px; min-width:0; overflow:hidden; }
+  .dc-cell.num { justify-content:center; font-family:var(--font-mono); font-size:11px; color:var(--gray-500); }
+  .dc-cell .dc-row-ico { color:var(--text-tertiary); display:flex; flex:0 0 auto; }
+  .dc-row.is-selected .dc-row-ico, .dc-row.is-selected .dc-cell.num { color:var(--orange-400); }
+  .dc-name { font-size:13px; font-weight:500; color:var(--title-blue); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dc-mock { font-family:var(--font-mono); font-size:9.5px; letter-spacing:0.04em; color:var(--text-tertiary); border:1px solid var(--border-default); border-radius:3px; padding:0 4px; flex:0 0 auto; }
+  .dc-cell.type { font-size:12px; color:var(--text-secondary); }
+  .dc-stat-dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+  .dc-stat-dot.online { background:var(--acc); box-shadow:0 0 6px var(--amber-glow); }
+  .dc-stat-dot.offline { background:transparent; box-shadow:inset 0 0 0 1.5px var(--gray-500); }
+  .dc-stat-dot.locked { background:var(--live-500); box-shadow:0 0 6px var(--live-glow); }
+  .dc-stat-dot.unlocked { background:var(--lock-500); box-shadow:0 0 6px var(--lock-glow); }
+  .dc-stat-dot.unknown { background:transparent; box-shadow:inset 0 0 0 1.5px var(--gray-500); }
+  .dc-stat-txt { font-size:12px; color:var(--text-secondary); white-space:nowrap; }
+  .dc-row.offline .dc-stat-txt { color:var(--text-tertiary); }
+  .dc-pos { font-size:11px; color:var(--text-tertiary); white-space:nowrap; }
+  .dc-cell.mono { font-family:var(--font-mono); font-size:11.5px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dc-cell.mono.dim { color:var(--text-disabled); }
+  .dc-empty-rows { padding:56px 20px; text-align:center; color:var(--text-tertiary); font-size:13px; }
+  .dc-empty-rows[hidden] { display:none; }
+
+  /* Section-level banners (emergency / doors error) */
+  .dc-banner { display:flex; align-items:flex-start; gap:10px; padding:9px 20px; border-bottom:1px solid var(--divider); background:var(--bg-deep); font-size:12px; color:var(--text-secondary); }
+  .dc-banner svg { flex:0 0 auto; margin-top:1px; color:var(--text-tertiary); }
+  .dc-banner.alert { background:var(--lock-haze); color:#ffcabf; }
+  .dc-banner.alert svg { color:var(--lock-500); }
+  .dc-banner.warn { background:color-mix(in srgb, var(--orange-500) 12%, transparent); color:var(--orange-300); }
+  .dc-banner.ok { background:color-mix(in srgb, var(--live-500) 10%, transparent); color:#9be8b8; }
+  .dc-banner.ok svg { color:var(--live-500); }
+  .dc-banner-body { min-width:0; display:flex; flex-direction:column; gap:4px; }
+  .dc-banner-body strong { color:var(--text-primary); font-weight:600; }
+  .dc-banner.alert .dc-banner-body strong { color:#ffd9d1; }
+  .dc-banner details summary { cursor:pointer; color:var(--text-tertiary); font-size:11px; }
+  .dc-banner details .dc-kv-grid { margin-top:8px; }
+  .dc-banner[hidden] { display:none; }
+
+  /* ============ Detail panel ============ */
+  .dc-detail-layer { position:absolute; top:0; bottom:0; left:264px; right:0; overflow:hidden; pointer-events:none; z-index:20; }
+  /* solid dim only (no backdrop-filter): a per-frame blur re-composite made
+     the slide stutter; the dark scrim keeps the focus effect without it. */
+  .dc-scrim { position:absolute; inset:0; background:rgba(4,5,7,0.58); opacity:0; transition:opacity 300ms var(--ease-tactile); pointer-events:none; }
+  .dc-panel { position:absolute; top:0; bottom:0; right:0; width:80%; min-width:min(700px,100%); transform:translateX(102%); background:var(--screen); display:flex; flex-direction:column; border-left:1px solid color-mix(in srgb, var(--acc) 50%, transparent); box-shadow:-34px 0 90px -24px rgba(0,0,0,0.92); will-change:transform; pointer-events:none; }
+  /* left-edge accent seam that flashes as the panel docks (design: dockflash) */
+  .dc-seam { position:absolute; top:0; bottom:0; left:0; width:2px; background:linear-gradient(180deg,rgba(7,8,10,0) 0%,var(--orange-400) 16%,var(--orange-400) 84%,rgba(7,8,10,0) 100%); box-shadow:0 0 18px 2px var(--amber-glow); opacity:0; pointer-events:none; z-index:3; }
+  .dc-detail-layer.is-open { pointer-events:auto; }
+  .dc-detail-layer.is-open .dc-scrim { opacity:1; pointer-events:auto; }
+  .dc-detail-layer.is-open .dc-panel { animation:dc-pagein 440ms cubic-bezier(0.8,0,0.15,1) forwards; pointer-events:auto; }
+  .dc-detail-layer.is-open .dc-seam { animation:dc-dockflash 460ms ease-out 410ms both; }
+  .dc-detail-layer.is-closing .dc-panel { animation:dc-pageout 380ms cubic-bezier(0.8,0,0.15,1) forwards; }
+
+  .dc-panel-head { flex:0 0 auto; display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); height:62px; border-bottom:1px solid var(--border-default); background:linear-gradient(180deg,#0f1216,#0b0e11); }
+  .dc-ph-left { display:flex; align-items:stretch; min-width:0; }
+  .dc-ph-tile { width:62px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border-right:1px solid var(--divider); color:var(--accent-text); }
+  .dc-ph-meta { display:flex; flex-direction:column; justify-content:center; min-width:0; padding:0 18px; }
+  .dc-ph-tags { display:flex; align-items:center; gap:8px; line-height:1.2; margin-bottom:2px; }
+  .dc-ph-type { font-size:9.5px; letter-spacing:0.06em; color:var(--orange-300); white-space:nowrap; flex:0 0 auto; }
+  .dc-ph-sep { width:1px; height:9px; background:var(--border-strong); flex:0 0 auto; }
+  .dc-ph-status { font-size:9.5px; font-weight:600; letter-spacing:0.06em; white-space:nowrap; flex:0 0 auto; }
+  .dc-ph-status.online { color:var(--accent-text); text-shadow:0 0 8px var(--amber-glow); }
+  .dc-ph-status.locked { color:var(--live-500); text-shadow:0 0 8px var(--live-glow); }
+  .dc-ph-status.offline, .dc-ph-status.unknown { color:var(--text-tertiary); }
+  .dc-ph-status.unlocked { color:var(--lock-500); text-shadow:0 0 8px var(--lock-glow); }
+  .dc-ph-name { font-size:17px; font-weight:600; color:var(--title-blue); line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .dc-ph-right { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:0 16px; }
+  .dc-back { height:38px; flex:0 0 auto; border:1px solid rgba(255,192,138,0.55); border-radius:19px; background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); color:var(--text-on-accent); cursor:pointer; display:flex; align-items:center; gap:7px; padding:0 20px; font-family:var(--font-sans); font-size:12px; font-weight:600; box-shadow:inset 0 1px 0 rgba(255,255,255,0.28),0 5px 15px -8px rgba(0,0,0,0.75); }
+  .dc-back:hover { background:linear-gradient(180deg,var(--orange-400),var(--orange-500)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.34),0 0 16px var(--amber-glow); }
+
+  .dc-panel-body { flex:1; overflow:auto; }
+  .dc-panel-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); align-items:stretch; min-height:100%; min-width:600px; animation:dc-contentin 340ms var(--ease-out) 90ms backwards; }
+  .dc-col-right { min-width:0; border-left:1px solid var(--border-default); }
+  .dc-col-left { min-width:0; }
+  .dc-sec-head { display:flex; align-items:center; gap:9px; height:32px; padding:0 20px; background:var(--bg-deep); border-bottom:1px solid var(--divider); }
+  .dc-sec-dot { width:5px; height:5px; border-radius:50%; background:var(--orange-500); box-shadow:0 0 6px var(--amber-glow); flex:0 0 auto; }
+  .dc-sec-title { font-size:11px; font-weight:600; letter-spacing:0.04em; color:var(--orange-400); }
+  .dc-sec-head .dc-hr { background:var(--divider); }
+  .dc-kv { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:9px 20px; border-bottom:1px solid var(--divider); }
+  .dc-kv .dc-k { font-size:12px; color:var(--text-tertiary); flex:0 0 auto; }
+  .dc-kv .dc-v { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); text-align:right; word-break:break-all; min-width:0; }
+  .dc-caps { display:flex; flex-wrap:wrap; gap:6px; padding:12px 20px 14px; border-bottom:1px solid var(--divider); }
+  .dc-cap { font-family:var(--font-mono); font-size:11px; padding:2px 8px; border-radius:var(--radius-sm); background:var(--surface-cell); color:var(--text-secondary); box-shadow:inset 0 0 0 1px var(--border-default); }
+  .dc-lazy-hint { padding:14px 20px; font-size:12px; color:var(--text-tertiary); }
+  .dc-lazy-err { padding:12px 20px; font-size:12px; color:#ffb0b0; }
+  .dc-kv-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:6px 18px; padding:12px 20px 14px; }
+  .dc-kv-grid .dc-k { font-size:11px; color:var(--text-tertiary); word-break:break-word; }
+  .dc-kv-grid .dc-v { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); word-break:break-word; }
+  .dc-kv-grid .dc-kv-cell { display:flex; flex-direction:column; gap:1px; min-width:0; }
+
+  /* Panel action forms (rename + editor jump on /a/devices) - the same
+     field/button vocabulary as the rest of the design. */
+  .dc-act-form { display:flex; flex-direction:column; gap:10px; padding:14px 20px 16px; border-bottom:1px solid var(--divider); }
+  .dc-act-label { font-size:11px; font-weight:600; letter-spacing:0.04em; color:var(--text-tertiary); }
+  .dc-act-input { height:34px; padding:0 12px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-sans); font-size:13px; outline:none; }
+  .dc-act-input::placeholder { color:var(--text-tertiary); }
+  .dc-act-input:focus { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dc-act-row { display:flex; gap:8px; flex-wrap:wrap; }
+  .dc-act-btn { height:32px; display:inline-flex; align-items:center; gap:7px; padding:0 16px; border-radius:16px; border:1px solid var(--border-strong); background:var(--surface-raised); color:var(--text-secondary); cursor:pointer; text-decoration:none; font-family:var(--font-sans); font-size:12px; font-weight:600; }
+  .dc-act-btn:hover { color:var(--white); border-color:var(--border-accent); }
+  .dc-act-btn svg { width:13px; height:13px; }
+  .dc-act-btn.accent { border:1px solid rgba(255,192,138,0.55); background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); color:var(--text-on-accent); box-shadow:inset 0 1px 0 rgba(255,255,255,0.28),0 5px 15px -8px rgba(0,0,0,0.75); }
+  .dc-act-btn.accent:hover { background:linear-gradient(180deg,var(--orange-400),var(--orange-500)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.34),0 0 16px var(--amber-glow); }
+  .dc-act-hint { margin:0; font-size:11px; color:var(--text-tertiary); line-height:1.5; }
+
+  /* ============ Gating / empty states ============ */
+  .dc-gate { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:40px; text-align:center; }
+  .dc-gate-ico { width:54px; height:54px; border-radius:var(--radius-lg); display:inline-flex; align-items:center; justify-content:center; background:var(--surface-raised); box-shadow:inset 0 0 0 1px var(--border-default); color:var(--text-tertiary); }
+  .dc-gate.err .dc-gate-ico { color:#ffb0b0; background:var(--lock-haze); }
+  .dc-gate h2 { margin:0; font-size:17px; font-weight:600; color:var(--text-secondary); }
+  .dc-gate p { margin:0; font-size:13px; color:var(--text-tertiary); max-width:56ch; line-height:1.5; }
+  .dc-gate a { color:var(--orange-400); text-decoration:none; }
+  .dc-gate a:hover { text-decoration:underline; }
+
+  @keyframes dc-pagein { from{transform:translateX(102%);} to{transform:translateX(0);} }
+  @keyframes dc-pageout { from{transform:translateX(0);} to{transform:translateX(102%);} }
+  @keyframes dc-contentin { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+  @keyframes dc-dockflash { 0%{opacity:0;} 12%{opacity:1;} 100%{opacity:0;} }
+  @keyframes dc-flip { 0%{transform:rotateX(0);} 49%{transform:rotateX(88deg);} 51%{transform:rotateX(-88deg);} 100%{transform:rotateX(0);} }
+  /* facet shimmer when the filter set changes (design: catflash) */
+  @keyframes dc-catflash { 26%{color:var(--orange-400);text-shadow:0 0 6px var(--amber-glow);} 44%{color:var(--text-secondary);text-shadow:0 0 1px var(--amber-haze);} 62%{color:var(--orange-300);text-shadow:0 0 8px var(--amber-glow);} }
+  @media (prefers-reduced-motion: reduce) { .dc-facet-ico, .dc-facet-label { animation:none !important; } }
+  @keyframes dc-scanfulll { 0%{transform:translateX(-130%);opacity:0;} 10%{opacity:0.9;} 70%{opacity:0.45;} 100%{transform:translateX(460%);opacity:0;} }
+  @keyframes dc-scanfullr { 0%{transform:translateX(460%);opacity:0;} 10%{opacity:0.9;} 70%{opacity:0.45;} 100%{transform:translateX(-130%);opacity:0;} }
+  @keyframes dc-scanpartl { 0%{transform:translateX(-130%);opacity:0;} 16%{opacity:0.8;} 60%{opacity:0.4;} 100%{transform:translateX(180%);opacity:0;} }
+  @keyframes dc-scanpartr { 0%{transform:translateX(460%);opacity:0;} 16%{opacity:0.8;} 60%{opacity:0.4;} 100%{transform:translateX(160%);opacity:0;} }
+
+  /* Small screens: the shared shell parts only - each page overrides
+     --dc-grid and hides its own optional columns alongside this. */
+  @media (max-width:820px) {
+    .dc-aside { flex-basis:212px; }
+    .dc-detail-layer { left:0; }
+    .dc-panel { width:100%; min-width:0; }
+    .dc-table { min-width:0; }
+  }
+</style>
+{{end}}
+
+{{define "dc-check"}}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{end}}
+
+{{define "dc-icon"}}{{if eq . "hub"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>{{else if eq . "switch"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="2.6"/></svg>{{else if eq . "reader"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h5"/></svg>{{else if eq . "viewer"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>{{else if eq . "door"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M14 12h.01"/></svg>{{else if eq . "camera"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L8 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-4z"/><circle cx="12" cy="13" r="3.2"/></svg>{{else if eq . "sensor"}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>{{else}}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>{{end}}{{end}}
+
+{{define "dc-detail-layer"}}
+<div class="dc-detail-layer" data-dc-layer>
+  <div class="dc-scrim" data-dc-scrim></div>
+  <div class="dc-panel" role="dialog" aria-modal="true" aria-label="Device detail">
+    <span class="dc-seam" aria-hidden="true"></span>
+    <div class="dc-panel-head">
+      <div class="dc-ph-left">
+        <div class="dc-ph-tile" data-dc-ph-tile></div>
+        <div class="dc-ph-meta">
+          <div class="dc-ph-tags">
+            <span class="dc-ph-type" data-dc-ph-type></span>
+            <span class="dc-ph-sep"></span>
+            <span class="dc-ph-status" data-dc-ph-status></span>
+          </div>
+          <span class="dc-ph-name" data-dc-ph-name></span>
+        </div>
+      </div>
+      <div class="dc-ph-right">
+        <button type="button" class="dc-back" data-dc-close><span>Back</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </div>
+    <div class="dc-panel-body">
+      <div class="dc-panel-grid">
+        <div class="dc-col-left" data-dc-left></div>
+        <div class="dc-col-right" data-dc-right></div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "dc-core-js"}}
+<script>
+  // Device Center shell core. window.dcInit(cfg) wires the client-side
+  // search + faceted filtering + column sort over the server-rendered
+  // rows, and the slide-out panel mechanics. Page-specific behavior
+  // comes in via cfg:
+  //   filterDims  { dim: rowAttr }  facet dimensions -> row data-attrs
+  //   modeDim     dim whose single selection drives the toolbar label
+  //   modeLabels  { key: label }    labels for modeDim values
+  //   modeDefault string            toolbar label with no/mixed selection
+  //   sortAttrs   { key: rowAttr }  sort keys -> row data-attrs
+  //   sortLabels  { key: label }    sort-chip labels
+  //   fillRight(row, rightCol, api)  set the panel's right column when a
+  //                                  row opens (sync, before the slide)
+  //   afterSlide(row, rightCol, api) optional; runs ~360ms into the
+  //                                  slide, only while the row is still
+  //                                  selected (the lazy-fetch hook)
+  // Returns the api the page's own live-update code builds on.
+  window.dcInit = function (cfg) {
+    cfg = cfg || {};
+    var root = document.querySelector('[data-dc]');
+    if (!root) return null;
+    var tbody = root.querySelector('[data-dc-tbody]');
+    if (!tbody) return null;
+
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('[data-dc-row]'));
+    var groups = Array.prototype.slice.call(tbody.querySelectorAll('[data-dc-group]'));
+    var searchInput = root.querySelector('[data-dc-search]');
+    var shownEl = root.querySelector('[data-dc-shown]');
+    var modeEl = root.querySelector('[data-dc-mode]');
+    var noResults = root.querySelector('[data-dc-noresults]');
+
+    // active filter sets, keyed by facet dimension
+    var filterDims = cfg.filterDims || {};
+    var filters = {};
+    for (var d in filterDims) filters[d] = new Set();
+    var query = '';
+    var sort = { key: '', dir: 1 };
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    function matches(row) {
+      if (query) { if ((row.getAttribute('data-search') || '').indexOf(query) < 0) return false; }
+      for (var dim in filters) {
+        var set = filters[dim];
+        if (!set.size) continue;
+        var val = row.getAttribute('data-' + filterDims[dim]) || '';
+        if (!set.has(val)) return false;
+      }
+      return true;
+    }
+
+    // Group headers are keyed by the same row attr the page groups on
+    // (data-cat on /a/devices); pages without groups simply have none.
+    var groupAttr = cfg.groupAttr || 'cat';
+
+    function apply() {
+      var shown = 0;
+      rows.forEach(function (r) {
+        var ok = matches(r);
+        r.style.display = ok ? '' : 'none';
+        if (ok) shown++;
+      });
+      // group headers: hidden while sorting; otherwise shown only when the
+      // group has at least one visible row.
+      groups.forEach(function (g) {
+        if (sort.key) { g.style.display = 'none'; return; }
+        var cat = g.getAttribute('data-dc-group');
+        var any = rows.some(function (r) {
+          return r.getAttribute('data-' + groupAttr) === cat && r.style.display !== 'none';
+        });
+        g.style.display = any ? '' : 'none';
+      });
+      if (shownEl) shownEl.textContent = shown;
+      // "no match" only when filters hid an otherwise non-empty table -
+      // an empty table has its own server-rendered message.
+      if (noResults) noResults.hidden = shown !== 0 || !rows.length;
+      updateMode();
+      // keep a live sort consistent when filters/search change the row set
+      if (sort.key) applySort();
+    }
+
+    function updateMode() {
+      if (!modeEl) return;
+      var def = cfg.modeDefault || 'All devices';
+      if (cfg.modeDim && filters[cfg.modeDim]) {
+        var keys = Array.from(filters[cfg.modeDim]);
+        if (keys.length === 1) {
+          modeEl.textContent = (cfg.modeLabels || {})[keys[0]] || def;
+          return;
+        }
+      }
+      modeEl.textContent = def;
+    }
+
+    // Facet shimmer: when the filter set changes, every facet's icon + label
+    // does a brief staggered accent flash (design: catflash). Disabled under
+    // prefers-reduced-motion.
+    var facetBtns = Array.prototype.slice.call(root.querySelectorAll('[data-dc-facet]'));
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function flashFacets() {
+      if (reduceMotion) return;
+      facetBtns.forEach(function (btn) {
+        Array.prototype.forEach.call(btn.querySelectorAll('.dc-facet-ico, .dc-facet-label'), function (el) {
+          el.style.animation = 'none';
+        });
+      });
+      void root.offsetWidth; // one reflow, then (re)start the animations
+      facetBtns.forEach(function (btn, i) {
+        Array.prototype.forEach.call(btn.querySelectorAll('.dc-facet-ico, .dc-facet-label'), function (el) {
+          el.style.animation = 'dc-catflash 620ms ease-out ' + (i * 95) + 'ms 1 backwards';
+        });
+      });
+    }
+
+    // Re-roll the fleet-status split-flap (design: _scheduleFlap).
+    var digits = Array.prototype.slice.call(root.querySelectorAll('.dc-digit'));
+    function reflipDigits() {
+      if (reduceMotion || !digits.length) return;
+      digits.forEach(function (el) { el.style.animation = 'none'; });
+      void root.offsetWidth;
+      digits.forEach(function (el, i) { el.style.animation = 'dc-flip 560ms ease-in-out ' + (i * 80) + 'ms 1 backwards'; });
+    }
+
+    // Ambient life in the left column, matching the design's timers: the
+    // facet cascade (top-to-bottom glow) fires on its own at irregular
+    // intervals (~2-5x/min), and the counters occasionally re-flip. Both
+    // self-reschedule; skipped entirely under prefers-reduced-motion.
+    if (!reduceMotion) {
+      (function scheduleCatFlash() {
+        setTimeout(function () { flashFacets(); scheduleCatFlash(); }, 12000 + Math.random() * 18000);
+      })();
+      (function scheduleFlap() {
+        setTimeout(function () { reflipDigits(); scheduleFlap(); }, 16000 + Math.random() * 22000);
+      })();
+    }
+
+    // ---- facets ----
+    facetBtns.forEach(function (btn) {
+      if (btn.disabled) return;
+      btn.addEventListener('click', function () {
+        var dim = btn.getAttribute('data-dc-facet');
+        var val = btn.getAttribute('data-dc-value');
+        var set = filters[dim];
+        if (!set) return;
+        if (set.has(val)) { set.delete(val); btn.classList.remove('is-active'); }
+        else { set.add(val); btn.classList.add('is-active'); }
+        flashFacets();
+        apply();
+      });
+    });
+
+    // ---- search ----
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        query = searchInput.value.trim().toLowerCase();
+        apply();
+      });
+    }
+
+    // ---- clear ----
+    var clearBtn = root.querySelector('[data-dc-clear]');
+    if (clearBtn) clearBtn.addEventListener('click', function () {
+      for (var d in filters) filters[d].clear();
+      root.querySelectorAll('[data-dc-facet].is-active').forEach(function (b) { b.classList.remove('is-active'); });
+      if (searchInput) searchInput.value = '';
+      query = '';
+      clearSort();
+      flashFacets();
+      apply();
+    });
+
+    // ---- sort ----
+    var sortLabels = cfg.sortLabels || {};
+    var sortAttrs = cfg.sortAttrs || {};
+    var sortedChip = root.querySelector('[data-dc-clearsort]');
+    var sortLabelEl = root.querySelector('[data-dc-sortlabel]');
+
+    function sortVal(row, key) {
+      return (row.getAttribute('data-' + (sortAttrs[key] || key)) || '').toLowerCase();
+    }
+
+    function applySort() {
+      if (!sort.key) return;
+      var visible = rows.filter(function (r) { return r.style.display !== 'none'; });
+      visible.sort(function (a, b) {
+        var va = sortVal(a, sort.key), vb = sortVal(b, sort.key);
+        if (va < vb) return -1 * sort.dir;
+        if (va > vb) return 1 * sort.dir;
+        // stable-ish tiebreak by original index
+        return (parseInt(a.getAttribute('data-idx'), 10) - parseInt(b.getAttribute('data-idx'), 10)) * sort.dir;
+      });
+      visible.forEach(function (r) { tbody.appendChild(r); });
+    }
+
+    function markSortIndicators() {
+      root.querySelectorAll('[data-dc-sort]').forEach(function (th) {
+        var ind = th.querySelector('[data-dc-ind]');
+        if (!ind) return;
+        ind.textContent = (th.getAttribute('data-dc-sort') === sort.key) ? (sort.dir === 1 ? '▲' : '▼') : '';
+      });
+    }
+
+    function clearSort() {
+      sort.key = ''; sort.dir = 1;
+      // restore original DOM order (rows + their group headers/templates)
+      var frag = document.createDocumentFragment();
+      // rebuild by original index order, re-inserting group headers before
+      // the first row of each category.
+      var seen = {};
+      var ordered = rows.slice().sort(function (a, b) {
+        return parseInt(a.getAttribute('data-idx'), 10) - parseInt(b.getAttribute('data-idx'), 10);
+      });
+      ordered.forEach(function (r) {
+        var cat = r.getAttribute('data-' + groupAttr);
+        if (!seen[cat]) {
+          seen[cat] = true;
+          var g = groups.filter(function (x) { return x.getAttribute('data-dc-group') === cat; })[0];
+          if (g) frag.appendChild(g);
+        }
+        frag.appendChild(r);
+      });
+      tbody.appendChild(frag);
+      if (sortedChip) sortedChip.classList.remove('is-on');
+      markSortIndicators();
+    }
+
+    root.querySelectorAll('[data-dc-sort]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var key = th.getAttribute('data-dc-sort');
+        if (sort.key === key) { sort.dir = -sort.dir; }
+        else { sort.key = key; sort.dir = 1; }
+        if (sortLabelEl) sortLabelEl.textContent = sortLabels[key] || key;
+        if (sortedChip) sortedChip.classList.add('is-on');
+        markSortIndicators();
+        apply();
+        applySort();
+      });
+    });
+    if (sortedChip) sortedChip.addEventListener('click', function () { clearSort(); apply(); });
+
+    // ---- detail panel ----
+    var layer = root.querySelector('[data-dc-layer]');
+    var scrim = root.querySelector('[data-dc-scrim]');
+    var closeBtn = root.querySelector('[data-dc-close]');
+    var phTile = root.querySelector('[data-dc-ph-tile]');
+    var phType = root.querySelector('[data-dc-ph-type]');
+    var phStatus = root.querySelector('[data-dc-ph-status]');
+    var phName = root.querySelector('[data-dc-ph-name]');
+    var leftCol = root.querySelector('[data-dc-left]');
+    var rightCol = root.querySelector('[data-dc-right]');
+    var selectedRow = null;
+
+    function iconFor(cat) {
+      var tpl = tbody.querySelector('[data-dc-row][data-' + groupAttr + '="' + cat + '"] .dc-row-ico');
+      return tpl ? tpl.innerHTML : '';
+    }
+
+    function openPanel(row) {
+      if (!layer) return;
+      var idx = row.getAttribute('data-idx');
+      var cat = row.getAttribute('data-' + groupAttr);
+
+      if (selectedRow) selectedRow.classList.remove('is-selected');
+      selectedRow = row;
+      row.classList.add('is-selected');
+
+      phTile.innerHTML = iconFor(cat);
+      phType.textContent = row.getAttribute('data-type') || '';
+      var st = row.getAttribute('data-status') || 'unknown';
+      phStatus.className = 'dc-ph-status ' + st;
+      // status text = the visible status text in the row
+      var stTxt = row.querySelector('.dc-stat-txt');
+      phStatus.textContent = stTxt ? stTxt.textContent : st;
+      phName.textContent = row.getAttribute('data-name') || '';
+
+      // left column: clone the pre-rendered overview sections
+      leftCol.innerHTML = '';
+      var det = tbody.querySelector('[data-dc-detail="' + idx + '"]');
+      if (det && det.content) leftCol.appendChild(det.content.cloneNode(true));
+
+      // right column: the page decides (pre-rendered controls, a lazy
+      // hint that afterSlide replaces, a live topic tree, ...).
+      if (cfg.fillRight) cfg.fillRight(row, rightCol, api);
+      else rightCol.innerHTML = '';
+
+      layer.classList.remove('is-closing');
+      // Flush the freshly injected panel content's layout NOW, then start the
+      // transform on the next frame so the slide runs on a settled layer
+      // (no first-frame reflow stutter).
+      void layer.offsetWidth;
+      requestAnimationFrame(function () {
+        layer.classList.add('is-open');
+        // preventScroll: focusing inside the panel must not scroll-into-view
+        // mid-slide (that was a jank source).
+        if (closeBtn) { try { closeBtn.focus({ preventScroll: true }); } catch (e) { closeBtn.focus(); } }
+        // Defer the page's lazy work until the slide has essentially
+        // finished, so injecting detail rows never reflows during the slide.
+        if (cfg.afterSlide) setTimeout(function () {
+          if (selectedRow === row) cfg.afterSlide(row, rightCol, api);
+        }, 360);
+      });
+    }
+
+    function closePanel() {
+      if (!layer || !layer.classList.contains('is-open')) return;
+      layer.classList.add('is-closing');
+      layer.classList.remove('is-open');
+      if (selectedRow) { selectedRow.classList.remove('is-selected'); selectedRow = null; }
+    }
+
+    tbody.addEventListener('click', function (e) {
+      var row = e.target.closest('[data-dc-row]');
+      if (row) openPanel(row);
+    });
+    if (scrim) scrim.addEventListener('click', closePanel);
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePanel(); });
+
+    // ---- live-update plumbing for the page ----
+    var statTiles = {};
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dc-stat]'), function (el) {
+      statTiles[el.getAttribute('data-dc-stat')] = el;
+    });
+    var fleetTotalEl = root.querySelector('.dc-fleet-total');
+    var toolbarTotalEl = root.querySelector('.dc-count .dc-total');
+    var totalUnit = (cfg.totalUnit || 'units');
+
+    function padCount(n) {
+      n = Math.max(0, Math.min(99, Math.round(n)));
+      return (n < 10 ? '0' : '') + n;
+    }
+
+    function setCounter(name, n) {
+      var tile = statTiles[name];
+      if (!tile || n == null) return;
+      var str = padCount(n);
+      var digitEls = tile.querySelectorAll('.dc-digit');
+      if (digitEls.length !== 2) return;
+      var changed = digitEls[0].textContent !== str[0] || digitEls[1].textContent !== str[1];
+      digitEls[0].textContent = str[0];
+      digitEls[1].textContent = str[1];
+      // the red "off" treatment only while something IS offline
+      if (name === 'offline') tile.classList.toggle('off', n > 0);
+      if (changed && !reduceMotion) {
+        Array.prototype.forEach.call(digitEls, function (el) { el.style.animation = 'none'; });
+        void tile.offsetWidth;
+        Array.prototype.forEach.call(digitEls, function (el, i) {
+          el.style.animation = 'dc-flip 560ms ease-in-out ' + (i * 80) + 'ms 1 backwards';
+        });
+      }
+    }
+
+    function setFacetCount(dim, value, n) {
+      if (n == null) return;
+      var el = root.querySelector('[data-dc-facet="' + dim + '"][data-dc-value="' + value + '"] .dc-facet-count');
+      if (el) el.textContent = n;
+    }
+
+    function setTotal(n) {
+      if (n == null) return;
+      if (fleetTotalEl) fleetTotalEl.textContent = n + ' ' + totalUnit;
+      if (toolbarTotalEl) toolbarTotalEl.textContent = '/ ' + n;
+    }
+
+    var api = {
+      root: root, tbody: tbody, rows: rows, groups: groups,
+      apply: apply, openPanel: openPanel, closePanel: closePanel,
+      current: function () { return selectedRow; },
+      isCurrent: function (row) { return selectedRow === row; },
+      setCounter: setCounter, setFacetCount: setFacetCount, setTotal: setTotal,
+      esc: esc,
+      panel: { layer: layer, phType: phType, phStatus: phStatus, phName: phName, leftCol: leftCol, rightCol: rightCol },
+      state: function () {
+        var active = 0;
+        for (var d in filters) active += filters[d].size;
+        return {
+          query: query, sortKey: sort.key, filtersActive: active,
+          layerOpen: !!(layer && layer.classList.contains('is-open'))
+        };
+      }
+    };
+
+    apply();
+    return api;
+  };
+
+  // A POST lands back with ?flash=...; strip it from the URL once
+  // rendered so a later (auto-)reload does not repeat the banner.
+  // Anchored match, and only the flash param is removed - other query
+  // params and the hash survive.
+  (function () {
+    if (!/[?&]flash=/.test(window.location.search)) return;
+    var qs = window.location.search.slice(1).split('&').filter(function (p) {
+      return p.indexOf('flash=') !== 0;
+    }).join('&');
+    var url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+    try { window.history.replaceState(null, '', url); } catch (e) {}
+  })();
+
+  // Group-header scan sweep: every 8s at most one visible group's trailing
+  // hairline gets a single accent scan pass (sometimes none), matching the
+  // design's periodic _rollScans. Disabled under prefers-reduced-motion.
+  (function () {
+    var scans = Array.prototype.slice.call(document.querySelectorAll('[data-dc-scan]'));
+    if (!scans.length) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    function roll() {
+      scans.forEach(function (s) { s.style.animation = 'none'; });
+      if (Math.random() < 0.3) return; // sometimes nothing scans
+      var vis = scans.filter(function (s) {
+        var g = s.closest('[data-dc-group]');
+        return g && g.style.display !== 'none';
+      });
+      if (!vis.length) return;
+      var s = vis[Math.floor(Math.random() * vis.length)];
+      var dir = Math.random() < 0.5 ? 'l' : 'r';
+      var part = Math.random() < 0.4 ? 'part' : 'full';
+      var dur = Math.round(2400 + Math.random() * 1200);
+      void s.offsetWidth; // restart the animation even if re-picked
+      s.style.animation = 'dc-scan' + part + dir + ' ' + dur + 'ms linear 200ms 1 both';
+    }
+    setTimeout(roll, 1200);
+    setInterval(roll, 8000);
+  })();
+
+  // Search-field ambient animation: a faint dot field (in the configured
+  // admin accent) behind the input. Typed text pushes the dots aside (a
+  // "magnet"). Canvas-only, purely decorative, disabled under
+  // prefers-reduced-motion.
+  (function () {
+    var box = document.querySelector('.dc-search');
+    var cv = box && box.querySelector('[data-dc-search-canvas]');
+    var input = box && box.querySelector('[data-dc-search]');
+    if (!box || !cv || !input) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    var ctx = cv.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var PAD = 36;                                 // where the input text starts
+    var FONT = '14px "IBM Plex Sans", system-ui, sans-serif';
+
+    // Dot colour = the configurable admin accent (--accent). Parse it once;
+    // fall back to the design orange if it is unset or non-hex.
+    var ACC = [255, 122, 26];
+    (function () {
+      var raw = getComputedStyle(box).getPropertyValue('--accent').trim();
+      var m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw);
+      if (m) {
+        var h = m[1];
+        if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        ACC = [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+      } else {
+        var rm = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(raw);
+        if (rm) ACC = [+rm[1], +rm[2], +rm[3]];
+      }
+    })();
+
+    var R = 15, MAX = 11;                          // magnet reach / strength
+    var W, H, cols, rows, cx, cy, dots = null;
+
+    function build() {
+      var r = cv.getBoundingClientRect();
+      W = r.width; H = r.height;
+      if (!W || !H) { dots = null; return; }
+      cv.width = W * dpr; cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cols = Math.max(1, Math.round(W / 3.4)); rows = Math.max(1, Math.round(H / 3.4));
+      cx = W / cols; cy = H / rows;
+      dots = [];
+      for (var i = 0; i < cols; i++) {
+        for (var j = 0; j < rows; j++) {
+          dots.push({ hx: (i + 0.5) * cx, hy: (j + 0.5) * cy, ox: 0, oy: 0, bias: i / cols, ph: Math.random() * 6.283, sp: 0.6 + Math.random() * 1.4 });
+        }
+      }
+    }
+
+    function draw(t) {
+      if (!dots) { build(); if (!dots) { requestAnimationFrame(draw); return; } }
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#0a0c0f';
+      ctx.fillRect(0, 0, W, H);
+
+      var val = input.value || '';
+      ctx.font = FONT;
+      var tw2 = val ? ctx.measureText(val).width : 0;
+      var x0 = PAD, x1 = PAD + tw2, yc = H / 2;
+
+      for (var k = 0; k < dots.length; k++) {
+        var d = dots[k];
+        var tox = 0, toy = 0;
+        if (val && d.hx <= x1 + 1) {
+          var nx = Math.max(x0, Math.min(d.hx, x1));
+          var vx = d.hx - nx, vy = d.hy - yc, dist = Math.hypot(vx, vy);
+          if (dist < R) {
+            if (dist < 0.001) { vx = 0; vy = Math.random() < 0.5 ? -1 : 1; dist = 1; }
+            var f = (R - dist) / R * MAX;
+            tox = vx / dist * f; toy = vy / dist * f;
+          }
+        }
+        d.ox += (tox - d.ox) * 0.2;
+        d.oy += (toy - d.oy) * 0.2;
+
+        var px = d.hx + d.ox, py = d.hy + d.oy;
+        var tw = 0.5 + 0.5 * Math.sin(t * 0.002 * d.sp + d.ph);
+        var a = (0.05 + d.bias * 0.5) * tw;
+        // dim -> full accent ramp across the field (dim ~47% of the accent)
+        var dim = 0.47 + d.bias * 0.53;
+        var rC = ACC[0] * dim, gC = ACC[1] * dim, bC = ACC[2] * dim, s = 1.8;
+
+        ctx.fillStyle = 'rgba(' + Math.round(rC) + ',' + Math.round(gC) + ',' + Math.round(bC) + ',' + a.toFixed(3) + ')';
+        ctx.fillRect(px - s / 2, py - s / 2, s, s);
+      }
+      requestAnimationFrame(draw);
+    }
+
+    build();
+    window.addEventListener('resize', build);
+    requestAnimationFrame(draw);
+  })();
+</script>
+{{end}}
