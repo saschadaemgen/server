@@ -78,7 +78,18 @@ func New(opts Options) *Client {
 			// a proxy in the environment would receive every request
 			// line and the digest Authorization header - this client
 			// must only ever dial the configured LAN address itself.
-			Transport: &http.Transport{Proxy: nil},
+			//
+			// The explicit 2s DialContext timeout bounds the TCP connect
+			// specifically. A powered-off device answers no SYN, and
+			// without a dial-level bound the connect falls back to the OS
+			// TCP timeout (~2 min of SYN retransmits). At 2s it gives up
+			// well before the 3s whole-request Timeout, so the
+			// reachability poll and the Device Center probe fail fast on a
+			// dead host instead of stalling the poll / the page.
+			Transport: &http.Transport{
+				Proxy:       nil,
+				DialContext: (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
+			},
 			// Never follow a redirect: a compromised or mis-addressed
 			// box could bounce the request (and a digest response) to
 			// a foreign host. The Gen2 RPC endpoint never legitimately
