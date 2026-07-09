@@ -691,20 +691,20 @@ func (s *Server) shellyPendingAction(w http.ResponseWriter, r *http.Request, act
 // discovery does not re-adopt it. A CARVILON-side config action only - the
 // device itself is never written to. The address must match a CONFIGURED
 // active device (defence against a caller-chosen target). Redirects back to
-// /a/ua with a stable flash code.
+// /a/devices with a stable flash code.
 func (s *Server) handleAdminUAShellyRemove(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	if s.shellystore == nil {
-		http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
 		return
 	}
 	addr := strings.TrimSpace(r.PostForm.Get("address"))
 	norm, ok := normalizeShellyAddr(addr)
 	if !ok || norm == "" {
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	// Learn the device's broker account (if provisioned) BEFORE removing, so
@@ -722,18 +722,18 @@ func (s *Server) handleAdminUAShellyRemove(w http.ResponseWriter, r *http.Reques
 	err := s.shellystore.RemoveByAddress(r.Context(), norm)
 	switch {
 	case errors.Is(err, shellystore.ErrNotFound):
-		http.Redirect(w, r, "/a/ua?flash=shelly-notfd", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-notfd", http.StatusSeeOther)
 		return
 	case err != nil:
 		s.log.Error("shelly: remove device failed", "err", err)
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	if mqttUser != "" {
 		s.deprovisionShellyCredential(mqttUser)
 	}
 	s.rebuildShellyClients(r.Context())
-	http.Redirect(w, r, "/a/ua?flash=shelly-removed", http.StatusSeeOther)
+	http.Redirect(w, r, "/a/devices?flash=shelly-removed", http.StatusSeeOther)
 }
 
 // handleAdminUAShellyScan triggers an active mDNS scan from the Device
@@ -743,7 +743,7 @@ func (s *Server) handleAdminUAShellyScan(w http.ResponseWriter, r *http.Request)
 	if s.shellyDisco != nil {
 		s.shellyDisco.ScanNow()
 	}
-	http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+	http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
 }
 
 // handleAdminUAShellyProvision (re)runs MQTT provisioning for one active
@@ -752,31 +752,31 @@ func (s *Server) handleAdminUAShellyScan(w http.ResponseWriter, r *http.Request)
 // added device. Address must match a CONFIGURED active device.
 func (s *Server) handleAdminUAShellyProvision(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil || s.shellystore == nil {
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	norm, ok := normalizeShellyAddr(r.PostForm.Get("address"))
 	if !ok || norm == "" {
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	if !s.shellyProvisionReady() {
-		http.Redirect(w, r, "/a/ua?flash=shelly-noprov", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-noprov", http.StatusSeeOther)
 		return
 	}
 	active, err := s.shellystore.ListActive(r.Context())
 	if err != nil {
-		http.Redirect(w, r, "/a/ua?flash=shelly-err", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
 		return
 	}
 	for _, d := range active {
 		if d.Address == norm {
 			s.startShellyProvision(d.ID)
-			http.Redirect(w, r, "/a/ua?flash=shelly-provisioning", http.StatusSeeOther)
+			http.Redirect(w, r, "/a/devices?flash=shelly-provisioning", http.StatusSeeOther)
 			return
 		}
 	}
-	http.Redirect(w, r, "/a/ua?flash=shelly-notfd", http.StatusSeeOther)
+	http.Redirect(w, r, "/a/devices?flash=shelly-notfd", http.StatusSeeOther)
 }
 
 // buildShellySettingsBlock fills the settings block's Shelly section from

@@ -629,32 +629,40 @@ func (s *Server) routes() {
 	// on the same page as source "RPi"; the rename route is the one
 	// write the page carries - it only touches OUR reader registry,
 	// never UA.
-	s.mux.Handle("GET /a/ua", s.requireAdminSession(http.HandlerFunc(s.handleAdminUA)))
-	s.mux.Handle("GET /a/ua/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAStatus)))
-	s.mux.Handle("POST /a/ua/readers/name", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAReaderRename)))
-	s.mux.Handle("GET /a/ua/devices/{id}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADeviceSettings)))
-	s.mux.Handle("GET /a/ua/doors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADoorDetail)))
+	s.mux.Handle("GET /a/devices", s.requireAdminSession(http.HandlerFunc(s.handleAdminUA)))
+	s.mux.Handle("GET /a/devices/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAStatus)))
+	s.mux.Handle("POST /a/devices/readers/name", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAReaderRename)))
+	s.mux.Handle("GET /a/devices/devices/{id}/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADeviceSettings)))
+	s.mux.Handle("GET /a/devices/doors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUADoorDetail)))
 	// Protect Etappe 1: lazy camera/sensor detail for the same page.
-	s.mux.Handle("GET /a/ua/protect/cameras/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectCamera)))
-	s.mux.Handle("GET /a/ua/protect/sensors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectSensor)))
+	s.mux.Handle("GET /a/devices/protect/cameras/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectCamera)))
+	s.mux.Handle("GET /a/devices/protect/sensors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectSensor)))
 	// Shelly Etappe 1: lazy live channel detail for the same page. The
 	// {id} is the configured device address; the handler only ever
 	// dials addresses that are part of the stored configuration.
-	s.mux.Handle("GET /a/ua/shelly/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyDetail)))
+	s.mux.Handle("GET /a/devices/shelly/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyDetail)))
 	// Shelly Etappe 2: sticky per-device removal + active "Scan now" from the
 	// Device Center. Removal forgets the device on OUR side (ignore list) and
 	// never writes to the device - control stays read-only.
-	s.mux.Handle("POST /a/ua/shelly/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRemove)))
-	s.mux.Handle("POST /a/ua/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyScan)))
+	s.mux.Handle("POST /a/devices/shelly/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRemove)))
+	s.mux.Handle("POST /a/devices/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyScan)))
 	// Shelly Etappe 3, Phase 1: (re)provision a device onto the MQTT broker.
-	s.mux.Handle("POST /a/ua/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
+	s.mux.Handle("POST /a/devices/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
 	// Dev-only: feed a synthetic mDNS announcement through the real discovery
 	// path so the adopt/sticky-remove/release chain can be driven without a
 	// live device or OS multicast. Registered ONLY in DevMode - never in a
 	// production build.
 	if s.cfg.DevMode {
-		s.mux.Handle("POST /a/ua/shelly/_dev/announce", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyDevAnnounce)))
+		s.mux.Handle("POST /a/devices/shelly/_dev/announce", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyDevAnnounce)))
 	}
+	// The Device Center lived at /a/ua before the rename ("ua" was the
+	// UniFi Access legacy in the URL; the page has long outgrown it).
+	// Old bookmarks and cached pages keep working via a permanent
+	// redirect that preserves the sub-path and query. GET only: the
+	// POST endpoints are form targets rendered by the page itself,
+	// which now points at /a/devices/*.
+	s.mux.Handle("GET /a/ua", http.HandlerFunc(redirectLegacyUA))
+	s.mux.Handle("GET /a/ua/{rest...}", http.HandlerFunc(redirectLegacyUA))
 
 	s.mux.Handle("GET /a/designer", s.requireAdminSession(http.HandlerFunc(s.handleAdminDesigner)))
 	s.mux.Handle("GET /a/designer/catalog.json", s.requireAdminSession(http.HandlerFunc(s.handleDesignerCatalog)))
@@ -882,6 +890,23 @@ func (s *Server) ListenAndServe() error {
 //	/m/logout  -> /webviewer/logout
 func (s *Server) redirectLegacyM(w http.ResponseWriter, r *http.Request) {
 	target := mapLegacyMieterPath(r.URL.Path, "/m")
+	if raw := r.URL.RawQuery; raw != "" {
+		target += "?" + raw
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
+}
+
+// redirectLegacyUA forwards the pre-rename /a/ua* URL family with a
+// 301 to /a/devices* (sub-path and query preserved), so old bookmarks
+// and cached pages that still fetch /a/ua/status or the lazy detail
+// endpoints keep working. Like the other legacy redirects it is not
+// session-gated: it reveals only that the path moved, and the target
+// enforces the admin session itself.
+func redirectLegacyUA(w http.ResponseWriter, r *http.Request) {
+	target := "/a/devices" + strings.TrimPrefix(r.URL.Path, "/a/ua")
+	if target == "/a/devices/" {
+		target = "/a/devices"
+	}
 	if raw := r.URL.RawQuery; raw != "" {
 		target += "?" + raw
 	}

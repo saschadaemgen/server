@@ -96,7 +96,7 @@ func TestAdminUA_ShellyRows(t *testing.T) {
 	dead := deadAddr(t)
 	wireShelly(t, env, stub.addr(), dead)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	for _, want := range []string{
 		">Switches<",             // group heading
 		"Growbox",                // device name from GetDeviceInfo
@@ -129,7 +129,7 @@ func TestAdminUA_ShellyOnlyRendersTable(t *testing.T) {
 	stub := newShellyStub(t, "Growbox")
 	wireShelly(t, env, stub.addr())
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if strings.Contains(body, `class="dc-gate`) {
 		t.Errorf("gate card shown although Shelly fills the page")
 	}
@@ -152,7 +152,7 @@ func TestAdminUA_ShellyDetailLazy(t *testing.T) {
 	stub := newShellyStub(t, "Growbox")
 	wireShelly(t, env, stub.addr())
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/shelly/" + url.PathEscape(stub.addr()))
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/shelly/" + url.PathEscape(stub.addr()))
 	if err != nil {
 		t.Fatalf("GET shelly detail: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestAdminUA_ShellyDetailOnlyDialsConfigured(t *testing.T) {
 	foreign := newShellyStub(t, "Foreign")
 	wireShelly(t, env, configured.addr())
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/shelly/" + url.PathEscape(foreign.addr()))
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/shelly/" + url.PathEscape(foreign.addr()))
 	if err != nil {
 		t.Fatalf("GET foreign detail: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAdminUA_ShellyDetailOnlyDialsConfigured(t *testing.T) {
 		t.Errorf("foreign target was dialed %d times, want 0", h)
 	}
 	// Bad id shapes are rejected before any lookup.
-	resp2, err := env.client.Get(env.ts.URL + "/a/ua/shelly/" + url.PathEscape("../evil"))
+	resp2, err := env.client.Get(env.ts.URL + "/a/devices/shelly/" + url.PathEscape("../evil"))
 	if err != nil {
 		t.Fatalf("GET bad id: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestAdminUA_StatusIncludesShelly(t *testing.T) {
 	dead := deadAddr(t)
 	wireShelly(t, env, stub.addr(), dead)
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/status")
 	if err != nil {
 		t.Fatalf("GET status: %v", err)
 	}

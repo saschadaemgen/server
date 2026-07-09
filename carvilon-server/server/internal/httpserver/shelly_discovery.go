@@ -87,7 +87,7 @@ func (s *Server) handleAdminShellyDevAnnounce(w http.ResponseWriter, r *http.Req
 		TXT:      txt,
 	}
 	s.shellyDisco.InjectForTest(r.Context(), entry)
-	http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+	http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
 }
 
 // ShellyServiceType is the DNS-SD service Gen2+ Shelly devices advertise.

@@ -443,7 +443,7 @@
         <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
         <span class="dc-spacer"></span>
         {{if .Page.ShellyAvailable}}
-        <form class="dc-toolform" method="post" action="/a/ua/shelly/scan" title="Actively scan the network for Shelly devices">
+        <form class="dc-toolform" method="post" action="/a/devices/shelly/scan" title="Actively scan the network for Shelly devices">
           <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><path d="M12 4 9 7M12 20l3-3"/></svg>Scan Shelly</button>
         </form>
         {{end}}
@@ -527,11 +527,11 @@
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Device controls</span><span class="dc-hr"></span></div>
                   <div class="dc-act-form">
                     <div class="dc-act-row">
-                      <form method="post" action="/a/ua/shelly/provision" style="margin:0;">
+                      <form method="post" action="/a/devices/shelly/provision" style="margin:0;">
                         <input type="hidden" name="address" value="{{$r.ID}}">
                         <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>{{if eq $r.MQTTState "linked"}}Re-provision MQTT{{else}}Provision MQTT{{end}}</button>
                       </form>
-                      <form method="post" action="/a/ua/shelly/remove" style="margin:0;">
+                      <form method="post" action="/a/devices/shelly/remove" style="margin:0;">
                         <input type="hidden" name="address" value="{{$r.ID}}">
                         <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
                       </form>
@@ -547,7 +547,7 @@
               {{if eq $r.Kind "rpi-reader"}}
               <template data-dc-actions="{{$r.Index}}">
                 <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Reader controls</span><span class="dc-hr"></span></div>
-                <form class="dc-act-form" method="post" action="/a/ua/readers/name">
+                <form class="dc-act-form" method="post" action="/a/devices/readers/name">
                   <input type="hidden" name="id" value="{{$r.ID}}">
                   <span class="dc-act-label">Custom name</span>
                   <input class="dc-act-input" type="text" name="name" value="{{$r.CustomName}}" placeholder="{{$r.AutoName}}" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Custom name">
@@ -908,11 +908,11 @@
     }
 
     function loadDetail(kind, id, target, row) {
-      var url = kind === 'door' ? '/a/ua/doors/' + encodeURIComponent(id)
-        : kind === 'camera' ? '/a/ua/protect/cameras/' + encodeURIComponent(id)
-        : kind === 'sensor' ? '/a/ua/protect/sensors/' + encodeURIComponent(id)
-        : kind === 'shelly' ? '/a/ua/shelly/' + encodeURIComponent(id)
-        : '/a/ua/devices/' + encodeURIComponent(id) + '/settings';
+      var url = kind === 'door' ? '/a/devices/doors/' + encodeURIComponent(id)
+        : kind === 'camera' ? '/a/devices/protect/cameras/' + encodeURIComponent(id)
+        : kind === 'sensor' ? '/a/devices/protect/sensors/' + encodeURIComponent(id)
+        : kind === 'shelly' ? '/a/devices/shelly/' + encodeURIComponent(id)
+        : '/a/devices/devices/' + encodeURIComponent(id) + '/settings';
       // A slow response must never clobber the panel after the user has
       // opened another row (the right column can hold the local reader's
       // rename form by then - typed input would be destroyed).
@@ -958,7 +958,7 @@
     apply();
 
     // ---- live status ----
-    // Poll a lightweight snapshot (/a/ua/status) so an online/offline
+    // Poll a lightweight snapshot (/a/devices/status) so an online/offline
     // or lock-state change shows up without a manual reload. Rows are
     // matched by kind+id; the flip counters re-roll only when a digit
     // actually changes. Paused while the tab is hidden.
@@ -1135,7 +1135,7 @@
     }
     function pollStatus() {
       if (document.hidden) { schedulePoll(POLL_MS); return; }
-      fetch('/a/ua/status', { credentials: 'same-origin', cache: 'no-store' })
+      fetch('/a/devices/status', { credentials: 'same-origin', cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (d && d.ok) applySnapshot(d);

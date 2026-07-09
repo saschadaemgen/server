@@ -16,7 +16,7 @@ import (
 // The local reader registry as the Device Center's third source
 // ("RPi"). These tests cover what moved here from the retired
 // standalone NFC page: readers listed with status, rename, offline
-// persistence - now inside /a/ua.
+// persistence - now inside /a/devices.
 
 func seedReader(t *testing.T, env *testEnv, det readerstore.Detected) {
 	t.Helper()
@@ -41,7 +41,7 @@ func TestAdminUA_ReaderRowWithUAOff(t *testing.T) {
 	// KeyUAEnabled left unset -> uaEnabled=false; Protect unset too.
 	seedReader(t, env, readerA)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if strings.Contains(body, `class="dc-gate`) {
 		t.Errorf("gate card shown although a local reader fills the page")
 	}
@@ -54,7 +54,7 @@ func TestAdminUA_ReaderRowWithUAOff(t *testing.T) {
 		"PN532",                     // model column + facet
 		`data-kind="rpi-reader"`,    // panel behaviour switch
 		"Reader controls",           // actions template
-		`action="/a/ua/readers/name"`,
+		`action="/a/devices/readers/name"`,
 		`href="/a/designer"`,        // editor jump
 		"only devices from other sources are shown", // UA notice banner
 	} {
@@ -74,7 +74,7 @@ func TestAdminUA_NFCPageGone(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	seedReader(t, env, readerA)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if strings.Contains(body, `href="/a/nfc"`) {
 		t.Errorf("NFC nav link still in the topbar")
 	}
@@ -98,7 +98,7 @@ func TestAdminUA_ReaderRowAlongsideUA(t *testing.T) {
 	wireUA(t, env, newUAStub(t))
 	seedReader(t, env, readerA)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	for _, want := range []string{
 		"Leser Eingang",          // UA reader
 		"RPi-NFC-PN532 (I2C-1)",  // local reader
@@ -124,7 +124,7 @@ func TestAdminUA_ReaderRename(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	seedReader(t, env, readerA)
 
-	resp, err := env.client.PostForm(env.ts.URL+"/a/ua/readers/name",
+	resp, err := env.client.PostForm(env.ts.URL+"/a/devices/readers/name",
 		url.Values{"id": {"nfc:i2c-1"}, "name": {"Front door"}})
 	if err != nil {
 		t.Fatalf("POST rename: %v", err)
@@ -132,11 +132,11 @@ func TestAdminUA_ReaderRename(t *testing.T) {
 	resp.Body.Close()
 	// The test client never auto-follows, so the 303 + Location are
 	// asserted directly.
-	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusSeeOther || loc != "/a/ua?flash=renamed" {
-		t.Errorf("redirect = %d %q, want 303 /a/ua?flash=renamed", resp.StatusCode, loc)
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusSeeOther || loc != "/a/devices?flash=renamed" {
+		t.Errorf("redirect = %d %q, want 303 /a/devices?flash=renamed", resp.StatusCode, loc)
 	}
 
-	body := getBody(t, env, "/a/ua?flash=renamed")
+	body := getBody(t, env, "/a/devices?flash=renamed")
 	if !strings.Contains(body, "Front door") {
 		t.Errorf("custom name missing from page")
 	}
@@ -148,7 +148,7 @@ func TestAdminUA_ReaderRename(t *testing.T) {
 	}
 
 	// Clearing reverts to the auto-name.
-	resp, err = env.client.PostForm(env.ts.URL+"/a/ua/readers/name",
+	resp, err = env.client.PostForm(env.ts.URL+"/a/devices/readers/name",
 		url.Values{"id": {"nfc:i2c-1"}, "name": {""}})
 	if err != nil {
 		t.Fatalf("POST clear: %v", err)
@@ -160,14 +160,14 @@ func TestAdminUA_ReaderRename(t *testing.T) {
 	}
 
 	// Unknown reader -> the not-found flash code, never free text.
-	resp, err = env.client.PostForm(env.ts.URL+"/a/ua/readers/name",
+	resp, err = env.client.PostForm(env.ts.URL+"/a/devices/readers/name",
 		url.Values{"id": {"nfc:i2c-9"}, "name": {"x"}})
 	if err != nil {
 		t.Fatalf("POST unknown: %v", err)
 	}
 	resp.Body.Close()
-	if loc := resp.Header.Get("Location"); loc != "/a/ua?flash=err-notfd" {
-		t.Errorf("unknown-reader redirect = %q, want /a/ua?flash=err-notfd", loc)
+	if loc := resp.Header.Get("Location"); loc != "/a/devices?flash=err-notfd" {
+		t.Errorf("unknown-reader redirect = %q, want /a/devices?flash=err-notfd", loc)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestAdminUA_ReaderOfflineShown(t *testing.T) {
 	if err := env.readerStore.Sync(context.Background(), nil); err != nil {
 		t.Fatalf("Sync empty: %v", err)
 	}
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if !strings.Contains(body, "RPi-NFC-PN532 (I2C-1)") {
 		t.Errorf("gone reader disappeared from the page")
 	}
@@ -210,7 +210,7 @@ func TestAdminUA_StatusIncludesReader(t *testing.T) {
 		Sources map[string]bool `json:"sources"`
 	}) {
 		t.Helper()
-		resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+		resp, err := env.client.Get(env.ts.URL + "/a/devices/status")
 		if err != nil {
 			t.Fatalf("GET status: %v", err)
 		}

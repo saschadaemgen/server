@@ -714,11 +714,11 @@ var uaFlash = map[string]struct{ msg, typ string }{
 // code - never reflects the submitted text.
 func (s *Server) handleAdminUAReaderRename(w http.ResponseWriter, r *http.Request) {
 	if s.readerStore == nil {
-		http.Redirect(w, r, "/a/ua", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=err-name", http.StatusSeeOther)
 		return
 	}
 	id := strings.TrimSpace(r.PostFormValue("id"))
@@ -729,20 +729,20 @@ func (s *Server) handleAdminUAReaderRename(w http.ResponseWriter, r *http.Reques
 		name = string(rn[:80])
 	}
 	if id == "" {
-		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=err-name", http.StatusSeeOther)
 		return
 	}
 	err := s.readerStore.SetCustomName(r.Context(), id, name)
 	switch {
 	case errors.Is(err, readerstore.ErrNotFound):
-		http.Redirect(w, r, "/a/ua?flash=err-notfd", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=err-notfd", http.StatusSeeOther)
 	case err != nil:
 		s.log.Error("device center: set reader custom name", "reader", id, "err", err)
-		http.Redirect(w, r, "/a/ua?flash=err-name", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=err-name", http.StatusSeeOther)
 	case name == "":
-		http.Redirect(w, r, "/a/ua?flash=reset", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=reset", http.StatusSeeOther)
 	default:
-		http.Redirect(w, r, "/a/ua?flash=renamed", http.StatusSeeOther)
+		http.Redirect(w, r, "/a/devices?flash=renamed", http.StatusSeeOther)
 	}
 }
 
@@ -955,7 +955,7 @@ func uaEmergencyFlag(val any) bool {
 	return false
 }
 
-// uaStatusItem is one row's live status in the /a/ua/status payload,
+// uaStatusItem is one row's live status in the /a/devices/status payload,
 // addressed by kind+id (matching the row's data attributes). Local
 // readers additionally carry their last tag so an open panel shows a
 // scan without a reload.

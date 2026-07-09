@@ -77,15 +77,40 @@ func TestAdminUA_DisabledMakesNoCalls(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: stub.ts.URL, Token: "t"}))
 	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if !strings.Contains(body, "UniFi Access is disabled") {
 		t.Errorf("disabled hint missing:\n%s", firstLines(body))
 	}
 	if h := atomic.LoadInt32(&stub.hits); h != 0 {
 		t.Errorf("UDM was called %d times while UA disabled, want 0", h)
 	}
-	if !strings.Contains(body, `href="/a/ua"`) {
+	if !strings.Contains(body, `href="/a/devices"`) {
 		t.Errorf("UA nav link missing from topbar")
+	}
+}
+
+// The pre-rename /a/ua* family 301s to /a/devices* - the page, the
+// sub-paths a cached page still fetches, and the query string all
+// survive the move. The redirect is method-scoped to GET.
+func TestAdminUA_LegacyUARedirect(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+
+	for _, tc := range []struct{ path, want string }{
+		{"/a/ua", "/a/devices"},
+		{"/a/ua/", "/a/devices"},
+		{"/a/ua?flash=renamed", "/a/devices?flash=renamed"},
+		{"/a/ua/status", "/a/devices/status"},
+		{"/a/ua/doors/0cea-door-1", "/a/devices/doors/0cea-door-1"},
+	} {
+		resp, err := env.client.Get(env.ts.URL + tc.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", tc.path, err)
+		}
+		resp.Body.Close()
+		if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusMovedPermanently || loc != tc.want {
+			t.Errorf("GET %s = %d %q, want 301 %q", tc.path, resp.StatusCode, loc, tc.want)
+		}
 	}
 }
 
@@ -105,7 +130,7 @@ func TestAdminUA_FlatOverview(t *testing.T) {
 	}
 	wireUA(t, env, stub)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	for _, want := range []string{
 		"Haupt-Hub", "Leser Eingang", "Mock Cam", "UA Cam", // device names (data)
 		"Hauseingang", "Kellertür", // door names (data)
@@ -146,7 +171,7 @@ func TestAdminUA_Unauthorized(t *testing.T) {
 	}
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: ts.URL, Token: "bad"}))
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	if !strings.Contains(body, "Access denied") {
 		t.Errorf("401 card missing")
 	}
@@ -163,7 +188,7 @@ func TestAdminUA_StatusSnapshot(t *testing.T) {
 	stub := newUAStub(t)
 	wireUA(t, env, stub)
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/status")
 	if err != nil {
 		t.Fatalf("GET status: %v", err)
 	}
@@ -216,7 +241,7 @@ func TestAdminUA_StatusDisabledMakesNoCalls(t *testing.T) {
 	env.srv.SetUAClient(uaapi.New(uaapi.Options{BaseURL: stub.ts.URL, Token: "t"}))
 	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/status")
 	if err != nil {
 		t.Fatalf("GET status: %v", err)
 	}
@@ -242,7 +267,7 @@ func TestAdminUA_DeviceSettingsLazy(t *testing.T) {
 	stub := newUAStub(t)
 	wireUA(t, env, stub)
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/devices/aabbccddee01/settings")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/devices/aabbccddee01/settings")
 	if err != nil {
 		t.Fatalf("GET settings: %v", err)
 	}
@@ -281,7 +306,7 @@ func TestAdminUA_DoorDetailLazy(t *testing.T) {
 	stub := newUAStub(t)
 	wireUA(t, env, stub)
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/doors/0cea-door-1")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/doors/0cea-door-1")
 	if err != nil {
 		t.Fatalf("GET door: %v", err)
 	}
@@ -315,8 +340,8 @@ func TestAdminUA_DetailRejectsBadID(t *testing.T) {
 	// decodes to ".." in PathValue and bypasses ServeMux path cleaning,
 	// so it must be caught by uaValidID.
 	for _, bad := range []string{
-		"/a/ua/devices/bad%20id!/settings",
-		"/a/ua/devices/%2e%2e/settings", // %2e%2e -> ".." bypasses ServeMux cleaning
+		"/a/devices/devices/bad%20id!/settings",
+		"/a/devices/devices/%2e%2e/settings", // %2e%2e -> ".." bypasses ServeMux cleaning
 	} {
 		resp, err := env.client.Get(env.ts.URL + bad)
 		if err != nil {
@@ -434,7 +459,7 @@ func TestAdminUA_ProtectRows(t *testing.T) {
 	wireUA(t, env, newUAStub(t))
 	wireProtect(t, env, newProtectStub(t))
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	for _, want := range []string{
 		"Einfahrt", "Garten", "Kellersensor", // protect device names
 		">Cameras<", ">Sensors<", // group headings
@@ -467,7 +492,7 @@ func TestAdminUA_ProtectOnlyMakesNoUACalls(t *testing.T) {
 	// KeyUAEnabled left unset + no token stored -> uaEnabled=false.
 	wireProtect(t, env, newProtectStub(t))
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	// `class="dc-gate` is the rendered card; the bare ".dc-gate" in
 	// the stylesheet is always present.
 	if strings.Contains(body, `class="dc-gate`) {
@@ -493,7 +518,7 @@ func TestAdminUA_ProtectErrorKeepsPage(t *testing.T) {
 	stub.fail = true
 	wireProtect(t, env, stub)
 
-	body := getBody(t, env, "/a/ua")
+	body := getBody(t, env, "/a/devices")
 	for _, want := range []string{"Haupt-Hub", "Cameras and sensors could not be loaded"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)
@@ -512,7 +537,7 @@ func TestAdminUA_ProtectCameraDetailLazy(t *testing.T) {
 	wireUA(t, env, newUAStub(t))
 	wireProtect(t, env, newProtectStub(t))
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/protect/cameras/cam-1")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/protect/cameras/cam-1")
 	if err != nil {
 		t.Fatalf("GET camera detail: %v", err)
 	}
@@ -549,7 +574,7 @@ func TestAdminUA_StatusIncludesProtect(t *testing.T) {
 	wireUA(t, env, newUAStub(t))
 	wireProtect(t, env, newProtectStub(t))
 
-	resp, err := env.client.Get(env.ts.URL + "/a/ua/status")
+	resp, err := env.client.Get(env.ts.URL + "/a/devices/status")
 	if err != nil {
 		t.Fatalf("GET status: %v", err)
 	}
