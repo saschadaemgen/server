@@ -654,10 +654,14 @@
       phStatus.textContent = stTxt ? stTxt.textContent : st;
       phName.textContent = row.getAttribute('data-name') || '';
 
-      // left column: clone the pre-rendered overview sections
+      // left column: the page may take it over for special rows (cfg.fillLeft
+      // returning true, e.g. a device cockpit); the default clones the
+      // pre-rendered overview sections.
       leftCol.innerHTML = '';
-      var det = tbody.querySelector('[data-dc-detail="' + idx + '"]');
-      if (det && det.content) leftCol.appendChild(det.content.cloneNode(true));
+      if (!(cfg.fillLeft && cfg.fillLeft(row, leftCol, api))) {
+        var det = tbody.querySelector('[data-dc-detail="' + idx + '"]');
+        if (det && det.content) leftCol.appendChild(det.content.cloneNode(true));
+      }
 
       // right column: the page decides (pre-rendered controls, a lazy
       // hint that afterSlide replaces, a live topic tree, ...).
@@ -687,6 +691,8 @@
       layer.classList.add('is-closing');
       layer.classList.remove('is-open');
       if (selectedRow) { selectedRow.classList.remove('is-selected'); selectedRow = null; }
+      // pages with live panel content (streams, tickers) tear it down here
+      if (cfg.onClose) cfg.onClose();
     }
 
     tbody.addEventListener('click', function (e) {

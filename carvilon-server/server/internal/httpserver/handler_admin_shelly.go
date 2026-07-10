@@ -26,6 +26,7 @@ import (
 
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/shellyapi"
+	"carvilon.local/server/internal/shellycaps"
 	"carvilon.local/server/internal/shellystore"
 )
 
@@ -341,6 +342,34 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 		IP:          addr,
 		Origin:      info.Origin,
 		MQTTState:   info.MQTTState,
+		ShellyID:    info.StoreID,
+	}
+	// Cockpit plumbing: the broker topic prefix (the provisioned account,
+	// else the conventional "shelly-<mac>" the provisioner would assign)
+	// and the capability-derived channel set. Model preference: the live
+	// probe's answer, else the store's last-seen model - an offline
+	// device still renders its channel skeleton.
+	if user := info.MQTTUsername; user != "" {
+		row.ShellyPrefix = "carvilon/" + user
+	} else if info.MAC != "" {
+		row.ShellyPrefix = "carvilon/shelly-" + strings.ToLower(info.MAC)
+	}
+	capModel := info.Model
+	if p.info != nil && p.info.ModelLabel() != "" {
+		capModel = p.info.ModelLabel()
+	}
+	if chans := shellycaps.Channels(capModel); len(chans) > 0 {
+		type chJSON struct {
+			ID    int  `json:"id"`
+			Meter bool `json:"meter"`
+		}
+		list := make([]chJSON, 0, len(chans))
+		for _, c := range chans {
+			list = append(list, chJSON{ID: c.ID, Meter: c.Meter})
+		}
+		if raw, err := json.Marshal(list); err == nil {
+			row.ChannelsJSON = string(raw)
+		}
 	}
 	if p.err == nil {
 		row.StatusState, row.StatusText = "online", "Online"

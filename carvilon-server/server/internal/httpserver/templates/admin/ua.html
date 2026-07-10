@@ -12,6 +12,57 @@
     .dc-root { --dc-grid:28px minmax(120px,1.6fr) 130px minmax(90px,1fr) 130px; }
     .dc-th.col-type, .dc-th.col-ip, .dc-th.col-fw, .dc-cell.col-type, .dc-cell.col-ip, .dc-cell.col-fw { display:none; }
   }
+  /* ============ Shelly Gen2 cockpit (slide-out) ============ */
+  /* Function area (left column): per-channel switch + live readouts.
+     Uses the dc vocabulary; dck-* is this page's cockpit-only layer. */
+  .dck-note { padding:12px 20px; font-size:12px; color:var(--text-tertiary); line-height:1.5; border-bottom:1px solid var(--divider); }
+  .dck-note.warn { color:var(--orange-300); }
+  .dck-note.err { color:#ffb0b0; }
+  .dck-state { font-size:11px; font-weight:600; letter-spacing:0.05em; color:var(--text-tertiary); flex:0 0 auto; width:26px; text-align:right; }
+  .dck-state.on { color:var(--orange-300); text-shadow:0 0 8px var(--amber-glow); }
+  .dck-tog { position:relative; width:40px; height:20px; flex:0 0 auto; border:none; border-radius:10px; cursor:pointer; background:var(--field-bg); box-shadow:var(--well); padding:0; }
+  .dck-tog::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--gray-500); transition:left 160ms var(--ease-tactile), background 160ms; }
+  .dck-tog.on { background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); box-shadow:0 0 10px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,0.25); }
+  .dck-tog.on::after { left:22px; background:var(--white); }
+  .dck-tog:disabled { cursor:default; opacity:0.45; }
+  .dck-tog.pending::after { animation:dck-pulse 900ms ease-in-out infinite; }
+  @keyframes dck-pulse { 50% { opacity:0.35; } }
+  .dck-meters { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:6px; padding:10px 20px 4px; }
+  .dck-tile { border-radius:var(--radius-sm); background:var(--surface-cell); box-shadow:inset 0 0 0 1px var(--border-subtle); padding:7px 10px 8px; min-width:0; }
+  .dck-tile .k { font-size:9.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-tertiary); white-space:nowrap; }
+  .dck-tile .v { margin-top:2px; font-family:var(--font-mono); font-size:13px; color:var(--text-secondary); white-space:nowrap; }
+  .dck-in { display:flex; align-items:center; gap:7px; padding:8px 20px 14px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--divider); }
+  .dck-in .k { color:var(--text-tertiary); }
+
+  /* Settings (right column): dc-act vocabulary + a dark select + the
+     weekly-schedule editor. Apply-on-change status flashes per field. */
+  .dck-f { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:7px 20px; border-bottom:1px solid var(--divider); }
+  .dck-f .l { font-size:12px; color:var(--text-tertiary); flex:0 0 auto; }
+  .dck-f .c { display:flex; align-items:center; gap:7px; min-width:0; }
+  .dck-i { height:30px; padding:0 10px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-sans); font-size:12.5px; outline:none; width:150px; }
+  .dck-i:focus { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dck-i.num { width:74px; font-family:var(--font-mono); text-align:right; }
+  select.dck-i { width:150px; }
+  select.dck-i option { background:var(--gray-850); color:var(--white); }
+  .dck-suf { font-size:11px; color:var(--text-tertiary); }
+  .dck-st { font-family:var(--font-mono); font-size:10px; width:38px; flex:0 0 auto; color:var(--text-tertiary); text-align:right; }
+  .dck-st.ok { color:var(--live-500); }
+  .dck-st.err { color:var(--lock-500); }
+  .dck-ondev { display:inline-flex; align-items:center; gap:5px; margin-left:8px; font-size:9px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-tertiary); padding:1px 6px; border-radius:var(--radius-pill); box-shadow:inset 0 0 0 1px var(--border-default); flex:0 0 auto; }
+  .dck-sched { padding:10px 20px 14px; border-bottom:1px solid var(--divider); display:flex; flex-direction:column; gap:8px; }
+  .dck-srow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 10px; border-radius:var(--radius-sm); background:var(--surface-cell); box-shadow:inset 0 0 0 1px var(--border-subtle); }
+  .dck-srow .t { font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); }
+  .dck-srow .t .on { color:var(--orange-300); }
+  .dck-srow .d { font-size:11px; color:var(--text-tertiary); }
+  .dck-del { border:none; background:none; cursor:pointer; color:var(--text-tertiary); font-size:14px; line-height:1; padding:2px 4px; }
+  .dck-del:hover { color:var(--lock-500); }
+  .dck-dows { display:flex; gap:4px; flex-wrap:wrap; }
+  .dck-dow { width:30px; height:24px; border:none; border-radius:var(--radius-sm); cursor:pointer; background:var(--field-bg); box-shadow:var(--well); color:var(--text-tertiary); font-family:var(--font-sans); font-size:10.5px; font-weight:600; }
+  .dck-dow.on { background:linear-gradient(180deg,var(--orange-400),var(--orange-600)); color:var(--text-on-accent); box-shadow:0 0 8px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,0.25); }
+  .dck-times { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .dck-tl { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-tertiary); }
+  input.dck-time { height:28px; padding:0 8px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-mono); font-size:12px; outline:none; color-scheme:dark; }
+  .dck-sched-msg { font-size:11px; color:var(--orange-300); }
 </style>
 {{end}}
 
@@ -194,7 +245,8 @@
                    data-model="{{$r.Model}}" data-search="{{$r.Search}}"
                    data-name="{{$r.Name}}" data-type="{{$r.TypeLabel}}"
                    data-ip="{{$r.IP}}" data-fw="{{$r.Firmware}}" data-mac="{{$r.MAC}}"
-                   data-kind="{{$r.Kind}}" data-id="{{$r.ID}}">
+                   data-kind="{{$r.Kind}}" data-id="{{$r.ID}}"
+                   {{- if eq $r.Kind "shelly"}} data-shelly-id="{{$r.ShellyID}}" data-prefix="{{$r.ShellyPrefix}}" data-channels="{{$r.ChannelsJSON}}" data-mqtt="{{$r.MQTTState}}"{{end}}>
                 <div class="dc-cell num">{{printf "%02d" $r.Index}}</div>
                 <div class="dc-cell">
                   <span class="dc-row-ico">{{template "dc-icon" $r.Category}}</span>
@@ -225,7 +277,7 @@
                      device on our side and stops re-discovery; the device
                      itself is never written to (control stays read only). */}}
                 {{if eq $r.Kind "shelly"}}
-                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Device controls</span><span class="dc-hr"></span></div>
+                  <div class="dc-sec-head" data-shelly-rest><span class="dc-sec-dot"></span><span class="dc-sec-title">Device controls</span><span class="dc-hr"></span></div>
                   <div class="dc-act-form">
                     <div class="dc-act-row">
                       <form method="post" action="/a/devices/shelly/provision" style="margin:0;">
@@ -296,7 +348,17 @@
         if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
         return;
       }
-      var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details', shelly: 'Switch channels' }[kind] || 'Access methods';
+      // Shelly Gen2 cockpit: the right column is information (the
+      // pre-rendered overview sections) + per-channel settings; the
+      // "Device controls" block stays at the bottom ("the rest").
+      if (kind === 'shelly') {
+        rightCol.innerHTML = '';
+        var det = dc.tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
+        if (det && det.content) rightCol.appendChild(det.content.cloneNode(true));
+        cockpit.mountSettingsSkeleton(row, rightCol);
+        return;
+      }
+      var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
       rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
         + lazyTitle
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
@@ -305,6 +367,7 @@
     function afterSlide(row, rightCol) {
       var kind = row.getAttribute('data-kind');
       if (kind === 'rpi-reader') return;
+      if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
       loadDetail(kind, row.getAttribute('data-id'), rightCol, row);
     }
 
@@ -316,7 +379,9 @@
       sortAttrs: { name: 'name', type: 'type', status: 'status', model: 'model', ip: 'ip', fw: 'fw', mac: 'mac' },
       sortLabels: { name: 'name', type: 'type', status: 'status', model: 'model', ip: 'IP address', fw: 'firmware', mac: 'MAC' },
       fillRight: fillRight,
-      afterSlide: afterSlide
+      afterSlide: afterSlide,
+      fillLeft: function (row, leftCol) { return cockpit.fillLeft(row, leftCol); },
+      onClose: function () { cockpit.teardown(); }
     });
     if (!dc) return;
     var esc = dc.esc;
@@ -360,6 +425,465 @@
         return h + rowsHtml;
       }).join('');
     }
+
+    // ---- Shelly Gen2 cockpit ----
+    // The slide-out becomes a full device cockpit for Shelly rows:
+    // FUNCTION AREA left (real relay switches over the broker
+    // Switch.Set path + live W/V/A/Hz/temperature and input readouts
+    // from the retained status topics), INFORMATION + SETTINGS right
+    // (config pre-filled over HTTP-RPC, applied per field; Timer and
+    // Weekly Schedule stay two distinct sections). Live values ride
+    // the broker SSE monitor (/a/mqtt-monitor/stream), opened only
+    // while a Shelly panel is open and torn down on close.
+    var cockpit = (function () {
+      var es = null;          // EventSource while a shelly panel is open
+      var cur = null;         // { row, sid, prefix, channels, leftCol }
+      var DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+      var IN_MODES = [['follow', 'Follow'], ['flip', 'Flip'], ['momentary', 'Momentary'], ['detached', 'Detached']];
+      var INIT_STATES = [['off', 'Off'], ['on', 'On'], ['restore_last', 'Restore last'], ['match_input', 'Match input']];
+      var IN_TYPES = [['switch', 'Switch'], ['button', 'Button']];
+
+      function chansOf(row) {
+        try { var c = JSON.parse(row.getAttribute('data-channels') || '[]'); return Array.isArray(c) ? c : []; }
+        catch (e) { return []; }
+      }
+      function secHead(title, onDevice) {
+        return '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">' + esc(title)
+          + '</span>' + (onDevice ? '<span class="dck-ondev">on device</span>' : '') + '<span class="dc-hr"></span></div>';
+      }
+      function fmtNum(v, dp) { return (v == null || isNaN(v)) ? '—' : Number(v).toFixed(dp); }
+
+      // ---- function area (left column) ----
+      function fillLeft(row, leftCol) {
+        // Tear down on EVERY panel open, not just shelly-to-shelly:
+        // opening a non-shelly row from an open cockpit must also close
+        // the stream (a row switch never goes through closePanel).
+        teardown();
+        if (row.getAttribute('data-kind') !== 'shelly') return false;
+        cur = {
+          row: row,
+          // numeric coercion: a missing store row renders id "0", which
+          // is a truthy STRING - it must read as "not adopted", not as a
+          // dialable device id
+          sid: (Number(row.getAttribute('data-shelly-id')) > 0) ? row.getAttribute('data-shelly-id') : '',
+          prefix: row.getAttribute('data-prefix') || '',
+          linked: row.getAttribute('data-mqtt') === 'linked',
+          channels: chansOf(row),
+          leftCol: leftCol
+        };
+        var h = secHead('Functions', false);
+        if (!cur.channels.length) {
+          h += '<div class="dck-note">The channel layout for this model is not known yet - live control appears once the device reports its switches.</div>';
+        }
+        cur.channels.forEach(function (ch) {
+          var n = ch.id + 1;
+          h += '<div data-dck-ch="' + ch.id + '">'
+            + '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Switch ' + n
+            + '<span data-dck-name></span></span><span class="dc-hr"></span>'
+            + '<button type="button" class="dck-tog" data-dck-tog="' + ch.id + '" disabled aria-label="Switch ' + n + '"></button>'
+            + '<span class="dck-state" data-dck-state>—</span></div>'
+            + (ch.meter
+              ? '<div class="dck-meters">'
+                + '<div class="dck-tile"><div class="k">Power</div><div class="v"><span data-dck-w>—</span> W</div></div>'
+                + '<div class="dck-tile"><div class="k">Voltage</div><div class="v"><span data-dck-v>—</span> V</div></div>'
+                + '<div class="dck-tile"><div class="k">Current</div><div class="v"><span data-dck-a>—</span> A</div></div>'
+                + '<div class="dck-tile"><div class="k">Frequency</div><div class="v"><span data-dck-hz>—</span> Hz</div></div>'
+                + '<div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div>'
+                + '</div>'
+              : '<div class="dck-meters"><div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div></div>')
+            + '<div class="dck-in"><span class="k">Physical input</span>'
+            + '<span class="dc-stat-dot unknown" data-dck-indot></span><span data-dck-in>—</span></div>'
+            + '<div class="dck-note err" data-dck-chmsg hidden></div>'
+            + '</div>';
+        });
+        if (cur.linked) {
+          h += '<div class="dck-note warn" data-dck-offline hidden>The device has no live broker session right now - switching is disabled until it reconnects.</div>';
+        }
+        if (!cur.linked) {
+          h += '<div class="dck-note warn">This device is not linked to the CARVILON MQTT broker yet - switching and live values need the link. Provision MQTT under Device controls on the right; until then the readouts below are a one-time HTTP snapshot.</div>'
+            + '<div data-dck-snapshot></div>';
+        }
+        leftCol.innerHTML = h;
+        leftCol.querySelectorAll('[data-dck-tog]').forEach(function (btn) {
+          btn.addEventListener('click', function () { toggle(Number(btn.getAttribute('data-dck-tog')), btn); });
+        });
+        return true;
+      }
+
+      // afterSlide: the deferred work (the /a/devices pattern - never
+      // reflow during the slide): overview names, settings fetches, the
+      // live stream (or the one-shot HTTP snapshot when unprovisioned).
+      function afterSlide(row, rightCol) {
+        if (!cur || cur.row !== row) return;
+        if (cur.sid) {
+          fetch('/a/designer/shelly/' + encodeURIComponent(cur.sid) + '/overview', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !cur || cur.row !== row) return;
+              Object.keys(d.names || {}).forEach(function (k) {
+                var el = cur.leftCol.querySelector('[data-dck-ch="' + Number(k) + '"] [data-dck-name]');
+                if (el && d.names[k]) el.textContent = ' · ' + d.names[k];
+              });
+            }).catch(function () {});
+        }
+        if (cur.linked && cur.prefix) stream();
+        else if (!cur.linked) httpSnapshot(row);
+        renderSettings(row, rightCol);
+      }
+
+      function teardown() {
+        if (es) { es.close(); es = null; }
+        Object.keys(confirmTimers).forEach(function (k) { clearTimeout(confirmTimers[k]); });
+        confirmTimers = {};
+        cur = null;
+      }
+
+      // ---- live values over the broker SSE monitor ----
+      function stream() {
+        // double-open guard: a second openPanel on the same row before the
+        // deferred afterSlide ran must never orphan the first source
+        if (es) { es.close(); es = null; }
+        es = new EventSource('/a/mqtt-monitor/stream');
+        es.addEventListener('snapshot', function (e) {
+          var d = JSON.parse(e.data);
+          (d.retained || []).forEach(applyTopic);
+          applyClients(d.clients);
+        });
+        es.addEventListener('msg', function (e) { applyTopic(JSON.parse(e.data)); });
+        // the 2s tick carries the connected-clients set: a device whose
+        // broker session is gone must not offer a doomed switch click
+        // (its RETAINED state would otherwise keep the toggle enabled).
+        es.addEventListener('tick', function (e) { applyClients(JSON.parse(e.data).clients); });
+      }
+      function applyClients(list) {
+        if (!cur || !cur.prefix) return;
+        var user = cur.prefix.slice(cur.prefix.indexOf('/') + 1);
+        cur.devOnline = Array.isArray(list) && list.indexOf(user) >= 0;
+        cur.leftCol.querySelectorAll('[data-dck-tog]').forEach(function (t) {
+          if (cur.devOnline) { if (t.hasAttribute('data-dck-known')) t.disabled = false; }
+          else { t.disabled = true; t.classList.remove('pending'); }
+        });
+        var note = cur.leftCol.querySelector('[data-dck-offline]');
+        if (note) note.hidden = !!cur.devOnline;
+      }
+      function applyTopic(m) {
+        if (!cur || !cur.prefix || m.topic.indexOf(cur.prefix + '/status/') !== 0) return;
+        var leaf = m.topic.slice(cur.prefix.length + 8); // after "/status/"
+        var body = null;
+        if (!m.binary) { try { body = JSON.parse(m.payload); } catch (e) {} }
+        if (body == null) return;
+        var mSw = /^switch:(\d+)$/.exec(leaf);
+        if (mSw) { patchSwitch(Number(mSw[1]), body); return; }
+        var mIn = /^input:(\d+)$/.exec(leaf);
+        if (mIn) { patchInput(Number(mIn[1]), body); }
+      }
+      function chEl(ch) { return cur && cur.leftCol.querySelector('[data-dck-ch="' + ch + '"]'); }
+      function patchSwitch(ch, o) {
+        var el = chEl(ch); if (!el) return;
+        var tog = el.querySelector('[data-dck-tog]');
+        var st = el.querySelector('[data-dck-state]');
+        if (typeof o.output === 'boolean') {
+          tog.setAttribute('data-dck-known', '1');
+          tog.disabled = (cur && cur.devOnline === false);
+          tog.classList.remove('pending');
+          if (confirmTimers[ch]) { clearTimeout(confirmTimers[ch]); delete confirmTimers[ch]; }
+          tog.classList.toggle('on', o.output);
+          tog.setAttribute('aria-pressed', o.output ? 'true' : 'false');
+          if (st) { st.textContent = o.output ? 'on' : 'off'; st.classList.toggle('on', o.output); }
+        }
+        var set = function (sel, val, dp) { var s = el.querySelector(sel); if (s) s.textContent = fmtNum(val, dp); };
+        set('[data-dck-w]', o.apower, 1);
+        set('[data-dck-v]', o.voltage, 0);
+        set('[data-dck-a]', o.current, 2);
+        set('[data-dck-hz]', o.freq, 0);
+        if (o.temperature && o.temperature.tC != null) set('[data-dck-t]', o.temperature.tC, 1);
+      }
+      function patchInput(ch, o) {
+        var el = chEl(ch); if (!el) return;
+        var dot = el.querySelector('[data-dck-indot]');
+        var txt = el.querySelector('[data-dck-in]');
+        if (typeof o.state === 'boolean') {
+          if (dot) dot.className = 'dc-stat-dot ' + (o.state ? 'online' : 'offline');
+          if (txt) txt.textContent = o.state ? 'active' : 'inactive';
+        } else if (txt) { txt.textContent = 'button'; }
+      }
+
+      // Unprovisioned fallback: the existing one-shot HTTP live view
+      // (Shelly.GetStatus) - honest data, no control.
+      function httpSnapshot(row) {
+        var box = cur && cur.leftCol.querySelector('[data-dck-snapshot]');
+        if (!box) return;
+        fetch('/a/devices/shelly/' + encodeURIComponent(row.getAttribute('data-id')), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row) return;
+            if (!d || d.ok === false) { box.innerHTML = sectionErr((d && d.error) || 'Could not be loaded.'); return; }
+            box.innerHTML = renderSections(d.sections || []);
+          })
+          .catch(function () { if (cur && cur.row === row) box.innerHTML = sectionErr('Could not be loaded.'); });
+      }
+
+      // ---- manual switch (broker Switch.Set - the faceplate path) ----
+      var confirmTimers = {}; // channel -> timeout id (cleared on confirm/teardown)
+      function chFlash(ch, msg) {
+        var el = chEl(ch); if (!el) return;
+        var m = el.querySelector('[data-dck-chmsg]'); if (!m) return;
+        m.textContent = msg;
+        m.hidden = false;
+        setTimeout(function () { m.hidden = true; }, 5000);
+      }
+      function toggle(ch, btn) {
+        if (!cur || !cur.prefix || btn.disabled) return;
+        var want = !btn.classList.contains('on');
+        btn.classList.add('pending');
+        var row = cur.row;
+        fetch('/a/designer/shelly/switch', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefix: cur.prefix, channel: ch, on: want })
+        }).then(function (r) {
+          if (!r.ok) { btn.classList.remove('pending'); chFlash(ch, 'Switch command failed.'); return; }
+          // the device confirms on its status topic (the SSE msg clears
+          // "pending"); a QoS-0 publish to an absent device is silently
+          // lost, so a bounded timer turns that into an honest error.
+          if (confirmTimers[ch]) clearTimeout(confirmTimers[ch]);
+          confirmTimers[ch] = setTimeout(function () {
+            delete confirmTimers[ch];
+            if (!cur || cur.row !== row) return;
+            var el = chEl(ch); if (!el) return;
+            var t = el.querySelector('[data-dck-tog]');
+            if (t && t.classList.contains('pending')) {
+              t.classList.remove('pending');
+              chFlash(ch, 'No confirmation from the device.');
+            }
+          }, 6000);
+        }).catch(function () { btn.classList.remove('pending'); chFlash(ch, 'Switch command failed.'); });
+      }
+
+      // ---- settings (right column, per channel) ----
+      function mountSettingsSkeleton(row, rightCol) {
+        var rest = rightCol.querySelector('[data-shelly-rest]');
+        var mount = document.createElement('div');
+        mount.setAttribute('data-dck-settings', '');
+        if (rest) rightCol.insertBefore(mount, rest);
+        else rightCol.appendChild(mount);
+        mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">Reading device configuration&hellip;</div>';
+      }
+      function renderSettings(row, rightCol) {
+        var mount = rightCol.querySelector('[data-dck-settings]');
+        if (!mount || !cur) return;
+        if (!cur.sid) {
+          mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">Settings need the device in the adopted set.</div>';
+          return;
+        }
+        mount.innerHTML = '';
+        cur.channels.forEach(function (ch) { renderChannelSettings(mount, row, ch.id); });
+        if (!cur.channels.length) {
+          mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">No known channels for this model yet.</div>';
+        }
+      }
+      function renderChannelSettings(mount, row, ch) {
+        var box = document.createElement('div');
+        box.setAttribute('data-dck-set', ch);
+        box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false) + '<div class="dc-lazy-hint">Reading device&hellip;</div>';
+        mount.appendChild(box);
+        var sid = cur.sid;
+        Promise.all([
+          fetch('/a/designer/shelly/' + sid + '/channel/' + ch, { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : Promise.reject(); }),
+          fetch('/a/designer/shelly/' + sid + '/schedules', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : { jobs: [] }; }).catch(function () { return { jobs: [] }; })
+        ]).then(function (res) {
+          if (!cur || cur.row !== row) return;
+          renderChannelForm(box, row, ch, res[0].switch || {}, res[0].input, (res[1].jobs || []));
+        }).catch(function () {
+          if (cur && cur.row === row) box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false)
+            + '<div class="dc-lazy-err">Device unreachable - settings run over HTTP-RPC; check the device is on the LAN.</div>';
+        });
+      }
+      function b(o) { return o === true; }
+      function s(o, k) { return o && o[k] != null ? String(o[k]) : ''; }
+      function nOf(o, k) { return o && o[k] != null ? o[k] : ''; }
+      function field(label, ctrl) {
+        return '<div class="dck-f"><span class="l">' + esc(label) + '</span><span class="c">' + ctrl + '<span class="dck-st" data-st></span></span></div>';
+      }
+      function txt(k, v) { return '<input class="dck-i" data-k="' + k + '" type="text" value="' + esc(v == null ? '' : String(v)) + '">'; }
+      function num(k, v, suf) { return '<input class="dck-i num" data-k="' + k + '" type="number" value="' + (v === '' || v == null ? '' : esc(String(v))) + '">' + (suf ? '<span class="dck-suf">' + esc(suf) + '</span>' : ''); }
+      function sel(k, v, opts) {
+        return '<select class="dck-i" data-k="' + k + '">' + opts.map(function (o) {
+          return '<option value="' + o[0] + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+        }).join('') + '</select>';
+      }
+      function tog(k, on) { return '<button type="button" class="dck-tog' + (on ? ' on' : '') + '" data-k="' + k + '" data-tog aria-pressed="' + (on ? 'true' : 'false') + '"></button>'; }
+
+      function renderChannelForm(box, row, ch, sw, inp, jobs) {
+        var n = ch + 1;
+        box.innerHTML =
+          secHead('Channel ' + n + ' settings', false)
+          + field('Name', txt('name', s(sw, 'name')))
+          + field('Power-on default', sel('initial_state', s(sw, 'initial_state'), INIT_STATES))
+          + field('Relay mode', sel('in_mode', s(sw, 'in_mode'), IN_MODES))
+          + (inp && Object.keys(inp).length
+            ? field('Input type', sel('input.type', s(inp, 'type'), IN_TYPES)) + field('Invert input', tog('input.invert', b(inp.invert)))
+            : '')
+          + field('Max power', num('power_limit', nOf(sw, 'power_limit'), 'W'))
+          + field('Max voltage', num('voltage_limit', nOf(sw, 'voltage_limit'), 'V'))
+          + field('Undervoltage', num('undervoltage_limit', nOf(sw, 'undervoltage_limit'), 'V'))
+          + field('Max current', num('current_limit', nOf(sw, 'current_limit'), 'A'))
+          + field('Auto-recover V errors', tog('autorecover_voltage_errors', b(sw.autorecover_voltage_errors)))
+          + secHead('Channel ' + n + ' timer', true)
+          + '<div class="dck-note">Relative auto on/off after a switch event (seconds, no calendar).</div>'
+          + field('Auto-OFF', tog('auto_off', b(sw.auto_off)))
+          + field('after', num('auto_off_delay', nOf(sw, 'auto_off_delay'), 's'))
+          + field('Auto-ON', tog('auto_on', b(sw.auto_on)))
+          + field('after', num('auto_on_delay', nOf(sw, 'auto_on_delay'), 's'))
+          + secHead('Channel ' + n + ' weekly schedule', true)
+          + '<div class="dck-note">Runs on the device (local, no internet). On/off at a time on chosen weekdays.</div>'
+          + '<div class="dck-sched" data-sched></div>';
+        wireFields(box, row, ch);
+        renderSchedule(box.querySelector('[data-sched]'), row, ch, jobs);
+        var nameInp = box.querySelector('[data-k="name"]');
+        if (nameInp) nameInp.addEventListener('change', function () {
+          var nm = cur && cur.leftCol.querySelector('[data-dck-ch="' + ch + '"] [data-dck-name]');
+          if (nm) nm.textContent = nameInp.value ? ' · ' + nameInp.value : '';
+        });
+      }
+      function apply(ch, comp, key, val, statusEl) {
+        var url = '/a/designer/shelly/' + cur.sid + '/channel/' + ch + '/' + (comp === 'input' ? 'input-config' : 'switch-config');
+        if (statusEl) { statusEl.textContent = '…'; statusEl.className = 'dck-st'; }
+        fetch(url, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: (function (o) { o[key] = val; return o; })({}) })
+        }).then(function (r) {
+          if (statusEl) { statusEl.textContent = r.ok ? 'saved' : 'failed'; statusEl.className = 'dck-st ' + (r.ok ? 'ok' : 'err'); }
+        }).catch(function () {
+          if (statusEl) { statusEl.textContent = 'failed'; statusEl.className = 'dck-st err'; }
+        });
+      }
+      function wireFields(box, row, ch) {
+        box.querySelectorAll('[data-k]').forEach(function (el) {
+          var k = el.getAttribute('data-k');
+          var comp = k.indexOf('input.') === 0 ? 'input' : 'switch';
+          var key = comp === 'input' ? k.slice(6) : k;
+          var f = el.closest('.dck-f');
+          var st = f && f.querySelector('[data-st]');
+          if (el.hasAttribute('data-tog')) {
+            el.addEventListener('click', function () {
+              var on = !el.classList.contains('on');
+              el.classList.toggle('on', on);
+              el.setAttribute('aria-pressed', on ? 'true' : 'false');
+              apply(ch, comp, key, on, st);
+            });
+          } else if (el.tagName === 'SELECT') {
+            el.addEventListener('change', function () { apply(ch, comp, key, el.value, st); });
+          } else if (el.type === 'number') {
+            el.addEventListener('change', function () { apply(ch, comp, key, Number(el.value) || 0, st); });
+          } else {
+            el.addEventListener('change', function () { apply(ch, comp, key, el.value, st); });
+          }
+        });
+      }
+
+      // ---- weekly schedule editor (device Schedule component) ----
+      function mkJob(ch, hhmm, on, days) {
+        var hm = hhmm.split(':');
+        var dow = days.length === 7 ? '*' : days.join(',');
+        return { enable: true, timespec: '0 ' + (parseInt(hm[1], 10) || 0) + ' ' + (parseInt(hm[0], 10) || 0) + ' * * ' + dow, calls: [{ method: 'switch.set', params: { id: ch, on: on } }] };
+      }
+      function parseSpec(ts) {
+        var pp = String(ts || '').trim().split(/\s+/);
+        var h = parseInt(pp[2], 10) || 0, m = parseInt(pp[1], 10) || 0;
+        var raw = pp[5] || '*';
+        var days = raw === '*' ? [0, 1, 2, 3, 4, 5, 6] : raw.split(',').map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); });
+        var pad = function (x) { return (x < 10 ? '0' : '') + x; };
+        return { hhmm: pad(h) + ':' + pad(m), daysKey: days.slice().sort(function (a, bb) { return a - bb; }).join(','), days: days };
+      }
+      function groupJobs(jobs, ch) {
+        var parsed = jobs.map(function (j) {
+          var t = parseSpec(j.timespec);
+          var call = (j.calls || []).find(function (c) { return c.params && Number(c.params.id) === ch; });
+          return { id: j.id, hhmm: t.hhmm, daysKey: t.daysKey, days: t.days, on: !!(call && call.params.on) };
+        });
+        var rows = [], used = {};
+        parsed.forEach(function (a) {
+          if (used[a.id]) return;
+          if (a.on) {
+            var off = parsed.find(function (x) { return !used[x.id] && !x.on && x.daysKey === a.daysKey; });
+            if (off) { used[a.id] = used[off.id] = true; rows.push({ days: a.days, on: a.hhmm, off: off.hhmm, ids: [a.id, off.id] }); return; }
+          }
+          used[a.id] = true;
+          var r = { days: a.days, ids: [a.id] };
+          r[a.on ? 'on' : 'off'] = a.hhmm;
+          rows.push(r);
+        });
+        return rows;
+      }
+      function daysLabel(days) {
+        return days.length === 7 ? 'Every day' : days.map(function (d) { return DOW[d]; }).join(' ');
+      }
+      function renderSchedule(host, row, ch, jobs) {
+        var mine = jobs.filter(function (j) {
+          return (j.calls || []).some(function (c) { return c.method && c.method.toLowerCase() === 'switch.set' && c.params && Number(c.params.id) === ch; });
+        });
+        var rows = groupJobs(mine, ch);
+        host.innerHTML = rows.map(function (r) {
+          var parts = [];
+          if (r.on) parts.push('<span class="on">on ' + esc(r.on) + '</span>');
+          if (r.off) parts.push('off ' + esc(r.off));
+          return '<div class="dck-srow"><span><span class="t">' + parts.join(' · ') + '</span> <span class="d">' + esc(daysLabel(r.days)) + '</span></span>'
+            + '<button type="button" class="dck-del" data-del="' + r.ids.join(',') + '" title="Delete schedule">&times;</button></div>';
+        }).join('')
+          + '<div class="dck-dows">' + DOW.map(function (d, i) { return '<button type="button" class="dck-dow" data-d="' + i + '" aria-pressed="false">' + d + '</button>'; }).join('') + '</div>'
+          + '<div class="dck-times"><label class="dck-tl">On<input type="time" data-on class="dck-time"></label>'
+          + '<label class="dck-tl">Off<input type="time" data-off class="dck-time"></label>'
+          + '<button type="button" class="dc-act-btn" data-add>Add schedule</button></div>';
+        host.querySelectorAll('.dck-dow').forEach(function (d) {
+          d.addEventListener('click', function () {
+            var on = !d.classList.contains('on');
+            d.classList.toggle('on', on);
+            d.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+        });
+        host.querySelectorAll('[data-del]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var ids = btn.getAttribute('data-del').split(',').map(Number).filter(function (x) { return !isNaN(x); });
+            btn.disabled = true;
+            fetch('/a/designer/shelly/' + cur.sid + '/schedule/delete', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids })
+            }).then(function () { reloadSchedule(host, row, ch); }).catch(function () { btn.disabled = false; });
+          });
+        });
+        var add = host.querySelector('[data-add]');
+        if (add) add.addEventListener('click', function () {
+          var days = Array.prototype.map.call(host.querySelectorAll('.dck-dow.on'), function (d) { return Number(d.getAttribute('data-d')); }).sort(function (a, bb) { return a - bb; });
+          var onT = host.querySelector('[data-on]').value, offT = host.querySelector('[data-off]').value;
+          if (!days.length || (!onT && !offT)) { flashSched(host, 'Pick weekdays and a time'); return; }
+          var creates = [];
+          if (onT) creates.push(mkJob(ch, onT, true, days));
+          if (offT) creates.push(mkJob(ch, offT, false, days));
+          add.disabled = true;
+          Promise.all(creates.map(function (j) {
+            return fetch('/a/designer/shelly/' + cur.sid + '/schedule', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(j)
+            });
+          })).then(function () { reloadSchedule(host, row, ch); })
+            .catch(function () { add.disabled = false; flashSched(host, 'Device rejected the schedule'); });
+        });
+      }
+      function reloadSchedule(host, row, ch) {
+        fetch('/a/designer/shelly/' + cur.sid + '/schedules', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { jobs: [] }; }).catch(function () { return { jobs: [] }; })
+          .then(function (sch) { if (cur && cur.row === row) renderSchedule(host, row, ch, sch.jobs || []); });
+      }
+      function flashSched(host, msg) {
+        var m = host.querySelector('.dck-sched-msg');
+        if (!m) { m = document.createElement('div'); m.className = 'dck-sched-msg'; host.appendChild(m); }
+        m.textContent = msg;
+      }
+
+      return { fillLeft: fillLeft, afterSlide: afterSlide, teardown: teardown, mountSettingsSkeleton: mountSettingsSkeleton };
+    })();
 
     // ---- live status ----
     // Poll a lightweight snapshot (/a/devices/status) so an online/offline
@@ -450,6 +974,9 @@
             dc.panel.phStatus.textContent = item.text;
           }
           setDetailKVs(dc.panel.leftCol, item);
+          // the shelly cockpit keeps its info clone (Status / MQTT link
+          // KVs) in the RIGHT column - patch it there too
+          if (row.getAttribute('data-kind') === 'shelly') setDetailKVs(dc.panel.rightCol, item);
         }
       }
       return changed;

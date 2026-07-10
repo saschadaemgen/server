@@ -179,6 +179,16 @@ type uaRow struct {
 	Origin    string
 	MQTTState string
 
+	// Shelly cockpit plumbing (empty for non-Shelly rows): the store id
+	// keys the designer HTTP-RPC config/schedule endpoints, the prefix
+	// ("carvilon/<broker-user>") addresses the live status topics and the
+	// manual Switch.Set publish, and ChannelsJSON is the capability-
+	// derived channel set ([{"id":0,"meter":true},...]) the function
+	// area renders its per-channel cards from.
+	ShellyID     int64
+	ShellyPrefix string
+	ChannelsJSON string
+
 	// Lowercased "name model ip mac" for the client search box.
 	Search string
 }
@@ -328,6 +338,15 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 type shellyRowInfo struct {
 	Origin    string // "manual" | "discovered"
 	MQTTState string // "" | "provisioning" | "linked" | "failed"
+
+	// Device-cockpit plumbing: the store id (the shelly HTTP-RPC
+	// config/schedule endpoints key by it), the broker identity for the
+	// topic prefix, and the store-side MAC/model for the prefix fallback
+	// + the capability-derived channel set when the live probe is down.
+	StoreID      int64
+	MQTTUsername string // provisioned broker account ("" until provisioned)
+	MAC          string // normalised uppercase hex ("" when unknown)
+	Model        string // last-seen model ("" when unknown)
 }
 
 // shellyRowInfoByAddr maps active-device address -> its store-side info, so
@@ -343,7 +362,10 @@ func (s *Server) shellyRowInfoByAddr(ctx context.Context) map[string]shellyRowIn
 		return m
 	}
 	for _, d := range active {
-		m[d.Address] = shellyRowInfo{Origin: d.Origin, MQTTState: d.MQTTState}
+		m[d.Address] = shellyRowInfo{
+			Origin: d.Origin, MQTTState: d.MQTTState,
+			StoreID: d.ID, MQTTUsername: d.MQTTUsername, MAC: d.MAC, Model: d.Model,
+		}
 	}
 	return m
 }
