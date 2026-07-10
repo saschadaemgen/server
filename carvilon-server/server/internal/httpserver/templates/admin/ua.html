@@ -280,7 +280,7 @@
                    data-name="{{$r.Name}}" data-type="{{$r.TypeLabel}}"
                    data-ip="{{$r.IP}}" data-fw="{{$r.Firmware}}" data-mac="{{$r.MAC}}"
                    data-kind="{{$r.Kind}}" data-id="{{$r.ID}}"
-                   {{- if eq $r.Kind "shelly"}} data-shelly-id="{{$r.ShellyID}}" data-prefix="{{$r.ShellyPrefix}}" data-channels="{{$r.ChannelsJSON}}" data-mqtt="{{$r.MQTTState}}"{{end}}>
+                   {{- if eq $r.Kind "shelly"}} data-shelly-id="{{$r.ShellyID}}" data-gen="{{$r.ShellyGen}}" data-prefix="{{$r.ShellyPrefix}}" data-channels="{{$r.ChannelsJSON}}" data-mqtt="{{$r.MQTTState}}"{{end}}>
                 <div class="dc-cell num">{{printf "%02d" $r.Index}}</div>
                 <div class="dc-cell">
                   <span class="dc-row-ico">{{template "dc-icon" $r.Category}}</span>
@@ -500,6 +500,9 @@
           // is a truthy STRING - it must read as "not adopted", not as a
           // dialable device id
           sid: (Number(row.getAttribute('data-shelly-id')) > 0) ? row.getAttribute('data-shelly-id') : '',
+          // gen1 devices speak the frozen shellies/<id> topic scheme with
+          // raw payloads; everything else here follows the Gen2 grammar
+          gen1: row.getAttribute('data-gen') === '1',
           prefix: row.getAttribute('data-prefix') || '',
           linked: row.getAttribute('data-mqtt') === 'linked',
           channels: chansOf(row),
@@ -516,20 +519,33 @@
             + '<span data-dck-name></span></span><span class="dck-go">settings &rsaquo;</span><span class="dc-hr"></span>'
             + '<button type="button" class="dck-tog" data-dck-tog="' + ch.id + '" disabled aria-label="Switch ' + n + '"></button>'
             + '<span class="dck-state" data-dck-state>—</span></div>'
-            + (ch.meter
-              ? '<div class="dck-meters">'
-                + '<div class="dck-tile"><div class="k">Power</div><div class="v"><span data-dck-w>—</span> W</div></div>'
-                + '<div class="dck-tile"><div class="k">Voltage</div><div class="v"><span data-dck-v>—</span> V</div></div>'
-                + '<div class="dck-tile"><div class="k">Current</div><div class="v"><span data-dck-a>—</span> A</div></div>'
-                + '<div class="dck-tile"><div class="k">Frequency</div><div class="v"><span data-dck-hz>—</span> Hz</div></div>'
-                + '<div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div>'
-                + '</div>'
-              : '<div class="dck-meters"><div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div></div>')
+            + (cur.gen1
+              // gen1 meters report power + an energy counter, no per-channel
+              // voltage/current/frequency (the device temperature is one
+              // device-level value, rendered below the channels)
+              ? (ch.meter
+                ? '<div class="dck-meters">'
+                  + '<div class="dck-tile"><div class="k">Power</div><div class="v"><span data-dck-w>—</span> W</div></div>'
+                  + '<div class="dck-tile"><div class="k">Energy</div><div class="v"><span data-dck-wh>—</span> Wh</div></div>'
+                  + '</div>'
+                : '')
+              : (ch.meter
+                ? '<div class="dck-meters">'
+                  + '<div class="dck-tile"><div class="k">Power</div><div class="v"><span data-dck-w>—</span> W</div></div>'
+                  + '<div class="dck-tile"><div class="k">Voltage</div><div class="v"><span data-dck-v>—</span> V</div></div>'
+                  + '<div class="dck-tile"><div class="k">Current</div><div class="v"><span data-dck-a>—</span> A</div></div>'
+                  + '<div class="dck-tile"><div class="k">Frequency</div><div class="v"><span data-dck-hz>—</span> Hz</div></div>'
+                  + '<div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div>'
+                  + '</div>'
+                : '<div class="dck-meters"><div class="dck-tile"><div class="k">Temp</div><div class="v"><span data-dck-t>—</span> °C</div></div></div>'))
             + '<div class="dck-in"><span class="k">Physical input</span>'
             + '<span class="dc-stat-dot unknown" data-dck-indot></span><span data-dck-in>—</span></div>'
             + '<div class="dck-note err" data-dck-chmsg hidden></div>'
             + '</div>';
         });
+        if (cur.gen1 && cur.channels.length) {
+          h += '<div class="dck-in"><span class="k">Device temperature</span><span data-dck-devt>—</span></div>';
+        }
         if (cur.linked) {
           h += '<div class="dck-note warn" data-dck-offline hidden>The device has no live broker session right now - switching is disabled until it reconnects.</div>';
         }
@@ -623,7 +639,9 @@
         if (note) note.hidden = !!cur.devOnline;
       }
       function applyTopic(m) {
-        if (!cur || !cur.prefix || m.topic.indexOf(cur.prefix + '/status/') !== 0) return;
+        if (!cur || !cur.prefix) return;
+        if (cur.gen1) { gen1ApplyTopic(m); return; }
+        if (m.topic.indexOf(cur.prefix + '/status/') !== 0) return;
         var leaf = m.topic.slice(cur.prefix.length + 8); // after "/status/"
         var body = null;
         if (!m.binary) { try { body = JSON.parse(m.payload); } catch (e) {} }
@@ -632,6 +650,47 @@
         if (mSw) { patchSwitch(Number(mSw[1]), body); return; }
         var mIn = /^input:(\d+)$/.exec(leaf);
         if (mIn) { patchInput(Number(mIn[1]), body); }
+      }
+      // gen1 topics are flat: shellies/<id>/relay/N ("on"/"off"/
+      // "overpower" - raw strings, not JSON), .../relay/N/power and
+      // .../relay/N/energy (bare numbers; energy counts watt-minutes),
+      // .../input/N (0/1), .../temperature (one device-level °C value).
+      function gen1ApplyTopic(m) {
+        if (m.binary || m.topic.indexOf(cur.prefix + '/') !== 0) return;
+        var leaf = m.topic.slice(cur.prefix.length + 1);
+        var payload = (m.payload || '').trim();
+        var mR = /^relay\/(\d+)$/.exec(leaf);
+        if (mR) { gen1PatchRelay(Number(mR[1]), payload); return; }
+        var mP = /^relay\/(\d+)\/power$/.exec(leaf);
+        if (mP) { gen1SetTile(Number(mP[1]), '[data-dck-w]', parseFloat(payload), 1); return; }
+        var mE = /^relay\/(\d+)\/energy$/.exec(leaf);
+        if (mE) { gen1SetTile(Number(mE[1]), '[data-dck-wh]', parseFloat(payload) / 60, 1); return; }
+        var mIn = /^input\/(\d+)$/.exec(leaf);
+        if (mIn) { patchInput(Number(mIn[1]), { state: payload === '1' }); return; }
+        if (leaf === 'temperature') {
+          var t = cur.leftCol.querySelector('[data-dck-devt]');
+          if (t) t.textContent = fmtNum(parseFloat(payload), 1) + ' °C';
+        }
+      }
+      function gen1SetTile(ch, sel, val, dp) {
+        var el = chEl(ch); if (!el) return;
+        var s = el.querySelector(sel); if (s) s.textContent = fmtNum(val, dp);
+      }
+      function gen1PatchRelay(ch, payload) {
+        var el = chEl(ch); if (!el) return;
+        var tog = el.querySelector('[data-dck-tog]');
+        var st = el.querySelector('[data-dck-state]');
+        if (payload !== 'on' && payload !== 'off' && payload !== 'overpower') return;
+        var on = payload === 'on';
+        tog.setAttribute('data-dck-known', '1');
+        tog.disabled = (cur && cur.devOnline === false);
+        tog.classList.remove('pending');
+        if (confirmTimers[ch]) { clearTimeout(confirmTimers[ch]); delete confirmTimers[ch]; }
+        tog.classList.toggle('on', on);
+        tog.setAttribute('aria-pressed', on ? 'true' : 'false');
+        // "overpower" is the device's protective trip - the relay is off,
+        // and the state label says why instead of pretending a plain off
+        if (st) { st.textContent = payload; st.classList.toggle('on', on); }
       }
       function chEl(ch) { return cur && cur.leftCol.querySelector('[data-dck-ch="' + ch + '"]'); }
       function patchSwitch(ch, o) {
@@ -783,11 +842,374 @@
         t.innerHTML = html;
         return t.content;
       }
+      // ---- gen1 settings (REST /settings tree - not the Gen2 RPC) ----
+      var G1_DEFAULTS = [['off', 'Off'], ['on', 'On'], ['last', 'Restore last'], ['switch', 'Match switch']];
+      var G1_BTN_TYPES = [['momentary', 'Momentary'], ['toggle', 'Toggle'], ['edge', 'Edge'],
+        ['detached', 'Detached'], ['action', 'Action'], ['momentary_on_release', 'Momentary on release']];
+      function renderGen1DeviceSections(box) {
+        if (!cur) return;
+        box.innerHTML = '<div class="dc-lazy-hint">Reading device configuration&hellip;</div>';
+        var row = cur.row;
+        fetch('/a/designer/shelly/' + cur.sid + '/gen1/device', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row || cur.selCh != null) return;
+            if (!d || d.ok === false) {
+              box.innerHTML = '<div class="dc-lazy-err">Device configuration could not be loaded.</div>';
+              return;
+            }
+            renderGen1DeviceForm(box, d);
+          })
+          .catch(function () {
+            if (cur && cur.row === row) box.innerHTML = '<div class="dc-lazy-err">Device configuration could not be loaded.</div>';
+          });
+      }
+      function renderGen1DeviceForm(box, d) {
+        var sid = cur.sid;
+
+        // --- Device (name; the relay/roller mode only where it exists) ---
+        var devHTML = field('Device name', txt('g1:name', d.name || ''))
+          + roRow('Model', d.model);
+        if (d.mode) {
+          devHTML += field('Mode', sel('g1:mode', d.mode, [['relay', 'Relay'], ['roller', 'Roller']]))
+            + '<div class="dck-note warn">Switching the mode reboots the device and changes its channel layout - roller control is not supported here yet.</div>';
+        }
+        if (d.led) {
+          devHTML += field('Disable status LED', tog('g1:led_status_disable', d.led.status_disable === true))
+            + field('Disable power LED', tog('g1:led_power_disable', d.led.power_disable === true));
+        }
+
+        // --- Firmware & maintenance ---
+        var ota = d.ota || {};
+        var fwHTML = roRow('Firmware', d.fw || '—');
+        if (ota.has_update) {
+          fwHTML += '<div class="dck-inline"><span class="dck-ro">update: ' + esc(ota.new || 'available')
+            + '</span><button type="button" class="dck-mini accent" data-g1-otaup>Install</button></div>';
+        } else {
+          fwHTML += '<div class="dc-lazy-hint">No update reported by the device.</div>';
+        }
+        fwHTML += '<div class="dck-list"><div class="dck-inline">'
+          + '<button type="button" class="dck-mini" data-g1-reboot>Reboot device</button>'
+          + '</div><div data-g1-fwout></div></div>';
+
+        // --- Auth (the same fleet-wide rotation as Gen2 - one endpoint) ---
+        var authHTML = roRow('HTTP auth', d.login && d.login.enabled ? ('enabled (' + (d.login.username || 'admin') + ')') : 'disabled')
+          + '<div class="dck-list"><div class="dck-form">'
+          + '<span class="dc-act-label">New device password (min 8 characters)</span>'
+          + '<div class="dck-inline"><input class="dck-i" type="password" data-dck-authpw autocomplete="new-password" style="width:200px;">'
+          + '<button type="button" class="dck-mini accent" data-dck-authset>Apply</button><span class="dck-st" data-dck-authst></span></div>'
+          + '<p class="dc-act-hint">Rotates the installation password on ALL adopted Shelly devices (Gen1 via Basic auth, Gen2 via digest) AND updates CARVILON\'s stored password in the same action.</p>'
+          + '</div></div>';
+
+        // --- Connectivity (MQTT/cloud read-only by design) ---
+        var mq = d.mqtt || {};
+        var connHTML =
+          '<div class="dck-note">MQTT and cloud are managed by CARVILON provisioning and stay read-only here - editing them would sever the broker link. Gen1 firmware connects PLAINTEXT (no MQTT TLS exists on Gen1) - the documented second security tier: unique credentials + a default-deny ACL, LAN-only.</div>'
+          + roRow('MQTT server', mq.server)
+          + roRow('MQTT client/topic id', mq.id)
+          + roRow('MQTT enabled', String(mq.enable === true))
+          + roRow('Retain', String(mq.retain === true))
+          + roRow('Cloud enabled', String(d.cloud && d.cloud.enabled === true))
+          + '<div class="dck-note">Gen1 firmware disables the vendor cloud while MQTT is enabled (documented mutual exclusion).</div>';
+
+        box.innerHTML =
+          acc('Device', devHTML, true)
+          + acc('Firmware & maintenance', fwHTML, true)
+          + acc('Auth', authHTML, true)
+          + acc('Connectivity', connHTML, true);
+
+        box.querySelectorAll('[data-dck-acc]').forEach(function (h) {
+          h.addEventListener('click', function () { h.parentElement.classList.toggle('open'); });
+        });
+
+        // apply-on-change onto the whitelisted /settings keys
+        box.querySelectorAll('[data-k]').forEach(function (el) {
+          var full = el.getAttribute('data-k');
+          if (full.indexOf('g1:') !== 0) return;
+          var key = full.slice(3);
+          var f = el.closest('.dck-f');
+          var st = f && f.querySelector('[data-st]');
+          function send(val) {
+            var c = {}; c[key] = val;
+            devApply('/a/designer/shelly/' + sid + '/gen1/device-settings', c, st);
+          }
+          if (el.hasAttribute('data-tog')) {
+            el.addEventListener('click', function () {
+              var on = !el.classList.contains('on');
+              el.classList.toggle('on', on);
+              el.setAttribute('aria-pressed', on ? 'true' : 'false');
+              send(on);
+            });
+          } else if (el.tagName === 'SELECT') {
+            // track the last APPLIED mode, not the render-time fetch, so a
+            // cancelled confirm reverts to what the device actually runs
+            var prevMode = d.mode;
+            el.addEventListener('change', function () {
+              if (key === 'mode') {
+                if (!confirm('Switch the device mode now? The device reboots and its channel layout changes.')) {
+                  el.value = prevMode; return;
+                }
+                prevMode = el.value;
+              }
+              send(el.value);
+            });
+          } else {
+            el.addEventListener('change', function () { send(el.value); });
+          }
+        });
+
+        var up = box.querySelector('[data-g1-otaup]');
+        if (up) up.addEventListener('click', function () {
+          if (!confirm('Install the firmware update now? The device flashes and reboots on its own.')) return;
+          up.disabled = true;
+          fetch('/a/designer/shelly/' + sid + '/gen1/ota-update', { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) {
+              box.querySelector('[data-g1-fwout]').innerHTML = r.ok
+                ? '<div class="dc-lazy-hint">Update started - the device installs and reboots on its own.</div>'
+                : '<div class="dc-lazy-err">Update could not be started.</div>';
+            });
+        });
+        var rb = box.querySelector('[data-g1-reboot]');
+        if (rb) rb.addEventListener('click', function () {
+          if (!confirm('Reboot the device now? Its relays follow their power-on default; the device is briefly unreachable.')) return;
+          rb.disabled = true;
+          fetch('/a/designer/shelly/' + sid + '/gen1/reboot', { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) { rb.disabled = false; if (!r.ok) alert('Reboot failed.'); });
+        });
+        // the fleet-wide auth rotation posts to the SAME endpoint as Gen2
+        var authBtn = box.querySelector('[data-dck-authset]');
+        if (authBtn) authBtn.addEventListener('click', function () {
+          var pw = box.querySelector('[data-dck-authpw]').value;
+          var st = box.querySelector('[data-dck-authst]');
+          if (pw.length < 8) { st.textContent = 'min 8 chars'; st.className = 'dck-st err'; return; }
+          if (!confirm('Rotate the password on ALL adopted Shelly devices AND update the stored CARVILON password now?')) return;
+          st.textContent = '…'; st.className = 'dck-st';
+          fetch('/a/designer/shelly/' + sid + '/auth', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw })
+          }).then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+            .then(function (d2) {
+              var fails = (d2.failed || []).length;
+              st.textContent = fails ? (d2.applied + ' ok, ' + fails + ' failed') : ('applied to ' + d2.applied);
+              st.className = 'dck-st ' + (fails ? 'err' : 'ok');
+            })
+            .catch(function () { st.textContent = 'failed'; st.className = 'dck-st err'; });
+        });
+      }
+      function renderGen1ChannelSettings(box, row, ch) {
+        var sid = cur.sid;
+        function stale() { return !cur || cur.row !== row || cur.selCh !== ch; }
+        fetch('/a/designer/shelly/' + sid + '/gen1/channel/' + ch, { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+          .then(function (d) {
+            if (stale()) return;
+            renderGen1ChannelForm(box, row, ch, d);
+          })
+          .catch(function () {
+            if (!stale()) box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false)
+              + '<div class="dc-lazy-err">Device unreachable - settings run over the device\'s HTTP API; check the device is on the LAN.</div>';
+          });
+      }
+      function renderGen1ChannelForm(box, row, ch, d) {
+        var rl = d.relay || {};
+        var n = ch + 1;
+        box.innerHTML =
+          secHead('Channel ' + n + ' settings', false)
+          + field('Name', txt('name', rl.name))
+          + field('Power-on default', sel('default_state', rl.default_state || 'off', G1_DEFAULTS))
+          + field('Button type', sel('btn_type', rl.btn_type || 'toggle', G1_BTN_TYPES))
+          + field('Reverse button', tog('btn_reverse', rl.btn_reverse === true))
+          + (d.meter ? field('Max power', num('max_power', rl.max_power, 'W')) : '')
+          + secHead('Channel ' + n + ' timer', true)
+          + '<div class="dck-note">Relative auto on/off after a switch event (seconds, 0 disables).</div>'
+          + field('Auto-OFF after', num('auto_off', rl.auto_off, 's'))
+          + field('Auto-ON after', num('auto_on', rl.auto_on, 's'))
+          + secHead('Channel ' + n + ' weekly schedule', true)
+          + '<div class="dck-note">Runs on the device (local, no internet). Gen1 stores it as rule strings; sunrise/sunset rules need the device to know its location (set via the Shelly app) and their exact format is pending a real-device check.</div>'
+          + '<div class="dck-sched" data-g1sched></div>';
+        // apply-on-change onto /settings/relay/{ch} (whitelisted keys)
+        box.querySelectorAll('[data-k]').forEach(function (el) {
+          var key = el.getAttribute('data-k');
+          var f = el.closest('.dck-f');
+          var st = f && f.querySelector('[data-st]');
+          function send(val) {
+            var c = {}; c[key] = val;
+            devApply('/a/designer/shelly/' + sid + '/gen1/channel/' + ch + '/settings', c, st);
+          }
+          if (el.hasAttribute('data-tog')) {
+            el.addEventListener('click', function () {
+              var on = !el.classList.contains('on');
+              el.classList.toggle('on', on);
+              el.setAttribute('aria-pressed', on ? 'true' : 'false');
+              send(on);
+            });
+          } else if (el.tagName === 'SELECT') {
+            el.addEventListener('change', function () { send(el.value); });
+          } else if (el.type === 'number') {
+            el.addEventListener('change', function () {
+              if (el.value.trim() === '') { if (st) { st.textContent = 'unchanged'; st.className = 'dck-st'; } return; }
+              send(Number(el.value) || 0);
+            });
+          } else {
+            el.addEventListener('change', function () { send(el.value); });
+          }
+        });
+        var nameInp = box.querySelector('[data-k="name"]');
+        if (nameInp) nameInp.addEventListener('change', function () {
+          var nm = cur && cur.leftCol.querySelector('[data-dck-ch="' + ch + '"] [data-dck-name]');
+          if (nm) nm.textContent = nameInp.value ? ' · ' + nameInp.value : '';
+        });
+        renderGen1Schedule(box.querySelector('[data-g1sched]'), row, ch, d.schedule || { enabled: false, rules: [] });
+      }
+
+      // ---- gen1 weekly schedule: schedule_rules strings, whole-set writes ----
+      // Rule shapes: "HHMM-DAYS-on|off" (24h with leading zeros) and the
+      // sunrise/sunset variant "HHMM(asr|bsr|ass|bss)-DAYS-on|off" where
+      // HHMM is the zero-padded OFFSET MAGNITUDE and the modifier carries
+      // the sign + event (a=after, b=before; sr=sunrise, ss=sunset) - the
+      // grammar the on-device web UI writes. DAYS digits run 0=Monday..
+      // 6=Sunday (the Gen1 encoding - NOT the Gen2 cron one).
+      var G1DOW = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+      var G1_RULE = /^(\d{2})(\d{2})(asr|bsr|ass|bss)?-([0-6]{1,7})-(on|off)$/;
+      function g1ParseRule(rule) {
+        var m = G1_RULE.exec(rule);
+        if (!m) return null;
+        var when;
+        if (m[3]) {
+          var mins = Number(m[1]) * 60 + Number(m[2]);
+          var ev = m[3].slice(1) === 'sr' ? 'sunrise' : 'sunset';
+          var sign = m[3].charAt(0) === 'b' ? '-' : '+';
+          when = ev + (mins ? (' ' + sign + mins + 'm') : '');
+        } else {
+          when = m[1] + ':' + m[2];
+        }
+        return { when: when, days: m[4], action: m[5] };
+      }
+      function g1DaysLabel(days) {
+        if (days.length >= 7) return 'daily';
+        return days.split('').map(function (d) { return G1DOW[Number(d)] || '?'; }).join(' ');
+      }
+      function renderGen1Schedule(host, row, ch, sched) {
+        var rules = (sched.rules || []).slice();
+        var enabled = sched.enabled === true;
+        function slotHTML(k, label) {
+          return '<label class="dck-tl">' + label
+            + '<select class="dck-i" data-' + k + 'mode style="width:86px;"><option value="">—</option><option value="time">Time</option><option value="sunrise">Sunrise</option><option value="sunset">Sunset</option></select>'
+            + '<input type="time" data-' + k + ' class="dck-time" hidden>'
+            + '<input type="number" data-' + k + 'off class="dck-i num" value="0" title="Offset in minutes (+ after, - before)" hidden style="width:64px;"><\/label>';
+        }
+        host.innerHTML =
+          '<div class="dck-f"><span class="l">Schedule active</span><span class="c">'
+          + tog('g1sched-enable', enabled) + '<span class="dck-st" data-g1sch-st></span></span></div>'
+          + rules.map(function (rule, i) {
+            var p = g1ParseRule(rule);
+            var label = p ? ('<span class="' + (p.action === 'on' ? 'on' : '') + '">' + esc(p.action + ' ' + p.when) + '</span> <span class="d">' + esc(g1DaysLabel(p.days)) + '</span>')
+              : '<span class="d">' + esc(rule) + '</span>';
+            return '<div class="dck-srow"><span><span class="t">' + label + '</span></span>'
+              + '<button type="button" class="dck-del" data-del="' + i + '" title="Delete rule">&times;</button></div>';
+          }).join('')
+          + '<div class="dck-dows">' + G1DOW.map(function (d, i) { return '<button type="button" class="dck-dow" data-d="' + i + '" aria-pressed="false">' + d + '</button>'; }).join('') + '</div>'
+          + '<div class="dck-times">' + slotHTML('on', 'On') + slotHTML('off', 'Off')
+          + '<button type="button" class="dc-act-btn" data-add>Add schedule</button></div>';
+        function writeSet(nextRules, nextEnabled, after) {
+          fetch('/a/designer/shelly/' + cur.sid + '/gen1/channel/' + ch + '/schedule', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: nextEnabled, rules: nextRules })
+          }).then(function (r) { after(r.ok); }).catch(function () { after(false); });
+        }
+        function reload() {
+          fetch('/a/designer/shelly/' + cur.sid + '/gen1/channel/' + ch, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!cur || cur.row !== row || cur.selCh !== ch) return;
+              renderGen1Schedule(host, row, ch, (d && d.schedule) || { enabled: false, rules: [] });
+            }).catch(function () {});
+        }
+        var en = host.querySelector('[data-k="g1sched-enable"]');
+        var enSt = host.querySelector('[data-g1sch-st]');
+        if (en) en.addEventListener('click', function () {
+          var on = !en.classList.contains('on');
+          en.classList.toggle('on', on);
+          en.setAttribute('aria-pressed', on ? 'true' : 'false');
+          if (enSt) { enSt.textContent = '…'; enSt.className = 'dck-st'; }
+          writeSet(rules, on, function (ok) {
+            if (enSt) { enSt.textContent = ok ? 'saved' : 'failed'; enSt.className = 'dck-st ' + (ok ? 'ok' : 'err'); }
+            // keep the captured flag current: later whole-set writes
+            // (add/delete) must carry the flag the device now has, not
+            // the render-time one
+            if (ok) { enabled = on; } else { en.classList.toggle('on', !on); }
+          });
+        });
+        host.querySelectorAll('.dck-dow').forEach(function (d) {
+          d.addEventListener('click', function () {
+            var on = !d.classList.contains('on');
+            d.classList.toggle('on', on);
+            d.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+        });
+        ['on', 'off'].forEach(function (k) {
+          var s = host.querySelector('[data-' + k + 'mode]');
+          s.addEventListener('change', function () {
+            host.querySelector('[data-' + k + ']').hidden = (s.value !== 'time');
+            host.querySelector('[data-' + k + 'off]').hidden = (s.value !== 'sunrise' && s.value !== 'sunset');
+          });
+        });
+        host.querySelectorAll('[data-del]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var idx = Number(btn.getAttribute('data-del'));
+            btn.disabled = true;
+            var next = rules.filter(function (_, i) { return i !== idx; });
+            writeSet(next, enabled, function (ok) { if (ok) reload(); else btn.disabled = false; });
+          });
+        });
+        var add = host.querySelector('[data-add]');
+        function slotRule(k, days, action) {
+          var mode = host.querySelector('[data-' + k + 'mode]').value;
+          if (!mode) return null;
+          if (mode === 'time') {
+            var v = host.querySelector('[data-' + k + ']').value; // "HH:MM"
+            if (!v) return null;
+            return v.replace(':', '') + '-' + days + '-' + action;
+          }
+          // sun rule: zero-padded |offset| as HHMM + the sign/event
+          // modifier ("0030asr" = sunrise+30min; zero offset writes the
+          // "a" variant like the stock UI). The stock UI guarantees
+          // offsets up to +/-2:59 - clamp to stay inside that.
+          var off = Math.round(Number(host.querySelector('[data-' + k + 'off]').value) || 0);
+          if (off > 179 || off < -179) { alert('Sun offsets are limited to ±179 minutes.'); return null; }
+          var abs = Math.abs(off);
+          var hh = String(Math.floor(abs / 60)).padStart(2, '0');
+          var mm = String(abs % 60).padStart(2, '0');
+          var mod = (off < 0 ? 'b' : 'a') + (mode === 'sunrise' ? 'sr' : 'ss');
+          return hh + mm + mod + '-' + days + '-' + action;
+        }
+        if (add) add.addEventListener('click', function () {
+          var days = [];
+          host.querySelectorAll('.dck-dow.on').forEach(function (d) { days.push(Number(d.getAttribute('data-d'))); });
+          if (!days.length) { alert('Pick at least one weekday.'); return; }
+          var dayStr = days.sort().join('');
+          var next = rules.slice();
+          var onRule = slotRule('on', dayStr, 'on');
+          var offRule = slotRule('off', dayStr, 'off');
+          if (!onRule && !offRule) { alert('Pick an on and/or off time.'); return; }
+          if (onRule) next.push(onRule);
+          if (offRule) next.push(offRule);
+          add.disabled = true;
+          // rules write as a WHOLE set (the documented Gen1 semantics) and
+          // adding implies the schedule should run
+          writeSet(next, true, function (ok) {
+            add.disabled = false;
+            if (ok) reload(); else alert('The schedule could not be written.');
+          });
+        });
+      }
       function renderChannelSettings(mount, row, ch) {
         var box = document.createElement('div');
         box.setAttribute('data-dck-set', ch);
         box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false) + '<div class="dc-lazy-hint">Reading device&hellip;</div>';
         mount.appendChild(box);
+        if (cur.gen1) { renderGen1ChannelSettings(box, row, ch); return; }
         var sid = cur.sid;
         function stale() { return !cur || cur.row !== row || cur.selCh !== ch; }
         Promise.all([
@@ -930,6 +1352,7 @@
           box.innerHTML = '';
           return;
         }
+        if (cur.gen1) { renderGen1DeviceSections(box); return; }
         if (cur.deviceData) { renderDeviceSectionsFrom(box, cur.deviceData); return; }
         box.innerHTML = '<div class="dc-lazy-hint">Reading device configuration&hellip;</div>';
         var row = cur.row;

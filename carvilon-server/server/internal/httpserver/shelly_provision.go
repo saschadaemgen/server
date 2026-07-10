@@ -23,6 +23,7 @@ import (
 
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/shelly1api"
 	"carvilon.local/server/internal/shellyapi"
 	"carvilon.local/server/internal/shellystore"
 )
@@ -93,10 +94,60 @@ func (s *Server) shellySetMQTTState(id int64, username, state string) {
 	}
 }
 
-// provisionShellyDevice runs the full provisioning for one device id and
-// persists the outcome. Best-effort and self-contained: any failure lands
-// as MQTTStateFailed with a redacted log, never a panic.
+// provisionShellyDevice dispatches one device's provisioning to its
+// generation's flow: Gen2+ onto the TLS listener (CA-verified), Gen1 onto
+// the documented plaintext tier (shelly1_provision.go). A device whose
+// generation is still unknown is classified first over the
+// unauthenticated GET /shelly identify probe - never guessed. Best-effort
+// and self-contained: any failure lands as MQTTStateFailed with a
+// redacted log, never a panic.
 func (s *Server) provisionShellyDevice(ctx context.Context, id int64) {
+	fail := func(reason string) {
+		s.log.Warn("shelly: mqtt provisioning failed", "component", "shelly-provision", "reason", reason)
+		s.shellySetMQTTState(id, "", shellystore.MQTTStateFailed)
+	}
+	if s.shellystore == nil {
+		fail("store unavailable")
+		return
+	}
+	dev, err := s.shellystore.Get(ctx, id)
+	if err != nil || dev.State != shellystore.StateActive {
+		fail("device not active")
+		return
+	}
+	gen := dev.Gen
+	if gen == shellystore.GenUnknown {
+		address, ok := normalizeShellyAddr(dev.Address)
+		if !ok || address == "" {
+			fail("stored address failed the LAN guard")
+			return
+		}
+		ident, ierr := shelly1api.New(shelly1api.Options{Address: address, Timeout: 8 * time.Second}).GetIdentity(ctx)
+		if ierr != nil {
+			fail("device unreachable")
+			return
+		}
+		gen = ident.Generation()
+		if gen <= 0 {
+			fail("could not classify the device generation")
+			return
+		}
+		if err := s.shellystore.SetIdentity(ctx, id,
+			normalizeMAC(ident.MACLabel()), shellyIdentModel(ident, gen), gen); err != nil {
+			s.log.Warn("shelly: record identity failed", "err", err)
+		}
+		s.rebuildShellyClients(ctx)
+	}
+	if gen == shellystore.Gen1 {
+		s.provisionShelly1Device(ctx, id)
+		return
+	}
+	s.provisionShelly2Device(ctx, id)
+}
+
+// provisionShelly2Device runs the full Gen2+ provisioning for one device
+// id and persists the outcome.
+func (s *Server) provisionShelly2Device(ctx context.Context, id int64) {
 	fail := func(reason string) {
 		s.log.Warn("shelly: mqtt provisioning failed", "component", "shelly-provision", "reason", reason)
 		s.shellySetMQTTState(id, "", shellystore.MQTTStateFailed)

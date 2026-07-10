@@ -78,6 +78,30 @@ func (s *Server) handleAdminShellyDevAnnounce(w http.ResponseWriter, r *http.Req
 	if id != "" {
 		txt["id"] = id
 	}
+	// gen=1 exercises the Gen1 path: a Gen1 device announces _http._tcp
+	// with a "<model>-<id>" instance name (app = the model prefix, e.g.
+	// "shelly1pm"), which the allowlist classifier must admit - the same
+	// non-bypass property as the Gen2 injection.
+	if strings.TrimSpace(r.PostForm.Get("gen")) == "1" {
+		model := strings.TrimSpace(r.PostForm.Get("app"))
+		if model == "" {
+			model = "shelly1"
+		}
+		gLabel := model
+		if id != "" {
+			gLabel = model + "-" + id
+		}
+		entry := dnssd.Entry{
+			Instance: gLabel + "." + Shelly1ServiceType + ".",
+			Service:  Shelly1ServiceType + ".",
+			Host:     gLabel + ".local.",
+			Addrs:    []netip.Addr{ip},
+			Port:     port,
+		}
+		s.shellyDisco.InjectGen1ForTest(r.Context(), entry)
+		http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
+		return
+	}
 	entry := dnssd.Entry{
 		Instance: label + "." + ShellyServiceType + ".",
 		Service:  ShellyServiceType + ".",
@@ -116,14 +140,19 @@ const (
 // shellyDiscovery consumes a dnssd source and reconciles finds into the
 // store. It is created once and run for the process lifetime.
 type shellyDiscovery struct {
-	store     *shellystore.Store
-	source    dnssd.Source
-	log       *slog.Logger
-	enabled   func(context.Context) bool // Shelly integration on? (adoption gate)
-	autoAdopt func(context.Context) bool // approval gate off? (auto-activate finds)
-	rebuild   func(context.Context)      // rebuild the live client fleet
-	limit     int
-	now       func() time.Time
+	store *shellystore.Store
+	// source hears the Gen2+ _shelly._tcp service; gen1Source (nil when
+	// the Gen1 integration is not wired) hears _http._tcp, from which the
+	// strict Gen1 name allowlist admits only in-scope Gen1 devices. Both
+	// feed the same adoption policy and the same approval gate.
+	source     dnssd.Source
+	gen1Source dnssd.Source
+	log        *slog.Logger
+	enabled    func(context.Context) bool // Shelly integration on? (adoption gate)
+	autoAdopt  func(context.Context) bool // approval gate off? (auto-activate finds)
+	rebuild    func(context.Context)      // rebuild the live client fleet
+	limit      int
+	now        func() time.Time
 
 	mu         sync.Mutex
 	lastSeen   map[string]time.Time
@@ -138,23 +167,25 @@ type shellyDiscovery struct {
 	closed    chan struct{}
 }
 
-// newShellyDiscovery wires the coordinator. source may be a *dnssd.Browser
-// or a test fake; enabled/autoAdopt/rebuild are Server methods.
-func newShellyDiscovery(store *shellystore.Store, source dnssd.Source, log *slog.Logger, enabled, autoAdopt func(context.Context) bool, rebuild func(context.Context)) *shellyDiscovery {
+// newShellyDiscovery wires the coordinator. source (Gen2+) and gen1Source
+// (Gen1; may be nil) may be *dnssd.Browser or test fakes; enabled/
+// autoAdopt/rebuild are Server methods.
+func newShellyDiscovery(store *shellystore.Store, source, gen1Source dnssd.Source, log *slog.Logger, enabled, autoAdopt func(context.Context) bool, rebuild func(context.Context)) *shellyDiscovery {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &shellyDiscovery{
-		store:     store,
-		source:    source,
-		log:       log,
-		enabled:   enabled,
-		autoAdopt: autoAdopt,
-		rebuild:   rebuild,
-		limit:     maxShellyAddresses,
-		now:       time.Now,
-		lastSeen:  map[string]time.Time{},
-		closed:    make(chan struct{}),
+		store:      store,
+		source:     source,
+		gen1Source: gen1Source,
+		log:        log,
+		enabled:    enabled,
+		autoAdopt:  autoAdopt,
+		rebuild:    rebuild,
+		limit:      maxShellyAddresses,
+		now:        time.Now,
+		lastSeen:   map[string]time.Time{},
+		closed:     make(chan struct{}),
 	}
 }
 
@@ -171,6 +202,12 @@ func (d *shellyDiscovery) Run(ctx context.Context) {
 	ticker := time.NewTicker(discoveryBackstop)
 	defer ticker.Stop()
 	entries := d.source.Entries()
+	// A nil gen1 source leaves this channel nil - a nil channel arm never
+	// fires, so the select below degrades to the Gen2-only behaviour.
+	var gen1Entries <-chan dnssd.Entry
+	if d.gen1Source != nil {
+		gen1Entries = d.gen1Source.Entries()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -179,6 +216,8 @@ func (d *shellyDiscovery) Run(ctx context.Context) {
 			return
 		case e := <-entries:
 			d.observe(ctx, e)
+		case e := <-gen1Entries:
+			d.observeGen1(ctx, e)
 		case <-ticker.C:
 			if d.enabled(ctx) {
 				d.ScanNow()
@@ -215,12 +254,15 @@ func (d *shellyDiscovery) ScanNow() {
 			return
 		}
 		d.source.Scan(ctx)
+		if d.gen1Source != nil {
+			d.gen1Source.Scan(ctx)
+		}
 	}()
 }
 
-// observe applies the adoption policy to one seen instance. It is the trust
-// boundary: an off-LAN address or a non-Shelly/Gen1 instance is dropped
-// here, and a device on the ignore list is never re-adopted.
+// observe applies the adoption policy to one seen Gen2+ instance. It is
+// the trust boundary: an off-LAN address or a non-Shelly/Gen1 instance is
+// dropped here, and a device on the ignore list is never re-adopted.
 func (d *shellyDiscovery) observe(ctx context.Context, e dnssd.Entry) {
 	if d.enabled == nil || !d.enabled(ctx) {
 		return // integration off: hear nothing, adopt nothing
@@ -229,7 +271,26 @@ func (d *shellyDiscovery) observe(ctx context.Context, e dnssd.Entry) {
 	if !ok {
 		return // not a usable Gen2+ Shelly, or no LAN address (off-LAN rejected)
 	}
+	d.adoptDetected(ctx, det)
+}
 
+// observeGen1 is the Gen1 sibling of observe: same gates, same adoption
+// policy, but classification through the strict _http._tcp name
+// allowlist (shelly1_discovery.go) instead of the Gen2 TXT rules.
+func (d *shellyDiscovery) observeGen1(ctx context.Context, e dnssd.Entry) {
+	if d.enabled == nil || !d.enabled(ctx) {
+		return
+	}
+	det, ok := shelly1DetectedFromEntry(e)
+	if !ok {
+		return // not an in-scope Gen1 Shelly, or no LAN address
+	}
+	d.adoptDetected(ctx, det)
+}
+
+// adoptDetected is the generation-neutral tail of the observe path:
+// dedupe, adoption through the approval gate, count-level logging.
+func (d *shellyDiscovery) adoptDetected(ctx context.Context, det shellystore.Detected) {
 	// Dedupe by durable identity so a chatty device (or a flood) does not
 	// hammer the store; the key is the MAC when known, else the address.
 	key := det.MAC
@@ -301,6 +362,12 @@ func (d *shellyDiscovery) InjectForTest(ctx context.Context, e dnssd.Entry) {
 	d.observe(ctx, e)
 }
 
+// InjectGen1ForTest is the Gen1 sibling: the exact observeGen1() path
+// (allowlist classifier included), never a bypass.
+func (d *shellyDiscovery) InjectGen1ForTest(ctx context.Context, e dnssd.Entry) {
+	d.observeGen1(ctx, e)
+}
+
 // resetDedupeForTest clears the in-memory recently-seen cache so a test can
 // re-present the same identity without waiting out the dedupe window.
 func (d *shellyDiscovery) resetDedupeForTest() {
@@ -334,7 +401,19 @@ func shellyDetectedFromEntry(e dnssd.Entry) (shellystore.Detected, bool) {
 		Address: addr,
 		Name:    e.InstanceLabel(),
 		Model:   shellyModelFromEntry(e),
+		Gen:     shellyGenFromTXT(e.TXT),
 	}, true
+}
+
+// shellyGenFromTXT reads the announced generation for the store tag. The
+// _shelly._tcp service is Gen2+ by definition, so an absent/unparseable
+// gen records as 2 (the floor), a parsed one verbatim.
+func shellyGenFromTXT(txt map[string]string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(txt["gen"]))
+	if err != nil || n < 2 {
+		return shellystore.Gen2
+	}
+	return n
 }
 
 // shellyGenOK reports whether the announced generation is 2 or newer (or

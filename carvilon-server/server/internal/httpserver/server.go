@@ -53,7 +53,6 @@ import (
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/readerstore"
-	"carvilon.local/server/internal/shellyapi"
 	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
@@ -104,18 +103,24 @@ type Deps struct {
 	// Protect Etappe 1, read-only cameras + sensors in the Device
 	// Center). Built lazily like UA; nil means "not configured yet".
 	Protect *protectapi.Client
-	// Shelly holds one client per configured Shelly device address
-	// (Saison 21 - Shelly Etappe 1, read-only switches in the Device
-	// Center). Built lazily like UA; empty means "not configured yet".
-	Shelly []*shellyapi.Client
+	// Shelly holds one generation-dispatched client per configured Shelly
+	// device (Saison 21 - Shelly Etappe 1, read-only switches in the
+	// Device Center; Gen1 joins via the same fleet). Built lazily like
+	// UA; empty means "not configured yet".
+	Shelly []ShellyDeviceClient
 	// ShellyStore is the persistent Shelly device set + ignore list
 	// (migration 038, Etappe 2). Nil keeps Shelly on the Etappe-1 read
 	// paths with no discovery/removal.
 	ShellyStore *shellystore.Store
 	// ShellyDiscovery is the dnssd source (a *dnssd.Browser) the mDNS
-	// auto-discovery coordinator consumes. Nil disables discovery; main
-	// owns its lifecycle (Close on shutdown).
+	// auto-discovery coordinator consumes for the Gen2+ _shelly._tcp
+	// service. Nil disables discovery; main owns its lifecycle (Close on
+	// shutdown).
 	ShellyDiscovery dnssd.Source
+	// ShellyGen1Discovery is the second dnssd source (_http._tcp), from
+	// which the strict Gen1 name allowlist admits in-scope Gen1 devices.
+	// Nil disables Gen1 discovery (Gen2 discovery is unaffected).
+	ShellyGen1Discovery dnssd.Source
 	// UserStore is the UserStore wrapper around the UA client
 	// (see access/ua). Nil = UA not configured yet; the admin UI
 	// then shows a hint instead of an empty list.
@@ -385,7 +390,7 @@ func New(deps Deps) (*Server, error) {
 	// and a dnssd source are present. main starts it (RunShellyDiscovery) and
 	// owns the source's lifecycle.
 	if deps.ShellyStore != nil && deps.ShellyDiscovery != nil {
-		srv.shellyDisco = newShellyDiscovery(deps.ShellyStore, deps.ShellyDiscovery,
+		srv.shellyDisco = newShellyDiscovery(deps.ShellyStore, deps.ShellyDiscovery, deps.ShellyGen1Discovery,
 			deps.Log, srv.shellyEnabled, srv.shellyAutoAdopt, srv.rebuildShellyClients)
 	}
 	srv.routes()
@@ -699,6 +704,17 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/designer/shelly/{id}/auth", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyAuth)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/schedule", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleCreate)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/schedule/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleDelete)))
+	// Gen1 siblings: the same cockpit surface over the frozen REST API
+	// (/settings tree + schedule_rules; MQTT read-only, provisioning owns
+	// it). Gen2-only endpoints above answer 404 for a Gen1 row and vice
+	// versa - the store's generation tag dispatches.
+	s.mux.Handle("GET /a/designer/shelly/{id}/gen1/device", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Device)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/device-settings", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1DeviceSettings)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/gen1/channel/{ch}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Channel)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/channel/{ch}/settings", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1ChannelSettings)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/channel/{ch}/schedule", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Schedule)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/reboot", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Reboot)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/ota-update", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1OTAUpdate)))
 	s.mux.Handle("GET /a/designer/syslog", s.requireAdminSession(http.HandlerFunc(s.handleDesignerSysLog)))
 	// Run: execute the posted graph in the engine, stream live values back
 	// over the monitor SSE, inject the editor's button press, and tear the

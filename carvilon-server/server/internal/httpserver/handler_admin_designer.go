@@ -95,7 +95,21 @@ func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyD
 		if username == "" {
 			continue // no identity to build a topic prefix from
 		}
-		caps := shellycaps.Channels(d.Model)
+		// Generation decides the capability table AND the topic root: Gen1
+		// firmware pins its topics under shellies/<mqtt_id> (provisioning
+		// sets mqtt_id = the broker username), Gen2+ under the assigned
+		// carvilon/<user> prefix. An unclassified device modules as Gen2
+		// (the pre-Gen1 behaviour) until its identify probe says otherwise.
+		var caps []shellycaps.Channel
+		prefix := mqttstore.DefaultPrefix(username)
+		gen := 0
+		if d.Gen == shellystore.Gen1 {
+			caps = shellycaps.Gen1Channels(d.Model, "")
+			prefix = "shellies/" + username
+			gen = shellystore.Gen1
+		} else {
+			caps = shellycaps.Channels(d.Model)
+		}
 		chans := make([]designer.ShellyChannel, 0, len(caps))
 		for _, c := range caps {
 			chans = append(chans, designer.ShellyChannel{ID: c.ID, Meter: c.Meter})
@@ -104,12 +118,22 @@ func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyD
 			ID:       d.ID,
 			MAC:      d.MAC,
 			Name:     shellyDisplayName(d),
-			Model:    d.Model,
-			Prefix:   mqttstore.DefaultPrefix(username),
+			Model:    shellyCatalogModel(d),
+			Gen:      gen,
+			Prefix:   prefix,
 			Channels: chans,
 		})
 	}
 	return out
+}
+
+// shellyCatalogModel renders the model for the module label: Gen1 rows
+// store the raw type code ("SHSW-25"), which reads as its human name.
+func shellyCatalogModel(d shellystore.Device) string {
+	if d.Gen == shellystore.Gen1 {
+		return shellycaps.Gen1ModelLabel(d.Model)
+	}
+	return d.Model
 }
 
 // shellyDisplayName picks the module's label: the device's name, else its
@@ -120,7 +144,7 @@ func shellyDisplayName(d shellystore.Device) string {
 	case strings.TrimSpace(d.Name) != "":
 		return d.Name
 	case strings.TrimSpace(d.Model) != "":
-		return d.Model
+		return shellyCatalogModel(d)
 	default:
 		return "Shelly " + d.MAC
 	}

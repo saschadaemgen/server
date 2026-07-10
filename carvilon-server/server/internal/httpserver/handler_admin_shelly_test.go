@@ -14,6 +14,7 @@ import (
 
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/shellyapi"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/uaapi"
 )
 
@@ -78,9 +79,12 @@ func wireShelly(t *testing.T, env *testEnv, addrs ...string) {
 	if err := env.platformCfg.Set(context.Background(), platformconfig.KeyShellyEnabled, "1"); err != nil {
 		t.Fatalf("enable shelly: %v", err)
 	}
-	clients := make([]*shellyapi.Client, 0, len(addrs))
+	clients := make([]ShellyDeviceClient, 0, len(addrs))
 	for _, a := range addrs {
-		clients = append(clients, shellyapi.New(shellyapi.Options{Address: a}))
+		clients = append(clients, ShellyDeviceClient{
+			Gen:  shellystore.Gen2,
+			Gen2: shellyapi.New(shellyapi.Options{Address: a}),
+		})
 	}
 	env.srv.SetShellyClients(clients)
 }

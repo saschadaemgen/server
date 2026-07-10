@@ -60,14 +60,18 @@ type ShellyChannel struct {
 
 // ShellyDevice is one adopted Shelly device the catalog turns into a
 // finished per-device module block (data-driven from the adopted-device
-// set). Prefix is the device's MQTT topic base ("carvilon/shelly-<mac>"),
-// so the editor can compose the mqtt: channel addresses the module binds
-// to without the user ever seeing a raw topic.
+// set). Prefix is the device's MQTT topic base - "carvilon/shelly-<mac>"
+// for Gen2+, "shellies/shelly-<mac>" for Gen1 (the fixed root its
+// firmware prepends) - so the editor can compose the mqtt: channel
+// addresses the module binds to without the user ever seeing a raw
+// topic. Gen tells the expansion which topic/payload grammar to emit
+// (2 when absent - every pre-Gen1 catalog was Gen2-only).
 type ShellyDevice struct {
 	ID       int64           `json:"id"`
 	MAC      string          `json:"mac"`
 	Name     string          `json:"name"`
 	Model    string          `json:"model"`
+	Gen      int             `json:"gen,omitempty"`
 	Prefix   string          `json:"prefix"`
 	Channels []ShellyChannel `json:"channels"`
 }

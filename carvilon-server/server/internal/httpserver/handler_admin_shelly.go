@@ -25,21 +25,47 @@ import (
 	"sync"
 
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/shelly1api"
 	"carvilon.local/server/internal/shellyapi"
 	"carvilon.local/server/internal/shellycaps"
 	"carvilon.local/server/internal/shellystore"
 )
 
+// ShellyDeviceClient is one device's transport, dispatched by API
+// generation: Gen2+ devices speak JSON-RPC (shellyapi), Gen1 devices the
+// frozen REST API (shelly1api). A device whose generation is still
+// unknown (a manual pin never reached) carries the Gen1 client only for
+// its GET /shelly identify probe - the one endpoint BOTH generations
+// serve unauthenticated - and is classified, never guessed. Exported
+// because main hands the startup fleet through Deps.
+type ShellyDeviceClient struct {
+	StoreID int64
+	Gen     int                // shellystore.GenUnknown | Gen1 | Gen2(+)
+	Gen2    *shellyapi.Client  // non-nil when Gen >= Gen2
+	Gen1    *shelly1api.Client // non-nil when Gen == Gen1 or GenUnknown
+}
+
+// Address returns the configured device address (the row identity).
+func (c ShellyDeviceClient) Address() string {
+	if c.Gen2 != nil {
+		return c.Gen2.Address()
+	}
+	if c.Gen1 != nil {
+		return c.Gen1.Address()
+	}
+	return ""
+}
+
 // shellyFleet is the immutable set of per-device clients. Swapped as
 // one pointer (like the ua/protect clients) when the settings change.
 type shellyFleet struct {
-	clients []*shellyapi.Client
+	clients []ShellyDeviceClient
 }
 
 // SetShellyClients lets main (and the settings POST) swap the
 // per-device Shelly clients after a config change. An empty set
 // means "not configured".
-func (s *Server) SetShellyClients(clients []*shellyapi.Client) {
+func (s *Server) SetShellyClients(clients []ShellyDeviceClient) {
 	if len(clients) == 0 {
 		s.shelly = nil
 		return
@@ -52,7 +78,7 @@ func (s *Server) SetShellyClients(clients []*shellyapi.Client) {
 // the settings POST swaps it (possibly to nil) while requests are in
 // flight, and a check-then-deref double read would open a nil-panic
 // window that the single-pointer ua/protect swaps do not have.
-func (s *Server) shellyClientList() []*shellyapi.Client {
+func (s *Server) shellyClientList() []ShellyDeviceClient {
 	if fleet := s.shelly; fleet != nil {
 		return fleet.clients
 	}
@@ -87,11 +113,11 @@ func (s *Server) shellyReady(ctx context.Context) bool {
 	return s.shellyEnabled(ctx) && len(s.shellyClientList()) > 0
 }
 
-// shellyFriendlyError maps a shellyapi error to a fixed English
-// message. Like uaFriendlyError it never embeds the underlying error
-// text - the address/password must never reach the HTML or JSON.
+// shellyFriendlyError maps a shellyapi/shelly1api error to a fixed
+// English message. Like uaFriendlyError it never embeds the underlying
+// error text - the address/password must never reach the HTML or JSON.
 func shellyFriendlyError(err error) string {
-	if errors.Is(err, shellyapi.ErrUnauthorized) {
+	if errors.Is(err, shellyapi.ErrUnauthorized) || errors.Is(err, shelly1api.ErrUnauthorized) {
 		return "Access denied - please check the Shelly auth password (401)."
 	}
 	return "Device unreachable or the response was invalid."
@@ -209,39 +235,39 @@ func shellyDiscoverableIP(ip net.IP) bool {
 	return ip.IsPrivate()
 }
 
-// BuildShellyClients constructs one client per stored address (the legacy
-// comma-separated form, kept for the one-time seed). The stored value is
-// trusted to have passed parseShellyAddresses, but a re-parse keeps a
-// hand-edited database row from constructing clients for arbitrary targets.
-func BuildShellyClients(addresses, password string) []*shellyapi.Client {
-	parsed, err := parseShellyAddresses(addresses)
-	if err != nil {
-		return nil
-	}
-	return buildShellyClientsFromList(parsed, password)
-}
-
-// buildShellyClientsFromList constructs one client per address, re-checking
-// each through the LAN guard (defence in depth: the addresses come from the
-// shelly_devices table, which a hand-edit could poison). An address that
-// fails the guard is dropped, not dialled.
-func buildShellyClientsFromList(addresses []string, password string) []*shellyapi.Client {
-	clients := make([]*shellyapi.Client, 0, len(addresses))
-	for _, addr := range addresses {
-		norm, ok := normalizeShellyAddr(addr)
+// BuildShellyFleet constructs one generation-dispatched client per active
+// device, re-checking each address through the LAN guard (defence in
+// depth: the addresses come from the shelly_devices table, which a
+// hand-edit could poison). An address that fails the guard is dropped,
+// not dialled. The shared installation password serves both generations
+// (digest for Gen2+, Basic user "admin" for Gen1 - the same hardening
+// convention provisioning asserts).
+func BuildShellyFleet(devices []shellystore.Device, password string) []ShellyDeviceClient {
+	clients := make([]ShellyDeviceClient, 0, len(devices))
+	for _, d := range devices {
+		norm, ok := normalizeShellyAddr(d.Address)
 		if !ok || norm == "" {
 			continue
 		}
-		clients = append(clients, shellyapi.New(shellyapi.Options{Address: norm, Password: password}))
+		c := ShellyDeviceClient{StoreID: d.ID, Gen: d.Gen}
+		if d.Gen >= shellystore.Gen2 {
+			c.Gen2 = shellyapi.New(shellyapi.Options{Address: norm, Password: password})
+		} else {
+			// Gen1 - or unknown, where this client's unauthenticated
+			// GET /shelly identify probe classifies the device.
+			c.Gen1 = shelly1api.New(shelly1api.Options{Address: norm, Password: password})
+		}
+		clients = append(clients, c)
 	}
 	return clients
 }
 
 // rebuildShellyClients rebuilds the live client fleet from the active
-// device set (manual + discovered) plus the shared digest password, and
-// swaps it in. Called after any change to the set: a settings save, a
-// manual removal, or an mDNS auto-adopt. A store/read error leaves the
-// current fleet in place (never blanks a working set on a transient error).
+// device set (manual + discovered) plus the shared password, and swaps
+// it in. Called after any change to the set: a settings save, a manual
+// removal, an mDNS auto-adopt, or a probe-time generation classification.
+// A store/read error leaves the current fleet in place (never blanks a
+// working set on a transient error).
 func (s *Server) rebuildShellyClients(ctx context.Context) {
 	if s.shellystore == nil {
 		return
@@ -252,11 +278,7 @@ func (s *Server) rebuildShellyClients(ctx context.Context) {
 		return
 	}
 	password, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
-	addrs := make([]string, 0, len(active))
-	for _, d := range active {
-		addrs = append(addrs, d.Address)
-	}
-	s.SetShellyClients(buildShellyClientsFromList(addrs, password))
+	s.SetShellyClients(BuildShellyFleet(active, password))
 }
 
 // SeedShellyManualFromLegacy imports the Etappe-1 comma-separated address
@@ -292,19 +314,27 @@ func SeedShellyManualFromLegacy(ctx context.Context, store *shellystore.Store, c
 }
 
 // shellyProbe is one device's poll outcome: its client (for the
-// address), the device info when reachable, and the redacted error
-// otherwise. err != nil simply means "offline" - never a page error.
+// address), the generation-appropriate answer when reachable, and the
+// redacted error otherwise. err != nil simply means "offline" - never a
+// page error. gen is the generation THIS answer resolved to (it differs
+// from client.Gen exactly once: when an unknown device's identify probe
+// classified it).
 type shellyProbe struct {
-	client *shellyapi.Client
-	info   *shellyapi.DeviceInfo
+	client ShellyDeviceClient
+	gen    int
+	info   *shellyapi.DeviceInfo // Gen2+ answer
+	ident  *shelly1api.Identity  // Gen1 / identify answer
 	err    error
 }
 
-// probeShelly polls every configured device in parallel (one
-// Shelly.GetDeviceInfo each - the method answers without auth, so it
-// doubles as the reachability probe). The result keeps the configured
-// order; an unreachable device is an offline entry, and one dead box
-// never delays the page beyond the client timeout.
+// probeShelly polls every configured device in parallel - one
+// Shelly.GetDeviceInfo (Gen2+) or GET /shelly (Gen1 and unclassified)
+// each; both answer without auth, so they double as the reachability
+// probe. The result keeps the configured order; an unreachable device is
+// an offline entry, and one dead box never delays the page beyond the
+// client timeout. A probe that CLASSIFIES a previously unknown device is
+// recorded in the store and the fleet is rebuilt, so the next poll runs
+// the proper transport.
 func (s *Server) probeShelly(ctx context.Context) []shellyProbe {
 	clients := s.shellyClientList()
 	if len(clients) == 0 {
@@ -314,14 +344,66 @@ func (s *Server) probeShelly(ctx context.Context) []shellyProbe {
 	var wg sync.WaitGroup
 	for i, c := range clients {
 		wg.Add(1)
-		go func(i int, c *shellyapi.Client) {
+		go func(i int, c ShellyDeviceClient) {
 			defer wg.Done()
-			info, err := c.GetDeviceInfo(ctx)
-			probes[i] = shellyProbe{client: c, info: info, err: err}
+			p := shellyProbe{client: c, gen: c.Gen}
+			if c.Gen2 != nil {
+				p.info, p.err = c.Gen2.GetDeviceInfo(ctx)
+			} else if c.Gen1 != nil {
+				p.ident, p.err = c.Gen1.GetIdentity(ctx)
+				if p.err == nil && c.Gen == shellystore.GenUnknown {
+					p.gen = p.ident.Generation()
+				}
+			} else {
+				p.err = errors.New("shelly: no transport")
+			}
+			probes[i] = p
 		}(i, c)
 	}
 	wg.Wait()
+	s.recordShellyIdentities(ctx, probes)
 	return probes
+}
+
+// recordShellyIdentities persists what identify probes just learned about
+// previously unclassified devices (generation, model, full MAC) and
+// rebuilds the fleet once so they get their proper transport. A no-op on
+// the steady state (every device classified).
+func (s *Server) recordShellyIdentities(ctx context.Context, probes []shellyProbe) {
+	if s.shellystore == nil {
+		return
+	}
+	resolved := false
+	for _, p := range probes {
+		if p.client.Gen != shellystore.GenUnknown || p.ident == nil || p.gen <= 0 || p.client.StoreID == 0 {
+			continue
+		}
+		model := shellyIdentModel(p.ident, p.gen)
+		if err := s.shellystore.SetIdentity(ctx, p.client.StoreID,
+			normalizeMAC(p.ident.MACLabel()), model, p.gen); err != nil {
+			s.log.Warn("shelly: record identity failed", "err", err)
+			continue
+		}
+		resolved = true
+	}
+	if resolved {
+		s.log.Info("shelly: classified device generation from identify probe", "component", "shelly")
+		s.rebuildShellyClients(ctx)
+	}
+}
+
+// shellyIdentModel derives the store's model string from an identify
+// answer: Gen1 keeps the raw type code (the capability-table key,
+// "SHSW-25"), Gen2+ the same "Shelly <app>" convention the mDNS path
+// stores.
+func shellyIdentModel(ident *shelly1api.Identity, gen int) string {
+	if gen == shellystore.Gen1 {
+		return ident.TypeLabel()
+	}
+	if app := strings.TrimSpace(ident.App.String()); app != "" {
+		return "Shelly " + app
+	}
+	return ident.TypeLabel()
 }
 
 // makeShellyRow builds the flat Device Center row for one Shelly
@@ -331,6 +413,15 @@ func (s *Server) probeShelly(ctx context.Context) []shellyProbe {
 // "-" everywhere else; nothing is invented.
 func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 	addr := p.client.Address()
+	// The generation this row renders as: the probe's resolution first
+	// (it may have just classified the device), the store's tag as the
+	// offline fallback. 0 renders the Gen2 skeleton it always did, minus
+	// any claim about the generation.
+	gen := p.gen
+	if gen == shellystore.GenUnknown {
+		gen = info.Gen
+	}
+	isGen1 := gen == shellystore.Gen1
 	row := uaRow{
 		ID:          addr,
 		Kind:        "shelly",
@@ -343,22 +434,44 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 		Origin:      info.Origin,
 		MQTTState:   info.MQTTState,
 		ShellyID:    info.StoreID,
+		ShellyGen:   gen,
 	}
 	// Cockpit plumbing: the broker topic prefix (the provisioned account,
 	// else the conventional "shelly-<mac>" the provisioner would assign)
-	// and the capability-derived channel set. Model preference: the live
-	// probe's answer, else the store's last-seen model - an offline
-	// device still renders its channel skeleton.
+	// and the capability-derived channel set. Gen2 devices publish under
+	// the assigned carvilon/<user> prefix; Gen1 firmware always roots its
+	// topics at shellies/<mqtt_id>, and provisioning sets mqtt_id to the
+	// broker username - so the prefix differs per generation, nothing
+	// else does. Model preference: the live probe's answer, else the
+	// store's last-seen model - an offline device still renders its
+	// channel skeleton.
+	prefixRoot := "carvilon/"
+	if isGen1 {
+		prefixRoot = "shellies/"
+	}
 	if user := info.MQTTUsername; user != "" {
-		row.ShellyPrefix = "carvilon/" + user
+		row.ShellyPrefix = prefixRoot + user
 	} else if info.MAC != "" {
-		row.ShellyPrefix = "carvilon/shelly-" + strings.ToLower(info.MAC)
+		row.ShellyPrefix = prefixRoot + "shelly-" + strings.ToLower(info.MAC)
 	}
 	capModel := info.Model
 	if p.info != nil && p.info.ModelLabel() != "" {
 		capModel = p.info.ModelLabel()
 	}
-	if chans := shellycaps.Channels(capModel); len(chans) > 0 {
+	if isGen1 && p.ident != nil && p.ident.TypeLabel() != "" {
+		capModel = p.ident.TypeLabel()
+	}
+	var chans []shellycaps.Channel
+	if isGen1 {
+		// Mode (relay vs roller on a 2.5) lives in the authenticated
+		// /settings tree, which the row probe deliberately never reads -
+		// the relay-mode shape is the M1 scope; a roller-mode device
+		// shows relay channels until the settings surface corrects it.
+		chans = shellycaps.Gen1Channels(capModel, "")
+	} else {
+		chans = shellycaps.Channels(capModel)
+	}
+	if len(chans) > 0 {
 		type chJSON struct {
 			ID    int  `json:"id"`
 			Meter bool `json:"meter"`
@@ -376,13 +489,33 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 	} else {
 		row.StatusState, row.StatusText = "offline", "Offline"
 	}
-	if p.info != nil {
+	authLabel, deviceID := "", ""
+	switch {
+	case p.info != nil:
 		if n := p.info.DisplayName(); n != "" {
 			row.Name = n
 		}
 		row.Model = p.info.ModelLabel()
 		row.MAC = p.info.MACLabel()
 		row.Firmware = p.info.FirmwareLabel()
+		authLabel, deviceID = p.info.AuthLabel(), p.info.IDLabel()
+	case p.ident != nil:
+		// GET /shelly carries no display name; the store's last-seen
+		// name (the mDNS instance label) is the honest label.
+		if n := strings.TrimSpace(info.Name); n != "" {
+			row.Name = n
+		}
+		row.Model = shellycaps.Gen1ModelLabel(p.ident.TypeLabel())
+		row.MAC = p.ident.MACLabel()
+		row.Firmware = p.ident.FirmwareLabel()
+		authLabel = p.ident.AuthLabel()
+	default:
+		if isGen1 {
+			if n := strings.TrimSpace(info.Name); n != "" {
+				row.Name = n
+			}
+			row.Model = shellycaps.Gen1ModelLabel(info.Model)
+		}
 	}
 
 	det := []kvRow{
@@ -391,20 +524,26 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 		{Key: "Source", Value: row.SourceLabel},
 	}
 	det = appendKVDash(det, "Model", row.Model)
+	det = appendKV(det, "Generation", shellyGenLabel(gen))
 	det = appendKVDash(det, "IP address", row.IP)
 	det = appendKVDash(det, "MAC", row.MAC)
 	det = appendKVDash(det, "Firmware", row.Firmware)
-	if p.info != nil {
-		det = appendKV(det, "Authentication", p.info.AuthLabel())
-		det = appendKVDash(det, "Device ID", p.info.IDLabel())
-	} else {
-		det = appendKVDash(det, "Device ID", "")
-	}
+	det = appendKV(det, "Authentication", authLabel)
+	det = appendKVDash(det, "Device ID", deviceID)
 	det = appendKV(det, "Origin", shellyOriginLabel(info.Origin))
 	det = appendKV(det, "MQTT link", shellyMQTTStateLabel(info.MQTTState))
 	row.Detail = det
 	row.Search = strings.ToLower(strings.Join([]string{row.Name, row.Model, row.IP, row.MAC, row.TypeLabel, "shelly"}, " "))
 	return row
+}
+
+// shellyGenLabel renders the stored generation ("" hides the line while
+// the device is unclassified - nothing is guessed).
+func shellyGenLabel(gen int) string {
+	if gen <= 0 {
+		return ""
+	}
+	return "Gen " + strconv.Itoa(gen)
 }
 
 // shellyOriginLabel renders the stored origin for the panel ("" for a row
@@ -454,17 +593,23 @@ func (s *Server) handleAdminUAShellyDetail(w http.ResponseWriter, r *http.Reques
 	}
 	// The id must match a CONFIGURED address: this endpoint must never
 	// dial a caller-chosen target, only what the admin stored.
-	var client *shellyapi.Client
+	var device ShellyDeviceClient
+	found := false
 	for _, c := range s.shellyClientList() {
 		if c.Address() == id {
-			client = c
+			device, found = c, true
 			break
 		}
 	}
-	if client == nil {
+	if !found {
 		writeUADetailError(w, "Not found.")
 		return
 	}
+	if device.Gen1 != nil {
+		s.writeShelly1Detail(w, r, device.Gen1)
+		return
+	}
+	client := device.Gen2
 
 	st, err := client.GetStatus(r.Context())
 	if err != nil {

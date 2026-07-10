@@ -181,11 +181,14 @@ type uaRow struct {
 
 	// Shelly cockpit plumbing (empty for non-Shelly rows): the store id
 	// keys the designer HTTP-RPC config/schedule endpoints, the prefix
-	// ("carvilon/<broker-user>") addresses the live status topics and the
-	// manual Switch.Set publish, and ChannelsJSON is the capability-
-	// derived channel set ([{"id":0,"meter":true},...]) the function
-	// area renders its per-channel cards from.
+	// ("carvilon/<broker-user>" for Gen2+, "shellies/<broker-user>" for
+	// Gen1) addresses the live status topics and the relay-command
+	// publish, ChannelsJSON is the capability-derived channel set
+	// ([{"id":0,"meter":true},...]) the function area renders its
+	// per-channel cards from, and ShellyGen tells the cockpit which
+	// topic/payload grammar the device speaks (0 = not yet classified).
 	ShellyID     int64
+	ShellyGen    int
 	ShellyPrefix string
 	ChannelsJSON string
 
@@ -347,6 +350,8 @@ type shellyRowInfo struct {
 	MQTTUsername string // provisioned broker account ("" until provisioned)
 	MAC          string // normalised uppercase hex ("" when unknown)
 	Model        string // last-seen model ("" when unknown)
+	Name         string // last-seen display name (mDNS instance label; "" when unknown)
+	Gen          int    // stored API generation (0 until classified)
 }
 
 // shellyRowInfoByAddr maps active-device address -> its store-side info, so
@@ -365,6 +370,7 @@ func (s *Server) shellyRowInfoByAddr(ctx context.Context) map[string]shellyRowIn
 		m[d.Address] = shellyRowInfo{
 			Origin: d.Origin, MQTTState: d.MQTTState,
 			StoreID: d.ID, MQTTUsername: d.MQTTUsername, MAC: d.MAC, Model: d.Model,
+			Name: d.Name, Gen: d.Gen,
 		}
 	}
 	return m

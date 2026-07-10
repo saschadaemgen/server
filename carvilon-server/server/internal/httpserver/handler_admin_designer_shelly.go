@@ -10,22 +10,31 @@ import (
 	"strings"
 
 	"carvilon.local/server/internal/platformconfig"
+	"carvilon.local/server/internal/shelly1api"
 	"carvilon.local/server/internal/shellyapi"
+	"carvilon.local/server/internal/shellystore"
 )
 
 // handleDesignerShellySwitch switches a Shelly relay directly from the
-// editor faceplate's clickable toggle, independent of any engine run: it
-// publishes a Gen2 JSON-RPC Switch.Set to the device's "<prefix>/rpc"
-// topic over the broker's in-process inline client (the same envelope the
-// mqtt: driver's RPC sink builds - not a guess). It is the manual half of
-// the module's relay control; a graph-driven relay uses the run path and
-// the faceplate switch is inert for it (output exclusivity, enforced in
-// the editor).
+// editor faceplate's / cockpit's clickable toggle, independent of any
+// engine run, over the broker's in-process inline client. The publish
+// grammar follows the device generation, which the prefix root already
+// encodes (provisioning owns both conventions):
+//
+//   - Gen2+ "carvilon/shelly-…": the JSON-RPC Switch.Set envelope to
+//     "<prefix>/rpc" (the same envelope the mqtt: driver's RPC sink
+//     builds - not a guess);
+//   - Gen1 "shellies/shelly-…": the raw "on"/"off" payload to
+//     "<prefix>/relay/<ch>/command" (the frozen Gen1 topic scheme).
+//
+// It is the manual half of the module's relay control; a graph-driven
+// relay uses the run path and the faceplate switch is inert for it
+// (output exclusivity, enforced in the editor).
 //
 // Route: POST /a/designer/shelly/switch (requireAdminSession). Body:
-// {"prefix":"carvilon/shelly-<mac>","channel":N,"on":bool}. The prefix
-// must be under the Shelly subtree so this endpoint can never be used to
-// publish to an arbitrary broker topic.
+// {"prefix":"carvilon/shelly-<mac>"|"shellies/shelly-<mac>","channel":N,
+// "on":bool}. The prefix must be under a Shelly subtree so this endpoint
+// can never be used to publish to an arbitrary broker topic.
 func (s *Server) handleDesignerShellySwitch(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Prefix  string `json:"prefix"`
@@ -37,10 +46,12 @@ func (s *Server) handleDesignerShellySwitch(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	prefix := strings.TrimSpace(in.Prefix)
-	// Only the Shelly device subtree, and no wildcards/relative segments,
+	// Only the Shelly device subtrees, and no wildcards/relative segments,
 	// so a crafted prefix cannot address another device account or escape
 	// the namespace.
-	if !strings.HasPrefix(prefix, "carvilon/shelly-") || strings.ContainsAny(prefix, "#+ ") || in.Channel < 0 || in.Channel > 99 {
+	gen1 := strings.HasPrefix(prefix, "shellies/shelly-")
+	if (!gen1 && !strings.HasPrefix(prefix, "carvilon/shelly-")) ||
+		strings.ContainsAny(prefix, "#+ ") || in.Channel < 0 || in.Channel > 99 {
 		http.Error(w, "invalid prefix or channel", http.StatusBadRequest)
 		return
 	}
@@ -49,21 +60,35 @@ func (s *Server) handleDesignerShellySwitch(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "broker is not running", http.StatusServiceUnavailable)
 		return
 	}
-	// Gen2 JSON-RPC Switch.Set envelope (id fixed: the device confirms the
-	// new state on its status topic, which the faceplate reads back; we do
-	// not correlate this reply). params carries the relay index and state.
-	env := map[string]any{
-		"id":     0,
-		"src":    prefix + "/rpc/resp",
-		"method": "Switch.Set",
-		"params": map[string]any{"id": in.Channel, "on": in.On},
+	topic := prefix + "/rpc"
+	var payload []byte
+	if gen1 {
+		// Gen1 command grammar: the raw on/off string to the channel's
+		// command topic; the device confirms on "<prefix>/relay/<ch>".
+		topic = prefix + "/relay/" + strconv.Itoa(in.Channel) + "/command"
+		if in.On {
+			payload = []byte("on")
+		} else {
+			payload = []byte("off")
+		}
+	} else {
+		// Gen2 JSON-RPC Switch.Set envelope (id fixed: the device confirms
+		// the new state on its status topic, which the faceplate reads
+		// back; we do not correlate this reply). params carries the relay
+		// index and state.
+		env := map[string]any{
+			"id":     0,
+			"src":    prefix + "/rpc/resp",
+			"method": "Switch.Set",
+			"params": map[string]any{"id": in.Channel, "on": in.On},
+		}
+		var err error
+		if payload, err = json.Marshal(env); err != nil {
+			http.Error(w, "encode failed", http.StatusInternalServerError)
+			return
+		}
 	}
-	payload, err := json.Marshal(env)
-	if err != nil {
-		http.Error(w, "encode failed", http.StatusInternalServerError)
-		return
-	}
-	if err := client.Publish(prefix+"/rpc", payload, false, 0); err != nil {
+	if err := client.Publish(topic, payload, false, 0); err != nil {
 		s.engineLog.Warn("shelly manual switch publish failed", "component", "shelly", "err", err)
 		http.Error(w, "publish failed", http.StatusBadGateway)
 		return
@@ -71,28 +96,65 @@ func (s *Server) handleDesignerShellySwitch(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// errShellyGen1 marks a store row that speaks the Gen1 REST API - the
+// Gen2 HTTP-RPC surface (config tree, scripts, webhooks, Schedule.*) does
+// not exist on it, so its endpoints answer "device unavailable" instead
+// of dialling /rpc on a device that has none.
+var errShellyGen1 = errors.New("shelly: gen1 device (no gen2 rpc surface)")
+
 // shellyClientForID builds a Gen2 HTTP-RPC client for an adopted device by
 // its store id, dialling its LAN address with the shared digest password
 // (the config/schedule transport - MQTT stays for switching/readouts). The
 // address goes back through the LAN guard (defence in depth against a
-// poisoned shelly_devices row).
+// poisoned shelly_devices row). A Gen1 row yields errShellyGen1 - callers
+// on the Gen2-only surface fail closed.
 func (s *Server) shellyClientForID(ctx context.Context, id int64) (*shellyapi.Client, error) {
-	if s.shellystore == nil {
-		return nil, errors.New("shelly store not configured")
-	}
-	d, err := s.shellystore.Get(ctx, id)
+	d, norm, err := s.shellyDeviceForID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	if d.Gen == shellystore.Gen1 {
+		return nil, errShellyGen1
+	}
+	return shellyapi.New(shellyapi.Options{Address: norm, Password: s.shellySharedPassword(ctx)}), nil
+}
+
+// shelly1ClientForID is the Gen1 sibling: the REST client for an adopted
+// Gen1 device by store id, same guards.
+func (s *Server) shelly1ClientForID(ctx context.Context, id int64) (*shelly1api.Client, error) {
+	d, norm, err := s.shellyDeviceForID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if d.Gen != shellystore.Gen1 {
+		return nil, errors.New("shelly: not a gen1 device")
+	}
+	return shelly1api.New(shelly1api.Options{Address: norm, Password: s.shellySharedPassword(ctx)}), nil
+}
+
+// shellyDeviceForID resolves a store id to its row + LAN-guarded address.
+func (s *Server) shellyDeviceForID(ctx context.Context, id int64) (shellystore.Device, string, error) {
+	if s.shellystore == nil {
+		return shellystore.Device{}, "", errors.New("shelly store not configured")
+	}
+	d, err := s.shellystore.Get(ctx, id)
+	if err != nil {
+		return shellystore.Device{}, "", err
+	}
 	norm, ok := normalizeShellyAddr(d.Address)
 	if !ok || norm == "" {
-		return nil, errors.New("device address unavailable")
+		return shellystore.Device{}, "", errors.New("device address unavailable")
 	}
-	var password string
-	if s.platformCfg != nil {
-		password, _ = s.platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
+	return d, norm, nil
+}
+
+// shellySharedPassword reads the shared installation device password.
+func (s *Server) shellySharedPassword(ctx context.Context) string {
+	if s.platformCfg == nil {
+		return ""
 	}
-	return shellyapi.New(shellyapi.Options{Address: norm, Password: password}), nil
+	password, _ := s.platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
+	return password
 }
 
 // shellyIDCh parses the {id} device and {ch} channel path params, bounding
@@ -138,6 +200,10 @@ func (s *Server) handleDesignerShellyOverview(w http.ResponseWriter, r *http.Req
 		return
 	}
 	cl, err := s.shellyClientForID(r.Context(), id)
+	if errors.Is(err, errShellyGen1) {
+		s.writeShelly1Overview(w, r, id)
+		return
+	}
 	if err != nil {
 		http.Error(w, "device unavailable", http.StatusNotFound)
 		return
@@ -885,6 +951,28 @@ func (s *Server) handleDesignerShellyAuth(w http.ResponseWriter, r *http.Request
 		norm, ok := normalizeShellyAddr(d.Address)
 		if !ok || norm == "" {
 			failed = append(failed, d.Address)
+			continue
+		}
+		if d.Gen == shellystore.Gen1 {
+			// Gen1: HTTP Basic via /settings/login (user "admin", the
+			// installation convention). The reachability check must be an
+			// AUTHENTICATED read (/settings) - /shelly answers without
+			// auth and would prove nothing about the old password.
+			cl := shelly1api.New(shelly1api.Options{Address: norm, Password: oldPassword})
+			if _, ierr := cl.GetSettings(r.Context()); ierr != nil {
+				failed = append(failed, d.Address)
+				continue
+			}
+			if aerr := cl.SetLogin(r.Context(), true, "admin", body.Password); aerr != nil {
+				// The response may have been lost AFTER the device applied
+				// the change - probe with the NEW password before giving up.
+				probe := shelly1api.New(shelly1api.Options{Address: norm, Password: body.Password})
+				if _, perr := probe.GetSettings(r.Context()); perr != nil {
+					failed = append(failed, d.Address)
+					continue
+				}
+			}
+			applied++
 			continue
 		}
 		cl := shellyapi.New(shellyapi.Options{Address: norm, Password: oldPassword})

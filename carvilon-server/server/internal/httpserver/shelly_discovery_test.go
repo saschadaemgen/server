@@ -52,7 +52,7 @@ func newDisco(t *testing.T, enabled, autoAdopt *bool) (*shellyDiscovery, *shelly
 	store := newDiscoTestStore(t)
 	src := newFakeSource()
 	rebuilds := 0
-	d := newShellyDiscovery(store, src, nil,
+	d := newShellyDiscovery(store, src, nil, nil,
 		func(context.Context) bool { return *enabled },
 		func(context.Context) bool { return *autoAdopt },
 		func(context.Context) { rebuilds++ })

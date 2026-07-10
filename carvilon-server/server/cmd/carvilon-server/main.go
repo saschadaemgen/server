@@ -310,24 +310,24 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	if err != nil {
 		log.Warn("shelly: list active devices failed at startup", "err", err)
 	}
-	shellyAddrList := make([]string, 0, len(shellyActive))
-	for _, d := range shellyActive {
-		shellyAddrList = append(shellyAddrList, d.Address)
-	}
-	shellyClients := httpserver.BuildShellyClients(strings.Join(shellyAddrList, ", "), shellyPassword)
+	shellyClients := httpserver.BuildShellyFleet(shellyActive, shellyPassword)
 	if len(shellyClients) > 0 {
 		log.Info("shelly api clients configured", "devices", len(shellyClients))
 	} else {
 		log.Info("shelly api not yet configured; admin can add device addresses under /a/settings or let mDNS discovery find them")
 	}
 
-	// mDNS auto-discovery browser (Gen2+ _shelly._tcp). A passive multicast
-	// listener plus active queries; it coexists with a system responder
-	// (avahi) via address/port reuse and falls back to ephemeral-port active
-	// queries if it cannot bind 5353. Opened always (near-zero passive load);
-	// the coordinator only adopts + actively scans while Shelly is enabled.
+	// mDNS auto-discovery browsers. Gen2+ devices advertise _shelly._tcp;
+	// Gen1 devices only announce a plain _http._tcp instance whose name the
+	// strict allowlist classifies. Both are passive multicast listeners plus
+	// active queries; they coexist with a system responder (avahi) via
+	// address/port reuse and fall back to ephemeral-port active queries if
+	// they cannot bind 5353. Opened always (near-zero passive load); the
+	// coordinator only adopts + actively scans while Shelly is enabled.
 	shellyBrowser := dnssd.Open(httpserver.ShellyServiceType, log)
 	defer shellyBrowser.Close()
+	shellyGen1Browser := dnssd.Open(httpserver.Shelly1ServiceType, log)
+	defer shellyGen1Browser.Close()
 
 	// access.UserStore-Adapter um den uaapi-Client. Nil-Client ist
 	// erlaubt; der Adapter liefert dann access.ErrNotConfigured und
@@ -470,44 +470,45 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	defer nfcMonitor.Close()
 
 	srv, err := httpserver.New(httpserver.Deps{
-		Config:          cfg,
-		Sessions:        sessionSvc,
-		AdminSessions:   adminSessionSvc,
-		ViewerManager:   viewerMgr,
-		Admin:           adminSvc,
-		PlatformConfig:  platformCfg,
-		Audit:           auditSvc,
-		ViewerLimiter:   viewerLimiter,
-		AdminLimiter:    adminLimiter,
-		UA:              uaClient,
-		Protect:         protectClient,
-		Shelly:          shellyClients,
-		ShellyStore:     shellyStore,
-		ShellyDiscovery: shellyBrowser,
-		UserStore:       userStore,
-		NativeUsers:     nativeUserStore,
-		Hub:             hub,
-		History:         historyStore,
-		TURNStore:       turnStore,
-		TURNSnapshots:   turnSnapshots,
-		StreamSnapshots: streamSnapshots,
-		EventBus:        eventBus,
-		DoorbellCalls:   callsSvc,
-		Streams:         streamBackend,
-		Weather:         weatherClient,
-		EgressIssuer:    egressIssuer,
-		Features:        featuregate.NewStore(database.DB),
-		MQTT:            mqttBroker,
-		MQTTStore:       mqttStore,
-		Telegram:        telegramBot,
-		TelegramStore:   telegramStore,
-		DesignerStore:   designerStore,
-		ReaderStore:     readerStore,
-		NFCMonitor:      nfcMonitor,
-		LogBuffer:       logBuf,
-		Console:         consoleMgr,
-		ConsoleStore:    consolestore.New(database.DB, secretsSvc),
-		Log:             log,
+		Config:              cfg,
+		Sessions:            sessionSvc,
+		AdminSessions:       adminSessionSvc,
+		ViewerManager:       viewerMgr,
+		Admin:               adminSvc,
+		PlatformConfig:      platformCfg,
+		Audit:               auditSvc,
+		ViewerLimiter:       viewerLimiter,
+		AdminLimiter:        adminLimiter,
+		UA:                  uaClient,
+		Protect:             protectClient,
+		Shelly:              shellyClients,
+		ShellyStore:         shellyStore,
+		ShellyDiscovery:     shellyBrowser,
+		ShellyGen1Discovery: shellyGen1Browser,
+		UserStore:           userStore,
+		NativeUsers:         nativeUserStore,
+		Hub:                 hub,
+		History:             historyStore,
+		TURNStore:           turnStore,
+		TURNSnapshots:       turnSnapshots,
+		StreamSnapshots:     streamSnapshots,
+		EventBus:            eventBus,
+		DoorbellCalls:       callsSvc,
+		Streams:             streamBackend,
+		Weather:             weatherClient,
+		EgressIssuer:        egressIssuer,
+		Features:            featuregate.NewStore(database.DB),
+		MQTT:                mqttBroker,
+		MQTTStore:           mqttStore,
+		Telegram:            telegramBot,
+		TelegramStore:       telegramStore,
+		DesignerStore:       designerStore,
+		ReaderStore:         readerStore,
+		NFCMonitor:          nfcMonitor,
+		LogBuffer:           logBuf,
+		Console:             consoleMgr,
+		ConsoleStore:        consolestore.New(database.DB, secretsSvc),
+		Log:                 log,
 	})
 	if err != nil {
 		log.Error("httpserver init failed", "err", err)
