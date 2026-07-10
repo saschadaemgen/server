@@ -675,6 +675,27 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/designer/shelly/{id}/channel/{ch}/switch-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySwitchConfig)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/channel/{ch}/input-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyInputConfig)))
 	s.mux.Handle("GET /a/designer/shelly/{id}/schedules", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySchedules)))
+	// Shelly completeness: the device-level surface (full config tree,
+	// whitelisted sys/ui/ble writes, firmware/reboot behind UI confirms,
+	// scripts, webhooks, and the auth change that keeps the stored
+	// installation password in sync). MQTT/cloud stay read-only by design.
+	s.mux.Handle("GET /a/designer/shelly/{id}/device", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyDevice)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/sys-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySysConfig)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/ui-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyUIConfig)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/ble-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyBLEConfig)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/reboot", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyReboot)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/fw-check", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyFWCheck)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/fw-update", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyFWUpdate)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/scripts", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScripts)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/script", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptCreate)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/script/{sid}/code", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptCode)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/script/{sid}/code", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptCode)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/script/{sid}/{action}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptAction)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/webhooks", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyWebhooks)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/webhook", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyWebhookCreate)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/webhook/{wid}/update", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyWebhookUpdate)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/webhook/{wid}/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyWebhookDelete)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/auth", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyAuth)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/schedule", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleCreate)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/schedule/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleDelete)))
 	s.mux.Handle("GET /a/designer/syslog", s.requireAdminSession(http.HandlerFunc(s.handleDesignerSysLog)))
