@@ -629,7 +629,7 @@ func TestNativeUsers_EmptyShowsCreateHint(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 	body := getBody(t, env, "/a/users")
-	if !strings.Contains(body, "Noch keine Benutzer angelegt") {
+	if !strings.Contains(body, "No users yet") {
 		t.Errorf("native empty-state hint missing")
 	}
 }
@@ -740,7 +740,7 @@ func TestUsers_UALinkCapabilityToggle(t *testing.T) {
 
 	// UA off: no link capability, nothing UA-related on the page.
 	off := getBody(t, env, "/a/users")
-	if strings.Contains(off, "UA-Profil") {
+	if strings.Contains(off, "UA profile") {
 		t.Errorf("UA-related markup present while UA disabled")
 	}
 
@@ -751,10 +751,10 @@ func TestUsers_UALinkCapabilityToggle(t *testing.T) {
 		access.User{ID: "ua-1", FirstName: "Karl", LastName: "UA", Status: access.StatusActive},
 	)
 	on := getBody(t, env, "/a/users")
-	if !strings.Contains(on, "UA-Profil verknuepfen") {
+	if !strings.Contains(on, "Link UA profile") {
 		t.Errorf("link action missing while UA enabled")
 	}
-	if !strings.Contains(on, "UA-Profil waehlen") {
+	if !strings.Contains(on, "Select UA profile") {
 		t.Errorf("selection dialog placeholder missing")
 	}
 	if !strings.Contains(on, "Karl UA") {
@@ -781,7 +781,7 @@ func TestNativeUsers_LinkUnlinkUAProfile(t *testing.T) {
 		t.Fatalf("after link UAUserID = %q, want ua-1", got.UAUserID)
 	}
 	body := getBody(t, env, "/a/users")
-	if !strings.Contains(body, "Karl UA") || !strings.Contains(body, "Loesen") {
+	if !strings.Contains(body, "Karl UA") || !strings.Contains(body, "Unlink UA profile") {
 		t.Errorf("linked profile name / unlink action missing on page")
 	}
 
@@ -846,7 +846,7 @@ func TestUsers_LinkCandidateExcludesAlreadyLinked(t *testing.T) {
 
 	body := getBody(t, env, "/a/users")
 	// ua-1 is taken -> the option is annotated as already linked to Anna.
-	if !strings.Contains(body, "bereits verknuepft mit Anna") {
+	if !strings.Contains(body, "already linked to Anna") {
 		t.Errorf("already-linked candidate not annotated")
 	}
 }

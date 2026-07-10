@@ -1,257 +1,277 @@
-<!doctype html>
-<html lang="de" data-theme="dark">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>carvilon - Benutzer</title>
-  <link rel="stylesheet" href="{{asset "/static/tokens.css"}}">
-  <link rel="stylesheet" href="{{asset "/static/components.css"}}">
-</head>
-<body class="admin-shell">
+{{define "title"}}Users{{end}}
 
-  {{template "admin-nav" .}}
+{{define "head-extra"}}
+{{template "dc-styles"}}
+<style>
+  /* Users - CARVILON's own user directory on the shared Device Center
+     shell. CARVILON is the master database: ONE user list; the ua_user_id
+     link is never a second entry, only an optional attribute on a user,
+     managed from the detail slide-out.
 
-  <main class="page" role="main">
-    <header class="page-header">
-      <div class="page-title-stack">
-        <h1 class="page-title">Benutzer</h1>
-        <p class="page-subtitle">
-          {{if .Page.UAConfigured}}UniFi Access ist aktiv - pro Benutzer kann optional ein UA-Profil verknuepft werden.
-          {{else if .Page.UAEnabled}}UniFi Access ist aktiv, aber nicht erreichbar - Verknuepfen derzeit nicht moeglich.
-          {{else}}Die CARVILON-Benutzer sind die Wahrheit. UniFi Access ist deaktiviert.{{end}}
-        </p>
+     Columns: No. | Name | Status | UA link | ID (the UA column only
+     exists while the UA toggle is on - nothing UA-related otherwise). */
+  .dc-root { --dc-grid:46px minmax(180px,1.6fr) 130px minmax(140px,1fr); }
+  .dc-root.has-ua { --dc-grid:46px minmax(180px,1.6fr) 130px minmax(150px,1.2fr) minmax(140px,1fr); }
+  @media (max-width:820px) {
+    .dc-root, .dc-root.has-ua { --dc-grid:28px minmax(120px,1.6fr) 110px; }
+    .dc-th.col-ua, .dc-th.col-id, .dc-cell.col-ua, .dc-cell.col-id { display:none; }
+  }
+
+  /* Create form inside the toolbar-toggled banner. */
+  .uc-create { display:flex; align-items:center; gap:10px; flex-wrap:wrap; width:100%; margin:0; }
+  .uc-create .dc-act-input { flex:1; min-width:200px; max-width:340px; }
+  .uc-create .dc-act-hint { flex-basis:100%; }
+
+  /* Dark select for the UA-profile link (the dc-act-input vocabulary). */
+  .dc-act-select { height:34px; padding:0 12px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-sans); font-size:13px; outline:none; width:100%; }
+  .dc-act-select:focus { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dc-act-select option { background:var(--gray-850); color:var(--white); }
+  .dc-act-select option:disabled { color:var(--gray-500); }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="dc-root{{if .Page.UAEnabled}} has-ua{{end}}" data-dc>
+  <!-- ============ Left column ============ -->
+  <aside class="dc-aside">
+    <div class="dc-fleet">
+      <div class="dc-fleet-head">
+        <span class="dc-fleet-title">User status</span>
+        <span class="dc-fleet-total dc-mono">{{.Page.TotalCount}} users</span>
       </div>
-      <div class="page-actions">
-        <button class="btn btn-primary" type="button" data-open-modal="create-native-user">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-          Neuer Benutzer
-        </button>
-      </div>
-    </header>
-
-    {{if .Page.Flash}}
-      <div class="banner banner-{{.Page.FlashType}}" role="status" style="margin-bottom: var(--space-4);">{{.Page.Flash}}</div>
-    {{end}}
-    {{if .Page.UAError}}
-      <div class="banner banner-red" role="status" style="margin-bottom: var(--space-4);">UA-Profile konnten nicht geladen werden: {{.Page.UAError}}</div>
-    {{end}}
-
-    <div class="app-card">
-      <div class="app-card-head" style="display:flex; gap:var(--space-3); align-items:center; flex-wrap:wrap;">
-        <form method="get" action="/a/users" style="display:flex; gap:var(--space-2); align-items:center; flex:1;">
-          <input class="input" name="nq" type="search" placeholder="Name suchen" value="{{.Page.NativeQuery}}" style="max-width:320px;"/>
-          <button class="btn btn-secondary btn-sm" type="submit">Filtern</button>
-          {{if .Page.NativeQuery}}
-            <a class="btn btn-secondary btn-sm" href="/a/users">Zuruecksetzen</a>
-          {{end}}
-        </form>
-        <span style="color:var(--color-text-tertiary);">{{.Page.NativeTotal}} Benutzer</span>
-      </div>
-
-      {{if not .Page.NativeUsers}}
-        <div class="app-card-body" style="text-align:center; padding: var(--space-6); color: var(--color-text-tertiary);">
-          {{if .Page.NativeQuery}}
-            Keine Treffer fuer die aktuelle Suche.
-          {{else}}
-            Noch keine Benutzer angelegt. Mit "Neuer Benutzer" rechts oben einen ersten Eintrag erzeugen.
-          {{end}}
+      <div class="dc-fleet-grid">
+        <div class="dc-stat" data-dc-stat="active">
+          <div class="dc-digits"><span class="dc-digit" style="animation-delay:0ms">{{slice .Page.ActivePad 0 1}}</span><span class="dc-digit" style="animation-delay:80ms">{{slice .Page.ActivePad 1 2}}</span></div>
+          <span class="dc-stat-label">active</span>
         </div>
-      {{else}}
-        <table class="app-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              {{if .Page.UAEnabled}}<th>UA-Profil</th>{{end}}
-              <th style="text-align:right;">Aktionen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Page.NativeUsers}}
-              <tr>
-                <td>
-                  <span style="display:flex; gap:var(--space-2); align-items:center;">
-                    <span class="app-table-mark">{{.Initials}}</span>
-                    <strong>{{.DisplayName}}</strong>
-                  </span>
-                </td>
-                <td>
-                  {{if .Active}}
-                    <span class="status-pill is-ok"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                  {{else}}
-                    <span class="status-pill is-danger"><span class="status-dot"></span>{{.StatusLabel}}</span>
-                  {{end}}
-                </td>
-                {{if $.Page.UAEnabled}}
-                  <td>
-                    {{if .UALinked}}
-                      <span style="display:inline-flex; gap:var(--space-2); align-items:center; flex-wrap:wrap;">
-                        <span class="badge">UA</span>
-                        <span>{{.LinkedUAName}}</span>
-                        <form method="post" action="/a/users/carvilon/{{.ID}}/unlink" style="display:inline; margin:0;" onsubmit="return confirm('UA-Verknuepfung von {{.DisplayName}} loesen?');">
-                          <button class="btn btn-secondary btn-sm" type="submit">Loesen</button>
-                        </form>
-                      </span>
-                    {{else if $.Page.UAConfigured}}
-                      <button class="btn btn-secondary btn-sm" type="button"
-                              data-open-modal="link-ua" data-user-id="{{.ID}}" data-user-name="{{.DisplayName}}">
-                        UA-Profil verknuepfen
-                      </button>
-                    {{else}}
-                      <span style="color:var(--color-text-tertiary);">&mdash;</span>
-                    {{end}}
-                  </td>
-                {{end}}
-                <td style="text-align:right; white-space:nowrap;">
-                  <button class="btn btn-secondary btn-sm" type="button" data-open-modal="edit-native-{{.ID}}">Bearbeiten</button>
-                  {{if .Active}}
-                    <form method="post" action="/a/users/carvilon/{{.ID}}/deactivate" style="display:inline; margin:0;">
-                      <button class="btn btn-secondary btn-sm" type="submit">Deaktivieren</button>
-                    </form>
-                  {{else}}
-                    <form method="post" action="/a/users/carvilon/{{.ID}}/activate" style="display:inline; margin:0;">
-                      <button class="btn btn-secondary btn-sm" type="submit">Aktivieren</button>
-                    </form>
-                  {{end}}
-                  <form method="post" action="/a/users/carvilon/{{.ID}}/delete" style="display:inline; margin:0;" onsubmit="return confirm('Benutzer {{.DisplayName}} endgueltig loeschen?');">
-                    <button class="btn btn-secondary btn-sm" type="submit">Loeschen</button>
-                  </form>
-                </td>
-              </tr>
-            {{end}}
-          </tbody>
-        </table>
+        <div class="dc-stat" data-dc-stat="inactive">
+          <div class="dc-digits"><span class="dc-digit" style="animation-delay:160ms">{{slice .Page.InactivePad 0 1}}</span><span class="dc-digit" style="animation-delay:240ms">{{slice .Page.InactivePad 1 2}}</span></div>
+          <span class="dc-stat-label">inactive</span>
+        </div>
+        {{if .Page.UAEnabled}}
+        <div class="dc-stat" data-dc-stat="linked">
+          <div class="dc-digits"><span class="dc-digit" style="animation-delay:320ms">{{slice .Page.LinkedPad 0 1}}</span><span class="dc-digit" style="animation-delay:400ms">{{slice .Page.LinkedPad 1 2}}</span></div>
+          <span class="dc-stat-label">ua linked</span>
+        </div>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="dc-search-wrap">
+      <div class="dc-search">
+        <canvas class="dc-search-canvas" data-dc-search-canvas aria-hidden="true"></canvas>
+        <span class="dc-search-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+        <input type="text" data-dc-search placeholder="Search name, ID" autocomplete="off" spellcheck="false" aria-label="Search users">
+      </div>
+    </div>
+
+    <div class="dc-filters">
+      <div class="dc-filter-head">
+        <span class="dc-fh-label">Filter</span>
+        <span class="dc-hr"></span>
+        <button type="button" class="dc-clear" data-dc-clear>Clear</button>
+      </div>
+
+      {{if .Page.StatusFacets}}
+      <div class="dc-facet-group"><span class="dc-fg-label">Status</span><span class="dc-hr"></span></div>
+      {{range .Page.StatusFacets}}
+        <button type="button" class="dc-facet status" data-dc-facet="status" data-dc-value="{{.Key}}">
+          <span class="dc-cb">{{template "dc-check"}}</span>
+          <span class="dc-facet-dot dc-stat-dot {{.Key}}"></span>
+          <span class="dc-facet-label">{{.Label}}</span>
+          <span class="dc-facet-count dc-mono">{{.Count}}</span>
+        </button>
+      {{end}}
+      {{end}}
+
+      {{if .Page.UAFacets}}
+      <div class="dc-facet-group"><span class="dc-fg-label">UA profile</span><span class="dc-hr"></span></div>
+      {{range .Page.UAFacets}}
+        <button type="button" class="dc-facet ua" data-dc-facet="ua" data-dc-value="{{.Key}}">
+          <span class="dc-cb">{{template "dc-check"}}</span>
+          <span class="dc-facet-label">{{.Label}}</span>
+          <span class="dc-facet-count dc-mono">{{.Count}}</span>
+        </button>
+      {{end}}
       {{end}}
     </div>
+  </aside>
 
-    <!-- Edit-Modals je Benutzer -->
-    {{range .Page.NativeUsers}}
-      <div class="modal-scrim" data-modal="edit-native-{{.ID}}" role="dialog" aria-modal="true" aria-labelledby="edit-native-title-{{.ID}}">
-        <div class="modal-glass">
-          <form method="post" action="/a/users/carvilon/{{.ID}}/update">
-            <header class="modal-header">
-              <div>
-                <h2 id="edit-native-title-{{.ID}}" class="modal-title">Benutzer bearbeiten</h2>
-                <p class="modal-sub">Anzeigename aendern. Die interne ID bleibt stabil.</p>
-              </div>
-              <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-              </button>
-            </header>
-            <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
-              <div class="field">
-                <label class="field-label" for="edit-name-{{.ID}}">Anzeigename</label>
-                <input class="input" id="edit-name-{{.ID}}" name="display_name" type="text" required maxlength="128" value="{{.DisplayName}}"/>
-              </div>
-            </div>
-            <footer class="modal-footer">
-              <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
-              <button class="btn btn-primary" type="submit">Speichern</button>
-            </footer>
-          </form>
-        </div>
-      </div>
-    {{end}}
-
-    <!-- Anlegen-Modal -->
-    <div class="modal-scrim" data-modal="create-native-user" role="dialog" aria-modal="true" aria-labelledby="create-native-title">
-      <div class="modal-glass">
-        <form method="post" action="/a/users/carvilon">
-          <header class="modal-header">
-            <div>
-              <h2 id="create-native-title" class="modal-title">Neuen Benutzer anlegen</h2>
-              <p class="modal-sub">CARVILON-eigener Benutzer mit stabiler ID.</p>
-            </div>
-            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-            </button>
-          </header>
-          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
-            <div class="field">
-              <label class="field-label" for="cn-name">Anzeigename</label>
-              <input class="input" id="cn-name" name="display_name" type="text" required maxlength="128" placeholder="z.B. Anna Schmidt"/>
-            </div>
-          </div>
-          <footer class="modal-footer">
-            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
-            <button class="btn btn-primary" type="submit">Anlegen</button>
-          </footer>
-        </form>
-      </div>
+  <!-- ============ Center table ============ -->
+  <main class="dc-main">
+    <div class="dc-toolbar">
+      <span class="dc-mode" data-dc-mode>All users</span>
+      <div class="dc-count"><span class="dc-shown" data-dc-shown>{{.Page.TotalCount}}</span><span class="dc-total">/ {{.Page.TotalCount}}</span></div>
+      <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
+      <span class="dc-spacer"></span>
+      <button type="button" class="dc-toolbtn" data-uc-create-toggle><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New user</button>
     </div>
 
-    {{if and .Page.UAConfigured (not .Page.UAError)}}
-    <!-- Geteilter Verknuepfen-Dialog: UA-Profile NUR hier als Auswahl. -->
-    <div class="modal-scrim" data-modal="link-ua" role="dialog" aria-modal="true" aria-labelledby="link-ua-title">
-      <div class="modal-glass">
-        <form method="post" action="/a/users/carvilon/link">
-          <header class="modal-header">
-            <div>
-              <h2 id="link-ua-title" class="modal-title">UA-Profil verknuepfen</h2>
-              <p class="modal-sub">Benutzer: <strong data-link-user></strong>. Das UA-Profil ist nur eine Bruecke, damit UA-Reader-Ereignisse diesem Benutzer zugeordnet werden.</p>
+    <div class="dc-banner" data-uc-create hidden>
+      <form class="uc-create" method="post" action="/a/users/carvilon">
+        <input class="dc-act-input" name="display_name" type="text" required maxlength="128" placeholder="Display name, e.g. Anna Schmidt" autocomplete="off" spellcheck="false" aria-label="Display name">
+        <button class="dc-act-btn accent" type="submit">Create user</button>
+        <p class="dc-act-hint">A CARVILON-owned user with a stable internal ID.{{if .Page.UAEnabled}} A UA profile can be linked afterwards from the user's panel.{{end}}</p>
+      </form>
+    </div>
+
+    {{if .Page.Flash}}<div class="dc-banner {{if eq .Page.FlashType "red"}}alert{{else}}ok{{end}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{{if eq .Page.FlashType "red"}}<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>{{else}}<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>{{end}}</svg><div class="dc-banner-body"><strong>{{.Page.Flash}}</strong></div></div>{{end}}
+    {{if .Page.UAError}}<div class="dc-banner warn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="dc-banner-body"><strong>UA profiles could not be loaded.</strong> {{.Page.UAError}}</div></div>{{end}}
+
+    <div class="dc-scroll">
+      <div class="dc-table">
+        <div class="dc-thead">
+          <button type="button" class="dc-th num">No.</button>
+          <button type="button" class="dc-th" data-dc-sort="name">Name <span class="dc-ind" data-dc-ind></span></button>
+          <button type="button" class="dc-th" data-dc-sort="status">Status <span class="dc-ind" data-dc-ind></span></button>
+          {{if .Page.UAEnabled}}<button type="button" class="dc-th col-ua" data-dc-sort="ua">UA profile <span class="dc-ind" data-dc-ind></span></button>{{end}}
+          <button type="button" class="dc-th col-id" data-dc-sort="id">ID <span class="dc-ind" data-dc-ind></span></button>
+        </div>
+
+        <div class="dc-tbody" data-dc-tbody>
+          {{range $r := .Page.NativeUsers}}
+            {{if $r.GroupStart}}
+              <div class="dc-group" data-dc-group="user">
+                <span class="dc-group-ico">{{template "dc-icon" "user"}}</span>
+                <span class="dc-group-label">Users</span>
+                <span class="dc-group-count">{{printf "%02d" $r.GroupCount}}</span>
+                <span class="dc-group-line"><span class="dc-scan" data-dc-scan></span></span>
+              </div>
+            {{end}}
+            <div class="dc-row {{$r.StatusState}}" data-dc-row data-idx="{{$r.Index}}"
+                 data-cat="user" data-status="{{$r.StatusState}}" data-ua="{{if $r.UALinked}}linked{{else}}none{{end}}"
+                 data-search="{{$r.Search}}" data-name="{{$r.DisplayName}}" data-type="User"
+                 data-ua-name="{{$r.LinkedUAName}}" data-id="{{$r.ID}}" data-kind="user">
+              <div class="dc-cell num">{{printf "%02d" $r.Index}}</div>
+              <div class="dc-cell">
+                <span class="dc-row-ico">{{template "dc-icon" "user"}}</span>
+                <span class="dc-name">{{$r.DisplayName}}</span>
+              </div>
+              <div class="dc-cell">
+                <span class="dc-stat-dot {{$r.StatusState}}"></span>
+                <span class="dc-stat-txt">{{$r.StatusText}}</span>
+              </div>
+              {{if $.Page.UAEnabled}}
+              <div class="dc-cell mono col-ua{{if not $r.UALinked}} dim{{end}}">{{if $r.UALinked}}{{$r.LinkedUAName}}{{else}}-{{end}}</div>
+              {{end}}
+              <div class="dc-cell mono col-id dim">{{$r.ID}}</div>
             </div>
-            <button class="modal-close" type="button" data-action="close-modal" aria-label="Schliessen">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-            </button>
-          </header>
-          <div class="modal-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
-            {{if .Page.UACandidates}}
-              <div class="field">
-                <label class="field-label" for="link-select">UA-Profil</label>
-                <select class="input" id="link-select" name="ua_user_id" required>
-                  <option value="" disabled selected>&mdash; UA-Profil waehlen &mdash;</option>
-                  {{range .Page.UACandidates}}
+
+            <template data-dc-detail="{{$r.Index}}">
+              <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Overview</span><span class="dc-hr"></span></div>
+              <div class="dc-kv"><span class="dc-k">Type</span><span class="dc-v">User</span></div>
+              <div class="dc-kv"><span class="dc-k">Status</span><span class="dc-v">{{$r.StatusText}}</span></div>
+              <div class="dc-kv"><span class="dc-k">Display name</span><span class="dc-v">{{$r.DisplayName}}</span></div>
+              <div class="dc-kv"><span class="dc-k">Internal ID</span><span class="dc-v">{{$r.ID}}</span></div>
+              {{if $.Page.UAEnabled}}
+              <div class="dc-kv"><span class="dc-k">UA profile</span><span class="dc-v">{{if $r.UALinked}}{{$r.LinkedUAName}}{{else}}-{{end}}</span></div>
+              {{end}}
+              {{if $r.Created}}<div class="dc-kv"><span class="dc-k">Created</span><span class="dc-v">{{$r.Created}}</span></div>{{end}}
+            </template>
+
+            <template data-dc-actions="{{$r.Index}}">
+              <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">User controls</span><span class="dc-hr"></span></div>
+              <form class="dc-act-form" method="post" action="/a/users/carvilon/{{$r.ID}}/update">
+                <span class="dc-act-label">Display name</span>
+                <input class="dc-act-input" type="text" name="display_name" value="{{$r.DisplayName}}" required maxlength="128" autocomplete="off" spellcheck="false" aria-label="Display name">
+                <div class="dc-act-row">
+                  <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Save name</button>
+                </div>
+                <p class="dc-act-hint">The internal ID stays stable across renames.</p>
+              </form>
+              <div class="dc-act-form">
+                <div class="dc-act-row">
+                  {{if $r.Active}}
+                  <form method="post" action="/a/users/carvilon/{{$r.ID}}/deactivate" style="margin:0;">
+                    <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>Deactivate</button>
+                  </form>
+                  {{else}}
+                  <form method="post" action="/a/users/carvilon/{{$r.ID}}/activate" style="margin:0;">
+                    <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg>Activate</button>
+                  </form>
+                  {{end}}
+                  <form method="post" action="/a/users/carvilon/{{$r.ID}}/delete" style="margin:0;" onsubmit="return confirm('Delete user {{$r.DisplayName}} permanently?');">
+                    <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Delete user</button>
+                  </form>
+                </div>
+                <p class="dc-act-hint">Deactivating keeps the user and its links; deleting is permanent.</p>
+              </div>
+              {{if $.Page.UAEnabled}}
+              <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">UA profile</span><span class="dc-hr"></span></div>
+              {{if $r.UALinked}}
+              <form class="dc-act-form" method="post" action="/a/users/carvilon/{{$r.ID}}/unlink" onsubmit="return confirm('Unlink the UA profile from {{$r.DisplayName}}?');">
+                <div class="dc-act-row">
+                  <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18.84 12.25 21 10a5 5 0 0 0-7-7l-2.5 2.5M5.17 11.75 3 14a5 5 0 0 0 7 7l2.5-2.5"/><path d="M4 4l16 16"/></svg>Unlink UA profile</button>
+                </div>
+                <p class="dc-act-hint">Linked to <strong>{{$r.LinkedUAName}}</strong>. The link only maps UA reader events onto this user; the UA profile itself is untouched.</p>
+              </form>
+              {{else if $.Page.UAConfigured}}
+              <form class="dc-act-form" method="post" action="/a/users/carvilon/{{$r.ID}}/link">
+                <span class="dc-act-label">Link a UA profile</span>
+                <select class="dc-act-select" name="ua_user_id" required aria-label="UA profile">
+                  <option value="" disabled selected>&mdash; Select UA profile &mdash;</option>
+                  {{range $.Page.UACandidates}}
                     {{if .LinkedToName}}
-                      <option value="{{.ID}}" disabled>{{.Name}} (bereits verknuepft mit {{.LinkedToName}})</option>
+                      <option value="{{.ID}}" disabled>{{.Name}} (already linked to {{.LinkedToName}})</option>
                     {{else}}
                       <option value="{{.ID}}">{{.Name}}</option>
                     {{end}}
                   {{end}}
                 </select>
-              </div>
-            {{else}}
-              <p style="color:var(--color-text-tertiary);">Keine UA-Profile gefunden.</p>
-            {{end}}
-          </div>
-          <footer class="modal-footer">
-            <button class="btn btn-secondary" type="button" data-action="close-modal">Abbrechen</button>
-            <button class="btn btn-primary" type="submit" {{if not .Page.UACandidates}}disabled{{end}}>Verknuepfen</button>
-          </footer>
-        </form>
+                <div class="dc-act-row">
+                  <button class="dc-act-btn accent" type="submit" {{if not $.Page.UACandidates}}disabled{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Link UA profile</button>
+                </div>
+                <p class="dc-act-hint">{{if $.Page.UACandidates}}The UA profile is only a bridge so UA reader events map onto this user - it never becomes a second user entry.{{else}}No UA profiles found.{{end}}</p>
+              </form>
+              {{else}}
+              <div class="dc-act-form"><p class="dc-act-hint">UniFi Access is enabled but not reachable - linking is unavailable right now.</p></div>
+              {{end}}
+              {{end}}
+            </template>
+          {{end}}
+        </div>
+        <div class="dc-empty-rows" data-dc-noresults hidden>No users match the current filters.</div>
+        {{if not .Page.NativeUsers}}<div class="dc-empty-rows">{{if .Page.NativeQuery}}No results for the current search.{{else}}No users yet. Create the first one with "New user" in the toolbar.{{end}}</div>{{end}}
       </div>
     </div>
-    {{end}}
   </main>
 
-  <script src="{{asset "/static/interactions.js"}}"></script>
-  <script>
-    (function () {
-      document.addEventListener('click', function (e) {
-        var opener = e.target.closest('[data-open-modal]');
-        if (opener) {
-          e.preventDefault();
-          var key = opener.getAttribute('data-open-modal');
-          var m = document.querySelector('[data-modal="' + key + '"]');
-          if (!m) return;
-          // Shared link modal: wire it to the clicked user's row.
-          if (key === 'link-ua') {
-            var uid = opener.getAttribute('data-user-id');
-            var form = m.querySelector('form');
-            if (form && uid) form.setAttribute('action', '/a/users/carvilon/' + uid + '/link');
-            var label = m.querySelector('[data-link-user]');
-            if (label) label.textContent = opener.getAttribute('data-user-name') || '';
-            var sel = m.querySelector('select[name="ua_user_id"]');
-            if (sel) sel.selectedIndex = 0;
-          }
-          m.classList.add('is-open');
-          return;
-        }
-        if (e.target.closest('[data-action="close-modal"]')) {
-          var scrim = e.target.closest('.modal-scrim');
-          if (scrim) scrim.classList.remove('is-open');
-        }
-      });
-    })();
-  </script>
-</body>
-</html>
+  {{template "dc-detail-layer"}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+{{template "dc-core-js"}}
+<script>
+  // Users - CARVILON's own directory on the shared shell. The page
+  // script wires the Users-specific parts: the panel's right column is
+  // the pre-rendered per-user controls (rename, activate/deactivate,
+  // delete, UA link/unlink - the /a/devices reader-controls pattern),
+  // and the toolbar's "New user" button toggles the create banner.
+  // Every action is a plain form POST; the page re-renders after.
+  (function () {
+    var dc = window.dcInit({
+      filterDims: { status: 'status', ua: 'ua' },
+      modeDefault: 'All users',
+      totalUnit: 'users',
+      sortAttrs: { name: 'name', status: 'status', id: 'id'{{if .Page.UAEnabled}}, ua: 'ua-name'{{end}} },
+      sortLabels: { name: 'name', status: 'status', id: 'ID'{{if .Page.UAEnabled}}, ua: 'UA profile'{{end}} },
+      fillRight: function (row, rightCol) {
+        rightCol.innerHTML = '';
+        var act = dc.tbody.querySelector('[data-dc-actions="' + row.getAttribute('data-idx') + '"]');
+        if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
+      }
+    });
+
+    var toggle = document.querySelector('[data-uc-create-toggle]');
+    var banner = document.querySelector('[data-uc-create]');
+    if (toggle && banner) toggle.addEventListener('click', function () {
+      banner.hidden = !banner.hidden;
+      if (!banner.hidden) {
+        var input = banner.querySelector('input[name="display_name"]');
+        if (input) { try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); } }
+      }
+    });
+  })();
+</script>
+{{end}}

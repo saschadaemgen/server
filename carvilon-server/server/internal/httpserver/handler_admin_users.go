@@ -42,6 +42,19 @@ type adminUsersData struct {
 
 	Flash     string
 	FlashType string
+
+	// Device Center shell data, mirroring /a/devices: the fleet
+	// counters (+ their 2-digit split-flap pads) and the facet lists
+	// the shared dc shell renders in the left column.
+	TotalCount    int
+	ActiveCount   int
+	InactiveCount int
+	LinkedCount   int
+	ActivePad     string
+	InactivePad   string
+	LinkedPad     string
+	StatusFacets  []uaFacet
+	UAFacets      []uaFacet
 }
 
 // nativeUserRow is one row in the CARVILON-users table view.
@@ -50,11 +63,19 @@ type nativeUserRow struct {
 	DisplayName string
 	Initials    string
 	Active      bool
-	StatusLabel string // "Aktiv" | "Inaktiv"
 	// Optionale UA-Verknuepfung (nur ein Attribut, kein eigener Nutzer):
 	UALinked     bool   // hat eine UA-Kopplung
 	LinkedUAID   string // die ua_user_id (opak)
 	LinkedUAName string // aufgeloester UA-Profil-Anzeigename (oder Fallback)
+
+	// Device Center row fields (the dc shell's vocabulary).
+	Index       int    // 1-based table row number
+	GroupStart  bool   // first row: carries the single "Users" group header
+	GroupCount  int    // rows in the group (== TotalCount)
+	StatusState string // "online" | "offline" (Active in dc terms)
+	StatusText  string // "Active" | "Inactive"
+	Created     string // rendered creation time for the panel
+	Search      string // lowercased filter haystack for the client-side search
 }
 
 // uaCandidate ist ein UA-Profil, das im Verknuepfen-Dialog zur Auswahl
@@ -112,7 +133,7 @@ func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 		list, err := s.nativeUsers.List(r.Context(), access.NativeListParams{Query: data.NativeQuery})
 		if err != nil {
 			s.log.Warn("native users list failed", "err", err)
-			data.Flash = "Eigene Benutzer konnten nicht geladen werden."
+			data.Flash = "The user list could not be loaded."
 			data.FlashType = "red"
 		} else {
 			displayList = list
@@ -165,13 +186,47 @@ func (s *Server) handleAdminUsersList(w http.ResponseWriter, r *http.Request) {
 				row.LinkedUAName = uaNames[u.UAUserID]
 			case data.UAConfigured && data.UAError == "":
 				// UA reachable but this id has no profile -> dangling link.
-				row.LinkedUAName = "UA-Profil " + u.UAUserID + " (nicht gefunden)"
+				row.LinkedUAName = "UA profile " + u.UAUserID + " (not found)"
 			default:
 				// UA off or unreachable: show the raw id, don't guess a name.
-				row.LinkedUAName = "UA-Profil " + u.UAUserID
+				row.LinkedUAName = "UA profile " + u.UAUserID
 			}
 		}
 		data.NativeUsers = append(data.NativeUsers, row)
+	}
+
+	// Device Center shell data: fleet counters + facets (the /a/devices
+	// pattern - status facets always render, even at 0, so a toggle
+	// after an action lands on truthful counts), and the single "Users"
+	// group header the table's scan sweep rides on.
+	data.TotalCount = len(data.NativeUsers)
+	for i := range data.NativeUsers {
+		data.NativeUsers[i].Index = i + 1
+		data.NativeUsers[i].GroupCount = data.TotalCount
+		if data.NativeUsers[i].Active {
+			data.ActiveCount++
+		} else {
+			data.InactiveCount++
+		}
+		if data.NativeUsers[i].UALinked {
+			data.LinkedCount++
+		}
+	}
+	if data.TotalCount > 0 {
+		data.NativeUsers[0].GroupStart = true
+	}
+	data.ActivePad = pad2(data.ActiveCount)
+	data.InactivePad = pad2(data.InactiveCount)
+	data.LinkedPad = pad2(data.LinkedCount)
+	data.StatusFacets = append(data.StatusFacets,
+		uaFacet{Key: "online", Label: "Active", Count: data.ActiveCount},
+		uaFacet{Key: "offline", Label: "Inactive", Count: data.InactiveCount},
+	)
+	if data.UAEnabled {
+		data.UAFacets = append(data.UAFacets,
+			uaFacet{Key: "linked", Label: "Linked", Count: data.LinkedCount},
+			uaFacet{Key: "none", Label: "Not linked", Count: data.TotalCount - data.LinkedCount},
+		)
 	}
 	s.renderAdminPage(w, "users", data)
 }
@@ -222,19 +277,26 @@ func (s *Server) uaAvailable(ctx context.Context) bool {
 }
 
 func toNativeUserRow(u access.NativeUser) nativeUserRow {
-	label := "Inaktiv"
+	state, text := "offline", "Inactive"
 	if u.Active {
-		label = "Aktiv"
+		state, text = "online", "Active"
+	}
+	created := ""
+	if !u.CreatedAt.IsZero() {
+		created = u.CreatedAt.Format("2006-01-02 15:04")
 	}
 	return nativeUserRow{
 		ID:          u.ID,
 		DisplayName: u.DisplayName,
 		Initials:    u.Initials(),
 		Active:      u.Active,
-		StatusLabel: label,
 		UALinked:    u.UAUserID != "",
 		LinkedUAID:  u.UAUserID,
 		// LinkedUAName wird im Handler aufgeloest (braucht die UA-Namen).
+		StatusState: state,
+		StatusText:  text,
+		Created:     created,
+		Search:      strings.ToLower(u.DisplayName + " " + u.ID + " user"),
 	}
 }
 

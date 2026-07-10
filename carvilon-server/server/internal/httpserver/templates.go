@@ -86,6 +86,7 @@ var newDesignPages = map[string]bool{
 	"mqtt":          true,
 	"mqtt-monitor":  true,
 	"telegram":      true,
+	"users":         true,
 }
 
 func newAdminTemplates() (*adminTemplates, error) {
