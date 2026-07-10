@@ -2,6 +2,7 @@ package mqttdriver
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -98,6 +99,163 @@ func TestMQTTDriver_SameTopicNoDeadlock(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("engine deadlocked ticking a same-topic mqtt loop")
 	}
+}
+
+// TestMQTTDriver_JSONPathSource proves the Shelly source path: a source
+// bound to "<topic>#temperature.tC" pulls the nested field out of a full
+// switch:0 status snapshot and feeds it through as a float. The value
+// lands on the Out topic via a plain passthrough sink.
+func TestMQTTDriver_JSONPathSource(t *testing.T) {
+	cli := startBroker(t)
+	const statusTopic = "carvilon/shelly-test/status/switch:0"
+	inAddr := statusTopic + "#temperature.tC"
+	const outTopic = "test/jsonpath/out"
+
+	g := engine.Graph{
+		Schema: 1,
+		Nodes: []engine.GraphNode{
+			{ID: "in", Type: engine.TypeSourceChannelFloat, Params: map[string]any{"channel": "mqtt:" + inAddr}},
+			{ID: "out", Type: engine.TypeSinkChannelFloat, Params: map[string]any{"channel": "mqtt:" + outTopic}},
+		},
+		Edges: []engine.GraphEdge{{From: "in:out", To: "out:in"}},
+	}
+	eng, err := engine.Build(g, engine.DefaultRegistry(), 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	drv := NewDriver(cli, []engine.Channel{
+		{Address: inAddr, Label: inAddr, Kind: engine.Float},
+		{Address: outTopic, Label: outTopic, Kind: engine.Float},
+	}, nil)
+	t.Cleanup(func() { drv.Close() })
+	reg := engine.NewDriverRegistry()
+	reg.RegisterSource(engine.PrefixMQTT, drv)
+	reg.RegisterSink(engine.PrefixMQTT, drv)
+	table := engine.BindingTable{
+		"mqtt:" + inAddr:   {Prefix: engine.PrefixMQTT, Addr: inAddr},
+		"mqtt:" + outTopic: {Prefix: engine.PrefixMQTT, Addr: outTopic},
+	}
+	if err := engine.BindGraph(eng, g, table, nil, reg); err != nil {
+		t.Fatalf("BindGraph: %v", err)
+	}
+
+	out := make(chan string, 8)
+	if err := cli.Subscribe(outTopic, 9997, func(_ string, p []byte) { out <- string(p) }); err != nil {
+		t.Fatalf("observe subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Unsubscribe(outTopic, 9997) })
+
+	// A realistic Shelly switch:0 status snapshot (retained full state).
+	snapshot := `{"id":0,"output":false,"apower":0.0,"voltage":225.9,"current":0.0,` +
+		`"aenergy":{"total":10366308.79},"temperature":{"tC":51.1,"tF":124.1}}`
+	if err := cli.Publish(statusTopic, []byte(snapshot), true, 0); err != nil {
+		t.Fatalf("publish snapshot: %v", err)
+	}
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case got := <-out:
+			if got != "51.1" {
+				t.Fatalf("Out payload = %q, want %q", got, "51.1")
+			}
+			return
+		case <-ticker.C:
+			eng.Tick()
+		case <-deadline:
+			t.Fatal("no extracted value within timeout")
+		}
+	}
+}
+
+// TestMQTTDriver_SwitchSetSink proves the Shelly sink path: a bool sink
+// bound to "<topic>#Switch.Set:0" publishes a Gen2 JSON-RPC command
+// (rather than a bare "true") when its input rises, and the falling edge
+// sends on:false.
+func TestMQTTDriver_SwitchSetSink(t *testing.T) {
+	cli := startBroker(t)
+	const cmdTopic = "test/switchset/cmd"
+	const rpcTopic = "carvilon/shelly-test/rpc"
+	rpcAddr := rpcTopic + "#Switch.Set:0"
+
+	g := engine.Graph{
+		Schema: 1,
+		Nodes: []engine.GraphNode{
+			{ID: "in", Type: engine.TypeSourceChannel, Params: map[string]any{"channel": "mqtt:" + cmdTopic}},
+			{ID: "out", Type: engine.TypeSinkChannel, Params: map[string]any{"channel": "mqtt:" + rpcAddr}},
+		},
+		Edges: []engine.GraphEdge{{From: "in:out", To: "out:in"}},
+	}
+	eng, err := engine.Build(g, engine.DefaultRegistry(), 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	drv := NewDriver(cli, []engine.Channel{
+		{Address: cmdTopic, Label: cmdTopic, Kind: engine.Bool},
+		{Address: rpcAddr, Label: rpcAddr, Kind: engine.Bool},
+	}, nil)
+	t.Cleanup(func() { drv.Close() })
+	reg := engine.NewDriverRegistry()
+	reg.RegisterSource(engine.PrefixMQTT, drv)
+	reg.RegisterSink(engine.PrefixMQTT, drv)
+	table := engine.BindingTable{
+		"mqtt:" + cmdTopic: {Prefix: engine.PrefixMQTT, Addr: cmdTopic},
+		"mqtt:" + rpcAddr:  {Prefix: engine.PrefixMQTT, Addr: rpcAddr},
+	}
+	if err := engine.BindGraph(eng, g, table, nil, reg); err != nil {
+		t.Fatalf("BindGraph: %v", err)
+	}
+
+	rpc := make(chan []byte, 8)
+	if err := cli.Subscribe(rpcTopic, 9996, func(_ string, p []byte) {
+		b := make([]byte, len(p))
+		copy(b, p)
+		rpc <- b
+	}); err != nil {
+		t.Fatalf("observe subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Unsubscribe(rpcTopic, 9996) })
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	awaitOn := func(want bool) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case raw := <-rpc:
+				var got struct {
+					Method string `json:"method"`
+					Params struct {
+						ID int  `json:"id"`
+						On bool `json:"on"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal(raw, &got); err != nil {
+					t.Fatalf("rpc payload not JSON: %v (%s)", err, raw)
+				}
+				if got.Method != "Switch.Set" || got.Params.ID != 0 || got.Params.On != want {
+					t.Fatalf("rpc = %+v, want Switch.Set id=0 on=%v", got, want)
+				}
+				return
+			case <-ticker.C:
+				eng.Tick()
+			case <-deadline:
+				t.Fatalf("no Switch.Set on=%v within timeout", want)
+			}
+		}
+	}
+	// Rising edge -> on:true, falling edge -> on:false.
+	if err := cli.Publish(cmdTopic, []byte("on"), false, 0); err != nil {
+		t.Fatalf("publish on: %v", err)
+	}
+	awaitOn(true)
+	if err := cli.Publish(cmdTopic, []byte("off"), false, 0); err != nil {
+		t.Fatalf("publish off: %v", err)
+	}
+	awaitOn(false)
 }
 
 func typesFor(kind engine.Kind) (src, sink string) {
