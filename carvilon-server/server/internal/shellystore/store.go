@@ -42,6 +42,15 @@ var ErrNotFound = errors.New("shellystore: device not found")
 // ErrAtCap is returned when approving would push the active set past its cap.
 var ErrAtCap = errors.New("shellystore: active device cap reached")
 
+// API generations as stored in the gen column (migration 040). GenUnknown
+// is a device that was never identified (a manual IP that was never
+// reached); it is classified by the next identify probe, never guessed.
+const (
+	GenUnknown = 0
+	Gen1       = 1
+	Gen2       = 2
+)
+
 // Origins and states as stored in the table.
 const (
 	OriginManual     = "manual"
@@ -88,6 +97,7 @@ type Device struct {
 	State       string // StateActive | StateIgnored
 	Name        string // last-seen display name; "" allowed
 	Model       string // last-seen model; "" allowed
+	Gen         int    // API generation: GenUnknown | Gen1 | Gen2(+)
 	FirstSeenAt int64  // ms epoch
 	UpdatedAt   int64  // ms epoch
 
@@ -114,6 +124,7 @@ type Detected struct {
 	Address string // canonical LAN IPv4[:port]
 	Name    string
 	Model   string
+	Gen     int // API generation the announcement implies; GenUnknown keeps the stored value
 }
 
 // ListActive returns every device that is currently polled + shown,
@@ -136,7 +147,7 @@ func (s *Store) ListManualActive(ctx context.Context) ([]Device, error) {
 
 func (s *Store) query(ctx context.Context, whereOrder string, args ...any) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mac, address, origin, state, name, model, first_seen_at, updated_at,
+		`SELECT id, mac, address, origin, state, name, model, gen, first_seen_at, updated_at,
 		        mqtt_username, mqtt_state, mqtt_updated_at
 		   FROM shelly_devices `+whereOrder, args...)
 	if err != nil {
@@ -147,7 +158,7 @@ func (s *Store) query(ctx context.Context, whereOrder string, args ...any) ([]De
 	for rows.Next() {
 		var d Device
 		if err := rows.Scan(&d.ID, &d.MAC, &d.Address, &d.Origin, &d.State,
-			&d.Name, &d.Model, &d.FirstSeenAt, &d.UpdatedAt,
+			&d.Name, &d.Model, &d.Gen, &d.FirstSeenAt, &d.UpdatedAt,
 			&d.MQTTUsername, &d.MQTTState, &d.MQTTUpdated); err != nil {
 			return nil, fmt.Errorf("shellystore: scan: %w", err)
 		}
@@ -245,8 +256,9 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 				return AdoptSkippedFull, err
 			}
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET address = ?, name = ?, model = ?, updated_at = ? WHERE id = ?`,
-				d.Address, d.Name, d.Model, now, id)
+				`UPDATE shelly_devices SET address = ?, name = ?, model = ?,
+				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.Address, d.Name, d.Model, d.Gen, d.Gen, now, id)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt refresh: %w", err)
 			}
@@ -264,8 +276,9 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET mac = ?, name = ?, model = ?, updated_at = ? WHERE id = ?`,
-				d.MAC, d.Name, d.Model, now, mid)
+				`UPDATE shelly_devices SET mac = ?, name = ?, model = ?,
+				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.MAC, d.Name, d.Model, d.Gen, d.Gen, now, mid)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt upgrade: %w", err)
 			}
@@ -281,8 +294,9 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET name = ?, model = ?, updated_at = ? WHERE id = ?`,
-				d.Name, d.Model, now, id)
+				`UPDATE shelly_devices SET name = ?, model = ?,
+				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.Name, d.Model, d.Gen, d.Gen, now, id)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt refresh addr: %w", err)
 			}
@@ -317,9 +331,9 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 		return AdoptSkippedFull, nil
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO shelly_devices (mac, address, origin, state, name, model, first_seen_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.MAC, d.Address, OriginDiscovered, targetState, d.Name, d.Model, now, now)
+		`INSERT INTO shelly_devices (mac, address, origin, state, name, model, gen, first_seen_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.MAC, d.Address, OriginDiscovered, targetState, d.Name, d.Model, d.Gen, now, now)
 	if err != nil {
 		return AdoptSkippedFull, fmt.Errorf("shellystore: adopt insert: %w", err)
 	}
@@ -353,6 +367,43 @@ func (s *Store) ResetStaleProvisioning(ctx context.Context) error {
 		MQTTStateFailed, s.now().UnixMilli(), MQTTStateProvisioning)
 	if err != nil {
 		return fmt.Errorf("shellystore: reset stale provisioning: %w", err)
+	}
+	return nil
+}
+
+// SetIdentity records what a live identify probe (GET /shelly, or the
+// Gen2 GetDeviceInfo) learned about a device: the API generation (when
+// gen > 0), the model (when non-empty), and the full MAC - the MAC only
+// fills an EMPTY slot (an address-only manual pin, or a Gen1 mDNS find
+// whose instance label carried just the 3-byte id tail) and never
+// overwrites an existing identity. A MAC already claimed by another row
+// is skipped rather than violating the unique index - the address-eviction
+// rules in Adopt own that reconciliation. Returns ErrNotFound for an
+// unknown id.
+func (s *Store) SetIdentity(ctx context.Context, id int64, mac, model string, gen int) error {
+	now := s.now().UnixMilli()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE shelly_devices SET
+		        gen   = CASE WHEN ? > 0 THEN ? ELSE gen END,
+		        model = CASE WHEN ? <> '' THEN ? ELSE model END,
+		        updated_at = ?
+		  WHERE id = ?`,
+		gen, gen, model, model, now, id)
+	if err != nil {
+		return fmt.Errorf("shellystore: set identity: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if mac != "" {
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE shelly_devices SET mac = ?, updated_at = ?
+			  WHERE id = ? AND mac = ''
+			    AND NOT EXISTS (SELECT 1 FROM shelly_devices o WHERE o.mac = ? AND o.id <> ?)`,
+			mac, now, id, mac, id)
+		if err != nil {
+			return fmt.Errorf("shellystore: set identity mac: %w", err)
+		}
 	}
 	return nil
 }
