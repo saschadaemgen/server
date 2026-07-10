@@ -14,6 +14,30 @@ func init() {
 		New:      func(map[string]Value) Node { return &manual{} },
 	})
 
+	// input.toggle is a held manual switch: the same externally-driven
+	// boolean source as input.manual (it holds the last set level), a
+	// distinct type so the editor can offer a momentary push-button
+	// (input.manual, pulse) AND a held on/off switch (input.toggle) as two
+	// clearly-named palette blocks. Both share the manual node - the
+	// pulse-vs-hold difference is purely how the editor drives it.
+	Register(Descriptor{
+		Type:     "input.toggle",
+		Category: "input",
+		Title:    "Toggle switch",
+		Outputs:  []Port{{Name: "out", Kind: Bool}},
+		New:      func(map[string]Value) Node { return &manual{} },
+	})
+
+	// input.constant.{bool,float,text} emit a fixed, held value from their
+	// "value" param on every tick - the simple "feed a steady 1/0, number
+	// or string into the graph" source. Unlike input.manual/toggle they take
+	// no external input: the value is baked into the graph, so it needs no
+	// run/input plumbing (which is bool-only). One node, three types so the
+	// static descriptor's output kind matches the value kind.
+	registerConstant("input.constant.bool", "Constant (on/off)", Bool, BoolVal(false))
+	registerConstant("input.constant.float", "Constant (number)", Float, FloatVal(0))
+	registerConstant("input.constant.text", "Constant (text)", Text, TextVal(""))
+
 	Register(Descriptor{
 		Type:          "time.staircase",
 		Category:      "time",
@@ -69,6 +93,39 @@ func (n *manual) Eval(ctx *EvalContext, in Inputs, out Outputs) {
 func (n *manual) setExternal(port string, v Value) {
 	if port == "out" {
 		n.val = v.B
+	}
+}
+
+// registerConstant registers one input.constant.<kind> descriptor: a
+// leaf source whose single "value" param (declared in the descriptor's
+// kind so coerceParams types it) is emitted, held, on "out".
+func registerConstant(typ, title string, kind Kind, def Value) {
+	Register(Descriptor{
+		Type:     typ,
+		Category: "input",
+		Title:    title,
+		Outputs:  []Port{{Name: "out", Kind: kind}},
+		Params:   []Param{{Name: "value", Kind: kind, Default: def}},
+		New:      func(p map[string]Value) Node { return constant{v: p["value"]} },
+	})
+}
+
+// constant is a fixed-value source: Eval writes its construction-time
+// value onto "out" every tick, in the value's kind. It carries no state
+// and takes no external input. It is a selfStarter so the engine
+// evaluates it once at startup (no trigger would otherwise reach it).
+type constant struct{ v Value }
+
+func (constant) selfStart() {}
+
+func (n constant) Eval(ctx *EvalContext, in Inputs, out Outputs) {
+	switch n.v.Kind {
+	case Float:
+		out.SetFloat("out", n.v.F)
+	case Text:
+		out.SetText("out", n.v.S)
+	default:
+		out.SetBool("out", n.v.B)
 	}
 }
 

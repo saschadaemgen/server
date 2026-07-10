@@ -108,6 +108,13 @@ func (e *Engine) Add(id string, n Node) {
 	e.outs[id] = storeMap{}
 	e.addOrder = append(e.addOrder, id)
 	e.topoStale = true
+	// A self-starting source (e.g. input.constant) has no external trigger
+	// and no upstream, so mark it dirty at insertion time: the first Tick
+	// then evaluates it once and its held value settles (and propagates)
+	// like any other change. Nodes without the marker stay event-driven.
+	if _, ok := n.(selfStarter); ok {
+		e.markDirty(id)
+	}
 }
 
 // AddType constructs a node from the registry and adds it under id,
@@ -207,6 +214,13 @@ func (e *Engine) applyExternal(nodeID, port string, v Value) {
 type externalSetter interface {
 	setExternal(port string, v Value)
 }
+
+// selfStarter is implemented by nodes that must be evaluated once at
+// startup even without an external trigger or upstream change, so their
+// held output is established on the first Tick (e.g. input.constant).
+// Add marks them dirty at insertion time; the marker method is never
+// called - its presence is the whole contract.
+type selfStarter interface{ selfStart() }
 
 func (e *Engine) markDirty(id string) { e.dirty[id] = true }
 
