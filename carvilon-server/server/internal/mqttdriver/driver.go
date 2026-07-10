@@ -69,6 +69,7 @@ type Driver struct {
 
 	mu     sync.Mutex
 	retain map[string]bool    // sink address -> retain flag (plain-publish option)
+	onOff  map[string]bool    // sink address -> bool payload as "on"/"off" (Gen1 grammar)
 	rpc    map[string]rpcSpec // sink address -> RPC target (Switch.Set etc.)
 	subID  map[string]int     // subscribed address -> inline subscription id
 	nextID int
@@ -131,6 +132,7 @@ func NewDriver(client mqttbroker.InlineClient, channels []engine.Channel, log *s
 		chans:  append([]engine.Channel(nil), channels...),
 		info:   make(map[string]*chanInfo, len(channels)),
 		retain: map[string]bool{},
+		onOff:  map[string]bool{},
 		rpc:    map[string]rpcSpec{},
 		subID:  map[string]int{},
 	}
@@ -162,10 +164,13 @@ func (d *Driver) Channels() []engine.Channel { return d.chans }
 func (d *Driver) ConfigureInput(addr string, cfg engine.ChannelConfig) error { return nil }
 
 // ConfigureOutput records the sink's options before the first Write: an
-// RPC target parsed from the address selector (Shelly relay switching)
-// and, for a plain-publish sink, the retain flag. A malformed selector or
-// an RPC target on a non-bool channel fails the bind loudly rather than
-// surfacing later inside a tick. Commands are never retained.
+// RPC target parsed from the address selector (Shelly Gen2 relay
+// switching), the plain-publish retain flag, and the plain-publish bool
+// payload style - "" (default "true"/"false") or "on-off" ("on"/"off",
+// the raw grammar Gen1 Shelly command topics expect; the Gen1 module's
+// binding generator sets it). A malformed selector, an RPC target on a
+// non-bool channel, or an unknown payload style fails the bind loudly
+// rather than surfacing later inside a tick. Commands are never retained.
 func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
 	ci, ok := d.info[addr]
 	if !ok {
@@ -187,12 +192,27 @@ func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
 	case "true", "1", "on", "yes":
 		retain = true
 	}
+	onOff := false
+	switch style := strings.ToLower(strings.TrimSpace(cfg["payload"])); style {
+	case "", "default":
+	case "on-off":
+		if ci.kind != engine.Bool {
+			return fmt.Errorf("mqttdriver: payload style %q requires a bool channel, got %s (node bound to %q)", style, kindName(ci.kind), addr)
+		}
+		if spec != nil {
+			return fmt.Errorf("mqttdriver: payload style %q does not apply to an rpc sink (node bound to %q)", style, addr)
+		}
+		onOff = true
+	default:
+		return fmt.Errorf("mqttdriver: unknown payload style %q (node bound to %q)", style, addr)
+	}
 	d.mu.Lock()
 	if spec != nil {
 		d.rpc[addr] = *spec
 		retain = false // an RPC command is not a retained state
 	}
 	d.retain[addr] = retain
+	d.onOff[addr] = onOff
 	d.mu.Unlock()
 	return nil
 }
@@ -301,6 +321,13 @@ func (d *Driver) Write(addr string, v engine.Value) error {
 		d.rpcSeq++
 		payload = formatRPC(spec, ci.topic, d.rpcSeq, v.B)
 		retain = false
+	} else if d.onOff[addr] && v.Kind == engine.Bool {
+		// the Gen1 command grammar: raw "on"/"off" instead of true/false
+		if v.B {
+			payload = []byte("on")
+		} else {
+			payload = []byte("off")
+		}
 	} else {
 		payload = formatPayload(v)
 	}
@@ -440,7 +467,9 @@ func parsePayload(kind engine.Kind, payload []byte) (engine.Value, bool) {
 		switch strings.ToLower(s) {
 		case "true", "1", "on":
 			return engine.BoolVal(true), true
-		case "false", "0", "off":
+		case "false", "0", "off", "overpower":
+			// "overpower" is the Gen1 protective trip: the relay IS off -
+			// dropping it would leave a bound source stuck at stale "on".
 			return engine.BoolVal(false), true
 		}
 		return engine.Value{}, false

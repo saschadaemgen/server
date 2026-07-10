@@ -179,7 +179,7 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 			connected[c.Username] = true
 		}
 	}
-	retained := s.mqtt.Retained("carvilon/#")
+	retained := s.mqttMonitorRetained()
 	lastSeen := map[string]int64{}
 	for _, m := range retained {
 		prefix := topicDevicePrefix(m.Topic)
@@ -193,13 +193,11 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 		prefix := mqttstore.DefaultPrefix(a.Username)
 		row := mqttMonitorDevice{
 			Username:      a.Username,
-			Prefix:        prefix,
 			Label:         a.Label,
 			Name:          a.Label,
 			ACLSubtree:    mqttstore.DefaultSubtree(a.Username),
 			LastConnectAt: a.LastConnectAt,
 			Connected:     connected[a.Username],
-			LastSeen:      lastSeen[prefix],
 			Category:      "other",
 		}
 		if row.Name == "" {
@@ -215,7 +213,14 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 			if d.Name != "" {
 				row.Name = d.Name
 			}
+			// A Gen1 device's tree lives under the fixed shellies/ root
+			// (mqtt_id = the broker username), not the carvilon/ prefix.
+			if d.Gen == shellystore.Gen1 {
+				prefix = "shellies/" + a.Username
+			}
 		}
+		row.Prefix = prefix
+		row.LastSeen = lastSeen[prefix]
 		if rules, rerr := s.mqttStore.ListACL(ctx, a.Username); rerr == nil {
 			row.ACLRules = len(rules)
 		}
@@ -295,10 +300,11 @@ func mqttLastConnectLabel(ms int64) string {
 	return time.UnixMilli(ms).Format("2006-01-02 15:04")
 }
 
-// topicDevicePrefix returns the "carvilon/<user>" device prefix of a
-// concrete topic, or "" when the topic is not under a device subtree.
+// topicDevicePrefix returns the "carvilon/<user>" (Gen2+/first-party) or
+// "shellies/<id>" (Gen1) device prefix of a concrete topic, or "" when
+// the topic is not under a device subtree.
 func topicDevicePrefix(topic string) string {
-	if !strings.HasPrefix(topic, "carvilon/") {
+	if !strings.HasPrefix(topic, "carvilon/") && !strings.HasPrefix(topic, "shellies/") {
 		return ""
 	}
 	parts := strings.SplitN(topic, "/", 3)
@@ -306,6 +312,13 @@ func topicDevicePrefix(topic string) string {
 		return ""
 	}
 	return parts[0] + "/" + parts[1]
+}
+
+// mqttMonitorRetained reads the retained snapshot of both device trees:
+// carvilon/# (Gen2+/first-party) and shellies/# (the fixed Gen1 root).
+func (s *Server) mqttMonitorRetained() []mqttbroker.MonitorMessage {
+	retained := s.mqtt.Retained("carvilon/#")
+	return append(retained, s.mqtt.Retained("shellies/#")...)
 }
 
 // handleAdminMQTTMonitorStream is the live SSE feed for the Device MQTT
@@ -339,7 +352,7 @@ func (s *Server) handleAdminMQTTMonitorStream(w http.ResponseWriter, r *http.Req
 		"broker":   s.mqttMonitorBrokerView(),
 		"stats":    s.mqttMonitorStats(),
 		"clients":  s.mqttMonitorConnectedUsers(),
-		"retained": s.mqtt.Retained("carvilon/#"),
+		"retained": s.mqttMonitorRetained(),
 	}
 	if err := writeMQTTSSE(w, "snapshot", snapshot); err != nil {
 		return

@@ -85,11 +85,13 @@ func (mo *Monitor) Subscribe(buffer int) (<-chan MonitorMessage, func()) {
 	}
 }
 
-// monitorHook forwards every publish under carvilon/ to the Monitor with
-// its full (bounded) payload. It is wired on every broker start next to
-// the console + authz hooks, so it is re-established across a
-// reconfigure. Topics outside carvilon/ (including $SYS) are ignored -
-// the page only watches the device tree.
+// monitorHook forwards every publish under the device trees to the
+// Monitor with its full (bounded) payload: carvilon/ (the Gen2+/first-
+// party prefix) and shellies/ (the fixed topic root Gen1 firmware
+// prepends - only its <id> segment is configurable). It is wired on
+// every broker start next to the console + authz hooks, so it is
+// re-established across a reconfigure. Topics outside the device trees
+// (including $SYS) are ignored - the page only watches devices.
 type monitorHook struct {
 	mqtt.HookBase
 	monitor *Monitor
@@ -100,10 +102,15 @@ func (h *monitorHook) ID() string { return "carvilon-mqtt-monitor" }
 func (h *monitorHook) Provides(b byte) bool { return b == mqtt.OnPublished }
 
 func (h *monitorHook) OnPublished(cl *mqtt.Client, pk packets.Packet) {
-	if !strings.HasPrefix(pk.TopicName, "carvilon/") {
+	if !monitoredTopic(pk.TopicName) {
 		return
 	}
 	h.monitor.publish(monitorMessageFromPacket(pk))
+}
+
+// monitoredTopic reports whether a topic belongs to a watched device tree.
+func monitoredTopic(topic string) bool {
+	return strings.HasPrefix(topic, "carvilon/") || strings.HasPrefix(topic, "shellies/")
 }
 
 // monitorMessageFromPacket renders a packet into a MonitorMessage with a

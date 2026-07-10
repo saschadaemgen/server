@@ -320,6 +320,28 @@ func (m *Manager) TLSServerAddr() (string, bool) {
 	return net.JoinHostPort(m.advertHost, strconv.Itoa(m.settings.TLSPort)), true
 }
 
+// TCPServerAddr returns the "host:port" a LAN device should dial for the
+// broker's PLAINTEXT listener - the tier Gen1 Shellies provision onto
+// (their firmware has no MQTT TLS; the documented second security tier:
+// unique per-device credentials + default-deny ACL, LAN-only). ok is
+// false when the broker is not running, OR the plaintext listener sits
+// on the loopback fallback (advertising 127.0.0.1 to an external device
+// would point the device at itself), OR the advertised host is not a
+// literal IP - deliberately stricter than the TLS sibling: a Gen1 box
+// gets exactly one dialable IP written into its flash, never a hostname
+// it may not resolve. Provisioning must fail loudly instead.
+func (m *Manager) TCPServerAddr() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.running || m.advertHost == "" {
+		return "", false
+	}
+	if ip := net.ParseIP(m.advertHost); ip == nil || ip.IsLoopback() {
+		return "", false
+	}
+	return net.JoinHostPort(m.advertHost, strconv.Itoa(m.settings.TCPPort)), true
+}
+
 // CACertPEM returns the broker's CA certificate as PEM, for uploading to a
 // device as its user CA so it can verify the CA-signed broker leaf. This is
 // the CA, never the leaf: a Shelly rejects a self-signed leaf pinned as a CA,
