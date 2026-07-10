@@ -13,7 +13,23 @@ import { socketCenter, findWireTo, addWire, removeWire, recomputeEndpoints, cutW
 import { renderMinimap, updateMinimap } from './minimap.js';
 import { openInspector } from './inspector.js';
 import { firePulse } from './sim.js';
-import { deleteSelected } from './nodes.js';
+import { deleteSelected, markRequiredPorts } from './nodes.js';
+
+// portKindOf returns a port's value kind ('bool'|'float'|'text') or
+// undefined for a decorative block whose ports carry no kind. kindsOK
+// permits a connection when either end's kind is unknown (decorative
+// blocks stay freely wireable) and enforces an exact match otherwise -
+// bool→bool, float→float, text→text.
+function portKindOf(sel){const i=sel.indexOf(':');const nid=sel.slice(0,i),pid=sel.slice(i+1);const nd=nodes[nid];if(!nd)return undefined;
+  const p=nd.def.ports.in.concat(nd.def.ports.out).find(x=>x.id===pid);return p&&p.kind;}
+function kindsOK(aSel,bSel){const ka=portKindOf(aSel),kb=portKindOf(bSel);return !ka||!kb||ka===kb;}
+// portOf returns the port descriptor for a "node:port" selector, or null.
+function portOf(sel){const i=sel.indexOf(':');const nd=nodes[sel.slice(0,i)];if(!nd)return null;
+  const pid=sel.slice(i+1);return nd.def.ports.in.concat(nd.def.ports.out).find(x=>x.id===pid)||null;}
+// isDrivenRelay reports whether an input is a Shelly relay control that is
+// already wired - the single-use rule: two graph sources must never fight
+// over one physical relay, so a second driver is refused (not replaced).
+function isDrivenRelay(inSel){const p=portOf(inSel);return !!p&&p.srole==='relay'&&wires.some(o=>o.to===inSel);}
 
 /* ===== pan / drag / marquee ===== */
 let mode=null,pan=null,drag=null,mq=null;
@@ -83,28 +99,43 @@ addEventListener('blur',()=>{if(spaceHand){spaceHand=false;applyToolCursor();}})
 
 /* ===== wiring (connect sockets, with whip on connect) ===== */
 let wiring=null;
-function startWiring(port,e){if(wiring)cancelWiring();const sel=port.dataset.port,dir=port.closest('.ports-out')?'out':'in';mode='wire';const tp=NS('path');tp.setAttribute('class','wire-temp');svg.appendChild(tp);wiring={sel,dir,tp};updateWireTemp(e);}
+function startWiring(port,e){if(wiring)cancelWiring();const sel=port.dataset.port,dir=port.classList.contains('io-out')?'out':'in';mode='wire';const tp=NS('path');tp.setAttribute('class','wire-temp');svg.appendChild(tp);wiring={sel,dir,tp};updateWireTemp(e);}
 function updateWireTemp(e){if(!wiring)return;const a=socketCenter(wiring.sel);if(!a)return;const cx=(e.clientX-S.tx)/S.scale,cy=(e.clientY-S.ty)/S.scale,dx=Math.max(40,Math.abs(cx-a.x)*0.5),from=wiring.dir==='out';
   wiring.tp.setAttribute('d',`M ${a.x} ${a.y} C ${a.x+(from?dx:-dx)} ${a.y}, ${cx+(from?-dx:dx)} ${cy}, ${cx} ${cy}`);
   clearTargetHi();const el=document.elementFromPoint(e.clientX,e.clientY),tp=el&&el.closest('.port');
-  if(tp){const td=tp.closest('.ports-out')?'out':'in';if(td!==wiring.dir&&tp.dataset.port.split(':')[0]!==wiring.sel.split(':')[0])tp.classList.add('wire-ok');}}
-function clearTargetHi(){document.querySelectorAll('.port.wire-ok').forEach(p=>p.classList.remove('wire-ok'));}
+  if(tp){const td=tp.closest('.io-out')?'out':'in';
+    if(td!==wiring.dir&&tp.dataset.port.split(':')[0]!==wiring.sel.split(':')[0])
+      tp.classList.add(kindsOK(wiring.sel,tp.dataset.port)?'wire-ok':'wire-bad');}}
+function clearTargetHi(){document.querySelectorAll('.port.wire-ok,.port.wire-bad').forEach(p=>p.classList.remove('wire-ok','wire-bad'));}
 function cancelWiring(){if(wiring&&wiring.tp)wiring.tp.remove();wiring=null;clearTargetHi();}
 function finishWiring(e){
   try{const el=document.elementFromPoint(e.clientX,e.clientY),tp=el&&el.closest('.port');
-    if(tp&&wiring){const tsel=tp.dataset.port,td=tp.closest('.ports-out')?'out':'in';let outSel,inSel;
+    if(tp&&wiring){const tsel=tp.dataset.port,td=tp.classList.contains('io-out')?'out':'in';let outSel,inSel;
       if(wiring.dir==='out'&&td==='in'){outSel=wiring.sel;inSel=tsel;}else if(wiring.dir==='in'&&td==='out'){outSel=tsel;inSel=wiring.sel;}
-      if(outSel&&inSel&&outSel.split(':')[0]!==inSel.split(':')[0])createEdge(outSel,inSel);}
+      if(outSel&&inSel&&outSel.split(':')[0]!==inSel.split(':')[0]){
+        // Type-mismatch guard: reject a bool→float/text (etc.) connection
+        // and flash the target so the reason is visible, rather than
+        // silently building a wire the run would refuse (kind_mismatch).
+        // A Shelly relay already driven is single-use: refuse a 2nd driver.
+        if(!kindsOK(outSel,inSel)||isDrivenRelay(inSel)){flashReject(tp);}
+        else createEdge(outSel,inSel);
+      }}
   }catch(err){console.warn('wire connect failed',err);}finally{cancelWiring();}}
+// flashReject briefly marks a port as an invalid drop target. Uses its own
+// class (not wire-bad) so the finally-clause's clearTargetHi - which strips
+// the hover wire-ok/wire-bad - does not wipe the flash the same tick.
+function flashReject(portEl){portEl.classList.add('io-reject');setTimeout(()=>portEl.classList.remove('io-reject'),500);}
 function createEdge(outSel,inSel){if(GRAPH.edges.some(x=>x.from===outSel&&x.to===inSel))return;const ex=findWireTo(inSel);if(ex)removeWire(ex);
-  const edge={from:outSel,to:inSel};GRAPH.edges.push(edge);const o=addWire(edge);if(o){o.vel={x:(Math.random()*2-1)*14,y:-34};firePulse(outSel+'>'+inSel);}renderMinimap();markDirty();if(selection.size===1)openInspector([...selection][0]);}
+  const edge={from:outSel,to:inSel};GRAPH.edges.push(edge);const o=addWire(edge);if(o){o.vel={x:(Math.random()*2-1)*14,y:-34};firePulse(outSel+'>'+inSel);}renderMinimap();markDirty();markRequiredPorts();if(selection.size===1)openInspector([...selection][0]);}
 function freePortsForAuto(id){const n=nodes[id].def,r=[];n.ports.in.forEach(p=>{if(!findWireTo(id+':'+p.id))r.push({sel:id+':'+p.id,dir:'in'});});n.ports.out.forEach(p=>r.push({sel:id+':'+p.id,dir:'out'}));return r;}
 function autoWireUpdate(){clearTargetHi();if(!drag||drag.items.length!==1)return;
   const id=drag.items[0].el.dataset.id;if(!nodes[id])return;let best=null,bestD=52;
   for(const fp of freePortsForAuto(id)){const a=socketCenter(fp.sel);if(!a)continue;
     for(const oid in nodes){if(oid===id)continue;const on=nodes[oid].def;
       const cands=fp.dir==='out'?on.ports.in.map(p=>({sel:oid+':'+p.id,dir:'in'})):on.ports.out.map(p=>({sel:oid+':'+p.id,dir:'out'}));
-      for(const tp of cands){if(tp.dir==='in'&&findWireTo(tp.sel))continue;const b=socketCenter(tp.sel);if(!b)continue;const dd=Math.hypot(a.x-b.x,a.y-b.y);
+      for(const tp of cands){if(tp.dir==='in'&&findWireTo(tp.sel))continue;if(!kindsOK(fp.sel,tp.sel))continue;
+        const inSel=fp.dir==='out'?tp.sel:fp.sel;if(isDrivenRelay(inSel))continue;
+        const b=socketCenter(tp.sel);if(!b)continue;const dd=Math.hypot(a.x-b.x,a.y-b.y);
         if(dd<bestD){bestD=dd;best={out:fp.dir==='out'?fp.sel:tp.sel,in:fp.dir==='out'?tp.sel:fp.sel,dragPort:fp.sel,targetPort:tp.sel};}}}}
   if(best){const a=socketCenter(best.dragPort),b=socketCenter(best.targetPort);
     if(a&&b){const el=nodes[id].el;el.style.top=(el.offsetTop-(a.y-b.y))+'px';recomputeEndpoints();}
@@ -129,7 +160,7 @@ export function selectWire(o){clearSel();deselectWire();selectedWire=o;o.g.class
 export function resetWireSelection(){deselectWire();}
 function deselectWire(){if(selectedWire){selectedWire.g.classList.remove('wsel');selectedWire=null;}if(wireDel)wireDel.classList.remove('show');}
 function updateWireDel(){if(!selectedWire||!wireDel)return;const sp=selectedWire.sp;wireDel.style.left=(sp.x*S.scale+S.tx)+'px';wireDel.style.top=(sp.y*S.scale+S.ty)+'px';wireDel.classList.add('show');}
-if(wireDel)wireDel.onclick=()=>{if(selectedWire){const w=selectedWire;deselectWire();cutWire(w);renderMinimap();markDirty();}};
+if(wireDel)wireDel.onclick=()=>{if(selectedWire){const w=selectedWire;deselectWire();cutWire(w);renderMinimap();markDirty();markRequiredPorts();}};
 
 /* ===== align / distribute ===== */
 function alignSel(type){
@@ -156,4 +187,4 @@ document.querySelectorAll('#rtools [data-al]').forEach(b=>b.onclick=()=>alignSel
 
 /* ===== wire-delete cursor follow + keyboard ===== */
 function tickWireDel(){if(selectedWire)updateWireDel();requestAnimationFrame(tickWireDel);}requestAnimationFrame(tickWireDel);
-addEventListener('keydown',e=>{const tag=(e.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea')return;if(e.key==='Escape'){clearSel();deselectWire();}else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();if(selectedWire){const w=selectedWire;deselectWire();cutWire(w);renderMinimap();markDirty();}else deleteSelected();}else if(e.key==='v'||e.key==='V')setTool('select');else if(e.key==='h'||e.key==='H')setTool('hand');});
+addEventListener('keydown',e=>{const tag=(e.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea')return;if(e.key==='Escape'){clearSel();deselectWire();}else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();if(selectedWire){const w=selectedWire;deselectWire();cutWire(w);renderMinimap();markDirty();markRequiredPorts();}else deleteSelected();}else if(e.key==='v'||e.key==='V')setTool('select');else if(e.key==='h'||e.key==='H')setTool('hand');});

@@ -28,7 +28,12 @@ body{font-family:var(--font);color:var(--text);overflow:hidden;-webkit-font-smoo
 #viewport{position:fixed;inset:0;z-index:2;overflow:hidden;cursor:default;touch-action:none}
 #viewport.tool-hand,#viewport.tool-hand *{cursor:grab}
 #viewport.panning,#viewport.panning *{cursor:grabbing}
-#world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+/* No permanent will-change here: a permanently-promoted layer is
+   rasterized once at natural resolution and the compositor bitmap-scales
+   it on zoom -> blurry text at scale>1. transform.js promotes #world only
+   DURING an active pan/zoom (smooth) and demotes it when idle, so the
+   browser re-rasterizes the content at the current zoom (crisp). */
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
 #wires{position:absolute;left:0;top:0;width:10px;height:10px;overflow:visible;pointer-events:none}
 
 /* marquee */
@@ -44,10 +49,14 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 @keyframes flow{to{stroke-dashoffset:-28}}
 
 /* nodes */
+/* Opaque background, no backdrop-filter. The zoom-blur's real cause is
+   #world's layer promotion (fixed in transform.js: promote only during a
+   gesture, demote at idle so it re-rasterizes crisp). Nodes stay opaque
+   with NO backdrop-filter so they never become their own bitmap-scaled
+   layer under the scaled #world — crisp text wins over the glass effect. */
 .node{position:absolute;width:214px;border-radius:15px;cursor:grab;
-  background:linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);border:1px solid var(--border);
+  background:linear-gradient(180deg, #16181c 0%, #0e0f12 100%);border:1px solid var(--border);
   box-shadow:0 20px 44px -18px rgba(0,0,0,.85), 0 2px 8px -2px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
-  backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);
   transition:box-shadow .25s ease, border-color .25s ease;}
 .node:hover{border-color:var(--border-bright);box-shadow:0 24px 56px -18px rgba(0,0,0,.9), 0 0 26px -6px var(--cat), inset 0 1px 0 rgba(255,255,255,.07);}
 .node.dragging{cursor:grabbing;transition:none;box-shadow:0 34px 70px -20px rgba(0,0,0,.95), 0 0 40px -6px var(--cat);}
@@ -62,7 +71,7 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .node.lit .node-icon{box-shadow:0 0 13px -4px var(--cat), inset 0 0 10px -6px var(--cat)}
 .node::before{content:"";position:absolute;inset:0;border-radius:15px;pointer-events:none;z-index:0;overflow:hidden;background:radial-gradient(58% 72% at 14% 4%, color-mix(in srgb,var(--cat) 16%,transparent), transparent 50%)}
 .node-head,.node-body{position:relative;z-index:1}
-.node-accent,.ports{z-index:1}
+.node-accent,.node-io{z-index:1}
 .node-icon svg{width:18px;height:18px;stroke-width:2}
 .node-titles{min-width:0}
 .node-cat{font:600 9.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--cat);opacity:.92;margin-bottom:4px}
@@ -104,18 +113,204 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .ctl-prog{height:3px;border-radius:99px;background:rgba(120,150,180,.14);overflow:hidden;margin-top:2px}
 .ctl-prog>i{display:block;height:100%;width:0;background:var(--cat);box-shadow:0 0 8px var(--cat)}
 
-/* ports + tooltip */
-.ports{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:14px}
-.ports-in{left:-7px}.ports-out{right:-7px}
-.port{position:relative}
-.socket{width:15px;height:15px;border-radius:50%;display:block;
+/* ports: a labeled I/O band — inputs read left→right (socket · name ·
+   value), outputs mirror to the right edge. Sockets straddle the card
+   border so wires meet the card; a thin ring colours each socket by value
+   kind (bool / float / text). A per-port value slot shows the live 1/0,
+   number or string during a run. */
+.node-io{position:relative;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0 5px;margin-top:2px;border-top:1px solid rgba(255,255,255,.05)}
+.io-col{display:flex;flex-direction:column;gap:9px;min-width:0;max-width:calc(50% - 6px);padding:0 13px}
+.io-col-in{align-items:flex-start}
+.io-col-out{align-items:flex-end;margin-left:auto}
+.io-row{position:relative;display:flex;align-items:center;gap:7px;min-width:0;max-width:100%;cursor:crosshair}
+.io-name{font:600 10px/1 var(--mono);letter-spacing:.03em;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.io-val{font:800 11px/1 var(--mono);color:var(--faint);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:64px}
+.io-val:empty{display:none}
+.socket{position:relative;width:15px;height:15px;border-radius:50%;display:block;flex:none;
   background:radial-gradient(circle at 50% 50%, #07100f 0 32%, var(--wire) 37% 62%, color-mix(in srgb,var(--wire) 14%,transparent) 65%);
-  border:1px solid color-mix(in srgb,var(--wire) 65%,transparent);box-shadow:0 0 8px -1px var(--wire-soft), inset 0 0 4px rgba(0,0,0,.6);transition:box-shadow .2s}
+  border:1px solid color-mix(in srgb,var(--wire) 65%,transparent);box-shadow:0 0 8px -1px var(--wire-soft), inset 0 0 4px rgba(0,0,0,.6);transition:box-shadow .2s,transform .12s}
+.io-in .socket{margin-left:-20.5px}   /* straddle the left card edge (13px pad + 7.5) */
+.io-out .socket{margin-right:-20.5px} /* straddle the right card edge */
+/* kind ring: an independent coloured outline, so it never fights the
+   per-edge wire colour on the socket fill. */
+.socket::before{content:"";position:absolute;inset:-3px;border-radius:50%;border:1.5px solid transparent;pointer-events:none;transition:border-color .2s}
+.socket.k-bool::before{border-color:color-mix(in srgb,#34E4EA 55%,transparent)}
+.socket.k-float::before{border-color:color-mix(in srgb,#F6B23C 62%,transparent)}
+.socket.k-text::before{border-color:color-mix(in srgb,#B18CFF 62%,transparent)}
 .node:hover .socket{box-shadow:0 0 13px 0 var(--wire), inset 0 0 4px rgba(0,0,0,.6)}
-.port::after{content:attr(data-tip);position:absolute;bottom:130%;left:50%;transform:translateX(-50%) translateY(4px);
-  font:500 9px/1 var(--mono);letter-spacing:.06em;color:var(--cyan-bright);background:rgba(8,12,16,.92);border:1px solid var(--border);
-  padding:4px 6px;border-radius:5px;white-space:nowrap;opacity:0;pointer-events:none;transition:.15s;text-transform:uppercase}
-.port:hover::after{opacity:1;transform:translateX(-50%) translateY(0)}
+.io-row:hover .socket{transform:scale(1.14)}
+/* live-carrying port: the value badge and socket brighten to the card accent */
+.io-row.io-on .io-val{color:var(--cat)}
+.io-row.io-on .socket{box-shadow:0 0 10px 1px var(--cat), inset 0 0 4px rgba(0,0,0,.5)}
+/* required input still unwired: amber ring + amber label, flagged at the
+   exact port before a run is ever attempted. */
+.io-row.io-req .socket::before{border-color:#F6B23C;border-width:2px}
+.io-row.io-req .io-name{color:#F6B23C}
+.io-row.io-req .io-name::after{content:" *";color:#F6B23C}
+/* a Shelly relay control that is already driven: single-use, shown "in
+   use" (a solid accent socket) — a second driver is refused at wiring. */
+.io-row.io-driven .socket{box-shadow:0 0 0 2px var(--cat),0 0 10px -2px var(--cat)}
+.io-row.io-driven .io-name{color:var(--cat)}
+
+/* ===== Shelly device faceplate =====================================
+   A bigger, symmetric device panel: header (identity + total power +
+   online) over one row per channel — a blue bordered display (name ·
+   live watts · on/off, no 1/0), a divider, a clickable relay switch, a
+   schedule clock slot. Graph ports stay minimal at the row edges. */
+.node-shelly{width:392px}
+.sh-head{position:relative;z-index:1;display:flex;align-items:center;gap:11px;padding:13px 14px 11px;border-bottom:1px solid rgba(255,255,255,.06)}
+.sh-badge{flex:none;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--cat);
+  background:radial-gradient(120% 120% at 30% 20%, color-mix(in srgb,var(--cat) 30%,transparent), color-mix(in srgb,var(--cat) 7%,transparent));
+  border:1px solid color-mix(in srgb,var(--cat) 38%,transparent);box-shadow:0 0 8px -4px var(--cat), inset 0 0 10px -7px var(--cat)}
+.sh-badge svg{width:20px;height:20px;stroke-width:2}
+.sh-id{min-width:0;flex:1}
+.sh-name{font:700 14px/1.15 var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sh-model{font:600 10px/1.2 var(--mono);letter-spacing:.05em;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.sh-meta{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.sh-total{font:800 15px/1 var(--mono);color:var(--cat)}
+.sh-u{font:700 9px/1 var(--mono);color:var(--muted);margin-left:2px}
+.sh-online{width:9px;height:9px;border-radius:50%;background:rgba(120,150,180,.35);box-shadow:inset 0 0 3px rgba(0,0,0,.5);transition:.2s}
+.sh-online.on{background:#43E08A;box-shadow:0 0 8px -1px #43E08A}
+.sh-rows{position:relative;z-index:1;padding:6px 14px 12px;display:flex;flex-direction:column;gap:8px}
+/* every channel row identical height (hard symmetry requirement): equal
+   padding on all; the separator is a border that does not add height. */
+.sh-row{position:relative;display:flex;align-items:center;gap:11px;min-height:52px;padding:6px 0}
+.sh-row + .sh-row{border-top:1px solid rgba(255,255,255,.045)}
+/* labeled ports: a compact socket at the card edge + a short label
+   (Anschlussbezeichnung). Sockets are smaller than the busy old cluster
+   and every one is named. */
+.sh-inport{flex:none;display:flex;align-items:center;gap:5px}
+/* the input socket straddles the edge with a negative margin; pull its
+   label back so the socket↔label gap matches the output side (aligned). */
+.sh-inport .sh-plabel{margin-left:-8px}
+.sh-pout{flex:none;display:flex;flex-direction:column;justify-content:center;gap:6px}
+.sh-orow{display:flex;align-items:center;justify-content:flex-end;gap:5px}
+.sh-plabel{font:600 8.5px/1 var(--mono);letter-spacing:.03em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
+.sh-pin .socket,.sh-po .socket{width:13px;height:13px}
+.sh-pin .socket::before,.sh-po .socket::before{inset:-2px;border-width:1px}
+.sh-pin .socket{margin-left:-20.5px}   /* straddle the left card edge */
+.sh-po .socket{margin-right:-20.5px}   /* straddle the right card edge */
+.sh-pout{margin-right:-6px}
+/* blue channel display — proportionate, name + live watts + on/off state */
+.sh-disp{flex:1;min-width:0;cursor:pointer;border-radius:9px;padding:8px 11px;
+  border:1px solid color-mix(in srgb,#38BDF8 34%,transparent);
+  background:linear-gradient(180deg, color-mix(in srgb,#38BDF8 14%,transparent), color-mix(in srgb,#1E3A5F 20%,transparent));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);transition:border-color .2s, box-shadow .2s}
+.sh-disp:hover{border-color:color-mix(in srgb,#38BDF8 55%,transparent)}
+.sh-row.on .sh-disp{border-color:color-mix(in srgb,#43E08A 50%,transparent);
+  background:linear-gradient(180deg, color-mix(in srgb,#43E08A 15%,transparent), color-mix(in srgb,#1E3A5F 20%,transparent));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 0 16px -9px #43E08A}
+.sh-disp-top{display:flex;align-items:center;gap:7px;padding-bottom:7px;margin-bottom:7px;border-bottom:1px solid color-mix(in srgb,#38BDF8 16%,transparent)}
+.sh-disp-name{flex:1;min-width:0;font:700 12.5px/1.15 var(--font);color:#bfe6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
+.sh-in-led{flex:none;width:7px;height:7px;border-radius:50%;background:rgba(120,150,180,.3);transition:.2s}
+.sh-in-led.on{background:#F6B23C;box-shadow:0 0 7px -1px #F6B23C}
+.sh-clock{flex:none;color:#7fb8d8;display:inline-flex}
+.sh-clock svg{width:13px;height:13px}
+.sh-clock[hidden]{display:none}
+/* metering grid: W / V / A / Hz — a tidy 2×2 readout, each value + unit in
+   full (no truncation), the device total on the header. Premium, symmetric. */
+.sh-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 16px}
+.sh-m{display:flex;align-items:baseline;gap:4px;white-space:nowrap}
+.sh-mv{font:800 15px/1 var(--mono);color:#eef4fb;font-variant-numeric:tabular-nums}
+.sh-row.on .sh-mv{color:#fff}
+.sh-ml{font:700 9px/1 var(--mono);color:#7f93a6;letter-spacing:.04em}
+.sh-disp-foot{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)}
+.sh-disp-state{flex:none;font:700 9.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.sh-row.on .sh-disp-state{color:#43E08A}
+.sh-next{min-width:0;font:600 9px/1 var(--mono);color:#8fb0c8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.sh-next:empty{display:none}
+.sh-div{flex:none;align-self:stretch;width:1px;margin:4px 0;background:linear-gradient(180deg,transparent,rgba(255,255,255,.14),transparent)}
+/* clickable relay switch */
+.sh-sw{flex:none;padding:0;border:none;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sh-track{display:block;width:42px;height:23px;border-radius:999px;background:rgba(120,150,180,.18);border:1px solid var(--border);position:relative;transition:.2s}
+.sh-thumb{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#cfd8e2;transition:.2s}
+.sh-row.on .sh-track{background:color-mix(in srgb,#43E08A 62%,transparent);border-color:transparent}
+.sh-row.on .sh-thumb{left:21px;background:#fff;box-shadow:0 0 10px #43E08A}
+.sh-sw:hover .sh-track{border-color:var(--border-bright)}
+.sh-sw.sh-locked{opacity:.45;cursor:not-allowed}
+.sh-sw.sh-locked:hover .sh-track{border-color:var(--border)}
+
+/* ===== Shelly settings IN THE INSPECTOR SIDEBAR (not a modal) =====
+   Device view (channel picker) and channel view (config + weekly schedule),
+   rendered into #insp-props. Timer and Weekly Schedule are distinct blocks. */
+.si-sec{padding:11px 0;border-top:1px solid rgba(255,255,255,.06)}
+.si-sec:first-child{border-top:none}
+.si-h{display:flex;align-items:center;gap:8px;font:700 9.5px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--cyan-bright);margin-bottom:9px}
+.si-auto{display:inline-flex;align-items:center;gap:3px;margin-left:auto;padding:2px 6px;border-radius:999px;
+  font:700 8px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:#43E08A;
+  background:color-mix(in srgb,#43E08A 12%,transparent);border:1px solid color-mix(in srgb,#43E08A 30%,transparent)}
+.si-auto svg{width:9px;height:9px}
+.si-hint{font:500 10px/1.35 var(--font);color:var(--faint);margin:-2px 0 8px}
+.si-none{font:500 11px/1.3 var(--font);color:var(--faint);padding:2px 0}
+.si-f{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0}
+.si-f-l{font:500 11.5px/1.2 var(--font);color:var(--text);min-width:0}
+.si-f-c{flex:none;display:inline-flex;align-items:center;gap:6px}
+.si-i{background:rgba(120,150,180,.08);border:1px solid rgba(120,150,180,.16);border-radius:6px;color:var(--text);
+  font:600 11.5px/1 var(--mono);padding:6px 8px;outline:none;transition:border-color .15s}
+.si-i:focus{border-color:var(--cat-input)}
+input.si-i[type=text]{width:120px}
+input.si-n{width:58px;text-align:right}
+select.si-i{cursor:pointer}
+.si-num{display:inline-flex;align-items:center;gap:5px}
+.si-suf{font:700 9px/1 var(--mono);color:var(--muted)}
+.si-st{font:600 8.5px/1 var(--mono);color:transparent;min-width:26px;text-align:right}
+.si-st.ok{color:#43E08A}.si-st.err{color:#ff9a9a}
+.si-tog{padding:0;border:none;background:none;cursor:pointer}
+.si-tog-t{display:block;width:38px;height:21px;border-radius:999px;background:rgba(120,150,180,.16);border:1px solid var(--border);position:relative;transition:.2s}
+.si-tog-th{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#cfd8e2;transition:.2s}
+.si-tog.on .si-tog-t{background:color-mix(in srgb,var(--cat-input) 60%,transparent);border-color:transparent}
+.si-tog.on .si-tog-th{left:19px;background:#fff;box-shadow:0 0 8px var(--cat-input)}
+.si-load{padding:18px 4px;text-align:center;color:var(--muted);font:500 11.5px/1.4 var(--font)}
+.si-load.err{color:#ff9a9a}
+/* device view */
+.si-chans{display:flex;flex-direction:column;gap:6px}
+.si-chan{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(120,150,180,.14);
+  background:rgba(120,150,180,.05);color:var(--text);font:600 12px/1 var(--font);cursor:pointer;transition:.15s;text-align:left}
+.si-chan:hover{border-color:var(--cat);background:rgba(120,150,180,.1)}
+.si-chan i{margin-left:auto;width:14px;height:14px;color:var(--muted)}
+.si-chan-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,150,180,.4)}
+.si-note{font:500 10.5px/1.4 var(--font);color:var(--faint);margin-top:12px}
+/* channel view */
+.si-back{display:inline-flex;align-items:center;gap:3px;padding:4px 2px;border:none;background:none;cursor:pointer;color:var(--muted);font:600 11px/1 var(--font)}
+.si-back:hover{color:var(--text)}
+.si-back i{width:14px;height:14px}
+.si-chtitle{font:800 15px/1 var(--font);color:var(--text);margin:4px 0 6px}
+/* weekly schedule editor */
+.si-sched-msg{font:600 10px/1.3 var(--mono);color:#ff9a9a;margin-top:6px}
+.si-srow{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;border:1px solid rgba(120,150,180,.14);background:rgba(120,150,180,.05);margin-bottom:6px}
+.si-srow-i{flex:1;min-width:0}
+.si-srow-t{font:700 11px/1.2 var(--mono);color:var(--text)}
+.si-on{color:#43E08A}.si-off{color:var(--muted)}
+.si-srow-d{font:600 9.5px/1.2 var(--mono);color:var(--faint);letter-spacing:.04em;margin-top:2px}
+.si-del{flex:none;width:26px;height:26px;border-radius:6px;border:none;cursor:pointer;background:rgba(255,120,120,.08);color:#ff9a9a;display:grid;place-items:center}
+.si-del:hover{background:rgba(255,120,120,.18)}
+.si-del svg{width:13px;height:13px}
+.si-add{margin-top:8px;padding:9px;border-radius:8px;border:1px dashed rgba(120,150,180,.22);background:rgba(120,150,180,.03)}
+.si-dows{display:flex;gap:4px;margin-bottom:8px}
+.si-dow{flex:1;padding:5px 0;border-radius:6px;border:1px solid rgba(120,150,180,.16);background:rgba(120,150,180,.05);color:var(--muted);font:700 9.5px/1 var(--mono);cursor:pointer;transition:.12s}
+.si-dow.on{border-color:transparent;background:color-mix(in srgb,var(--cat-input) 55%,transparent);color:#04121a}
+.si-times{display:flex;gap:8px;margin-bottom:8px}
+.si-tl{flex:1;display:flex;flex-direction:column;gap:3px;font:600 9px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.si-time{background:rgba(120,150,180,.08);border:1px solid rgba(120,150,180,.16);border-radius:6px;color:var(--text);font:600 11.5px/1 var(--mono);padding:6px 7px;outline:none}
+.si-time:focus{border-color:var(--cat-input)}
+.si-addbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px;border-radius:7px;
+  border:1px solid color-mix(in srgb,var(--cat-input) 45%,transparent);background:color-mix(in srgb,var(--cat-input) 16%,transparent);
+  color:#eafcff;font:600 11px/1 var(--font);cursor:pointer}
+.si-addbtn:hover{background:color-mix(in srgb,var(--cat-input) 26%,transparent)}
+.si-addbtn:disabled{opacity:.5;cursor:default}
+.si-addbtn svg{width:13px;height:13px}
+/* port hover tooltip — the standard mechanism for EVERY port (io-band and
+   the Shelly faceplate), so every connection explains itself. */
+.port[data-tip]{position:relative}
+.port[data-tip]::after{content:attr(data-tip);position:absolute;bottom:135%;left:50%;transform:translateX(-50%) translateY(4px);z-index:6;
+  font:500 9px/1.25 var(--mono);letter-spacing:.04em;color:var(--cyan-bright);background:rgba(8,12,16,.96);border:1px solid var(--border);
+  padding:5px 7px;border-radius:5px;white-space:nowrap;max-width:220px;opacity:0;pointer-events:none;transition:.15s}
+.port[data-tip]:hover::after{opacity:1;transform:translateX(-50%) translateY(0)}
+/* the faceplate's descriptive tips are sentences — allow wrapping, don't shout */
+.sh-pin[data-tip]::after,.sh-po[data-tip]::after{white-space:normal;text-transform:none;width:180px;text-align:center;left:auto}
+.sh-pin[data-tip]::after{left:0}
+.sh-po[data-tip]::after{right:0;transform:translateY(4px)}
+.sh-po[data-tip]:hover::after{transform:translateY(0)}
 
 /* top bar */
 .topbar{position:fixed;top:0;left:0;right:0;height:54px;z-index:20;display:flex;align-items:center;gap:14px;padding:0 16px;
@@ -449,6 +644,13 @@ button.crumb-btn:focus,button.crumb-btn:focus-visible{outline:none}
 .fx-part{position:absolute;left:50%;top:50%;width:5px;height:5px;border-radius:50%;background:var(--cat);box-shadow:0 0 9px var(--cat);animation:fxPart .52s ease-out forwards}
 .wire-temp{fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-dasharray:5 6;opacity:.9;filter:drop-shadow(0 0 5px rgba(59,130,246,.6))}
 .port.wire-ok .socket{box-shadow:0 0 0 3px rgba(59,130,246,.45),0 0 16px var(--accent)!important;transform:scale(1.3)}
+/* type-mismatch drop target: a red ring so the reason a wire won't connect
+   is visible (bool→float etc.), rather than silently refusing. */
+.port.wire-bad .socket{box-shadow:0 0 0 3px rgba(255,92,92,.5),0 0 16px #ff5c5c!important;transform:scale(1.2)}
+.port.wire-bad{cursor:not-allowed}
+/* rejected drop (type mismatch): a brief red pulse at the target port */
+.port.io-reject .socket{box-shadow:0 0 0 3px rgba(255,92,92,.55),0 0 18px #ff5c5c!important;animation:ioReject .5s ease}
+@keyframes ioReject{0%,100%{transform:scale(1)}30%{transform:scale(1.35)}}
 .wire-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
 .wire.wsel .wire-base{stroke-width:3.4}
 .wire.wsel{filter:drop-shadow(0 0 3px #fff) drop-shadow(0 0 9px var(--wire-soft))}
@@ -537,8 +739,15 @@ body.dock-resizing{user-select:none;-webkit-user-select:none;cursor:ns-resize}
 /* ===== live run (Run): the wires flow while the engine runs (the
    Signal Flow toggle gates it); wires carrying a true signal glow
    brighter. Idle / after Stop = static. The Run button becomes Stop. ===== */
+/* Loxone-style online view: while running, a wire carrying a live signal
+   (true bool / non-zero number / non-empty text) is bright + bold; an
+   inactive wire is dimmed, so the flow of 1s and 0s is readable at a glance. */
+body.running .wire{opacity:.4;transition:opacity .18s ease}
+body.running .wire.live{opacity:1}
+body.running .wire.live .wire-base{stroke-width:3}
 body.running.signals-on .wire.live .wire-flow{opacity:.8}
 body.running .wire.live{filter:drop-shadow(0 0 3px var(--wire-soft)) drop-shadow(0 0 10px var(--wire-soft))}
+body.running .wire.wsel{opacity:1}
 .tbtn.running{background:rgba(244,80,80,.16);border-color:rgba(244,120,120,.5);color:#ffd9d9}
 .tbtn.running:hover{background:rgba(244,80,80,.24);border-color:rgba(244,140,140,.65);color:#fff}
 .tbtn.running .lead{color:#ff7a7a}

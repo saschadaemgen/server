@@ -13,13 +13,21 @@ import { attachDrag, moveGhost, dropNew } from './nodes.js';
 import { renderMinimap } from './minimap.js';
 
 export const NAME_ICON={},NAME_CAT={},NAME_TYPE={},NAME_CHANNEL={},NAME_UNIT={};
+// The catalog's real port metadata per block title (name/kind/optional),
+// so the editor can build labeled, typed ports from the single source of
+// truth instead of inventing generic ones. Read by nodes.js on drop.
+export const NAME_INPUTS={},NAME_OUTPUTS={};
+// Per-device Shelly module payload (mac/prefix/model/channels), keyed by
+// block title, so a dropped Shelly module builds its ports + mqtt: bindings
+// + faceplate from the adopted device. Read by nodes.js.
+export const NAME_SHELLY={};
 
 // Categories beyond the five base ones (input/logic/time/memory/output)
 // surface only when the runtime catalog includes them - "gpio" on a GPIO
 // host, "system" where telemetry is readable, "nfc" when a tag reader is
 // detected, "telegram" while the bot runs. Their display metadata lives
 // here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'}};
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of
@@ -35,8 +43,11 @@ export async function initPalette(){
    for(const b of (data.blocks||[])){
      if(!CAT[b.category])CAT[b.category]=EXTRA_CATS[b.category]||{color:'#7f8c99',label:b.category.toUpperCase(),icon:'box'};
      NAME_TYPE[b.title]=b.type;
+     NAME_INPUTS[b.title]=b.inputs||[];
+     NAME_OUTPUTS[b.title]=b.outputs||[];
      if(b.channel)NAME_CHANNEL[b.title]=b.channel;
      if(b.unit)NAME_UNIT[b.title]=b.unit;
+     if(b.shelly)NAME_SHELLY[b.title]=b.shelly;
      (LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);
    }
  }catch(err){console.error('designer: block catalog load failed',err);}
@@ -48,15 +59,15 @@ export async function initPalette(){
  if(!CAT.nfc)CAT.nfc=EXTRA_CATS.nfc;
  const libEl=document.getElementById('lib');
  function mkItem(name,icon,cat,c,implemented){const it=document.createElement('div');it.className='lib-item';it.dataset.name=name;it.dataset.cat=cat;it.dataset.impl=implemented?'1':'0';it.style.setProperty('--gc',c.color);
-   if(!implemented)it.title=name+' · Katalog-Eintrag — Engine-Node folgt';
+   if(!implemented)it.title=name+' · catalog entry — engine node to follow';
    it.innerHTML=`<span class="li-ic" title="Activate / deactivate"><i data-lucide="${icon}"></i></span><span class="li-name">${name}</span>`;return it;}
  for(const [cat,items] of Object.entries(LIBRARY)){
    const c=CAT[cat],g=document.createElement('div');g.className='lib-group collapsed';g.dataset.cat=cat;
    g.dataset.view='active';
-   g.innerHTML=`<div class="lib-glabel"><div class="glabel-track"><div class="glabel-colors" role="listbox" aria-label="Kategoriefarbe wählen"></div><div class="glabel-main"><span class="gd" title="Farbe ändern" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Aktive anzeigen">${items.length}</span><span class="gcount-off zero" title="Ausgeblendete anzeigen">0</span><i class="chev" data-lucide="chevron-down"></i></div></div></div><div class="lib-items"></div>`;
+   g.innerHTML=`<div class="lib-glabel"><div class="glabel-track"><div class="glabel-colors" role="listbox" aria-label="Choose category colour"></div><div class="glabel-main"><span class="gd" title="Change colour" style="--gc:${c.color}"></span><span class="gname">${c.label}</span><span class="gcount" title="Show active">${items.length}</span><span class="gcount-off zero" title="Show hidden">0</span><i class="chev" data-lucide="chevron-down"></i></div></div></div><div class="lib-items"></div>`;
    const iw=g.querySelector('.lib-items');
    for(const [name,icon,implemented] of items){NAME_ICON[name]=icon;NAME_CAT[name]=cat;iw.appendChild(mkItem(name,icon,cat,c,implemented));}
-   if(items.length===0&&cat==='nfc'){const e=document.createElement('div');e.className='lib-empty';e.textContent='Kein Leser erkannt — sobald einer am Bus antwortet, erscheint er hier.';iw.appendChild(e);}
+   if(items.length===0&&cat==='nfc'){const e=document.createElement('div');e.className='lib-empty';e.textContent='No reader detected — once one answers on the bus, it appears here.';iw.appendChild(e);}
    // Accordion: at most one category open at a time. Clicking a closed
    // group closes the others and opens it; clicking the open one closes it.
    g.querySelector('.lib-glabel').addEventListener('click',()=>{if(g.classList.contains('coloring'))return;const willOpen=g.classList.contains('collapsed');libEl.querySelectorAll('.lib-group').forEach(x=>x.classList.add('collapsed'));if(willOpen)g.classList.remove('collapsed');});
@@ -79,7 +90,7 @@ export async function initPalette(){
  function buildCatColors(g,cat){const host=g.querySelector('.glabel-colors');if(!host)return;host.innerHTML='';
    const cur=CAT[cat].color.toLowerCase();
    PALETTE.forEach(col=>{const s=document.createElement('button');s.type='button';s.className='gsw'+(col.toLowerCase()===cur?' sel':'');s.style.setProperty('--swc',col);s.dataset.col=col;s.title=col;host.appendChild(s);});
-   const cu=document.createElement('button');cu.type='button';cu.className='gsw gsw-custom';cu.title='Eigene Farbe…';cu.setAttribute('aria-label','Eigene Farbe wählen');
+   const cu=document.createElement('button');cu.type='button';cu.className='gsw gsw-custom';cu.title='Custom colour…';cu.setAttribute('aria-label','Choose a custom colour');
    cu.innerHTML='<i data-lucide="pipette"></i>';
    const inp=document.createElement('input');inp.type='color';inp.className='gsw-input';inp.value=/^#[0-9a-f]{6}$/i.test(CAT[cat].color)?CAT[cat].color:'#2dd4ef';cu.appendChild(inp);
    inp.addEventListener('input',()=>setCategoryColor(cat,inp.value));
@@ -111,7 +122,7 @@ export async function initPalette(){
  try{const s=JSON.parse(localStorage.getItem(FAV_KEY)||'[]');if(Array.isArray(s))favorites=s.filter(n=>typeof n==='string'&&NAME_CAT[n]).slice(0,FAV_MAX);}catch(_){/* fresh start */}
  function saveFavorites(){try{localStorage.setItem(FAV_KEY,JSON.stringify(favorites));}catch(_){/* private mode */}}
  const favSec=document.createElement('div');favSec.className='fav-sec';favSec.innerHTML='<div class="fav-row" id="fav-row"></div>'
-   +'<div class="fav-pop" id="fav-pop" role="tooltip">Noch frei — das Symbol eines Moduls in der Liste <b>lange gedrückt halten</b>, um es hier als Favorit abzulegen.</div>';
+   +'<div class="fav-pop" id="fav-pop" role="tooltip">Empty — <b>press and hold</b> a module\'s icon in the list to pin it here as a favourite.</div>';
  libEl.parentNode.insertBefore(favSec,libEl);const favRow=favSec.querySelector('#fav-row');
  // a touch long-press on a favourite must feed the hold timer, not the
  // browser's context menu (touch-action:none in CSS keeps scrolling off).
@@ -122,7 +133,7 @@ export async function initPalette(){
  function renderFavorites(){favRow.innerHTML='';favorites.forEach(name=>{const cat=NAME_CAT[name];if(!cat)return;const it=document.createElement('div');it.className='fav-item';it.dataset.name=name;it.dataset.cat=cat;it.style.setProperty('--gc',CAT[cat].color);it.title=name+' · hold to remove';
    it.innerHTML=`<i data-lucide="${NAME_ICON[name]||CAT[cat].icon}"></i>`;
    favRow.appendChild(it);attachFav(it);});
-   for(let i=favorites.length;i<FAV_MAX;i++){const s=document.createElement('button');s.type='button';s.className='fav-slot';s.title='Freier Favoriten-Platz';s.setAttribute('aria-label','Freier Favoriten-Platz — Hinweis anzeigen');s.innerHTML='<i data-lucide="plus"></i>';
+   for(let i=favorites.length;i<FAV_MAX;i++){const s=document.createElement('button');s.type='button';s.className='fav-slot';s.title='Empty favourite slot';s.setAttribute('aria-label','Empty favourite slot — show hint');s.innerHTML='<i data-lucide="plus"></i>';
      s.onclick=e=>{e.stopPropagation();favPop.classList.toggle('show');};favRow.appendChild(s);}
    if(window.lucide)lucide.createIcons();}
  function addFavorite(name){if(!name||favorites.includes(name)||favorites.length>=FAV_MAX)return false;favorites.unshift(name);saveFavorites();renderFavorites();return true;}

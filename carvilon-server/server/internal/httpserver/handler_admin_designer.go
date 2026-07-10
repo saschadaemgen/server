@@ -9,7 +9,10 @@ import (
 
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/hostinfo"
+	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/nfc"
+	"carvilon.local/server/internal/shellycaps"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/sysmetrics"
 	"carvilon.local/server/web/designer"
 )
@@ -59,8 +62,68 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	// bot enabled with a token set (the telegram: driver binds to the
 	// manager's Conn).
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning()),
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning(), s.shellyDevicesForCatalog(r.Context())),
 	})
+}
+
+// shellyDevicesForCatalog bridges the adopted Shelly device set to the
+// designer catalog's neutral type: one finished module per active device,
+// with its MQTT topic prefix and its capability-derived channel set (the
+// editor builds the module's ports + faceplate + mqtt: bindings from
+// this). The topic prefix uses the device's provisioned broker username
+// when known, else the conventional "shelly-<mac>" the provisioner
+// assigns - so the module can compose "carvilon/shelly-<mac>/..." even
+// before the MQTT link row is populated. Channels are model-derived for
+// M1 (offline, deterministic); a live switch:N enumeration refines this
+// later. The Shelly category needs the broker running (the module's
+// bindings ride the mqtt: driver), so it is empty when the broker is off.
+func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyDevice {
+	if s.shellystore == nil || !s.mqttBrokerRunning() {
+		return nil
+	}
+	devs, err := s.shellystore.ListActive(ctx)
+	if err != nil {
+		s.log.Error("shelly devices for catalog", "err", err)
+		return nil
+	}
+	out := make([]designer.ShellyDevice, 0, len(devs))
+	for _, d := range devs {
+		username := d.MQTTUsername
+		if username == "" && d.MAC != "" {
+			username = "shelly-" + strings.ToLower(d.MAC)
+		}
+		if username == "" {
+			continue // no identity to build a topic prefix from
+		}
+		caps := shellycaps.Channels(d.Model)
+		chans := make([]designer.ShellyChannel, 0, len(caps))
+		for _, c := range caps {
+			chans = append(chans, designer.ShellyChannel{ID: c.ID, Meter: c.Meter})
+		}
+		out = append(out, designer.ShellyDevice{
+			ID:       d.ID,
+			MAC:      d.MAC,
+			Name:     shellyDisplayName(d),
+			Model:    d.Model,
+			Prefix:   mqttstore.DefaultPrefix(username),
+			Channels: chans,
+		})
+	}
+	return out
+}
+
+// shellyDisplayName picks the module's label: the device's name, else its
+// model, else a MAC-based fallback - the same precedence the catalog's
+// shellyBlocks uses, resolved here so the block carries a ready label.
+func shellyDisplayName(d shellystore.Device) string {
+	switch {
+	case strings.TrimSpace(d.Name) != "":
+		return d.Name
+	case strings.TrimSpace(d.Model) != "":
+		return d.Model
+	default:
+		return "Shelly " + d.MAC
+	}
 }
 
 // mqttBrokerRunning reports whether the embedded broker is wired and up,

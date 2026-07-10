@@ -669,6 +669,14 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/designer/gpio/lines", s.requireAdminSession(http.HandlerFunc(s.handleDesignerGPIOLines)))
 	s.mux.Handle("GET /a/designer/telegram/chats", s.requireAdminSession(http.HandlerFunc(s.handleDesignerTelegramChats)))
 	s.mux.Handle("GET /a/designer/host", s.requireAdminSession(http.HandlerFunc(s.handleDesignerHost)))
+	s.mux.Handle("POST /a/designer/shelly/switch", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySwitch)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/overview", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyOverview)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/channel/{ch}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyChannel)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/channel/{ch}/switch-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySwitchConfig)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/channel/{ch}/input-config", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyInputConfig)))
+	s.mux.Handle("GET /a/designer/shelly/{id}/schedules", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellySchedules)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/schedule", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleCreate)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/schedule/delete", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScheduleDelete)))
 	s.mux.Handle("GET /a/designer/syslog", s.requireAdminSession(http.HandlerFunc(s.handleDesignerSysLog)))
 	// Run: execute the posted graph in the engine, stream live values back
 	// over the monitor SSE, inject the editor's button press, and tear the

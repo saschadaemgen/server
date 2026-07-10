@@ -10,9 +10,9 @@ import (
 // renders: 111 blocks across exactly the five categories, in the
 // counts the former inline list had.
 func TestCatalog_CountsAndCategories(t *testing.T) {
-	blocks := Catalog(false, nil, nil, false, false)
+	blocks := Catalog(false, nil, nil, false, false, nil)
 	if len(blocks) != 111 {
-		t.Fatalf("Catalog(false, nil, nil, false, false) has %d blocks, want 111", len(blocks))
+		t.Fatalf("Catalog(false, nil, nil, false, false, nil) has %d blocks, want 111", len(blocks))
 	}
 	want := map[string]int{"input": 26, "logic": 26, "time": 22, "memory": 13, "output": 24}
 	got := map[string]int{}
@@ -35,7 +35,7 @@ func TestCatalog_CountsAndCategories(t *testing.T) {
 func TestCatalog_Shape(t *testing.T) {
 	validKind := map[string]bool{"bool": true, "float": true, "text": true}
 	seen := map[string]bool{}
-	for _, b := range Catalog(true, nil, nil, false, false) { // superset: also covers the GPIO blocks
+	for _, b := range Catalog(true, nil, nil, false, false, nil) { // superset: also covers the GPIO blocks
 		if b.Type == "" || b.Category == "" || b.Title == "" || b.Icon == "" {
 			t.Errorf("block %+v has an empty identity field", b)
 		}
@@ -59,19 +59,21 @@ func TestCatalog_Shape(t *testing.T) {
 	}
 }
 
-// TestCatalog_Implemented checks that exactly the four engine-backed
+// TestCatalog_Implemented checks that exactly the six engine-backed base
 // blocks are flagged implemented and that their ports/params/delay-
 // boundary are derived faithfully from the engine registry (the single
 // source of truth), while every other block stays catalog-only.
 func TestCatalog_Implemented(t *testing.T) {
 	wantImpl := map[string]bool{
-		"input.manual":   true,
-		"logic.or":       true,
-		"time.staircase": true,
-		"output.lamp":    true,
+		"input.manual":         true,
+		"input.toggle":         true,
+		"input.constant.float": true,
+		"logic.or":             true,
+		"time.staircase":       true,
+		"output.lamp":          true,
 	}
 	implCount := 0
-	for _, b := range Catalog(false, nil, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false, nil) {
 		if !b.Implemented {
 			if len(b.Inputs) != 0 || len(b.Outputs) != 0 || len(b.Params) != 0 {
 				t.Errorf("catalog-only block %q unexpectedly carries ports/params", b.Type)
@@ -112,14 +114,14 @@ func TestCatalog_Implemented(t *testing.T) {
 // flag: absent without GPIO, and present (two engine-backed blocks typed
 // to source.channel / sink.channel, with a user-set line param) with it.
 func TestCatalog_GPIO(t *testing.T) {
-	for _, b := range Catalog(false, nil, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false, nil) {
 		if b.Category == "gpio" {
 			t.Fatalf("gpio category present without GPIO: %+v", b)
 		}
 	}
 	byType := map[string]CatalogBlock{}
 	count := 0
-	for _, b := range Catalog(true, nil, nil, false, false) {
+	for _, b := range Catalog(true, nil, nil, false, false, nil) {
 		if b.Category != "gpio" {
 			continue
 		}
@@ -143,8 +145,8 @@ func TestCatalog_GPIO(t *testing.T) {
 	if !ok || len(snk.Inputs) != 1 || snk.Inputs[0].Kind != "bool" {
 		t.Errorf("GPIO Ausgang must be a %s with a bool input: %+v", engine.TypeSinkChannel, snk)
 	}
-	if a, b := len(Catalog(false, nil, nil, false, false)), len(Catalog(true, nil, nil, false, false)); b != a+2 {
-		t.Errorf("Catalog(true) = %d blocks, want Catalog(false)+2 = %d", b, a+2)
+	if a, b := len(Catalog(false, nil, nil, false, false, nil)), len(Catalog(true, nil, nil, false, false, nil)); b != a+2 {
+		t.Errorf("Catalog(true, nil) = %d blocks, want Catalog(false, nil)+2 = %d", b, a+2)
 	}
 }
 
@@ -152,13 +154,13 @@ func TestCatalog_GPIO(t *testing.T) {
 // running: absent when off, two generic blocks (one source, one sink)
 // when on.
 func TestCatalog_MQTT(t *testing.T) {
-	for _, b := range Catalog(false, nil, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false, nil) {
 		if b.Category == "mqtt" {
 			t.Fatalf("mqtt category present while broker off: %+v", b)
 		}
 	}
 	var mqtt []CatalogBlock
-	for _, b := range Catalog(false, nil, nil, true, false) {
+	for _, b := range Catalog(false, nil, nil, true, false, nil) {
 		if b.Category == "mqtt" {
 			mqtt = append(mqtt, b)
 		}
@@ -186,13 +188,13 @@ func TestCatalog_MQTT(t *testing.T) {
 // the raw text source and text sink - when on, all engine-backed via
 // the generic channel node types.
 func TestCatalog_Telegram(t *testing.T) {
-	for _, b := range Catalog(false, nil, nil, false, false) {
+	for _, b := range Catalog(false, nil, nil, false, false, nil) {
 		if b.Category == "telegram" {
 			t.Fatalf("telegram category present while bot off: %+v", b)
 		}
 	}
 	byTitle := map[string]CatalogBlock{}
-	for _, b := range Catalog(false, nil, nil, false, true) {
+	for _, b := range Catalog(false, nil, nil, false, true, nil) {
 		if b.Category != "telegram" {
 			continue
 		}
@@ -205,10 +207,10 @@ func TestCatalog_Telegram(t *testing.T) {
 		t.Fatalf("telegram category has %d blocks, want 4: %v", len(byTitle), byTitle)
 	}
 	wantTypes := map[string]string{
-		"Telegram Senden":      engine.TypeSinkChannel,
-		"Telegram Befehl":      engine.TypeSourceChannel,
-		"Telegram Empfangen":   engine.TypeSourceChannelText,
-		"Telegram Text senden": engine.TypeSinkChannelText,
+		"Telegram Send":      engine.TypeSinkChannel,
+		"Telegram Command":   engine.TypeSourceChannel,
+		"Telegram Receive":   engine.TypeSourceChannelText,
+		"Telegram Send text": engine.TypeSinkChannelText,
 	}
 	for title, typ := range wantTypes {
 		b, ok := byTitle[title]
@@ -219,6 +221,67 @@ func TestCatalog_Telegram(t *testing.T) {
 		if b.Type != typ {
 			t.Errorf("telegram block %q type = %q, want %q", title, b.Type, typ)
 		}
+	}
+}
+
+// TestCatalog_Shelly verifies the Shelly category is data-driven and
+// gated on adopted devices: absent with none, one finished module block
+// per device (unique per-device type, carrying the prefix + channels) when
+// present, with a MAC suffix disambiguating a duplicate display name so
+// the title-keyed palette lookups never collide.
+func TestCatalog_Shelly(t *testing.T) {
+	for _, b := range Catalog(true, nil, nil, true, true, nil) {
+		if b.Category == "shelly" {
+			t.Fatalf("shelly category present without devices: %+v", b)
+		}
+	}
+	one := []ShellyDevice{{
+		ID: 7, MAC: "AABBCCDDEEFF", Name: "Flur", Model: "Shelly Pro4PM",
+		Prefix: "carvilon/shelly-aabbccddeeff",
+		Channels: []ShellyChannel{{ID: 0, Meter: true}, {ID: 1, Meter: true},
+			{ID: 2, Meter: true}, {ID: 3, Meter: true}},
+	}}
+	var shelly []CatalogBlock
+	for _, b := range Catalog(false, nil, nil, false, false, one) {
+		if b.Category == "shelly" {
+			shelly = append(shelly, b)
+		}
+	}
+	if len(shelly) != 1 {
+		t.Fatalf("shelly category has %d blocks, want 1", len(shelly))
+	}
+	b := shelly[0]
+	if b.Type != "shelly.device:AABBCCDDEEFF" || b.Title != "Flur" || !b.Implemented {
+		t.Errorf("shelly block = %+v", b)
+	}
+	if b.Shelly == nil || b.Shelly.Prefix != "carvilon/shelly-aabbccddeeff" || len(b.Shelly.Channels) != 4 {
+		t.Errorf("shelly block payload = %+v", b.Shelly)
+	}
+
+	// Two devices with the SAME display name: titles must stay unique
+	// (disambiguated by MAC) so the palette can never bake one device's
+	// channels into the other's block.
+	clash := []ShellyDevice{
+		{ID: 1, MAC: "AA11", Name: "Kitchen", Prefix: "carvilon/shelly-aa11", Channels: []ShellyChannel{{ID: 0}}},
+		{ID: 2, MAC: "BB22", Name: "Kitchen", Prefix: "carvilon/shelly-bb22", Channels: []ShellyChannel{{ID: 0}}},
+	}
+	titles := map[string]bool{}
+	types := map[string]bool{}
+	for _, cb := range Catalog(false, nil, nil, false, false, clash) {
+		if cb.Category != "shelly" {
+			continue
+		}
+		if titles[cb.Title] {
+			t.Errorf("duplicate shelly block title %q (palette lookups are title-keyed)", cb.Title)
+		}
+		if types[cb.Type] {
+			t.Errorf("duplicate shelly block type %q", cb.Type)
+		}
+		titles[cb.Title] = true
+		types[cb.Type] = true
+	}
+	if !titles["Kitchen (AA11)"] || !titles["Kitchen (BB22)"] {
+		t.Errorf("colliding names should disambiguate by MAC, got %v", titles)
 	}
 }
 
@@ -235,14 +298,14 @@ func sampleSysMetrics() []SysMetric {
 // block per metric (with its physical ref baked into Channel and a unit)
 // when present.
 func TestCatalog_System(t *testing.T) {
-	for _, b := range Catalog(true, nil, nil, false, false) {
+	for _, b := range Catalog(true, nil, nil, false, false, nil) {
 		if b.Category == "system" {
 			t.Fatalf("system category present without metrics: %+v", b)
 		}
 	}
 	metrics := sampleSysMetrics()
 	var sys []CatalogBlock
-	for _, b := range Catalog(false, metrics, nil, false, false) {
+	for _, b := range Catalog(false, metrics, nil, false, false, nil) {
 		if b.Category == "system" {
 			sys = append(sys, b)
 		}
@@ -273,14 +336,14 @@ func TestCatalog_System(t *testing.T) {
 // reader appears, because the editor's palette lookups are title-keyed
 // and silently overwrite on a duplicate title.
 func TestCatalog_NFC(t *testing.T) {
-	for _, b := range Catalog(true, nil, nil, true, true) {
+	for _, b := range Catalog(true, nil, nil, true, true, nil) {
 		if b.Category == "nfc" {
 			t.Fatalf("nfc category present without readers: %+v", b)
 		}
 	}
 	one := []NFCReader{{ID: "i2c-1", Name: "RPi-NFC-PN532 (I2C-1)", UIDChannel: "nfc:i2c-1:uid", PresentChannel: "nfc:i2c-1:present"}}
 	var nfc []CatalogBlock
-	for _, b := range Catalog(false, nil, one, false, false) {
+	for _, b := range Catalog(false, nil, one, false, false, nil) {
 		if b.Category == "nfc" {
 			nfc = append(nfc, b)
 		}
@@ -289,13 +352,13 @@ func TestCatalog_NFC(t *testing.T) {
 		t.Fatalf("nfc category has %d blocks, want 2", len(nfc))
 	}
 	uid, present := nfc[0], nfc[1]
-	if uid.Type != engine.TypeSourceChannelText || uid.Title != "RPi-NFC-PN532 (I2C-1) · Leser" || uid.Channel != "nfc:i2c-1:uid" || !uid.Implemented {
+	if uid.Type != engine.TypeSourceChannelText || uid.Title != "RPi-NFC-PN532 (I2C-1) · Reader" || uid.Channel != "nfc:i2c-1:uid" || !uid.Implemented {
 		t.Errorf("uid block = %+v", uid)
 	}
 	if len(uid.Outputs) != 1 || uid.Outputs[0].Kind != "text" {
 		t.Errorf("uid block must have one text output: %+v", uid.Outputs)
 	}
-	if present.Type != engine.TypeSourceChannel || present.Title != "RPi-NFC-PN532 (I2C-1) · Tag da" || present.Channel != "nfc:i2c-1:present" || !present.Implemented {
+	if present.Type != engine.TypeSourceChannel || present.Title != "RPi-NFC-PN532 (I2C-1) · Tag present" || present.Channel != "nfc:i2c-1:present" || !present.Implemented {
 		t.Errorf("present block = %+v", present)
 	}
 	if len(present.Outputs) != 1 || present.Outputs[0].Kind != "bool" {
@@ -308,7 +371,7 @@ func TestCatalog_NFC(t *testing.T) {
 		{ID: "i2c-13", Name: "Garage", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"},
 	}
 	titles := uniqueNFCTitles(t, distinct, 4)
-	if !titles["Haustür · Leser"] || !titles["Garage · Tag da"] {
+	if !titles["Haustür · Reader"] || !titles["Garage · Tag present"] {
 		t.Errorf("distinct names should carry no suffix, got %v", titles)
 	}
 	// Two readers with the SAME display name (a custom-name collision):
@@ -319,7 +382,7 @@ func TestCatalog_NFC(t *testing.T) {
 		{ID: "i2c-13", Name: "Eingang", UIDChannel: "nfc:i2c-13:uid", PresentChannel: "nfc:i2c-13:present"},
 	}
 	titles = uniqueNFCTitles(t, clash, 4)
-	if !titles["Eingang (i2c-1) · Leser"] || !titles["Eingang (i2c-13) · Tag da"] {
+	if !titles["Eingang (i2c-1) · Reader"] || !titles["Eingang (i2c-13) · Tag present"] {
 		t.Errorf("colliding names should disambiguate by bus, got %v", titles)
 	}
 }
@@ -331,7 +394,7 @@ func uniqueNFCTitles(t *testing.T, readers []NFCReader, want int) map[string]boo
 	t.Helper()
 	titles := map[string]bool{}
 	count := 0
-	for _, b := range Catalog(false, nil, readers, false, false) {
+	for _, b := range Catalog(false, nil, readers, false, false, nil) {
 		if b.Category != "nfc" {
 			continue
 		}

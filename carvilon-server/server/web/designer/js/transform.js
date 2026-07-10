@@ -32,7 +32,17 @@ export function restoreView(){
   return true;
 }
 
-export function applyTransform(){world.style.transform=`translate(${S.tx}px,${S.ty}px) scale(${S.scale})`;const _zv=document.getElementById('rt-zval');if(_zv)_zv.textContent=Math.round(S.scale*100)+'%';drawBG();updateMinimap();persistView();}
+// promoteWorld composites #world for a smooth pan/zoom, then DEMOTES it a
+// beat after the gesture settles so the browser re-rasterizes the content
+// at the current zoom (crisp text). A permanent will-change would leave the
+// layer bitmap-scaled and blurry at scale>1.
+let layerTimer=null;
+function promoteWorld(){
+  if(world.style.willChange!=='transform')world.style.willChange='transform';
+  if(layerTimer)clearTimeout(layerTimer);
+  layerTimer=setTimeout(()=>{world.style.willChange='auto';layerTimer=null;},220);
+}
+export function applyTransform(){world.style.transform=`translate(${S.tx}px,${S.ty}px) scale(${S.scale})`;const _zv=document.getElementById('rt-zval');if(_zv)_zv.textContent=Math.round(S.scale*100)+'%';promoteWorld();drawBG();updateMinimap();persistView();}
 export function graphBounds(){let a=1e9,b=1e9,c=-1e9,d=-1e9;for(const id in nodes){const el=nodes[id].el,x=el.offsetLeft,y=el.offsetTop,w=el.offsetWidth,h=el.offsetHeight;a=Math.min(a,x);b=Math.min(b,y);c=Math.max(c,x+w);d=Math.max(d,y+h);}return{minX:a,minY:b,maxX:c,maxY:d};}
 // visibleCanvas returns the on-screen rectangle actually free for the
 // stage: the window minus whatever chrome is really present right now —

@@ -13,7 +13,7 @@
 // autosave - no silent loss of changes or run state.
 
 import { GRAPH, nodes, wires, wireByEdge, world, graphDirty, markDirty, esc, escAttr, view, S } from './store.js';
-import { buildNode } from './nodes.js';
+import { buildNode, markRequiredPorts } from './nodes.js';
 import { buildWires, recomputeEndpoints } from './wires.js';
 import { renderMinimap } from './minimap.js';
 import { fit, restoreView, flushView } from './transform.js';
@@ -264,6 +264,9 @@ function loadIntoCanvas(g){
   for (const n of (g && g.nodes) || []){ GRAPH.nodes.push(n); buildNode(n); }
   for (const e of (g && g.edges) || []) GRAPH.edges.push(e);
   buildWires(); renderMinimap(); recomputeEndpoints();
+  // Nodes were built before their wires existed, so their required-input
+  // marks all read "unwired". Re-sweep now the wires are in place.
+  markRequiredPorts();
   // Per-graph viewport: restore the pan/zoom this graph was left at, else
   // frame it. view.graphId keys the stored view (0 when the canvas cleared).
   // Reset userAdjusted first: it is a per-session sticky flag, but the view

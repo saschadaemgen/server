@@ -25,11 +25,12 @@ type CatalogParam struct {
 }
 
 // CatalogBlock is one designer-catalog entry: the building blocks the
-// editor palette offers, in five categories. Implemented marks the four
-// blocks backed by a real engine node (input.manual, time.staircase,
-// logic.or, output.lamp); their ports/params/delay-boundary are derived
-// from the engine registry so they stay the single source of truth. The
-// rest are catalog-only for now (no ports/params yet) — see Catalog.
+// editor palette offers, in five categories. Implemented marks the six
+// blocks backed by a real engine node (input.manual, input.toggle,
+// input.constant.float, time.staircase, logic.or, output.lamp); their
+// ports/params/delay-boundary are derived from the engine registry so
+// they stay the single source of truth. The rest are catalog-only for
+// now (no ports/params yet) — see Catalog.
 type CatalogBlock struct {
 	Type          string         `json:"type"`
 	Category      string         `json:"category"`
@@ -45,6 +46,30 @@ type CatalogBlock struct {
 	// the dropped node, Unit the display suffix (°C, %). Omitted elsewhere.
 	Channel string `json:"channel,omitempty"`
 	Unit    string `json:"unit,omitempty"`
+	// Shelly carries the per-device payload on a Shelly module block: the
+	// MQTT topic prefix and the capability-derived channel set the editor
+	// builds the module's ports and faceplate from. Omitted elsewhere.
+	Shelly *ShellyDevice `json:"shelly,omitempty"`
+}
+
+// ShellyChannel is one relay channel a Shelly module exposes.
+type ShellyChannel struct {
+	ID    int  `json:"id"`    // Gen2 component index (switch:ID)
+	Meter bool `json:"meter"` // reports power/energy (…PM models)
+}
+
+// ShellyDevice is one adopted Shelly device the catalog turns into a
+// finished per-device module block (data-driven from the adopted-device
+// set). Prefix is the device's MQTT topic base ("carvilon/shelly-<mac>"),
+// so the editor can compose the mqtt: channel addresses the module binds
+// to without the user ever seeing a raw topic.
+type ShellyDevice struct {
+	ID       int64           `json:"id"`
+	MAC      string          `json:"mac"`
+	Name     string          `json:"name"`
+	Model    string          `json:"model"`
+	Prefix   string          `json:"prefix"`
+	Channels []ShellyChannel `json:"channels"`
 }
 
 // SysMetric is one available system-telemetry metric the catalog turns
@@ -70,12 +95,13 @@ type NFCReader struct {
 // renders: the 111 base blocks in the five-category order (input, logic,
 // time, memory, output), plus the runtime-detected driver categories -
 // "gpio" on a GPIO host, "system" where telemetry is readable, "nfc"
-// when a tag reader is detected, "mqtt"/"telegram" while broker/bot run.
+// when a tag reader is detected, "mqtt"/"telegram" while broker/bot run,
+// and "shelly" - one finished module per adopted Shelly device.
 // The implemented blocks have their ports, params and delay-boundary
 // filled from the engine registry; the catalog-only ones have empty
 // ports/params until their engine nodes land. The httpserver passes the
 // runtime flags and serializes this to /a/designer/catalog.json.
-func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, includeMQTT, includeTelegram bool) []CatalogBlock {
+func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, includeMQTT, includeTelegram bool, shellyDevices []ShellyDevice) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
@@ -91,6 +117,9 @@ func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, i
 	}
 	if includeTelegram {
 		blocks = append(blocks, telegramBlocks()...)
+	}
+	if len(shellyDevices) > 0 {
+		blocks = append(blocks, shellyBlocks(shellyDevices)...)
 	}
 	for i := range blocks {
 		b := &blocks[i]
@@ -124,8 +153,8 @@ func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, i
 // per-pin: one generic input and one generic output, host-agnostic.
 func gpioBlocks() []CatalogBlock {
 	return []CatalogBlock{
-		{Type: engine.TypeSourceChannel, Category: "gpio", Title: "GPIO Eingang", Icon: "import", Implemented: true},
-		{Type: engine.TypeSinkChannel, Category: "gpio", Title: "GPIO Ausgang", Icon: "plug-zap", Implemented: true},
+		{Type: engine.TypeSourceChannel, Category: "gpio", Title: "GPIO Input", Icon: "import", Implemented: true},
+		{Type: engine.TypeSinkChannel, Category: "gpio", Title: "GPIO Output", Icon: "plug-zap", Implemented: true},
 	}
 }
 
@@ -155,11 +184,55 @@ func mqttBlocks() []CatalogBlock {
 // doorbell -> phone (Senden) and phone -> lamp (Befehl).
 func telegramBlocks() []CatalogBlock {
 	return []CatalogBlock{
-		{Type: engine.TypeSinkChannel, Category: "telegram", Title: "Telegram Senden", Icon: "send", Implemented: true},
-		{Type: engine.TypeSourceChannel, Category: "telegram", Title: "Telegram Befehl", Icon: "message-circle", Implemented: true},
-		{Type: engine.TypeSourceChannelText, Category: "telegram", Title: "Telegram Empfangen", Icon: "import", Implemented: true},
-		{Type: engine.TypeSinkChannelText, Category: "telegram", Title: "Telegram Text senden", Icon: "send", Implemented: true},
+		{Type: engine.TypeSinkChannel, Category: "telegram", Title: "Telegram Send", Icon: "send", Implemented: true},
+		{Type: engine.TypeSourceChannel, Category: "telegram", Title: "Telegram Command", Icon: "message-circle", Implemented: true},
+		{Type: engine.TypeSourceChannelText, Category: "telegram", Title: "Telegram Receive", Icon: "import", Implemented: true},
+		{Type: engine.TypeSinkChannelText, Category: "telegram", Title: "Telegram Send text", Icon: "send", Implemented: true},
 	}
+}
+
+// shellyBlocks turns the adopted Shelly devices into one finished module
+// block each (data-driven, appended only when a device is adopted): a
+// single per-device faceplate the editor expands into the right mqtt:
+// channel bindings at run time. Each block's Type is per-device unique
+// (the "shelly.device:<mac>" form) so the catalog's unique-type invariant
+// holds; the editor keys the module off the "shelly" category and the
+// carried Shelly payload, not off a shared type. Titles MUST be unique
+// (the palette's lookups are title-keyed), so a duplicate display name is
+// disambiguated with the device's (unique) MAC, exactly like nfcBlocks.
+func shellyBlocks(devices []ShellyDevice) []CatalogBlock {
+	label := func(d ShellyDevice) string {
+		switch {
+		case d.Name != "":
+			return d.Name
+		case d.Model != "":
+			return d.Model
+		default:
+			return "Shelly " + d.MAC
+		}
+	}
+	count := map[string]int{}
+	for _, d := range devices {
+		count[label(d)]++
+	}
+	out := make([]CatalogBlock, 0, len(devices))
+	for i := range devices {
+		d := devices[i]
+		name := label(d)
+		if count[name] > 1 && d.MAC != "" {
+			name += " (" + d.MAC + ")"
+		}
+		dev := d
+		out = append(out, CatalogBlock{
+			Type:        "shelly.device:" + d.MAC,
+			Category:    "shelly",
+			Title:       name,
+			Icon:        "toggle-right",
+			Implemented: true,
+			Shelly:      &dev,
+		})
+	}
+	return out
 }
 
 // sysBlocks turns the available system metrics into one source block each
@@ -216,8 +289,8 @@ func nfcBlocks(readers []NFCReader) []CatalogBlock {
 			name += " (" + r.ID + ")"
 		}
 		out = append(out,
-			CatalogBlock{Type: engine.TypeSourceChannelText, Category: "nfc", Title: name + " · Leser", Icon: "nfc", Channel: r.UIDChannel, Implemented: true},
-			CatalogBlock{Type: engine.TypeSourceChannel, Category: "nfc", Title: name + " · Tag da", Icon: "scan", Channel: r.PresentChannel, Implemented: true},
+			CatalogBlock{Type: engine.TypeSourceChannelText, Category: "nfc", Title: name + " · Reader", Icon: "nfc", Channel: r.UIDChannel, Implemented: true},
+			CatalogBlock{Type: engine.TypeSourceChannel, Category: "nfc", Title: name + " · Tag present", Icon: "scan", Channel: r.PresentChannel, Implemented: true},
 		)
 	}
 	return out
@@ -257,7 +330,10 @@ func rawBlocks() []CatalogBlock {
 	add("input", "Dual button", "copy")
 	add("input", "Motion sensor", "radar")
 	add("input", "Presence sensor", "user-check")
-	add("input", "Switch", "toggle-left")
+	// Switch is the held on/off manual source (input.toggle), the
+	// counterpart to the momentary Push-button (input.manual) - drop it,
+	// wire it to an output and flip it for a steady level (Part C).
+	impl("input", "Switch", "toggle-left", "input.toggle")
 	add("input", "Wall switch", "square-mouse-pointer")
 	add("input", "Door sensor", "door-open")
 	add("input", "Window contact", "app-window")
@@ -302,7 +378,10 @@ func rawBlocks() []CatalogBlock {
 	add("logic", "State machine", "workflow")
 	add("logic", "Edge", "triangle")
 	add("logic", "Math", "calculator")
-	add("logic", "Constant", "pi")
+	// Constant is a fixed, held value source. Seeded as the number variant
+	// (input.constant.float); the editor's value-type selector re-types it
+	// to input.constant.bool / .text for a steady 1/0 or string (Part C).
+	impl("logic", "Constant", "pi", "input.constant.float")
 	add("logic", "Adder", "plus")
 	add("logic", "Multiplier", "x")
 	add("logic", "Selector", "list")
