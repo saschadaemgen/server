@@ -70,6 +70,29 @@
   .dck-tl { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-tertiary); }
   input.dck-time { height:28px; padding:0 8px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-mono); font-size:12px; outline:none; color-scheme:dark; }
   .dck-sched-msg { font-size:11px; color:var(--orange-300); }
+  /* Collapsible device-view sections (the balance rule: everything
+     starts collapsed; one dc-sec-head per section doubles as the
+     toggle). */
+  .dck-acc > .dc-sec-head { cursor:pointer; }
+  .dck-acc > .dc-sec-head:hover .dc-sec-title { color:var(--orange-300); }
+  .dck-acc-ind { font-size:9px; color:var(--text-tertiary); flex:0 0 auto; transition:transform 160ms var(--ease-tactile); }
+  .dck-acc.open .dck-acc-ind { transform:rotate(90deg); }
+  .dck-acc > .dck-acc-body { display:none; }
+  .dck-acc.open > .dck-acc-body { display:block; }
+  .dck-list { display:flex; flex-direction:column; gap:8px; padding:10px 20px 14px; border-bottom:1px solid var(--divider); }
+  .dck-lrow { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:var(--radius-sm); background:var(--surface-cell); box-shadow:inset 0 0 0 1px var(--border-subtle); flex-wrap:wrap; }
+  .dck-lrow .nm { font-size:12px; color:var(--text-secondary); font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .dck-lrow .meta { font-family:var(--font-mono); font-size:10.5px; color:var(--text-tertiary); min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .dck-lrow .sp { flex:1; }
+  .dck-mini { height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 10px; border-radius:12px; border:1px solid var(--border-strong); background:var(--surface-raised); color:var(--text-secondary); cursor:pointer; font-family:var(--font-sans); font-size:10.5px; font-weight:600; }
+  .dck-mini:hover { color:var(--white); border-color:var(--border-accent); }
+  .dck-mini.accent { border-color:rgba(255,192,138,0.55); background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); color:var(--text-on-accent); }
+  .dck-mini:disabled { opacity:0.45; cursor:default; }
+  .dck-code { width:100%; min-height:180px; resize:vertical; padding:10px 12px; border:none; border-radius:var(--radius-sm); background:var(--field-bg); box-shadow:var(--well); color:var(--white); font-family:var(--font-mono); font-size:12px; outline:none; line-height:1.5; }
+  .dck-code:focus { box-shadow:var(--well), 0 0 0 1px var(--border-accent); }
+  .dck-form { display:flex; flex-direction:column; gap:8px; width:100%; }
+  .dck-inline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .dck-ro { font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary); }
 </style>
 {{end}}
 
@@ -561,6 +584,7 @@
 
       function teardown() {
         if (es) { es.close(); es = null; }
+        // deviceData dies with the panel - a re-open reads fresh config
         Object.keys(confirmTimers).forEach(function (k) { clearTimeout(confirmTimers[k]); });
         confirmTimers = {};
         cur = null;
@@ -721,11 +745,16 @@
         (cur.ctrlNodes || []).forEach(function (n) { keep.appendChild(n); });
         mount.innerHTML = '';
         if (cur.selCh == null) {
-          // device view: hint + the device-level controls
+          // device view: hint + the FULL device-level surface (collapsed
+          // sections, so the column balance holds) + the controls
           if (cur.channels.length) {
             mount.appendChild(fragFromHTML(secHead('Settings', false)
               + '<div class="dc-lazy-hint">Select a switch on the left to configure it - name, power-on default, timer, protections and the weekly schedule live per channel.</div>'));
           }
+          var devBox = document.createElement('div');
+          devBox.setAttribute('data-dck-device', '');
+          mount.appendChild(devBox);
+          renderDeviceSections(devBox);
           mount.appendChild(keep);
           return;
         }
@@ -790,8 +819,13 @@
           + field('Name', txt('name', s(sw, 'name')))
           + field('Power-on default', sel('initial_state', s(sw, 'initial_state'), INIT_STATES))
           + field('Relay mode', sel('in_mode', s(sw, 'in_mode'), IN_MODES))
+          + field('Lock input', tog('in_locked', b(sw.in_locked)))
+          + field('Reverse output', tog('reverse', b(sw.reverse)))
           + (inp && Object.keys(inp).length
-            ? field('Input type', sel('input.type', s(inp, 'type'), IN_TYPES)) + field('Invert input', tog('input.invert', b(inp.invert)))
+            ? field('Input name', txt('input.name', s(inp, 'name')))
+            + field('Input type', sel('input.type', s(inp, 'type'), IN_TYPES))
+            + field('Input enabled', tog('input.enable', b(inp.enable)))
+            + field('Invert input', tog('input.invert', b(inp.invert)))
             : '')
           + field('Max power', num('power_limit', nOf(sw, 'power_limit'), 'W'))
           + field('Max voltage', num('voltage_limit', nOf(sw, 'voltage_limit'), 'V'))
@@ -849,6 +883,449 @@
           } else {
             el.addEventListener('change', function () { apply(ch, comp, key, el.value, st); });
           }
+        });
+      }
+
+      // ---- device-level settings (collapsed sections) ----
+      // Rendered from the device's OWN Shelly.GetConfig tree - the device
+      // defines completeness. Writes go through the whitelisted
+      // sys/ui/ble endpoints; MQTT + cloud render READ-ONLY (CARVILON
+      // provisioning owns them); firmware/reboot sit behind confirms;
+      // scripts + webhooks are managed via their device components; the
+      // auth change updates CARVILON's stored password in the same action.
+      function acc(title, bodyHTML, onDevice) {
+        return '<div class="dck-acc">'
+          + '<div class="dc-sec-head" data-dck-acc><span class="dc-sec-dot"></span><span class="dc-sec-title">' + esc(title) + '</span>'
+          + (onDevice ? '<span class="dck-ondev">on device</span>' : '')
+          + '<span class="dc-hr"></span><span class="dck-acc-ind">&#9654;</span></div>'
+          + '<div class="dck-acc-body">' + bodyHTML + '</div></div>';
+      }
+      function roRow(k, v) {
+        return '<div class="dck-f"><span class="l">' + esc(k) + '</span><span class="c"><span class="dck-ro">' + esc(v == null || v === '' ? '—' : String(v)) + '</span></span></div>';
+      }
+      function devApply(url, cfg, statusEl) {
+        if (statusEl) { statusEl.textContent = '…'; statusEl.className = 'dck-st'; }
+        return fetch(url, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: cfg })
+        }).then(function (r) {
+          if (statusEl) { statusEl.textContent = r.ok ? 'saved' : 'failed'; statusEl.className = 'dck-st ' + (r.ok ? 'ok' : 'err'); }
+          // a successful write stales the cached tree - the next device-
+          // view render re-reads instead of showing pre-write values
+          if (r.ok && cur) cur.deviceData = null;
+          return r.ok;
+        }).catch(function () {
+          if (statusEl) { statusEl.textContent = 'failed'; statusEl.className = 'dck-st err'; }
+          return false;
+        });
+      }
+      function renderDeviceSections(box) {
+        if (!cur) return;
+        if (!cur.sid) {
+          box.innerHTML = '';
+          return;
+        }
+        if (cur.deviceData) { renderDeviceSectionsFrom(box, cur.deviceData); return; }
+        box.innerHTML = '<div class="dc-lazy-hint">Reading device configuration&hellip;</div>';
+        var row = cur.row;
+        fetch('/a/designer/shelly/' + cur.sid + '/device', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row) return;
+            if (!d || d.ok === false) {
+              box.innerHTML = '<div class="dc-lazy-err">' + esc((d && d.error) || 'Device configuration could not be loaded.') + '</div>';
+              return;
+            }
+            cur.deviceData = d;
+            if (cur.selCh == null) renderDeviceSectionsFrom(box, d);
+          })
+          .catch(function () {
+            if (cur && cur.row === row) box.innerHTML = '<div class="dc-lazy-err">Device configuration could not be loaded.</div>';
+          });
+      }
+      function renderDeviceSectionsFrom(box, d) {
+        var cfg = d.config || {};
+        var sys = cfg.sys || {}, dev = sys.device || {}, loc = sys.location || {}, sntp = sys.sntp || {};
+        var info = d.info || {};
+        var sid = cur.sid;
+
+        // --- Device (sys + ui) ---
+        var devHTML =
+          field('Device name', txt('sys:device.name', dev.name == null ? '' : dev.name))
+          + field('Eco mode', tog('sys:device.eco_mode', dev.eco_mode === true))
+          + field('Discoverable', tog('sys:device.discoverable', dev.discoverable === true))
+          + field('Timezone', txt('sys:location.tz', loc.tz == null ? '' : loc.tz))
+          + field('Latitude', num('sys:location.lat', loc.lat == null ? '' : loc.lat, ''))
+          + field('Longitude', num('sys:location.lon', loc.lon == null ? '' : loc.lon, ''))
+          + field('SNTP server', txt('sys:sntp.server', sntp.server == null ? '' : sntp.server));
+        if (cfg.ui && cfg.ui.idle_brightness != null) {
+          devHTML += field('Panel idle brightness', num('ui:idle_brightness', cfg.ui.idle_brightness, '%'));
+        }
+
+        // --- Firmware & maintenance ---
+        var fwHTML = roRow('Firmware', dev.fw_id || info.fw_id || '—')
+          + '<div class="dck-list"><div class="dck-inline">'
+          + '<button type="button" class="dck-mini" data-dck-fwcheck>Check for update</button>'
+          + '<button type="button" class="dck-mini" data-dck-reboot>Reboot device</button>'
+          + '</div><div data-dck-fwout></div></div>';
+
+        // --- Auth ---
+        var authHTML = '<div class="dck-list"><div class="dck-form">'
+          + '<span class="dc-act-label">New device password (min 8 characters)</span>'
+          + '<div class="dck-inline"><input class="dck-i" type="password" data-dck-authpw autocomplete="new-password" style="width:200px;">'
+          + '<button type="button" class="dck-mini accent" data-dck-authset>Apply</button><span class="dck-st" data-dck-authst></span></div>'
+          + '<p class="dc-act-hint">Rotates the installation password on ALL adopted Shelly devices AND updates CARVILON\'s stored password in the same action. Devices that cannot be reached keep the old password and are listed here.</p>'
+          + '</div></div>';
+
+        // --- Network (read) ---
+        var w = d.wifiStatus || {}, e = d.ethStatus || {};
+        var wifiCfg = (cfg.wifi && cfg.wifi.sta) || {};
+        var netHTML =
+          roRow('Ethernet IP', e.ip)
+          + roRow('WiFi SSID', w.ssid || wifiCfg.ssid)
+          + roRow('WiFi IP', w.sta_ip || w.ip)
+          + roRow('WiFi RSSI', w.rssi != null ? w.rssi + ' dBm' : null)
+          + roRow('AP enabled', cfg.wifi && cfg.wifi.ap ? String(cfg.wifi.ap.enable === true) : null);
+
+        // --- Connectivity (MQTT/cloud read-only by design; BLE writable) ---
+        var mq = cfg.mqtt || {}, cl = cfg.cloud || {}, ws = cfg.ws || {}, knx = cfg.knx, ble = cfg.ble || {};
+        var connHTML =
+          '<div class="dck-note">MQTT and cloud are managed by CARVILON provisioning and stay read-only here - editing them would sever the broker link.</div>'
+          + roRow('MQTT server', mq.server)
+          + roRow('MQTT topic prefix', mq.topic_prefix)
+          + roRow('MQTT enabled', String(mq.enable === true))
+          + roRow('Cloud enabled', String(cl.enable === true))
+          + field('Bluetooth (BLE)', tog('ble:enable', ble.enable === true))
+          + field('BLE RPC', tog('ble:rpc.enable', !!(ble.rpc && ble.rpc.enable)))
+          + roRow('Outbound websocket', ws.enable === true ? (ws.server || 'enabled') : 'disabled');
+        if (knx) {
+          connHTML += roRow('KNX enabled', String(knx.enable === true)) + roRow('KNX address', knx.ia);
+        }
+
+        // --- Scripts / Webhooks (lazy per open) ---
+        var scriptsHTML = '<div class="dck-list" data-dck-scripts><div class="dc-lazy-hint">Loading&hellip;</div></div>';
+        var hooksHTML = '<div class="dck-list" data-dck-hooks><div class="dc-lazy-hint">Loading&hellip;</div></div>';
+
+        box.innerHTML =
+          acc('Device', devHTML, true)
+          + acc('Firmware & maintenance', fwHTML, true)
+          + acc('Scripts', scriptsHTML, true)
+          + acc('Webhooks', hooksHTML, true)
+          + acc('Auth', authHTML, true)
+          + acc('Network', netHTML, true)
+          + acc('Connectivity', connHTML, true);
+
+        // accordion toggles (lazy-load scripts/webhooks on first open)
+        box.querySelectorAll('[data-dck-acc]').forEach(function (h) {
+          h.addEventListener('click', function () {
+            var sec = h.parentElement;
+            sec.classList.toggle('open');
+            if (sec.classList.contains('open')) {
+              var sc = sec.querySelector('[data-dck-scripts]');
+              if (sc && !sc.getAttribute('data-loaded')) loadScripts(sc);
+              var hk = sec.querySelector('[data-dck-hooks]');
+              if (hk && !hk.getAttribute('data-loaded')) loadHooks(hk);
+            }
+          });
+        });
+
+        // device-level apply-on-change: data-k "component:dotted.key"
+        box.querySelectorAll('[data-k]').forEach(function (el) {
+          var full = el.getAttribute('data-k');
+          var ci = full.indexOf(':');
+          if (ci < 0) return; // channel fields use the other wiring
+          var comp = full.slice(0, ci), key = full.slice(ci + 1);
+          var url = '/a/designer/shelly/' + sid + '/' + comp + '-config';
+          var f = el.closest('.dck-f');
+          var st = f && f.querySelector('[data-st]');
+          function send(val) { var c = {}; c[key] = val; devApply(url, c, st); }
+          if (el.hasAttribute('data-tog')) {
+            el.addEventListener('click', function () {
+              var on = !el.classList.contains('on');
+              el.classList.toggle('on', on);
+              el.setAttribute('aria-pressed', on ? 'true' : 'false');
+              send(on);
+            });
+          } else if (el.type === 'number') {
+            el.addEventListener('change', function () {
+              // an emptied field is "leave it alone", not "write 0"
+              // (clearing latitude must not relocate the device to 0,0)
+              if (el.value.trim() === '') { if (st) { st.textContent = 'unchanged'; st.className = 'dck-st'; } return; }
+              send(Number(el.value) || 0);
+            });
+          } else {
+            el.addEventListener('change', function () { send(el.value); });
+          }
+        });
+
+        // firmware + reboot (explicit confirms)
+        var fwBtn = box.querySelector('[data-dck-fwcheck]');
+        var fwOut = box.querySelector('[data-dck-fwout]');
+        if (fwBtn) fwBtn.addEventListener('click', function () {
+          fwBtn.disabled = true;
+          fwOut.innerHTML = '<div class="dc-lazy-hint">Checking&hellip;</div>';
+          fetch('/a/designer/shelly/' + sid + '/fw-check', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              fwBtn.disabled = false;
+              if (!d) { fwOut.innerHTML = '<div class="dc-lazy-err">Check failed - device unreachable.</div>'; return; }
+              var u = d.updates || {};
+              var parts = [];
+              ['stable', 'beta'].forEach(function (stage) {
+                if (u[stage] && u[stage].version) {
+                  parts.push('<div class="dck-inline"><span class="dck-ro">' + esc(stage) + ': ' + esc(u[stage].version)
+                    + '</span><button type="button" class="dck-mini accent" data-dck-fwup="' + stage + '">Install</button></div>');
+                }
+              });
+              fwOut.innerHTML = parts.length ? parts.join('') : '<div class="dc-lazy-hint">No update available.</div>';
+              fwOut.querySelectorAll('[data-dck-fwup]').forEach(function (b) {
+                b.addEventListener('click', function () {
+                  var stage = b.getAttribute('data-dck-fwup');
+                  if (!confirm('Install the ' + stage + ' firmware now? The device reboots on its own afterwards.')) return;
+                  b.disabled = true;
+                  fetch('/a/designer/shelly/' + sid + '/fw-update', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage: stage })
+                  }).then(function (r) {
+                    fwOut.innerHTML = r.ok
+                      ? '<div class="dc-lazy-hint">Update started - the device installs and reboots on its own.</div>'
+                      : '<div class="dc-lazy-err">Update could not be started.</div>';
+                  });
+                });
+              });
+            })
+            .catch(function () { fwBtn.disabled = false; fwOut.innerHTML = '<div class="dc-lazy-err">Check failed.</div>'; });
+        });
+        var rbBtn = box.querySelector('[data-dck-reboot]');
+        if (rbBtn) rbBtn.addEventListener('click', function () {
+          if (!confirm('Reboot the device now? Its relays keep their state; the device is briefly unreachable.')) return;
+          rbBtn.disabled = true;
+          fetch('/a/designer/shelly/' + sid + '/reboot', { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) { rbBtn.disabled = false; if (!r.ok) alert('Reboot failed.'); });
+        });
+
+        // auth (device + stored password in one action)
+        var authBtn = box.querySelector('[data-dck-authset]');
+        if (authBtn) authBtn.addEventListener('click', function () {
+          var pw = box.querySelector('[data-dck-authpw]').value;
+          var st = box.querySelector('[data-dck-authst]');
+          if (pw.length < 8) { st.textContent = 'min 8 chars'; st.className = 'dck-st err'; return; }
+          if (!confirm('Rotate the password on ALL adopted Shelly devices AND update the stored CARVILON password now?')) return;
+          st.textContent = '…'; st.className = 'dck-st';
+          fetch('/a/designer/shelly/' + sid + '/auth', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw })
+          }).then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+            .then(function (d) {
+              var fails = (d.failed || []).length;
+              st.textContent = fails ? (d.applied + ' ok, ' + fails + ' failed') : ('applied to ' + d.applied);
+              st.className = 'dck-st ' + (fails ? 'err' : 'ok');
+            })
+            .catch(function () { st.textContent = 'failed'; st.className = 'dck-st err'; });
+        });
+      }
+
+      // --- scripts section ---
+      function loadScripts(host) {
+        host.setAttribute('data-loaded', '1');
+        var sid = cur.sid, row = cur.row;
+        fetch('/a/designer/shelly/' + sid + '/scripts', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row) return;
+            renderScripts(host, (d && d.scripts) || []);
+          })
+          .catch(function () { host.innerHTML = '<div class="dc-lazy-err">Scripts could not be loaded.</div>'; });
+      }
+      function renderScripts(host, list) {
+        var sid = cur.sid, row = cur.row;
+        host.innerHTML = list.map(function (s) {
+          return '<div class="dck-lrow" data-sid="' + s.id + '">'
+            + '<span class="nm">' + esc(s.name || ('script ' + s.id)) + '</span>'
+            + '<span class="meta">' + (s.running ? 'running' : 'stopped') + '</span><span class="sp"></span>'
+            + tog('script-enable', s.enable === true)
+            + '<button type="button" class="dck-mini" data-act="' + (s.running ? 'stop' : 'start') + '">' + (s.running ? 'Stop' : 'Start') + '</button>'
+            + '<button type="button" class="dck-mini" data-act="edit">Edit</button>'
+            + '<button type="button" class="dck-mini" data-act="delete">Delete</button>'
+            + '<div class="dck-form" data-editor hidden></div>'
+            + '</div>';
+        }).join('')
+          + '<div class="dck-lrow"><input class="dck-i" type="text" data-newname placeholder="New script name" style="width:170px;">'
+          + '<button type="button" class="dck-mini accent" data-newscript>Create</button></div>';
+        function reload() { host.removeAttribute('data-loaded'); loadScripts(host); }
+        host.querySelectorAll('.dck-lrow[data-sid]').forEach(function (rowEl) {
+          var scriptID = Number(rowEl.getAttribute('data-sid'));
+          var enTog = rowEl.querySelector('[data-k="script-enable"]');
+          if (enTog) enTog.addEventListener('click', function () {
+            var on = !enTog.classList.contains('on');
+            enTog.classList.toggle('on', on);
+            fetch('/a/designer/shelly/' + sid + '/script/' + scriptID + '/config', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enable: on })
+            }).then(function (r) {
+              if (!r.ok) enTog.classList.toggle('on', !on); // revert - the device refused
+            }).catch(function () { enTog.classList.toggle('on', !on); });
+          });
+          rowEl.querySelectorAll('[data-act]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              var act = b.getAttribute('data-act');
+              if (act === 'edit') {
+                var ed = rowEl.querySelector('[data-editor]');
+                if (!ed.hidden) { ed.hidden = true; return; }
+                ed.hidden = false;
+                ed.innerHTML = '<div class="dc-lazy-hint">Loading code&hellip;</div>';
+                fetch('/a/designer/shelly/' + sid + '/script/' + scriptID + '/code', { credentials: 'same-origin' })
+                  .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                  .then(function (d) {
+                    ed.innerHTML = '<textarea class="dck-code" spellcheck="false"></textarea>'
+                      + '<div class="dck-inline"><button type="button" class="dck-mini accent" data-save>Save code</button><span class="dck-st" data-st></span></div>';
+                    ed.querySelector('textarea').value = (d && d.code) || '';
+                    ed.querySelector('[data-save]').addEventListener('click', function () {
+                      var st = ed.querySelector('[data-st]');
+                      st.textContent = '…'; st.className = 'dck-st';
+                      fetch('/a/designer/shelly/' + sid + '/script/' + scriptID + '/code', {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: ed.querySelector('textarea').value })
+                      }).then(function (r) {
+                        st.textContent = r.ok ? 'saved' : 'failed';
+                        st.className = 'dck-st ' + (r.ok ? 'ok' : 'err');
+                      }).catch(function () { st.textContent = 'failed'; st.className = 'dck-st err'; });
+                    });
+                  })
+                  .catch(function () {
+                    // a failed read must NOT arm an empty editor - saving
+                    // it would wipe the script's source on the device
+                    ed.innerHTML = '<div class="dc-lazy-err">Code could not be loaded - not editable right now.</div>';
+                  });
+                return;
+              }
+              if (act === 'delete' && !confirm('Delete this script permanently?')) return;
+              b.disabled = true;
+              fetch('/a/designer/shelly/' + sid + '/script/' + scriptID + '/' + act, { method: 'POST', credentials: 'same-origin' })
+                .then(function (r) { if (r.ok) reload(); else { b.disabled = false; } })
+                .catch(function () { b.disabled = false; });
+            });
+          });
+        });
+        var nb = host.querySelector('[data-newscript]');
+        if (nb) nb.addEventListener('click', function () {
+          var name = host.querySelector('[data-newname]').value.trim();
+          if (!name) return;
+          nb.disabled = true;
+          fetch('/a/designer/shelly/' + sid + '/script', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name })
+          }).then(function (r) { if (r.ok) reload(); else { nb.disabled = false; } })
+            .catch(function () { nb.disabled = false; });
+        });
+      }
+
+      // --- webhooks section ---
+      function loadHooks(host) {
+        host.setAttribute('data-loaded', '1');
+        var sid = cur.sid, row = cur.row;
+        fetch('/a/designer/shelly/' + sid + '/webhooks', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row) return;
+            var hooks = (d && d.hooks && d.hooks.hooks) || [];
+            // event catalog: legacy hook_types[] or the current types{} map
+            var sup = (d && d.supported) || {};
+            var types = sup.hook_types || (sup.types ? Object.keys(sup.types) : []);
+            renderHooks(host, hooks, types);
+          })
+          .catch(function () { host.innerHTML = '<div class="dc-lazy-err">Webhooks could not be loaded.</div>'; });
+      }
+      function renderHooks(host, hooks, types) {
+        var sid = cur.sid;
+        function hookForm(h) {
+          var ev = (h && h.event) || '';
+          var typeOpts = types.length
+            ? types.map(function (t) { return '<option value="' + esc(t) + '"' + (t === ev ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('')
+            : '<option value="' + esc(ev) + '" selected>' + esc(ev || 'event') + '</option>';
+          return '<div class="dck-form">'
+            + '<div class="dck-inline"><span class="dck-ro">Event</span><select class="dck-i" data-h="event">' + typeOpts + '</select>'
+            + '<span class="dck-ro">Channel</span><input class="dck-i num" type="number" data-h="cid" value="' + (h && h.cid != null ? (Number(h.cid) || 0) : 0) + '" style="width:60px;"></div>'
+            + '<div class="dck-inline"><span class="dck-ro">Name</span><input class="dck-i" type="text" data-h="name" value="' + esc((h && h.name) || '') + '" style="width:200px;"></div>'
+            + '<span class="dck-ro">URLs (one per line)</span>'
+            + '<textarea class="dck-code" style="min-height:56px;" data-h="urls">' + esc(((h && h.urls) || []).join('\n')) + '</textarea>'
+            + '<div class="dck-inline"><button type="button" class="dck-mini accent" data-hsave>Save</button><span class="dck-st" data-st></span></div>'
+            + '</div>';
+        }
+        function readForm(scope, prevEnable) {
+          var urls = scope.querySelector('[data-h="urls"]').value.split('\n').map(function (u) { return u.trim(); }).filter(Boolean);
+          return {
+            event: scope.querySelector('[data-h="event"]').value,
+            cid: Number(scope.querySelector('[data-h="cid"]').value) || 0,
+            name: scope.querySelector('[data-h="name"]').value,
+            // editing must not silently re-enable a deliberately disabled hook
+            urls: urls, enable: prevEnable == null ? true : !!prevEnable
+          };
+        }
+        function reload() { host.removeAttribute('data-loaded'); loadHooks(host); }
+        host.innerHTML = hooks.map(function (h) {
+          return '<div class="dck-lrow" data-wid="' + (Number(h.id) || 0) + '">'
+            + '<span class="nm">' + esc(h.name || ('hook ' + h.id)) + '</span>'
+            + '<span class="meta">' + esc(h.event || '') + (h.urls && h.urls.length ? ' → ' + esc(h.urls[0]) + (h.urls.length > 1 ? ' (+' + (h.urls.length - 1) + ')' : '') : '') + '</span>'
+            + '<span class="sp"></span>'
+            + '<button type="button" class="dck-mini" data-act="edit">Edit</button>'
+            + '<button type="button" class="dck-mini" data-act="delete">Delete</button>'
+            + '<div data-editor hidden style="width:100%;"></div>'
+            + '</div>';
+        }).join('')
+          + '<div class="dck-lrow"><span class="nm">New webhook</span><span class="sp"></span>'
+          + '<button type="button" class="dck-mini accent" data-newhook>Add</button><div data-newform hidden style="width:100%;"></div></div>';
+        host.querySelectorAll('.dck-lrow[data-wid]').forEach(function (rowEl) {
+          var wid = Number(rowEl.getAttribute('data-wid'));
+          var h = hooks.find(function (x) { return x.id === wid; });
+          rowEl.querySelectorAll('[data-act]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              if (b.getAttribute('data-act') === 'delete') {
+                if (!confirm('Delete this webhook?')) return;
+                b.disabled = true;
+                fetch('/a/designer/shelly/' + sid + '/webhook/' + wid + '/delete', { method: 'POST', credentials: 'same-origin' })
+                  .then(function () { reload(); }).catch(function () { b.disabled = false; });
+                return;
+              }
+              var ed = rowEl.querySelector('[data-editor]');
+              if (!ed.hidden) { ed.hidden = true; return; }
+              ed.hidden = false;
+              ed.innerHTML = hookForm(h);
+              ed.querySelector('[data-hsave]').addEventListener('click', function () {
+                var st = ed.querySelector('[data-st]');
+                st.textContent = '…'; st.className = 'dck-st';
+                fetch('/a/designer/shelly/' + sid + '/webhook/' + wid + '/update', {
+                  method: 'POST', credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readForm(ed, h && h.enable))
+                }).then(function (r) {
+                  st.textContent = r.ok ? 'saved' : 'failed';
+                  st.className = 'dck-st ' + (r.ok ? 'ok' : 'err');
+                  if (r.ok) reload();
+                });
+              });
+            });
+          });
+        });
+        var nb = host.querySelector('[data-newhook]');
+        if (nb) nb.addEventListener('click', function () {
+          var nf = host.querySelector('[data-newform]');
+          if (!nf.hidden) { nf.hidden = true; return; }
+          nf.hidden = false;
+          nf.innerHTML = hookForm(null);
+          nf.querySelector('[data-hsave]').addEventListener('click', function () {
+            var st = nf.querySelector('[data-st]');
+            st.textContent = '…'; st.className = 'dck-st';
+            fetch('/a/designer/shelly/' + sid + '/webhook', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readForm(nf))
+            }).then(function (r) {
+              st.textContent = r.ok ? 'created' : 'failed';
+              st.className = 'dck-st ' + (r.ok ? 'ok' : 'err');
+              if (r.ok) reload();
+            });
+          });
         });
       }
 
