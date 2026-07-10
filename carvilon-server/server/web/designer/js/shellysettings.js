@@ -97,7 +97,8 @@ function renderDeviceSections(host, sid, d){
     roF('WiFi IP', w.sta_ip||w.ip)+roF('WiFi RSSI', w.rssi!=null?w.rssi+' dBm':null);
   const fwHTML = roF('Firmware', dev.fw_id||(d.info&&d.info.fw_id))+
     `<div class="si-f"><span class="si-f-c"><button type="button" class="si-addbtn" data-fwcheck>Check update</button>`+
-    `<button type="button" class="si-addbtn" data-reboot>Reboot</button></span></div><div data-fwout></div>`;
+    `<button type="button" class="si-addbtn" data-reboot>Reboot</button>`+
+    `<button type="button" class="si-addbtn" data-frstart>Factory reset…</button></span></div><div data-fwout></div><div data-fr hidden></div>`;
   const authHTML =
     `<div class="si-hint">Rotates the password on ALL adopted Shelly devices AND updates CARVILON's stored password in one action; unreachable devices are reported.</div>`+
     field('New password', `<input class="si-i" type="password" data-authpw autocomplete="new-password">`)+
@@ -155,6 +156,40 @@ function renderDeviceSections(host, sid, d){
     if(!confirm('Reboot the device now?')) return;
     rb.disabled=true;
     fetch('shelly/'+sid+'/reboot',{method:'POST',credentials:'same-origin'}).then(()=>{rb.disabled=false;});
+  };
+  // Factory reset: consequence dialog -> explicit acknowledgment ->
+  // type-to-confirm (exact device name) -> separate destructive button
+  // (never default-focused). The CARVILON record stays afterwards.
+  const frb=host.querySelector('[data-frstart]'), frx=host.querySelector('[data-fr]');
+  if(frb) frb.onclick=()=>{
+    if(!frx.hidden){ frx.hidden=true; return; }
+    frx.hidden=false;
+    const devName=String(dev.name||(d.info&&d.info.name)||'').trim();
+    frx.innerHTML=
+      `<div class="si-hint si-frwarn"><b>Factory reset erases everything on this device:</b><ul class="si-frlist">`+
+      `<li>the entire device configuration is erased</li>`+
+      `<li>the CARVILON provisioning is destroyed - auth and the MQTT/broker link are gone; the device leaves the broker</li>`+
+      `<li>all schedules, scripts and webhooks are wiped</li>`+
+      `<li>the device returns to AP setup mode</li>`+
+      `<li>relays switch OFF - connected loads lose power</li>`+
+      `<li>a full re-adoption is required afterwards</li></ul></div>`+
+      `<div class="si-times"><button type="button" class="si-addbtn" data-frack>I understand the consequences</button></div>`+
+      `<div class="si-scred" data-frstep2 hidden>`+
+      `<span class="si-f-l">Type the device name exactly (<b>${esc(devName)}</b>) to enable the reset</span>`+
+      `<input class="si-i" type="text" data-frname autocomplete="off" spellcheck="false">`+
+      `<div class="si-times"><button type="button" class="si-addbtn si-frdanger" data-frfire disabled>Factory reset now</button><span class="si-st" data-frst></span></div></div>`;
+    frx.querySelector('[data-frack]').onclick=()=>{ frx.querySelector('[data-frstep2]').hidden=false; };
+    const ni=frx.querySelector('[data-frname]'), fi=frx.querySelector('[data-frfire]');
+    ni.oninput=()=>{ fi.disabled=(ni.value!==devName); };
+    fi.onclick=()=>{
+      if(fi.disabled) return;
+      fi.disabled=true;
+      fetch('shelly/'+sid+'/factory-reset',{method:'POST',credentials:'same-origin'})
+        .then(r=>{ frx.innerHTML=r.ok
+          ?'<div class="si-hint si-frwarn">Factory reset sent. The device wipes itself, switches its relays OFF and returns in AP setup mode. The CARVILON record stays until you remove or re-adopt it.</div>'
+          :'<div class="si-load err">Factory reset could not be started.</div>'; })
+        .catch(()=>{ frx.innerHTML='<div class="si-load err">Factory reset could not be started.</div>'; });
+    };
   };
   const ab=host.querySelector('[data-authset]');
   if(ab) ab.onclick=()=>{
@@ -368,14 +403,29 @@ function renderSchedule(host, nodeId, ch, sid, jobs){
     fetch('shelly/'+sid+'/schedule/delete',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({ids})})
       .then(()=>reloadSchedule(host,nodeId,ch,sid)).catch(()=>{btn.disabled=false;});
   });
+  ['on','off'].forEach(k=>{
+    const sel=host.querySelector(`[data-${k}mode]`);
+    if(sel) sel.onchange=()=>{
+      const mode=sel.value;
+      host.querySelector(`[data-${k}]`).hidden=(mode!=='time');
+      host.querySelector(`[data-${k}off]`).hidden=(mode!=='sunrise'&&mode!=='sunset');
+      if(mode==='sunrise'||mode==='sunset') sunLocationHint(host, sid);
+    };
+  });
+  const slotSpec=k=>{
+    const mode=host.querySelector(`[data-${k}mode]`).value;
+    if(!mode) return null;
+    if(mode==='time'){ const v=host.querySelector(`[data-${k}]`).value; return v?{mode:'time',hhmm:v}:null; }
+    return {mode, off:host.querySelector(`[data-${k}off]`).value};
+  };
   const add=host.querySelector('[data-add]');
   if(add) add.onclick=()=>{
     const days=[...host.querySelectorAll('.si-dow.on')].map(d=>Number(d.dataset.d)).sort((a,b)=>a-b);
-    const onT=host.querySelector('[data-on]').value, offT=host.querySelector('[data-off]').value;
-    if(!days.length || (!onT && !offT)){ flash(host,'Pick weekdays and a time'); return; }
+    const onS=slotSpec('on'), offS=slotSpec('off');
+    if(!days.length || (!onS && !offS)){ flash(host,'Pick weekdays and an on/off time'); return; }
     const creates=[];
-    if(onT) creates.push(mkJob(ch, onT, true, days));
-    if(offT) creates.push(mkJob(ch, offT, false, days));
+    if(onS) creates.push(mkJob(ch, onS, true, days));
+    if(offS) creates.push(mkJob(ch, offS, false, days));
     add.disabled=true;
     Promise.all(creates.map(j=>fetch('shelly/'+sid+'/schedule',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(j)})))
       .then(()=>reloadSchedule(host,nodeId,ch,sid)).catch(()=>{add.disabled=false;flash(host,'Device rejected the schedule');});
@@ -392,44 +442,83 @@ function refreshClock(nodeId,ch,jobs){
   if(clk) clk.hidden=!has;
 }
 function flash(host,msg){ let m=host.querySelector('.si-sched-msg'); if(!m){ m=document.createElement('div'); m.className='si-sched-msg'; host.appendChild(m);} m.textContent=msg; }
+// sunLocationHint warns when the device has no lat/lon (sun events need a
+// location). One cached device fetch per sidebar life.
+let sunLocCache=null;
+function sunLocationHint(host, sid){
+  const note=host.querySelector('[data-sunhint]'); if(!note||!sid) return;
+  const check=t=>{ const loc=(((t||{}).config||{}).sys||{}).location||{}; note.hidden=!(loc.lat==null||loc.lon==null); };
+  if(sunLocCache){ check(sunLocCache); return; }
+  fetch('shelly/'+sid+'/device',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{
+    if(!d||d.ok===false) return;
+    sunLocCache=d; check(d);
+  }).catch(()=>{});
+}
 
 // mkJob builds a Schedule.Create job: "0 {min} {hour} * * {dow}" (no leading
 // zeros, integer weekdays) firing switch.set on/off for the channel.
-function mkJob(ch, hhmm, on, days){
-  const [h,m]=hhmm.split(':').map(x=>parseInt(x,10));
+function mkJob(ch, spec, on, days){
+  // spec {mode:'time'|'sunrise'|'sunset', hhmm, off}. Canonical sun form:
+  // "@sunrise[+/-<n>m] * * <weekday-ints>".
   const dow = days.length===7 ? '*' : days.join(',');
-  return { enable:true, timespec:`0 ${m||0} ${h||0} * * ${dow}`, calls:[{ method:'switch.set', params:{ id:ch, on } }] };
+  let ts;
+  if(spec.mode==='time'){
+    const [h,m]=(spec.hhmm||'').split(':').map(x=>parseInt(x,10));
+    ts=`0 ${m||0} ${h||0} * * ${dow}`;
+  } else {
+    const off=Math.round(Number(spec.off)||0);
+    ts='@'+spec.mode+(off?((off>0?'+':'-')+Math.abs(off)+'m'):'')+` * * ${dow}`;
+  }
+  return { enable:true, timespec:ts, calls:[{ method:'switch.set', params:{ id:ch, on } }] };
 }
 // groupJobs pairs an on-job and an off-job with the same weekday set into one
 // row; leftovers become single-action rows.
 function groupJobs(jobs, ch){
-  const parsed = jobs.map(j=>{ const t=parseSpec(j.timespec); const call=(j.calls||[]).find(c=>c.params&&Number(c.params.id)===ch); return { id:j.id, hhmm:t.hhmm, daysKey:t.daysKey, days:t.days, on:!!(call&&call.params.on) }; });
+  const parsed = jobs.map(j=>{ const t=parseSpec(j.timespec); const call=(j.calls||[]).find(c=>c.params&&Number(c.params.id)===ch); return { id:j.id, hhmm:t.hhmm, daysKey:t.daysKey, days:t.days, qual:t.qual, on:!!(call&&call.params.on) }; });
   const rows=[]; const used=new Set();
   parsed.forEach(a=>{ if(used.has(a.id)) return;
-    if(a.on){ const off=parsed.find(x=>!used.has(x.id) && !x.on && x.daysKey===a.daysKey); if(off){ used.add(a.id); used.add(off.id); rows.push({days:a.days, on:a.hhmm, off:off.hhmm, ids:[a.id,off.id]}); return; } }
-    used.add(a.id); rows.push({days:a.days, [a.on?'on':'off']:a.hhmm, ids:[a.id]});
+    if(a.on){ const off=parsed.find(x=>!used.has(x.id) && !x.on && x.daysKey===a.daysKey); if(off){ used.add(a.id); used.add(off.id); rows.push({days:a.days, qual:a.qual, on:a.hhmm, off:off.hhmm, ids:[a.id,off.id]}); return; } }
+    used.add(a.id); rows.push({days:a.days, qual:a.qual, [a.on?'on':'off']:a.hhmm, ids:[a.id]});
   });
   return rows;
 }
 function parseSpec(ts){
+  // Tolerant of both shapes: "sec min hour dom mon dow" and the token
+  // form "@sunrise[+/-<n>m] dom mon dow" (the captured "@sunrise 1,2 1 0"
+  // must render sanely). dom/mon restrictions become a display qualifier
+  // and join the grouping key so restricted jobs never mis-pair.
   const p=String(ts||'').trim().split(/\s+/);
-  const h=parseInt(p[2],10)||0, m=parseInt(p[1],10)||0;
-  const dowRaw=p[5]||'*';
+  const sun=/^@(sunrise|sunset)([+-]\d+[smh]?)?$/i.exec(p[0]||'');
+  let label, dom, mon, dowRaw;
+  if(sun){
+    let off=sun[2]||'';
+    if(off && !/[smh]$/i.test(off)) off+='m';
+    label=sun[1].toLowerCase()+off;
+    dom=p[1]!=null?p[1]:'*'; mon=p[2]!=null?p[2]:'*'; dowRaw=p[3]!=null?p[3]:'*';
+  } else {
+    const h=parseInt(p[2],10)||0, m=parseInt(p[1],10)||0;
+    label=pad(h)+':'+pad(m);
+    dom=p[3]!=null?p[3]:'*'; mon=p[4]!=null?p[4]:'*'; dowRaw=p[5]!=null?p[5]:'*';
+  }
   const days = dowRaw==='*' ? [0,1,2,3,4,5,6] : dowRaw.split(',').map(x=>parseInt(x,10)).filter(x=>!isNaN(x));
-  return { hhmm: pad(h)+':'+pad(m), daysKey: days.slice().sort((a,b)=>a-b).join(','), days };
+  const qual = (dom!=='*'||mon!=='*') ? (' · dom '+dom+' mon '+mon) : '';
+  return { hhmm: label, days, qual, daysKey: days.slice().sort((a,b)=>a-b).join(',')+'|'+dom+'|'+mon };
 }
 function pad(n){ return String(n).padStart(2,'0'); }
 function daysLabel(days){ return days.length===7 ? 'Every day' : days.map(d=>DOW[d]).join(' '); }
 
 function rowHTML(r){
   const parts=[]; if(r.on) parts.push(`<span class="si-on">on ${esc(r.on)}</span>`); if(r.off) parts.push(`<span class="si-off">off ${esc(r.off)}</span>`);
-  return `<div class="si-srow"><div class="si-srow-i"><div class="si-srow-t">${parts.join(' · ')}</div><div class="si-srow-d">${esc(daysLabel(r.days))}</div></div>`+
+  return `<div class="si-srow"><div class="si-srow-i"><div class="si-srow-t">${parts.join(' · ')}</div><div class="si-srow-d">${esc(daysLabel(r.days)+(r.qual||''))}</div></div>`+
     `<button type="button" class="si-del" data-del="${r.ids.join(',')}" title="Delete schedule"><i data-lucide="trash-2"></i></button></div>`;
 }
 function addFormHTML(){
+  const slot=(k,label)=>`<label class="si-tl">${label}<select class="si-i si-mode" data-${k}mode><option value="">—</option><option value="time">Time</option><option value="sunrise">Sunrise</option><option value="sunset">Sunset</option></select>`+
+    `<input type="time" data-${k} class="si-time" hidden><input type="number" data-${k}off class="si-i si-n si-off" value="0" title="Offset in minutes (+ after, - before)" hidden></label>`;
   return `<div class="si-add">`+
     `<div class="si-dows">`+DOW.map((d,i)=>`<button type="button" class="si-dow" data-d="${i}" aria-pressed="false">${d}</button>`).join('')+`</div>`+
-    `<div class="si-times"><label class="si-tl">On<input type="time" data-on class="si-time"></label><label class="si-tl">Off<input type="time" data-off class="si-time"></label></div>`+
+    `<div class="si-times">`+slot('on','On')+slot('off','Off')+`</div>`+
+    `<div class="si-sunhint" data-sunhint hidden>Sun schedules need the device location (latitude/longitude in the Device section).</div>`+
     `<button type="button" class="si-addbtn" data-add><i data-lucide="plus"></i>Add schedule</button></div>`;
 }
 

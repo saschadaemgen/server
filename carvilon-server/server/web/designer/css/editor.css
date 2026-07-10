@@ -794,3 +794,12 @@ body.running .wire.wsel{opacity:1}
 .si-ro { font-family:var(--mono, monospace); font-size:11px; opacity:0.75; }
 .si-code { width:100%; min-height:120px; resize:vertical; background:rgba(0,0,0,0.35); color:inherit; border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; font-family:var(--mono, monospace); font-size:11.5px; line-height:1.5; }
 .si-scred { display:flex; flex-direction:column; gap:6px; margin:6px 0; }
+
+/* Shelly sun schedules + guarded factory reset */
+.si-mode { width:84px; }
+.si-off { width:58px; }
+.si-sunhint { font-size:10.5px; color:#e8b34a; margin:4px 0; }
+.si-frwarn { color:#ff9d92; }
+.si-frlist { margin:4px 0 0 14px; padding:0; display:flex; flex-direction:column; gap:2px; font-size:10.5px; }
+.si-frdanger { border-color:rgba(255,92,77,0.6) !important; background:linear-gradient(180deg,#ff5c4d,#c8352a) !important; color:#fff !important; }
+.si-frdanger:disabled { opacity:0.35; }

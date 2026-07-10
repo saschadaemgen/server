@@ -93,6 +93,10 @@
   .dck-form { display:flex; flex-direction:column; gap:8px; width:100%; }
   .dck-inline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .dck-ro { font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary); }
+  .dck-danger { border-color:rgba(255,92,77,0.6) !important; background:linear-gradient(180deg,var(--lock-500),#c8352a) !important; color:#fff !important; }
+  .dck-danger:disabled { opacity:0.35; }
+  .dck-frlist { margin:6px 0 0 16px; padding:0; display:flex; flex-direction:column; gap:3px; }
+  .dck-frlist li { font-size:11.5px; line-height:1.45; }
 </style>
 {{end}}
 
@@ -968,7 +972,8 @@
           + '<div class="dck-list"><div class="dck-inline">'
           + '<button type="button" class="dck-mini" data-dck-fwcheck>Check for update</button>'
           + '<button type="button" class="dck-mini" data-dck-reboot>Reboot device</button>'
-          + '</div><div data-dck-fwout></div></div>';
+          + '<button type="button" class="dck-mini" data-dck-frstart>Factory reset&hellip;</button>'
+          + '</div><div data-dck-fwout></div><div data-dck-fr hidden></div></div>';
 
         // --- Auth ---
         var authHTML = '<div class="dck-list"><div class="dck-form">'
@@ -1097,6 +1102,51 @@
             })
             .catch(function () { fwBtn.disabled = false; fwOut.innerHTML = '<div class="dc-lazy-err">Check failed.</div>'; });
         });
+        // Factory reset: an extensive consequence dialog, an explicit
+        // acknowledgment, then type-to-confirm (the exact device name)
+        // before the destructive button - which never receives default
+        // focus - enables. After firing, the expected offline state is
+        // surfaced and the CARVILON record deliberately stays.
+        var frBtn = box.querySelector('[data-dck-frstart]');
+        var frBox = box.querySelector('[data-dck-fr]');
+        if (frBtn) frBtn.addEventListener('click', function () {
+          if (!frBox.hidden) { frBox.hidden = true; return; }
+          frBox.hidden = false;
+          var devName = String(dev.name || info.name || cur.row.getAttribute('data-name') || '').trim();
+          frBox.innerHTML =
+            '<div class="dck-note err"><strong>Factory reset erases everything on this device:</strong>'
+            + '<ul class="dck-frlist">'
+            + '<li>the entire device configuration is erased</li>'
+            + '<li>the CARVILON provisioning is destroyed - auth and the MQTT/broker link are gone; the device leaves the broker</li>'
+            + '<li>all schedules, scripts and webhooks are wiped</li>'
+            + '<li>the device returns to AP setup mode</li>'
+            + '<li>relays switch OFF - connected loads lose power</li>'
+            + '<li>a full re-adoption is required afterwards</li></ul></div>'
+            + '<div class="dck-list"><div class="dck-inline"><button type="button" class="dck-mini" data-fr-ack>I understand the consequences</button></div>'
+            + '<div class="dck-form" data-fr-step2 hidden>'
+            + '<span class="dc-act-label">Type the device name exactly (<b>' + esc(devName) + '</b>) to enable the reset</span>'
+            + '<div class="dck-inline"><input class="dck-i" type="text" data-fr-name autocomplete="off" spellcheck="false" style="width:220px;">'
+            + '<button type="button" class="dck-mini dck-danger" data-fr-fire disabled>Factory reset now</button><span class="dck-st" data-fr-st></span></div>'
+            + '</div></div>';
+          frBox.querySelector('[data-fr-ack]').addEventListener('click', function () {
+            frBox.querySelector('[data-fr-step2]').hidden = false;
+          });
+          var nameIn = frBox.querySelector('[data-fr-name]');
+          var fire = frBox.querySelector('[data-fr-fire]');
+          nameIn.addEventListener('input', function () { fire.disabled = (nameIn.value !== devName); });
+          fire.addEventListener('click', function () {
+            if (fire.disabled) return;
+            fire.disabled = true;
+            fetch('/a/designer/shelly/' + sid + '/factory-reset', { method: 'POST', credentials: 'same-origin' })
+              .then(function (r) {
+                frBox.innerHTML = r.ok
+                  ? '<div class="dck-note err">Factory reset sent. The device wipes itself, switches its relays OFF and returns in AP setup mode - it will show offline here. The CARVILON record stays until you remove or re-adopt it.</div>'
+                  : '<div class="dc-lazy-err">Factory reset could not be started.</div>';
+              })
+              .catch(function () { frBox.innerHTML = '<div class="dc-lazy-err">Factory reset could not be started.</div>'; });
+          });
+        });
+
         var rbBtn = box.querySelector('[data-dck-reboot]');
         if (rbBtn) rbBtn.addEventListener('click', function () {
           if (!confirm('Reboot the device now? Its relays keep their state; the device is briefly unreachable.')) return;
@@ -1330,34 +1380,66 @@
       }
 
       // ---- weekly schedule editor (device Schedule component) ----
-      function mkJob(ch, hhmm, on, days) {
-        var hm = hhmm.split(':');
+      function mkJob(ch, spec, on, days) {
+        // spec: {mode:'time'|'sunrise'|'sunset', hhmm, off}. Canonical sun
+        // form: "@sunrise[+/-<n>m] * * <weekday-ints>" (firmware rounds
+        // sun events to whole minutes).
         var dow = days.length === 7 ? '*' : days.join(',');
-        return { enable: true, timespec: '0 ' + (parseInt(hm[1], 10) || 0) + ' ' + (parseInt(hm[0], 10) || 0) + ' * * ' + dow, calls: [{ method: 'switch.set', params: { id: ch, on: on } }] };
+        var ts;
+        if (spec.mode === 'time') {
+          var hm = (spec.hhmm || '').split(':');
+          ts = '0 ' + (parseInt(hm[1], 10) || 0) + ' ' + (parseInt(hm[0], 10) || 0) + ' * * ' + dow;
+        } else {
+          var off = Math.round(Number(spec.off) || 0);
+          ts = '@' + spec.mode + (off ? ((off > 0 ? '+' : '-') + Math.abs(off) + 'm') : '') + ' * * ' + dow;
+        }
+        return { enable: true, timespec: ts, calls: [{ method: 'switch.set', params: { id: ch, on: on } }] };
       }
       function parseSpec(ts) {
+        // Tolerant of both device timespec shapes: the 6-field fixed form
+        // "sec min hour dom mon dow" and the token form
+        // "@sunrise[+/-<n>m] dom mon dow" (offset attaches to the token;
+        // the three date fields follow - the captured "@sunrise 1,2 1 0"
+        // must render sanely). dom/mon restrictions render as a qualifier
+        // and join the grouping key so restricted jobs never mis-pair.
         var pp = String(ts || '').trim().split(/\s+/);
-        var h = parseInt(pp[2], 10) || 0, m = parseInt(pp[1], 10) || 0;
-        var raw = pp[5] || '*';
-        var days = raw === '*' ? [0, 1, 2, 3, 4, 5, 6] : raw.split(',').map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); });
         var pad = function (x) { return (x < 10 ? '0' : '') + x; };
-        return { hhmm: pad(h) + ':' + pad(m), daysKey: days.slice().sort(function (a, bb) { return a - bb; }).join(','), days: days };
+        var sun = /^@(sunrise|sunset)([+-]\d+[smh]?)?$/i.exec(pp[0] || '');
+        var label, dom, mon, dowRaw;
+        if (sun) {
+          var off = sun[2] || '';
+          if (off && !/[smh]$/i.test(off)) off += 'm';
+          label = sun[1].toLowerCase() + off;
+          dom = pp[1] != null ? pp[1] : '*';
+          mon = pp[2] != null ? pp[2] : '*';
+          dowRaw = pp[3] != null ? pp[3] : '*';
+        } else {
+          var h = parseInt(pp[2], 10) || 0, m = parseInt(pp[1], 10) || 0;
+          label = pad(h) + ':' + pad(m);
+          dom = pp[3] != null ? pp[3] : '*';
+          mon = pp[4] != null ? pp[4] : '*';
+          dowRaw = pp[5] != null ? pp[5] : '*';
+        }
+        var days = dowRaw === '*' ? [0, 1, 2, 3, 4, 5, 6] : dowRaw.split(',').map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); });
+        var qual = (dom !== '*' || mon !== '*') ? (' · dom ' + dom + ' mon ' + mon) : '';
+        return { hhmm: label, days: days, qual: qual,
+                 daysKey: days.slice().sort(function (a, bb) { return a - bb; }).join(',') + '|' + dom + '|' + mon };
       }
       function groupJobs(jobs, ch) {
         var parsed = jobs.map(function (j) {
           var t = parseSpec(j.timespec);
           var call = (j.calls || []).find(function (c) { return c.params && Number(c.params.id) === ch; });
-          return { id: j.id, hhmm: t.hhmm, daysKey: t.daysKey, days: t.days, on: !!(call && call.params.on) };
+          return { id: j.id, hhmm: t.hhmm, daysKey: t.daysKey, days: t.days, qual: t.qual, on: !!(call && call.params.on) };
         });
         var rows = [], used = {};
         parsed.forEach(function (a) {
           if (used[a.id]) return;
           if (a.on) {
             var off = parsed.find(function (x) { return !used[x.id] && !x.on && x.daysKey === a.daysKey; });
-            if (off) { used[a.id] = used[off.id] = true; rows.push({ days: a.days, on: a.hhmm, off: off.hhmm, ids: [a.id, off.id] }); return; }
+            if (off) { used[a.id] = used[off.id] = true; rows.push({ days: a.days, qual: a.qual, on: a.hhmm, off: off.hhmm, ids: [a.id, off.id] }); return; }
           }
           used[a.id] = true;
-          var r = { days: a.days, ids: [a.id] };
+          var r = { days: a.days, qual: a.qual, ids: [a.id] };
           r[a.on ? 'on' : 'off'] = a.hhmm;
           rows.push(r);
         });
@@ -1371,17 +1453,34 @@
           return (j.calls || []).some(function (c) { return c.method && c.method.toLowerCase() === 'switch.set' && c.params && Number(c.params.id) === ch; });
         });
         var rows = groupJobs(mine, ch);
+        function slotHTML(k, label) {
+          return '<label class="dck-tl">' + label
+            + '<select class="dck-i" data-' + k + 'mode style="width:86px;"><option value="">—</option><option value="time">Time</option><option value="sunrise">Sunrise</option><option value="sunset">Sunset</option></select>'
+            + '<input type="time" data-' + k + ' class="dck-time" hidden>'
+            + '<input type="number" data-' + k + 'off class="dck-i num" value="0" title="Offset in minutes (+ after, - before)" hidden style="width:64px;"><\/label>';
+        }
         host.innerHTML = rows.map(function (r) {
           var parts = [];
           if (r.on) parts.push('<span class="on">on ' + esc(r.on) + '</span>');
           if (r.off) parts.push('off ' + esc(r.off));
-          return '<div class="dck-srow"><span><span class="t">' + parts.join(' · ') + '</span> <span class="d">' + esc(daysLabel(r.days)) + '</span></span>'
+          return '<div class="dck-srow"><span><span class="t">' + parts.join(' · ') + '</span> <span class="d">' + esc(daysLabel(r.days) + (r.qual || '')) + '</span></span>'
             + '<button type="button" class="dck-del" data-del="' + r.ids.join(',') + '" title="Delete schedule">&times;</button></div>';
         }).join('')
           + '<div class="dck-dows">' + DOW.map(function (d, i) { return '<button type="button" class="dck-dow" data-d="' + i + '" aria-pressed="false">' + d + '</button>'; }).join('') + '</div>'
-          + '<div class="dck-times"><label class="dck-tl">On<input type="time" data-on class="dck-time"></label>'
-          + '<label class="dck-tl">Off<input type="time" data-off class="dck-time"></label>'
-          + '<button type="button" class="dc-act-btn" data-add>Add schedule</button></div>';
+          + '<div class="dck-times">' + slotHTML('on', 'On') + slotHTML('off', 'Off')
+          + '<button type="button" class="dc-act-btn" data-add>Add schedule</button></div>'
+          + '<div class="dck-note warn" data-sunhint hidden>Sun schedules need the device location - set latitude/longitude under the Device section.</div>';
+        // per-slot mode wiring: fixed time shows the clock input, the sun
+        // modes show the +/- minutes offset and surface the location hint
+        ['on', 'off'].forEach(function (k) {
+          var sel = host.querySelector('[data-' + k + 'mode]');
+          sel.addEventListener('change', function () {
+            var mode = sel.value;
+            host.querySelector('[data-' + k + ']').hidden = (mode !== 'time');
+            host.querySelector('[data-' + k + 'off]').hidden = (mode !== 'sunrise' && mode !== 'sunset');
+            if (mode === 'sunrise' || mode === 'sunset') sunLocationHint(host);
+          });
+        });
         host.querySelectorAll('.dck-dow').forEach(function (d) {
           d.addEventListener('click', function () {
             var on = !d.classList.contains('on');
@@ -1400,13 +1499,22 @@
           });
         });
         var add = host.querySelector('[data-add]');
+        function slotSpec(k) {
+          var mode = host.querySelector('[data-' + k + 'mode]').value;
+          if (!mode) return null;
+          if (mode === 'time') {
+            var v = host.querySelector('[data-' + k + ']').value;
+            return v ? { mode: 'time', hhmm: v } : null;
+          }
+          return { mode: mode, off: host.querySelector('[data-' + k + 'off]').value };
+        }
         if (add) add.addEventListener('click', function () {
           var days = Array.prototype.map.call(host.querySelectorAll('.dck-dow.on'), function (d) { return Number(d.getAttribute('data-d')); }).sort(function (a, bb) { return a - bb; });
-          var onT = host.querySelector('[data-on]').value, offT = host.querySelector('[data-off]').value;
-          if (!days.length || (!onT && !offT)) { flashSched(host, 'Pick weekdays and a time'); return; }
+          var onS = slotSpec('on'), offS = slotSpec('off');
+          if (!days.length || (!onS && !offS)) { flashSched(host, 'Pick weekdays and an on/off time'); return; }
           var creates = [];
-          if (onT) creates.push(mkJob(ch, onT, true, days));
-          if (offT) creates.push(mkJob(ch, offT, false, days));
+          if (onS) creates.push(mkJob(ch, onS, true, days));
+          if (offS) creates.push(mkJob(ch, offS, false, days));
           add.disabled = true;
           Promise.all(creates.map(function (j) {
             return fetch('/a/designer/shelly/' + cur.sid + '/schedule', {
@@ -1421,6 +1529,28 @@
         fetch('/a/designer/shelly/' + cur.sid + '/schedules', { credentials: 'same-origin' })
           .then(function (r) { return r.ok ? r.json() : { jobs: [] }; }).catch(function () { return { jobs: [] }; })
           .then(function (sch) { if (cur && cur.row === row) renderSchedule(host, row, ch, sch.jobs || []); });
+      }
+      // sunLocationHint shows the warn note when the device has no
+      // lat/lon (sun events cannot be computed without a location). Uses
+      // the cached config tree; fetches it once when the panel has not
+      // opened the device view yet.
+      function sunLocationHint(host) {
+        var note = host.querySelector('[data-sunhint]');
+        if (!note || !cur) return;
+        function check(tree) {
+          var loc = (((tree || {}).config || {}).sys || {}).location || {};
+          note.hidden = !(loc.lat == null || loc.lon == null);
+        }
+        if (cur.deviceData) { check(cur.deviceData); return; }
+        if (!cur.sid) return;
+        var row = cur.row;
+        fetch('/a/designer/shelly/' + cur.sid + '/device', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!cur || cur.row !== row || !d || d.ok === false) return;
+            cur.deviceData = d;
+            check(d);
+          }).catch(function () {});
       }
       function flashSched(host, msg) {
         var m = host.querySelector('.dck-sched-msg');

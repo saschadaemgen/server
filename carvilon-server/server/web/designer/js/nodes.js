@@ -116,15 +116,28 @@ function applyShellySchedule(nd,jobs){
     const nx=row.querySelector('[data-chnext]');if(nx)nx.textContent=hit?('next '+hit.txt):'';
   });
 }
-// shellyCronNext computes the next fire of a "sec min hour * * dow" weekly
-// timespec (dow 0=Sun, comma list or *) as a minutes-from-now ordering key
-// plus the HH:MM label. Only the weekly on/off shape the editor writes is
-// handled; anything else (e.g. @sunset) returns null (no summary, still safe).
+// shellyCronNext computes the next fire of a weekly timespec as a
+// minutes-from-now ordering key plus a display label. Handles both the
+// fixed form "sec min hour * * dow" (label HH:MM) and the sun-token form
+// "@sunrise[+/-<n>m] dom mon dow" (label "sunrise+30m" - the exact time
+// is computed on the device; ordering approximates sunrise 06:00 /
+// sunset 18:00 purely to pick which action is "next").
 function shellyCronNext(ts){
-  const p=String(ts||'').trim().split(/\s+/);if(p.length<6)return null;
+  const p=String(ts||'').trim().split(/\s+/);
+  const sun=/^@(sunrise|sunset)([+-]\d+[smh]?)?$/i.exec(p[0]||'');
+  const now=new Date();
+  if(sun){
+    const dowRaw=p[3]!=null?p[3]:'*';
+    const dow=dowRaw==='*'?[0,1,2,3,4,5,6]:dowRaw.split(',').map(x=>parseInt(x,10)).filter(x=>!isNaN(x));if(!dow.length)return null;
+    let off=sun[2]||''; if(off&&!/[smh]$/i.test(off)) off+='m';
+    const approx=sun[1].toLowerCase()==='sunrise'?360:1080;
+    for(let add=0;add<8;add++){const day=(now.getDay()+add)%7;if(!dow.includes(day))continue;
+      const mins=add*1440+approx-(now.getHours()*60+now.getMinutes());if(mins>=0)return {at:mins,hhmm:sun[1].toLowerCase()+off};}
+    return null;
+  }
+  if(p.length<6)return null;
   const min=parseInt(p[1],10),hour=parseInt(p[2],10);if(isNaN(min)||isNaN(hour))return null;
   const dow=p[5]==='*'?[0,1,2,3,4,5,6]:p[5].split(',').map(x=>parseInt(x,10)).filter(x=>!isNaN(x));if(!dow.length)return null;
-  const now=new Date();
   for(let add=0;add<8;add++){const day=(now.getDay()+add)%7;if(!dow.includes(day))continue;
     const mins=add*1440+hour*60+min-(now.getHours()*60+now.getMinutes());if(mins>=0)return {at:mins,hhmm:String(hour).padStart(2,'0')+':'+String(min).padStart(2,'0')};}
   return null;
