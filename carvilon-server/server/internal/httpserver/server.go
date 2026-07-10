@@ -686,6 +686,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/designer/shelly/{id}/reboot", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyReboot)))
 	s.mux.Handle("GET /a/designer/shelly/{id}/fw-check", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyFWCheck)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/fw-update", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyFWUpdate)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/factory-reset", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyFactoryReset)))
 	s.mux.Handle("GET /a/designer/shelly/{id}/scripts", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScripts)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/script", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptCreate)))
 	s.mux.Handle("GET /a/designer/shelly/{id}/script/{sid}/code", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShellyScriptCode)))

@@ -63,6 +63,15 @@ func (c *Client) Update(ctx context.Context, stage string) error {
 	return err
 }
 
+// FactoryReset wipes the device back to factory state: configuration,
+// auth, MQTT provisioning, schedules, scripts and webhooks are all
+// erased and the device returns in AP setup mode with its relays OFF.
+// The UI gates this behind a multi-step, type-to-confirm chain.
+func (c *Client) FactoryReset(ctx context.Context) error {
+	_, err := c.callParams(ctx, "Shelly.FactoryReset", nil)
+	return err
+}
+
 // --- Scripts (mJS) ---------------------------------------------------------
 
 // ScriptInfo is one entry of Script.List.

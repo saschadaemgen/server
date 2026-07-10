@@ -526,6 +526,16 @@ func (s *Server) handleDesignerShellyReboot(w http.ResponseWriter, r *http.Reque
 	s.shellySimpleAction(w, r, func(ctx context.Context, cl *shellyapi.Client) error { return cl.Reboot(ctx) })
 }
 
+// handleDesignerShellyFactoryReset wipes the device back to factory
+// state. Destructive beyond recovery: the UI enforces an extensive
+// consequence dialog plus type-to-confirm before this endpoint is ever
+// called; the endpoint itself is the plain action. The CARVILON device
+// record deliberately survives - the operator removes or re-adopts.
+// Route: POST /a/designer/shelly/{id}/factory-reset.
+func (s *Server) handleDesignerShellyFactoryReset(w http.ResponseWriter, r *http.Request) {
+	s.shellySimpleAction(w, r, func(ctx context.Context, cl *shellyapi.Client) error { return cl.FactoryReset(ctx) })
+}
+
 // handleDesignerShellyFWCheck asks the device for available firmware.
 // Route: GET /a/designer/shelly/{id}/fw-check.
 func (s *Server) handleDesignerShellyFWCheck(w http.ResponseWriter, r *http.Request) {
