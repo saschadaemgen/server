@@ -18,20 +18,27 @@
   .dck-note { padding:12px 20px; font-size:12px; color:var(--text-tertiary); line-height:1.5; border-bottom:1px solid var(--divider); }
   .dck-note.warn { color:var(--orange-300); }
   .dck-note.err { color:#ffb0b0; }
-  .dck-state { font-size:11px; font-weight:600; letter-spacing:0.05em; color:var(--text-tertiary); flex:0 0 auto; width:26px; text-align:right; }
+  .dck-ch { cursor:pointer; }
+  .dck-ch:hover { background:rgba(255,255,255,0.02); }
+  .dck-ch.is-selected { background:var(--amber-haze); box-shadow:inset 3px 0 0 var(--orange-500); }
+  .dck-go { font-size:10px; font-weight:600; letter-spacing:0.05em; color:var(--text-tertiary); flex:0 0 auto; margin-left:8px; white-space:nowrap; }
+  .dck-ch:hover .dck-go, .dck-ch.is-selected .dck-go { color:var(--orange-400); }
+  .dck-back { display:flex; align-items:center; gap:7px; width:100%; border:none; background:var(--bg-deep); border-bottom:1px solid var(--divider); cursor:pointer; padding:8px 20px; font-family:var(--font-sans); font-size:11px; font-weight:600; color:var(--orange-400); text-align:left; }
+  .dck-back:hover { color:var(--orange-300); }
+  .dck-state { font-size:12px; font-weight:600; letter-spacing:0.05em; color:var(--text-tertiary); flex:0 0 auto; width:28px; text-align:right; }
   .dck-state.on { color:var(--orange-300); text-shadow:0 0 8px var(--amber-glow); }
-  .dck-tog { position:relative; width:40px; height:20px; flex:0 0 auto; border:none; border-radius:10px; cursor:pointer; background:var(--field-bg); box-shadow:var(--well); padding:0; }
-  .dck-tog::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--gray-500); transition:left 160ms var(--ease-tactile), background 160ms; }
+  .dck-tog { position:relative; width:46px; height:22px; flex:0 0 auto; border:none; border-radius:11px; cursor:pointer; background:var(--field-bg); box-shadow:var(--well); padding:0; }
+  .dck-tog::after { content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:var(--gray-500); transition:left 160ms var(--ease-tactile), background 160ms; }
   .dck-tog.on { background:linear-gradient(180deg,var(--orange-500),var(--orange-600)); box-shadow:0 0 10px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,0.25); }
-  .dck-tog.on::after { left:22px; background:var(--white); }
+  .dck-tog.on::after { left:26px; background:var(--white); }
   .dck-tog:disabled { cursor:default; opacity:0.45; }
   .dck-tog.pending::after { animation:dck-pulse 900ms ease-in-out infinite; }
   @keyframes dck-pulse { 50% { opacity:0.35; } }
-  .dck-meters { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:6px; padding:10px 20px 4px; }
-  .dck-tile { border-radius:var(--radius-sm); background:var(--surface-cell); box-shadow:inset 0 0 0 1px var(--border-subtle); padding:7px 10px 8px; min-width:0; }
+  .dck-meters { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; padding:12px 20px 6px; }
+  .dck-tile { border-radius:var(--radius-sm); background:var(--surface-cell); box-shadow:inset 0 0 0 1px var(--border-subtle); padding:9px 12px 10px; min-width:0; }
   .dck-tile .k { font-size:9.5px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-tertiary); white-space:nowrap; }
-  .dck-tile .v { margin-top:2px; font-family:var(--font-mono); font-size:13px; color:var(--text-secondary); white-space:nowrap; }
-  .dck-in { display:flex; align-items:center; gap:7px; padding:8px 20px 14px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--divider); }
+  .dck-tile .v { margin-top:3px; font-family:var(--font-mono); font-size:15px; color:var(--text-secondary); white-space:nowrap; }
+  .dck-in { display:flex; align-items:center; gap:7px; padding:10px 20px 16px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--divider); }
   .dck-in .k { color:var(--text-tertiary); }
 
   /* Settings (right column): dc-act vocabulary + a dark select + the
@@ -477,9 +484,9 @@
         }
         cur.channels.forEach(function (ch) {
           var n = ch.id + 1;
-          h += '<div data-dck-ch="' + ch.id + '">'
+          h += '<div class="dck-ch" data-dck-ch="' + ch.id + '" role="button" tabindex="0" aria-label="Channel ' + n + ' settings">'
             + '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Switch ' + n
-            + '<span data-dck-name></span></span><span class="dc-hr"></span>'
+            + '<span data-dck-name></span></span><span class="dck-go">settings &rsaquo;</span><span class="dc-hr"></span>'
             + '<button type="button" class="dck-tog" data-dck-tog="' + ch.id + '" disabled aria-label="Switch ' + n + '"></button>'
             + '<span class="dck-state" data-dck-state>—</span></div>'
             + (ch.meter
@@ -505,9 +512,29 @@
         }
         leftCol.innerHTML = h;
         leftCol.querySelectorAll('[data-dck-tog]').forEach(function (btn) {
-          btn.addEventListener('click', function () { toggle(Number(btn.getAttribute('data-dck-tog')), btn); });
+          btn.addEventListener('click', function (e) {
+            e.stopPropagation(); // the switch must never double as row selection
+            toggle(Number(btn.getAttribute('data-dck-tog')), btn);
+          });
+        });
+        // Clicking a channel row selects it - the right column then shows
+        // THAT channel's settings (the editor's device/channel pattern).
+        leftCol.querySelectorAll('.dck-ch').forEach(function (el) {
+          el.addEventListener('click', function () { select(Number(el.getAttribute('data-dck-ch'))); });
         });
         return true;
+      }
+
+      // select toggles the focused channel; re-clicking it (or the back
+      // link) returns to the device view. The left rows carry the visible
+      // selected state, the right column re-renders contextually.
+      function select(ch) {
+        if (!cur) return;
+        cur.selCh = (cur.selCh === ch) ? null : ch;
+        cur.leftCol.querySelectorAll('.dck-ch').forEach(function (el) {
+          el.classList.toggle('is-selected', Number(el.getAttribute('data-dck-ch')) === cur.selCh);
+        });
+        renderRight();
       }
 
       // afterSlide: the deferred work (the /a/devices pattern - never
@@ -528,7 +555,8 @@
         }
         if (cur.linked && cur.prefix) stream();
         else if (!cur.linked) httpSnapshot(row);
-        renderSettings(row, rightCol);
+        // the right column starts in the device view (mounted at
+        // fillRight time); channel settings load on selection
       }
 
       function teardown() {
@@ -660,27 +688,67 @@
         }).catch(function () { btn.classList.remove('pending'); chFlash(ch, 'Switch command failed.'); });
       }
 
-      // ---- settings (right column, per channel) ----
+      // ---- settings (right column: device view vs ONE selected channel) ----
+      // The right column stays compact: device information on top (the
+      // cloned overview sections), then EITHER the device-level controls
+      // (no channel selected) OR the selected channel's settings - never
+      // every channel stacked at once (the columns must stay balanced).
       function mountSettingsSkeleton(row, rightCol) {
-        var rest = rightCol.querySelector('[data-shelly-rest]');
         var mount = document.createElement('div');
         mount.setAttribute('data-dck-settings', '');
-        if (rest) rightCol.insertBefore(mount, rest);
-        else rightCol.appendChild(mount);
-        mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">Reading device configuration&hellip;</div>';
+        // The pre-rendered "Device controls" block (the marker section
+        // head + its form) becomes the device view's content: detach it
+        // so the mount can swap between it and a channel's settings.
+        var rest = rightCol.querySelector('[data-shelly-rest]');
+        cur.ctrlNodes = [];
+        if (rest) {
+          var form = rest.nextElementSibling;
+          rightCol.insertBefore(mount, rest);
+          cur.ctrlNodes.push(rest);
+          if (form) cur.ctrlNodes.push(form);
+        } else {
+          rightCol.appendChild(mount);
+        }
+        cur.mount = mount;
+        cur.selCh = null;
+        renderRight();
       }
-      function renderSettings(row, rightCol) {
-        var mount = rightCol.querySelector('[data-dck-settings]');
-        if (!mount || !cur) return;
-        if (!cur.sid) {
-          mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">Settings need the device in the adopted set.</div>';
+      function renderRight() {
+        if (!cur || !cur.mount) return;
+        var mount = cur.mount;
+        // rescue the live device-controls nodes before wiping the mount
+        var keep = document.createDocumentFragment();
+        (cur.ctrlNodes || []).forEach(function (n) { keep.appendChild(n); });
+        mount.innerHTML = '';
+        if (cur.selCh == null) {
+          // device view: hint + the device-level controls
+          if (cur.channels.length) {
+            mount.appendChild(fragFromHTML(secHead('Settings', false)
+              + '<div class="dc-lazy-hint">Select a switch on the left to configure it - name, power-on default, timer, protections and the weekly schedule live per channel.</div>'));
+          }
+          mount.appendChild(keep);
           return;
         }
-        mount.innerHTML = '';
-        cur.channels.forEach(function (ch) { renderChannelSettings(mount, row, ch.id); });
-        if (!cur.channels.length) {
-          mount.innerHTML = secHead('Settings', false) + '<div class="dc-lazy-hint">No known channels for this model yet.</div>';
+        // channel view: the device-controls nodes stay parked in the
+        // detached fragment (cur.ctrlNodes keeps them alive) until the
+        // device view returns
+        var back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'dck-back';
+        back.innerHTML = '&lsaquo; All channels';
+        back.addEventListener('click', function () { select(cur.selCh); });
+        mount.appendChild(back);
+        if (!cur.sid) {
+          mount.appendChild(fragFromHTML(secHead('Channel ' + (cur.selCh + 1) + ' settings', false)
+            + '<div class="dc-lazy-hint">Settings need the device in the adopted set.</div>'));
+          return;
         }
+        renderChannelSettings(mount, cur.row, cur.selCh);
+      }
+      function fragFromHTML(html) {
+        var t = document.createElement('template');
+        t.innerHTML = html;
+        return t.content;
       }
       function renderChannelSettings(mount, row, ch) {
         var box = document.createElement('div');
@@ -688,14 +756,15 @@
         box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false) + '<div class="dc-lazy-hint">Reading device&hellip;</div>';
         mount.appendChild(box);
         var sid = cur.sid;
+        function stale() { return !cur || cur.row !== row || cur.selCh !== ch; }
         Promise.all([
           fetch('/a/designer/shelly/' + sid + '/channel/' + ch, { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : Promise.reject(); }),
           fetch('/a/designer/shelly/' + sid + '/schedules', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : { jobs: [] }; }).catch(function () { return { jobs: [] }; })
         ]).then(function (res) {
-          if (!cur || cur.row !== row) return;
+          if (stale()) return;
           renderChannelForm(box, row, ch, res[0].switch || {}, res[0].input, (res[1].jobs || []));
         }).catch(function () {
-          if (cur && cur.row === row) box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false)
+          if (!stale()) box.innerHTML = secHead('Channel ' + (ch + 1) + ' settings', false)
             + '<div class="dc-lazy-err">Device unreachable - settings run over HTTP-RPC; check the device is on the LAN.</div>';
         });
       }
