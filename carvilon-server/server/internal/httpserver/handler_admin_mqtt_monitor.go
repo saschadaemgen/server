@@ -74,6 +74,9 @@ type mqttMonitorDevice struct {
 	// Device Center row fields (the dc shell's vocabulary).
 	Index       int    // 1-based table row number (assigned after the sort)
 	Category    string // dc icon key: "switch" for Shelly-backed rows, else "other"
+	GroupStart  bool   // first row of its category: carries the group header
+	GroupLabel  string // header label (categoryPlural: "Switches" / "Other devices")
+	GroupCount  int    // rows in this category
 	StatusState string // "online" | "offline" (Connected in dc terms)
 	StatusText  string // "Connected" | "Disconnected"
 	ProvKey     string // provisioning facet key: linked|provisioning|failed|none
@@ -231,15 +234,38 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 		out = append(out, row)
 	}
 
-	// Offline first (the operator's early warning), then by name.
+	// Category-major order (the Devices pattern: the table's group
+	// headers need contiguous categories), offline first inside each
+	// category (the operator's early warning), then by name.
+	catRank := map[string]int{"switch": 0, "other": 1}
 	sort.SliceStable(out, func(i, j int) bool {
+		if catRank[out[i].Category] != catRank[out[j].Category] {
+			return catRank[out[i].Category] < catRank[out[j].Category]
+		}
 		if out[i].Connected != out[j].Connected {
 			return !out[i].Connected // disconnected devices float up
 		}
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
+
+	// Number the rows and mark the first of each category as a group
+	// start (label + total count) for the table's group headings - the
+	// same shape /a/devices renders, so the shell's group handling
+	// (visibility while filtering, the scan sweep, clear-sort re-insert)
+	// applies 1:1.
+	catCount := map[string]int{}
+	for _, d := range out {
+		catCount[d.Category]++
+	}
+	lastCat := ""
 	for i := range out {
 		out[i].Index = i + 1
+		if out[i].Category != lastCat {
+			lastCat = out[i].Category
+			out[i].GroupStart = true
+			out[i].GroupLabel = categoryPlural(out[i].Category)
+			out[i].GroupCount = catCount[out[i].Category]
+		}
 	}
 	return out, len(retained)
 }

@@ -16,11 +16,6 @@
     .dc-th.col-model, .dc-th.col-ip, .dc-cell.col-model, .dc-cell.col-ip { display:none; }
   }
 
-  /* Offline rows highlighted - the operator's early warning (a device
-     that fell off the broker). The selected row's accent seam wins. */
-  .dc-row.offline:not(.is-selected) { box-shadow:inset 3px 0 0 var(--lock-500); background:var(--lock-haze); }
-  .dc-row.offline:not(.is-selected):hover { background:color-mix(in srgb, var(--lock-500) 16%, transparent); }
-
   /* Broker health strip - the page header above the table. */
   .dcm-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:1px; background:var(--divider); border-bottom:1px solid var(--border-default); }
   .dcm-tile { padding:9px 14px 10px; background:linear-gradient(180deg,#0f1216,#0b0e11); min-width:0; }
@@ -171,6 +166,14 @@
 
           <div class="dc-tbody" data-dc-tbody>
             {{range $r := .Page.Devices}}
+              {{if $r.GroupStart}}
+                <div class="dc-group" data-dc-group="{{$r.Category}}">
+                  <span class="dc-group-ico">{{template "dc-icon" $r.Category}}</span>
+                  <span class="dc-group-label">{{$r.GroupLabel}}</span>
+                  <span class="dc-group-count">{{printf "%02d" $r.GroupCount}}</span>
+                  <span class="dc-group-line"><span class="dc-scan" data-dc-scan></span></span>
+                </div>
+              {{end}}
               <div class="dc-row {{$r.StatusState}}" data-dc-row data-idx="{{$r.Index}}"
                    data-cat="{{$r.Category}}" data-status="{{$r.StatusState}}" data-prov="{{$r.ProvKey}}"
                    data-model="{{$r.Model}}" data-search="{{$r.Search}}"
