@@ -59,6 +59,16 @@ function renderDevice(container, nodeId){
   const sid = def.shelly && def.shelly.id;
   const host = container.querySelector('.si-devsecs');
   if(!sid){ host.innerHTML='<div class="si-note">Device not linked.</div>'; return; }
+  // Gen1 modules read the frozen REST surface, not the Gen2 RPC tree -
+  // fetching the Gen2 endpoint would 404 into a false "unreachable".
+  if(def.shelly && def.shelly.gen===1){
+    fetch('shelly/'+sid+'/gen1/device',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{
+      if(channelView.node!==null) return;
+      if(!d || d.ok===false){ host.innerHTML='<div class="si-load err">Device unreachable.</div>'; return; }
+      renderGen1DeviceSections(host, sid, d);
+    }).catch(()=>{ host.innerHTML='<div class="si-load err">Device unreachable.</div>'; });
+    return;
+  }
   fetch('shelly/'+sid+'/device',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{
     if(channelView.node!==null) return; // navigated into a channel meanwhile
     if(!d || d.ok===false){ host.innerHTML='<div class="si-load err">'+esc((d&&d.error)||'Device unreachable.')+'</div>'; return; }
@@ -71,6 +81,47 @@ function collSec(title, inner){
   return `<div class="si-sec si-coll"><div class="si-h si-collh">${esc(title)}<i data-lucide="chevron-right"></i></div><div class="si-collb" hidden>${inner}</div></div>`;
 }
 function roF(k,v){ return field(k, `<span class="si-ro">${esc(v==null||v===''?'—':String(v))}</span>`); }
+
+// ---- gen1 device view: the /settings-tree surface (REST, not RPC) ----
+function renderGen1DeviceSections(host, sid, d){
+  const mq = d.mqtt||{}, ota = d.ota||{};
+  const devHTML =
+    field('Device name', `<input class="si-i" data-g1k="name" type="text" value="${escAttr(d.name||'')}">`)+
+    roF('Model', d.model)+
+    (d.mode ? roF('Mode', d.mode+' (switch it in the Device Center)') : '')+
+    (d.led ? field('Disable status LED', g1tog('led_status_disable', d.led.status_disable===true))+
+             field('Disable power LED', g1tog('led_power_disable', d.led.power_disable===true)) : '');
+  const fwHTML = roF('Firmware', d.fw)+
+    (ota.has_update ? `<div class="si-f"><span class="si-f-l">update: ${esc(ota.new||'available')}</span><span class="si-f-c"><button type="button" class="si-addbtn" data-g1up>Install</button></span></div>` : '')+
+    `<div class="si-f"><span class="si-f-c"><button type="button" class="si-addbtn" data-g1reboot>Reboot device</button><span class="si-st" data-g1fwst></span></span></div>`;
+  const connHTML =
+    `<div class="si-note">MQTT and cloud are managed by CARVILON provisioning and stay read-only. Gen1 connects PLAINTEXT (no MQTT TLS on Gen1 firmware) - the documented second security tier.</div>`+
+    roF('MQTT server', mq.server)+roF('MQTT id', mq.id)+roF('MQTT enabled', String(mq.enable===true))+
+    roF('Cloud enabled', String(d.cloud && d.cloud.enabled===true));
+  host.innerHTML = collSec('Device', devHTML) + collSec('Firmware', fwHTML) + collSec('Connectivity', connHTML);
+  host.querySelectorAll('.si-collh').forEach(h=>{ h.onclick=()=>{ const b=h.parentElement.querySelector('.si-collb'); b.hidden=!b.hidden; }; });
+  host.querySelectorAll('[data-g1k]').forEach(el=>{
+    const key = el.dataset.g1k;
+    const st = el.closest('.si-f') && el.closest('.si-f').querySelector('[data-st]');
+    const send = v => g1apply(sid, 'device-settings', {[key]:v}, st);
+    if(el.dataset.tog!=null){ el.onclick=()=>{ const on=!el.classList.contains('on'); el.classList.toggle('on',on); send(on); }; }
+    else el.onchange=()=>send(el.value);
+  });
+  const up = host.querySelector('[data-g1up]');
+  if(up) up.onclick=()=>{ if(!confirm('Install the firmware update now? The device flashes and reboots on its own.')) return;
+    up.disabled=true; fetch('shelly/'+sid+'/gen1/ota-update',{method:'POST',credentials:'same-origin'}); };
+  const rb = host.querySelector('[data-g1reboot]');
+  if(rb) rb.onclick=()=>{ if(!confirm('Reboot the device now?')) return;
+    rb.disabled=true; fetch('shelly/'+sid+'/gen1/reboot',{method:'POST',credentials:'same-origin'}).then(r=>{ rb.disabled=false; if(!r.ok) alert('Reboot failed.'); }); };
+  if(window.lucide) lucide.createIcons();
+}
+function g1tog(k,on){ return `<button type="button" class="si-tog${on?' on':''}" data-g1k="${k}" data-tog></button>`; }
+function g1apply(sid, path, cfg, statusEl){
+  if(statusEl){ statusEl.textContent='…'; statusEl.className='si-st'; }
+  fetch('shelly/'+sid+'/gen1/'+path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({config:cfg})})
+    .then(r=>{ if(statusEl){ statusEl.textContent=r.ok?'saved':'failed'; statusEl.className='si-st'+(r.ok?' ok':' err'); } })
+    .catch(()=>{ if(statusEl){ statusEl.textContent='failed'; statusEl.className='si-st err'; } });
+}
 
 function renderDeviceSections(host, sid, d){
   const cfg=d.config||{}, sys=cfg.sys||{}, dev=sys.device||{}, loc=sys.location||{}, sntp=sys.sntp||{};
@@ -319,6 +370,13 @@ function renderChannel(container, nodeId, ch){
   if(window.lucide) lucide.createIcons();
   if(!sid){ container.querySelector('[data-body]').innerHTML='<div class="si-load err">Device not linked.</div>'; return; }
   const body = container.querySelector('[data-body]');
+  if(def.shelly && def.shelly.gen===1){
+    fetch('shelly/'+sid+'/gen1/channel/'+ch,{credentials:'same-origin'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{
+      if(channelView.node!==nodeId || channelView.ch!==ch) return;
+      renderGen1ChannelForm(body, sid, ch, d);
+    }).catch(()=>{ body.innerHTML='<div class="si-load err">Device unreachable — settings run over the device\'s HTTP API; check the device is on the LAN.</div>'; });
+    return;
+  }
   Promise.all([
     fetch('shelly/'+sid+'/channel/'+ch,{credentials:'same-origin'}).then(r=>r.ok?r.json():Promise.reject()),
     fetch('shelly/'+sid+'/schedules',{credentials:'same-origin'}).then(r=>r.ok?r.json():{jobs:[]}).catch(()=>({jobs:[]})),
@@ -327,6 +385,40 @@ function renderChannel(container, nodeId, ch){
     if(channelView.node!==nodeId || channelView.ch!==ch) return;
     renderChannelForm(body, nodeId, ch, sid, cfg.switch||{}, cfg.input, (sch.jobs||[]));
   }).catch(()=>{ body.innerHTML='<div class="si-load err">Device unreachable — settings run over HTTP-RPC; check the device is on the LAN.</div>'; });
+}
+
+// ---- gen1 channel view: /settings/relay/{ch} fields; the weekly
+// schedule shows read-only here (the Device Center cockpit carries the
+// full schedule_rules editor - one editor, one whole-set writer).
+const G1_DEFAULTS=[['off','Off'],['on','On'],['last','Restore last'],['switch','Match switch']];
+const G1_BTN_TYPES=[['momentary','Momentary'],['toggle','Toggle'],['edge','Edge'],['detached','Detached'],['action','Action'],['momentary_on_release','Momentary on release']];
+function g1sel(k,v,opts){ return `<select class="si-i" data-g1k="${k}">`+opts.map(o=>`<option value="${o[0]}"${o[0]===v?' selected':''}>${esc(o[1])}</option>`).join('')+`</select>`; }
+function renderGen1ChannelForm(body, sid, ch, d){
+  const rl = d.relay||{}, sch = d.schedule||{enabled:false,rules:[]};
+  body.innerHTML =
+    `<div class="si-sec"><div class="si-h">Channel</div>`+
+    field('Name', `<input class="si-i" data-g1k="name" type="text" value="${escAttr(rl.name||'')}">`)+
+    field('Power-on default', g1sel('default_state', rl.default_state||'off', G1_DEFAULTS))+
+    field('Button type', g1sel('btn_type', rl.btn_type||'toggle', G1_BTN_TYPES))+
+    field('Reverse button', g1tog('btn_reverse', rl.btn_reverse===true))+
+    (d.meter ? field('Max power', `<input class="si-i" data-g1k="max_power" type="number" value="${escAttr(rl.max_power==null?'':String(rl.max_power))}"> W`) : '')+
+    `</div><div class="si-sec"><div class="si-h">Timer <span class="si-ondev">on device</span></div>`+
+    field('Auto-OFF after', `<input class="si-i" data-g1k="auto_off" type="number" value="${escAttr(rl.auto_off==null?'':String(rl.auto_off))}"> s`)+
+    field('Auto-ON after', `<input class="si-i" data-g1k="auto_on" type="number" value="${escAttr(rl.auto_on==null?'':String(rl.auto_on))}"> s`)+
+    `</div><div class="si-sec"><div class="si-h">Weekly schedule <span class="si-ondev">on device</span></div>`+
+    (sch.rules && sch.rules.length
+      ? sch.rules.map(r=>`<div class="si-f"><span class="si-f-l">${esc(r)}</span></div>`).join('')+
+        `<div class="si-note">${sch.enabled?'Active.':'Present but disabled.'} Edit the schedule in the Device Center cockpit.</div>`
+      : `<div class="si-note">No schedule set. Create one in the Device Center cockpit.</div>`)+
+    `</div>`;
+  body.querySelectorAll('[data-g1k]').forEach(el=>{
+    const key = el.dataset.g1k;
+    const st = el.closest('.si-f') && el.closest('.si-f').querySelector('[data-st]');
+    const send = v => g1apply(sid, 'channel/'+ch+'/settings', {[key]:v}, st);
+    if(el.dataset.tog!=null){ el.onclick=()=>{ const on=!el.classList.contains('on'); el.classList.toggle('on',on); send(on); }; }
+    else if(el.type==='number'){ el.onchange=()=>{ if(el.value.trim()!=='') send(Number(el.value)||0); }; }
+    else el.onchange=()=>send(el.value);
+  });
 }
 
 // setConfig POSTs a single-key partial config and flashes the field status.

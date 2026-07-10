@@ -100,8 +100,48 @@ async function loadShellyOverview(nodeId,storeId){
     if(!r.ok)return;
     const d=await r.json(),nd=nodes[nodeId];if(!nd)return;
     for(const k in (d.names||{})){const nm=nd.el.querySelector(`.sh-row[data-ch="${Number(k)}"] [data-chname]`);if(nm&&d.names[k])nm.textContent=d.names[k];}
-    applyShellySchedule(nd,d.jobs||[]);
+    if(d.gen1)applyShelly1Schedule(nd,d.schedules||{});
+    else applyShellySchedule(nd,d.jobs||[]);
   }catch(_){/* device unreachable: placeholders stay, no error */}
+}
+// applyShelly1Schedule is the Gen1 sibling: schedules come as per-channel
+// rule-string sets ("0700-0123456-on"; weekday digits 0=Monday) instead
+// of cron jobs. The clock lights when a channel's schedule is enabled and
+// has rules; "next" is computed from the rule strings.
+function applyShelly1Schedule(nd,schedules){
+  nd.el.querySelectorAll('.sh-row').forEach(row=>{
+    const ch=String(Number(row.dataset.ch)),s=schedules[ch];
+    const active=!!(s&&s.enabled&&(s.rules||[]).length);
+    const clk=row.querySelector('[data-chclock]');if(clk)clk.hidden=!active;
+    const nx=row.querySelector('[data-chnext]');
+    if(nx)nx.textContent=active?(t=>t?('next '+t.hhmm):'')(shelly1RulesNext(s.rules)):'';
+  });
+}
+// shelly1RulesNext picks the next firing rule of a Gen1 rule set. Fixed
+// rules are exact; sun rules order approximately (sunrise 06:00 / sunset
+// 18:00 — the device computes the real time) and label as the token.
+function shelly1RulesNext(rules){
+  const now=new Date();let best=null;
+  for(const rule of (rules||[])){
+    // fixed "HHMM-DAYS-on|off" or sun "HHMM(asr|bsr|ass|bss)-DAYS-on|off"
+    // (HHMM = zero-padded offset magnitude; a=after, b=before).
+    const m=/^(\d{2})(\d{2})(asr|bsr|ass|bss)?-([0-6]{1,7})-(on|off)$/.exec(String(rule||''));
+    if(!m)continue;
+    // Gen1 weekday digits are 0=Monday..6=Sunday; JS getDay() is 0=Sunday.
+    const days=m[4].split('').map(d=>(Number(d)+1)%7);
+    let mins,label;
+    if(m[3]){
+      const ev=m[3].slice(1)==='sr'?'sunrise':'sunset';
+      const sign=m[3].charAt(0)==='b'?-1:1;
+      const off=sign*(Number(m[1])*60+Number(m[2]));
+      mins=(ev==='sunrise'?360:1080)+off; // approx ordering; device computes the real time
+      label=ev+(off?((off>0?'+':'')+off+'m'):'');
+    }else{mins=Number(m[1])*60+Number(m[2]);label=m[1]+':'+m[2];}
+    for(let add=0;add<8;add++){const day=(now.getDay()+add)%7;if(!days.includes(day))continue;
+      const at=add*1440+mins-(now.getHours()*60+now.getMinutes());
+      if(at>=0){if(!best||at<best.at)best={at,hhmm:label+' '+m[5]};break;}}
+  }
+  return best;
 }
 // applyShellySchedule lights the clock icon and shows a concise "next
 // scheduled action" (time + on/off) per channel from the device's schedule
@@ -162,16 +202,20 @@ const SHELLY_PTIP={
   input:'State of the physical SW input',
 };
 function shellyFaceplateHTML(n){
-  const sh=n.shelly||{}, model=sh.model||'';
+  const sh=n.shelly||{}, model=sh.model||'', gen1=sh.gen===1;
   const metric=(k,u)=>`<div class="sh-m"><span class="sh-mv" data-${k}>—</span><span class="sh-ml">${u}</span></div>`;
   const rows=(n.ports.in.filter(p=>p.srole==='relay')).map(rp=>{
     const c=rp.ch, outs=n.ports.out.filter(p=>p.ch===c);
+    const meterCh=(sh.channels||[]).some(x=>x.id===c&&x.meter);
+    // Gen1 meters report power only (no per-channel V/A/Hz on the frozen
+    // API) — the grid shows what the device really measures, nothing more.
+    const grid=gen1?(meterCh?metric('chw','W'):''):(metric('chw','W')+metric('chv','V')+metric('cha','A')+metric('chhz','Hz'));
     const poH=outs.map(p=>`<div class="sh-orow"><span class="sh-plabel">${esc(SHELLY_PLABEL[p.srole]||p.label||p.id)}</span><div class="port io-out sh-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(SHELLY_PTIP[p.srole]||p.label||'')}"><span class="socket${kindClass(p.kind)}"></span></div></div>`).join('');
     return `<div class="sh-row" data-ch="${c}">
       <div class="sh-inport"><div class="port io-in sh-pin" data-port="${escAttr(n.id+':'+rp.id)}" data-tip="${escAttr(SHELLY_PTIP.relay)}"><span class="socket${kindClass(rp.kind)}"></span></div><span class="sh-plabel">${esc(SHELLY_PLABEL.relay)}</span></div>
       <div class="sh-disp" data-chsettings="${c}" data-noselectdrag title="Channel settings">
         <div class="sh-disp-top"><span class="sh-disp-name" data-chname>CH${c+1}</span><span class="sh-in-led" data-chin title="Physical input state"></span><span class="sh-clock" data-chclock hidden><i data-lucide="clock"></i></span></div>
-        <div class="sh-grid">${metric('chw','W')}${metric('chv','V')}${metric('cha','A')}${metric('chhz','Hz')}</div>
+        ${grid?`<div class="sh-grid">${grid}</div>`:''}
         <div class="sh-disp-foot"><span class="sh-disp-state" data-chstate>off</span><span class="sh-next" data-chnext></span></div>
       </div>
       <div class="sh-div"></div>
@@ -366,7 +410,9 @@ function shellyDef(name){
     outp.push({id:'in'+n,label:'Input',kind:'bool',srole:'input',ch:n});
   }
   return {cat:'shelly',icon:NAME_ICON[name]||'toggle-right',title:name,type:'shelly.device',implemented:true,live:false,props:[],faceplate:true,
-    shelly:{id:s.id,mac:s.mac,prefix:s.prefix,model:s.model,name:s.name,channels:chans},
+    // gen rides along so the run expansion emits the right topic/payload
+    // grammar (0/absent = Gen2, the pre-Gen1 catalogs).
+    shelly:{id:s.id,mac:s.mac,prefix:s.prefix,model:s.model,name:s.name,gen:s.gen||0,channels:chans},
     ports:{in:inp,out:outp}};
 }
 function constantDef(name,t){

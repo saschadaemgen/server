@@ -60,7 +60,9 @@ function buildShellyMap(){
       shellyMap[n.id+'__sw'+c+'_out']={node:n.id,port:'sw'+c+'_out'};
       shellyMap[n.id+'__sw'+c+'_set']={node:n.id,port:'sw'+c+'_set'};
       shellyMap[n.id+'__in'+c]={node:n.id,port:'in'+c};
-      shellyMap[n.id+'__disp'+c]={node:n.id,port:'disp'+c};
+      // the whole-payload display source exists only on Gen2 (Gen1 has no
+      // combined JSON status topic - power arrives on its own float port)
+      if(n.shelly.gen!==1) shellyMap[n.id+'__disp'+c]={node:n.id,port:'disp'+c};
       if(ch.meter) shellyMap[n.id+'__sw'+c+'_pwr']={node:n.id,port:'sw'+c+'_pwr'};
     }
   }
@@ -118,20 +120,31 @@ function serializeGraph(){
   // control sink is emitted ONLY when wired (an unwired sink would write
   // false at tick 0 and force the relay OFF). portMap/shellyMap let the
   // edge rewrite and the live-value routing bridge editor <-> engine.
-  const emit=(engId,type,channel,modId,port)=>{ out.push({id:engId,type,params:{channel}}); ids.add(engId); portMap[modId+':'+port]=engId; };
+  // The generation picks the grammar: Gen2 = status/switch:N JSON topics +
+  // the Switch.Set RPC sink; Gen1 = the frozen flat topics (relay/N with
+  // raw on/off, relay/N/power bare numbers, input/N 0/1) + a plain-publish
+  // sink whose bool renders "on"/"off" (the payload:'on-off' driver option).
+  const emit=(engId,type,params,modId,port)=>{ out.push({id:engId,type,params}); ids.add(engId); portMap[modId+':'+port]=engId; };
   for(const n of GRAPH.nodes){
     if(n.type!=='shelly.device' || !n.shelly || !n.shelly.prefix) continue;
-    const p=n.shelly.prefix;
+    const p=n.shelly.prefix, gen1=n.shelly.gen===1;
     for(const ch of (n.shelly.channels||[])){
       const c=ch.id;
-      emit(n.id+'__sw'+c+'_out', 'source.channel', 'mqtt:'+p+'/status/switch:'+c+'#output', n.id, 'sw'+c+'_out');
-      if(ch.meter) emit(n.id+'__sw'+c+'_pwr', 'source.channel.float', 'mqtt:'+p+'/status/switch:'+c+'#apower', n.id, 'sw'+c+'_pwr');
-      emit(n.id+'__in'+c, 'source.channel', 'mqtt:'+p+'/status/input:'+c+'#state', n.id, 'in'+c);
+      const setPort=n.id+':sw'+c+'_set', setWired=GRAPH.edges.some(e=>e.to===setPort);
+      if(gen1){
+        emit(n.id+'__sw'+c+'_out', 'source.channel', {channel:'mqtt:'+p+'/relay/'+c}, n.id, 'sw'+c+'_out');
+        if(ch.meter) emit(n.id+'__sw'+c+'_pwr', 'source.channel.float', {channel:'mqtt:'+p+'/relay/'+c+'/power'}, n.id, 'sw'+c+'_pwr');
+        emit(n.id+'__in'+c, 'source.channel', {channel:'mqtt:'+p+'/input/'+c}, n.id, 'in'+c);
+        if(setWired) emit(n.id+'__sw'+c+'_set', 'sink.channel', {channel:'mqtt:'+p+'/relay/'+c+'/command', payload:'on-off'}, n.id, 'sw'+c+'_set');
+        continue;
+      }
+      emit(n.id+'__sw'+c+'_out', 'source.channel', {channel:'mqtt:'+p+'/status/switch:'+c+'#output'}, n.id, 'sw'+c+'_out');
+      if(ch.meter) emit(n.id+'__sw'+c+'_pwr', 'source.channel.float', {channel:'mqtt:'+p+'/status/switch:'+c+'#apower'}, n.id, 'sw'+c+'_pwr');
+      emit(n.id+'__in'+c, 'source.channel', {channel:'mqtt:'+p+'/status/input:'+c+'#state'}, n.id, 'in'+c);
       // display-only: the whole switch:N status payload (no selector) as text,
       // so the faceplate grid shows W/V/A/Hz — NO new graph ports for these.
-      emit(n.id+'__disp'+c, 'source.channel.text', 'mqtt:'+p+'/status/switch:'+c, n.id, 'disp'+c);
-      const setPort=n.id+':sw'+c+'_set';
-      if(GRAPH.edges.some(e=>e.to===setPort)) emit(n.id+'__sw'+c+'_set', 'sink.channel', 'mqtt:'+p+'/rpc#Switch.Set:'+c, n.id, 'sw'+c+'_set');
+      emit(n.id+'__disp'+c, 'source.channel.text', {channel:'mqtt:'+p+'/status/switch:'+c}, n.id, 'disp'+c);
+      if(setWired) emit(n.id+'__sw'+c+'_set', 'sink.channel', {channel:'mqtt:'+p+'/rpc#Switch.Set:'+c}, n.id, 'sw'+c+'_set');
     }
   }
   const edges=[];
@@ -328,6 +341,15 @@ function paintShelly(nd,port,v){
     const setm=(k,val,dp)=>{ const e=row.querySelector('[data-'+k+']'); if(e) e.textContent=fmtMetric(val,dp); };
     setm('chw',o.apower,1); setm('chv',o.voltage,0); setm('cha',o.current,2); setm('chhz',o.freq,0);
     row.dataset.w=Number(o.apower||0);
+    let total=0; el.querySelectorAll('.sh-row').forEach(r=>{ total+=Number(r.dataset.w||0); });
+    const tot=el.querySelector('[data-shtotal]'); if(tot) tot.textContent=fmtW(total);
+  }else if((m=/^sw(\d+)_pwr$/.exec(port)) && nd.def.shelly && nd.def.shelly.gen===1){
+    // Gen1 has no combined status payload: the power float port itself
+    // feeds the W metric + the device total (V/A/Hz do not exist there).
+    const row=el.querySelector(`.sh-row[data-ch="${m[1]}"]`); if(!row) return;
+    const w=v.kind===1?v.f:Number(v.f||0);
+    const e=row.querySelector('[data-chw]'); if(e) e.textContent=fmtMetric(w,1);
+    row.dataset.w=Number(w||0);
     let total=0; el.querySelectorAll('.sh-row').forEach(r=>{ total+=Number(r.dataset.w||0); });
     const tot=el.querySelector('[data-shtotal]'); if(tot) tot.textContent=fmtW(total);
   }else if((m=/^in(\d+)$/.exec(port))){
