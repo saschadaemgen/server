@@ -128,10 +128,10 @@
 
   /* ---- Settings: trigger + full-width category panel ---- */
   .cv-gear-btn{ padding:8px 10px; }
-  /* The settings glyph is a sliders/adjustments icon whose ink sits well
-     inside its 0 0 24 24 viewBox (~4px margin on every side), so nothing can
-     crop it. overflow:visible is belt-and-suspenders on top of that. */
-  .cv-gear-btn svg{ width:18px; height:18px; overflow:visible; }
+  /* A filled gear at 20px - the universal settings glyph, sized up from 18px
+     so it reads clearly next to the user chip. overflow:visible is a harmless
+     safety against any ancestor clip. */
+  .cv-gear-btn svg{ width:20px; height:20px; overflow:visible; }
   .cv-set-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:10px; }
   .cv-set-item{ display:flex; align-items:center; gap:11px; padding:11px 12px; border-radius:8px; background:#121519; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05),0 1px 2px rgba(0,0,0,0.5); border:none; cursor:pointer; text-align:left; width:100%; color:inherit; font-family:inherit; transition:background 110ms,box-shadow 110ms; }
   .cv-set-item:hover{ background:#171a1f; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cv-acc) 45%, transparent); }
@@ -248,7 +248,7 @@
     </nav>
   </div>
   <div class="cv-tb-right">
-    <button type="button" class="cv-link cv-gear-btn cv-drop-btn" data-cv-gear-btn aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="7" x2="19" y2="7"/><circle cx="9" cy="7" r="2.1"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="15" cy="12" r="2.1"/><line x1="5" y1="17" x2="19" y2="17"/><circle cx="10" cy="17" r="2.1"/></svg></button>
+    <button type="button" class="cv-link cv-gear-btn cv-drop-btn" data-cv-gear-btn aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></button>
     <button type="button" class="cv-user-chip" data-cv-user-btn aria-haspopup="true" aria-expanded="false"><span class="cv-avatar">{{.User.Initials}}</span><span class="cv-user-name">{{.User.Name}}</span><svg class="cv-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
   </div>
 
