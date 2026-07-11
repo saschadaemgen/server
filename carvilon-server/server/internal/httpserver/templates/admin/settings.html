@@ -154,6 +154,14 @@
         </div>
         <div class="set-row">
           <div class="set-row-main">
+            <span class="set-row-label">Scan network</span>
+            <span class="set-row-sub">Actively sweep your local network for Shelly devices - this finds devices that hide from mDNS (some ship with discovery off), so you never need to type an IP. Only the harmless identify endpoint is probed, never outside your own private subnet. Found devices appear under Pending approval below.</span>
+            <span class="set-row-sub" data-shscan-status hidden style="margin-top:6px;"></span>
+          </div>
+          <button type="button" class="btn btn-secondary" data-shscan-btn>Scan network</button>
+        </div>
+        <div class="set-row">
+          <div class="set-row-main">
             <span class="set-row-label">Auto-activate discovered devices</span>
             <span class="set-row-sub">Off (recommended): a found device waits for your approval below and is not contacted until then - safe on any network. On: found devices become active immediately (only recommended on a segmented VLAN you trust). This affects new finds only; devices already pending are left as they are.</span>
           </div>
@@ -186,12 +194,13 @@
         </div>
         {{if .Page.Shelly.Pending}}
           <table class="app-table">
-            <thead><tr><th>Identity (MAC)</th><th>Address</th><th></th></tr></thead>
+            <thead><tr><th>Identity (MAC)</th><th>Address</th><th>Found via</th><th></th></tr></thead>
             <tbody>
               {{range .Page.Shelly.Pending}}
                 <tr>
                   <td><code>{{if .MAC}}{{.MAC}}{{else}}-{{end}}</code></td>
                   <td><code>{{.Addr}}</code></td>
+                  <td>{{if .Origin}}<span class="set-row-sub" style="margin:0;">{{.Origin}}</span>{{else}}-{{end}}</td>
                   <td style="display:flex; gap:8px; justify-content:flex-end;">
                     <form method="post" action="/a/settings/shelly/approve" style="margin:0;">
                       <input type="hidden" name="id" value="{{.ID}}"/>
@@ -431,6 +440,47 @@
           set(n + ' / ' + d.total + ' devices reachable', n === d.total);
         })
         .catch(function () { set('Status unavailable', false); });
+    })();
+
+    // "Scan network": an on-demand active subnet sweep. Start returns at
+    // once; we poll the status endpoint for progress (probed/total) and a
+    // final summary (found N, M new), then reload so new pending rows show.
+    (function () {
+      var btn = document.querySelector('[data-shscan-btn]');
+      var out = document.querySelector('[data-shscan-status]');
+      if (!btn || !out) return;
+      var poll = null;
+      function show(msg) { out.hidden = false; out.textContent = msg; }
+      function stop() { if (poll) { clearInterval(poll); poll = null; } btn.disabled = false; }
+      function tick() {
+        fetch('/a/settings/shelly/scan-network/status', { credentials: 'same-origin', cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d) return;
+            if (d.running) { show('Probing ' + d.probed + ' / ' + d.total + ' addresses...'); return; }
+            stop();
+            if (d.message) { show(d.message); return; }
+            var msg = 'Scan complete - found ' + d.found + ' Shelly device' + (d.found === 1 ? '' : 's')
+              + ', ' + d.new + ' new.';
+            show(msg);
+            // reload to surface any new pending rows (only when something
+            // new landed, so a no-op scan doesn't bounce the page)
+            if (d.new > 0) { setTimeout(function () { location.reload(); }, 1200); }
+          })
+          .catch(function () { stop(); show('Scan status unavailable.'); });
+      }
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        show('Starting scan...');
+        fetch('/a/settings/shelly/scan-network', { method: 'POST', credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.ok) { stop(); show((d && d.message) || 'Scan could not be started.'); return; }
+            tick();
+            poll = setInterval(tick, 700);
+          })
+          .catch(function () { stop(); show('Scan could not be started.'); });
+      });
     })();
   </script>
 </body>

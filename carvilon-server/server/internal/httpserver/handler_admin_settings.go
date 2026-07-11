@@ -85,11 +85,13 @@ type shellySettingsBlock struct {
 }
 
 // shellyPendingRow is one entry of the "Pending approval" view. It shows only
-// what the announcement carried (no poll happened): MAC + address.
+// what the announcement/scan carried (no poll happened): MAC + address, plus
+// how the device surfaced (mDNS vs an active scan).
 type shellyPendingRow struct {
-	ID   int64
-	MAC  string
-	Addr string
+	ID     int64
+	MAC    string
+	Addr   string
+	Origin string // human label: "Discovered (mDNS)" | "Found by scan"
 }
 
 // shellyIgnoredRow is one entry of the "Ignored devices" view.

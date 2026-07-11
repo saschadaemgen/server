@@ -9,9 +9,21 @@ package shelly1api
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 )
+
+// ParseIdentityForTest decodes a raw /shelly body into an Identity - a
+// seam for other packages' tests to build classifier inputs without a
+// live device (the fields are flexVal, so they cannot be set directly).
+func ParseIdentityForTest(raw []byte) (*Identity, error) {
+	var id Identity
+	if err := json.Unmarshal(raw, &id); err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
 
 // Identity is the /shelly answer, shaped to hold BOTH generations' fields
 // so one probe classifies any Shelly (only the generation-appropriate

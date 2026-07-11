@@ -221,3 +221,47 @@ func TestManualRowDefaultsGenUnknown(t *testing.T) {
 		t.Fatalf("manual row gen = %d, want GenUnknown (column default)", active[0].Gen)
 	}
 }
+
+// TestAdoptRefreshPreservesNameOnEmpty: a re-find with empty Name/Model
+// (e.g. a scan responder that reports no app/model) must NOT blank the
+// name/model an earlier mDNS announcement stored. Only a non-empty
+// incoming value replaces it - matching the gen guard.
+func TestAdoptRefreshPreservesNameOnEmpty(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// mDNS-style adopt with a real name + model.
+	if _, err := s.Adopt(ctx, Detected{
+		MAC: "AABBCCDDEEFF", Address: "192.168.1.50", Name: "Kitchen 1PM",
+		Model: "Shelly Plus1PM", Gen: Gen2,
+	}, capN, true); err != nil {
+		t.Fatal(err)
+	}
+	// A later find (same MAC) carrying NO name/model - must preserve both.
+	if res, err := s.Adopt(ctx, Detected{
+		MAC: "AABBCCDDEEFF", Address: "192.168.1.51", Name: "", Model: "", Gen: 0,
+	}, capN, true); err != nil || res != AdoptedKnown {
+		t.Fatalf("re-adopt = %v, %v", res, err)
+	}
+	active, err := s.ListActive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := addrs(active)["192.168.1.51"]
+	if got.Name != "Kitchen 1PM" || got.Model != "Shelly Plus1PM" || got.Gen != Gen2 {
+		t.Errorf("empty re-find blanked identity: name=%q model=%q gen=%d", got.Name, got.Model, got.Gen)
+	}
+	// A find WITH a new name still updates it.
+	if _, err := s.Adopt(ctx, Detected{
+		MAC: "AABBCCDDEEFF", Address: "192.168.1.51", Name: "Kitchen main", Model: "Shelly Plus1PM", Gen: Gen2,
+	}, capN, true); err != nil {
+		t.Fatal(err)
+	}
+	active, err = s.ListActive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := addrs(active)["192.168.1.51"]; got.Name != "Kitchen main" {
+		t.Errorf("non-empty name not applied: %q", got.Name)
+	}
+}

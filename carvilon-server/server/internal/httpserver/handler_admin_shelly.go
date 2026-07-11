@@ -567,6 +567,8 @@ func shellyOriginLabel(origin string) string {
 		return "Manual (configured IP)"
 	case shellystore.OriginDiscovered:
 		return "Discovered (mDNS)"
+	case shellystore.OriginScanned:
+		return "Found by scan"
 	default:
 		return ""
 	}
@@ -994,7 +996,7 @@ func (s *Server) buildShellySettingsBlock(ctx context.Context) shellySettingsBlo
 	if pending, err := s.shellystore.ListPending(ctx); err == nil {
 		for _, d := range pending {
 			block.Pending = append(block.Pending, shellyPendingRow{
-				ID: d.ID, MAC: d.MAC, Addr: d.Address,
+				ID: d.ID, MAC: d.MAC, Addr: d.Address, Origin: shellyOriginLabel(d.Origin),
 			})
 		}
 	}

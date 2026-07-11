@@ -54,7 +54,8 @@ const (
 // Origins and states as stored in the table.
 const (
 	OriginManual     = "manual"
-	OriginDiscovered = "discovered"
+	OriginDiscovered = "discovered" // found via mDNS announcement
+	OriginScanned    = "scanned"    // found via an on-demand active subnet scan
 	StateActive      = "active"
 	StateIgnored     = "ignored"
 	// StatePending is a device found by discovery while the approval gate is
@@ -124,7 +125,8 @@ type Detected struct {
 	Address string // canonical LAN IPv4[:port]
 	Name    string
 	Model   string
-	Gen     int // API generation the announcement implies; GenUnknown keeps the stored value
+	Gen     int    // API generation the announcement implies; GenUnknown keeps the stored value
+	Origin  string // OriginDiscovered (default, "") | OriginScanned - how this find surfaced
 }
 
 // ListActive returns every device that is currently polled + shown,
@@ -256,9 +258,11 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 				return AdoptSkippedFull, err
 			}
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET address = ?, name = ?, model = ?,
-				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
-				d.Address, d.Name, d.Model, d.Gen, d.Gen, now, id)
+				`UPDATE shelly_devices SET address = ?,
+				        name  = CASE WHEN ? <> '' THEN ? ELSE name END,
+				        model = CASE WHEN ? <> '' THEN ? ELSE model END,
+				        gen   = CASE WHEN ? > 0  THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.Address, d.Name, d.Name, d.Model, d.Model, d.Gen, d.Gen, now, id)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt refresh: %w", err)
 			}
@@ -276,9 +280,11 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET mac = ?, name = ?, model = ?,
-				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
-				d.MAC, d.Name, d.Model, d.Gen, d.Gen, now, mid)
+				`UPDATE shelly_devices SET mac = ?,
+				        name  = CASE WHEN ? <> '' THEN ? ELSE name END,
+				        model = CASE WHEN ? <> '' THEN ? ELSE model END,
+				        gen   = CASE WHEN ? > 0  THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.MAC, d.Name, d.Name, d.Model, d.Model, d.Gen, d.Gen, now, mid)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt upgrade: %w", err)
 			}
@@ -294,9 +300,11 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 		switch {
 		case err == nil:
 			_, err = s.db.ExecContext(ctx,
-				`UPDATE shelly_devices SET name = ?, model = ?,
-				        gen = CASE WHEN ? > 0 THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
-				d.Name, d.Model, d.Gen, d.Gen, now, id)
+				`UPDATE shelly_devices SET
+				        name  = CASE WHEN ? <> '' THEN ? ELSE name END,
+				        model = CASE WHEN ? <> '' THEN ? ELSE model END,
+				        gen   = CASE WHEN ? > 0  THEN ? ELSE gen END, updated_at = ? WHERE id = ?`,
+				d.Name, d.Name, d.Model, d.Model, d.Gen, d.Gen, now, id)
 			if err != nil {
 				return AdoptSkippedFull, fmt.Errorf("shellystore: adopt refresh addr: %w", err)
 			}
@@ -330,10 +338,14 @@ func (s *Store) Adopt(ctx context.Context, d Detected, limit int, autoAdopt bool
 	if limit > 0 && n >= limit {
 		return AdoptSkippedFull, nil
 	}
+	origin := OriginDiscovered
+	if d.Origin == OriginScanned {
+		origin = OriginScanned
+	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO shelly_devices (mac, address, origin, state, name, model, gen, first_seen_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.MAC, d.Address, OriginDiscovered, targetState, d.Name, d.Model, d.Gen, now, now)
+		d.MAC, d.Address, origin, targetState, d.Name, d.Model, d.Gen, now, now)
 	if err != nil {
 		return AdoptSkippedFull, fmt.Errorf("shellystore: adopt insert: %w", err)
 	}

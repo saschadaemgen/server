@@ -246,6 +246,10 @@ type Server struct {
 	// shellyDisco is the mDNS auto-discovery coordinator; nil disables
 	// discovery (the manual list + read paths still work).
 	shellyDisco *shellyDiscovery
+	// shellyScan runs on-demand active subnet sweeps (the "Scan network"
+	// action) so a discoverable=false device is found without manual IP
+	// entry; nil disables the feature.
+	shellyScan *shellyScanner
 	// shellyProvisioning is the per-device singleflight guard for MQTT
 	// provisioning: at most one provision runs per device id, so two
 	// overlapping triggers (retry double-click, approve + manual) cannot
@@ -392,6 +396,10 @@ func New(deps Deps) (*Server, error) {
 	if deps.ShellyStore != nil && deps.ShellyDiscovery != nil {
 		srv.shellyDisco = newShellyDiscovery(deps.ShellyStore, deps.ShellyDiscovery, deps.ShellyGen1Discovery,
 			deps.Log, srv.shellyEnabled, srv.shellyAutoAdopt, srv.rebuildShellyClients)
+	}
+	if deps.ShellyStore != nil {
+		srv.shellyScan = newShellyScanner(deps.ShellyStore, deps.Log, srv.shellyEnabled,
+			srv.shellyIdentifyProbe, enumerateOwnSubnets)
 	}
 	srv.routes()
 	return srv, nil
@@ -571,6 +579,11 @@ func (s *Server) routes() {
 	// sticky ignore list (both from the settings block).
 	s.mux.Handle("POST /a/settings/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScan)))
 	s.mux.Handle("POST /a/settings/shelly/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyRelease)))
+	// Active subnet sweep ("Scan network"): finds a discoverable=false
+	// device without manual IP entry. Start returns at once; the UI polls
+	// the status route for progress + summary.
+	s.mux.Handle("POST /a/settings/shelly/scan-network", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetwork)))
+	s.mux.Handle("GET /a/settings/shelly/scan-network/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetworkStatus)))
 	// Shelly Etappe 2b: the discovery approval gate - toggle auto-adopt, and
 	// approve/reject a pending (discovered, not-yet-polled) device.
 	s.mux.Handle("POST /a/settings/shelly/autoadopt", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyAutoAdopt)))
