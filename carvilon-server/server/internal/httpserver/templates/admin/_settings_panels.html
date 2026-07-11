@@ -115,25 +115,15 @@
   <div class="sp-card sp-mt">
     <div class="sp-row">
       <div class="sp-row-main">
-        <span class="sp-label">Auto-discovery</span>
-        <span class="sp-sub">Gen2+ Shelly devices on the local network are found automatically over mDNS.{{if .Page.Shelly.DiscoveredCount}} Currently {{.Page.Shelly.DiscoveredCount}} discovered device{{if ne .Page.Shelly.DiscoveredCount 1}}s{{end}} active.{{end}} Removed devices stay removed - release them below to allow re-discovery.</span>
+        <span class="sp-label">Discovery</span>
+        <span class="sp-sub">Gen2+ Shelly devices on the local network are found automatically over mDNS.{{if .Page.Shelly.DiscoveredCount}} Currently {{.Page.Shelly.DiscoveredCount}} discovered device{{if ne .Page.Shelly.DiscoveredCount 1}}s{{end}} active.{{end}} Newly found devices appear in the Devices list, pinned to the top until you approve them; removed ones sit at the bottom until released. Approve, ignore and scan the network there.</span>
       </div>
-      <form method="post" action="/a/settings/shelly/scan" class="sp-m0">
-        <button class="sp-btn sp-btn-secondary" type="submit">Scan now</button>
-      </form>
-    </div>
-    <div class="sp-row">
-      <div class="sp-row-main">
-        <span class="sp-label">Scan network</span>
-        <span class="sp-sub">Actively sweep your local network for Shelly devices - this finds devices that hide from mDNS (some ship with discovery off), so you never need to type an IP. Only the harmless identify endpoint is probed, never outside your own private subnet. Found devices appear under Pending approval below.</span>
-        <span class="sp-sub" data-shscan-status hidden style="margin-top:6px;"></span>
-      </div>
-      <button type="button" class="sp-btn sp-btn-secondary" data-shscan-btn>Scan network</button>
+      <a class="sp-btn sp-btn-secondary" href="/a/devices">Open Devices</a>
     </div>
     <div class="sp-row">
       <div class="sp-row-main">
         <span class="sp-label">Auto-activate discovered devices</span>
-        <span class="sp-sub">Off (recommended): a found device waits for your approval below and is not contacted until then - safe on any network. On: found devices become active immediately (only recommended on a segmented VLAN you trust). This affects new finds only; devices already pending are left as they are.</span>
+        <span class="sp-sub">Off (recommended): a found device waits in the Devices list for your approval and is not contacted until then - safe on any network. On: found devices become active immediately (only recommended on a segmented VLAN you trust). This affects new finds only; devices already pending are left as they are.</span>
       </div>
       <form method="post" action="/a/settings/shelly/autoadopt" class="sp-m0">
         <label class="sp-toggle">
@@ -156,65 +146,6 @@
         <noscript><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit" style="margin-left:8px;">Save</button></noscript>
       </form>
     </div>
-    <div class="sp-row">
-      <div class="sp-row-main">
-        <span class="sp-label">Pending approval</span>
-        <span class="sp-sub">Devices found on the network waiting for your approval. They are not contacted or polled until you approve them, so a pending row shows only what the announcement carried (MAC + address). Approve to start polling it, or reject to keep it out.</span>
-      </div>
-    </div>
-    {{if .Page.Shelly.Pending}}
-      <table class="sp-table">
-        <thead><tr><th>Identity (MAC)</th><th>Address</th><th>Found via</th><th></th></tr></thead>
-        <tbody>
-          {{range .Page.Shelly.Pending}}
-            <tr>
-              <td><code>{{if .MAC}}{{.MAC}}{{else}}-{{end}}</code></td>
-              <td><code>{{.Addr}}</code></td>
-              <td>{{if .Origin}}<span class="sp-sub sp-m0">{{.Origin}}</span>{{else}}-{{end}}</td>
-              <td class="sp-cell-actions">
-                <form method="post" action="/a/settings/shelly/approve" class="sp-m0">
-                  <input type="hidden" name="id" value="{{.ID}}"/>
-                  <button class="sp-btn sp-btn-primary sp-btn-sm" type="submit">Approve</button>
-                </form>
-                <form method="post" action="/a/settings/shelly/reject" class="sp-m0">
-                  <input type="hidden" name="id" value="{{.ID}}"/>
-                  <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Reject</button>
-                </form>
-              </td>
-            </tr>
-          {{end}}
-        </tbody>
-      </table>
-    {{else}}
-      <p class="sp-sub sp-empty">No devices pending approval.</p>
-    {{end}}
-    <div class="sp-row sp-mt">
-      <div class="sp-row-main">
-        <span class="sp-label">Ignored devices</span>
-        <span class="sp-sub">Devices you removed or rejected are on this list and are not re-adopted by discovery. Release one to allow it to be found again.</span>
-      </div>
-    </div>
-    {{if .Page.Shelly.Ignored}}
-      <table class="sp-table">
-        <thead><tr><th>Identity</th><th>Last address</th><th></th></tr></thead>
-        <tbody>
-          {{range .Page.Shelly.Ignored}}
-            <tr>
-              <td><code>{{.Label}}</code></td>
-              <td><code>{{if .Addr}}{{.Addr}}{{else}}-{{end}}</code></td>
-              <td class="sp-cell-actions">
-                <form method="post" action="/a/settings/shelly/release" class="sp-m0">
-                  <input type="hidden" name="id" value="{{.ID}}"/>
-                  <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Release</button>
-                </form>
-              </td>
-            </tr>
-          {{end}}
-        </tbody>
-      </table>
-    {{else}}
-      <p class="sp-sub sp-empty">No ignored devices.</p>
-    {{end}}
   </div>
 
 {{else if eq .Cat "weather"}}

@@ -108,13 +108,13 @@
        it is incomplete - the status poller then never auto-reloads (a
        degraded render plus a healthy poll would otherwise reload in a
        loop). */}}
-  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyAvailable)}}
+  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
       <h2>UniFi Access is disabled</h2>
       <p>The UniFi Access integration is turned off. Turn it on under <a href="?settings=ua">Settings</a> once UA credentials are stored, and the device and door overview appears here.</p>
     </div>
-  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyAvailable)}}
+  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>
       <h2>No UA credentials stored</h2>
@@ -185,6 +185,18 @@
         {{end}}
         {{end}}
 
+        {{if .Page.LifecycleFacets}}
+        <div class="dc-facet-group"><span class="dc-fg-label">Lifecycle</span><span class="dc-hr"></span></div>
+        {{range .Page.LifecycleFacets}}
+          <button type="button" class="dc-facet lifecycle" data-dc-facet="lifecycle" data-dc-value="{{.Key}}">
+            <span class="dc-cb">{{template "dc-check"}}</span>
+            <span class="dc-facet-ico">{{template "dc-icon" .Key}}</span>
+            <span class="dc-facet-label">{{.Label}}</span>
+            <span class="dc-facet-count dc-mono">{{.Count}}</span>
+          </button>
+        {{end}}
+        {{end}}
+
         {{if .Page.SourceFacets}}
         <div class="dc-facet-group"><span class="dc-fg-label">Source</span><span class="dc-hr"></span></div>
         {{range .Page.SourceFacets}}
@@ -228,10 +240,12 @@
         <div class="dc-count"><span class="dc-shown" data-dc-shown>{{.Page.TotalCount}}</span><span class="dc-total">/ {{.Page.TotalCount}}</span></div>
         <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
         <span class="dc-spacer"></span>
-        {{if .Page.ShellyAvailable}}
-        <form class="dc-toolform" method="post" action="/a/devices/shelly/scan" title="Actively scan the network for Shelly devices">
+        {{if .Page.ShellyEnabled}}
+        <form class="dc-toolform" method="post" action="/a/devices/shelly/scan" title="Nudge mDNS discovery for Shelly devices on the local network">
           <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><path d="M12 4 9 7M12 20l3-3"/></svg>Scan Shelly</button>
         </form>
+        <button type="button" class="dc-toolbtn" data-shscan-btn title="Actively sweep your local subnet for Shelly devices that hide from mDNS - found devices appear in the Pending group"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Scan network</button>
+        <span class="dc-mono" data-shscan-status hidden style="font-size:12px;opacity:0.75;white-space:nowrap;"></span>
         {{end}}
         <span class="dc-readonly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Read only</span>
       </div>
@@ -276,6 +290,7 @@
               {{end}}
               <div class="dc-row {{$r.StatusState}}" data-dc-row data-idx="{{$r.Index}}"
                    data-cat="{{$r.Category}}" data-source="{{$r.Source}}" data-status="{{$r.StatusState}}"
+                   data-lifecycle="{{$r.Lifecycle}}"
                    data-model="{{$r.Model}}" data-search="{{$r.Search}}"
                    data-name="{{$r.Name}}" data-type="{{$r.TypeLabel}}"
                    data-ip="{{$r.IP}}" data-fw="{{$r.Firmware}}" data-mac="{{$r.MAC}}"
@@ -323,7 +338,40 @@
                         <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
                       </form>
                     </div>
-                    <p class="dc-act-hint">Provisioning points this device at the CARVILON MQTT broker over TLS and hardens it (cloud off, HTTP auth set) - it runs automatically on approval; use it to retry or re-apply. Removing forgets the device on the CARVILON side and stops re-discovery (sticky); the device itself is not otherwise changed. Release it again under Settings &rsaquo; Shelly.</p>
+                    <p class="dc-act-hint">Provisioning points this device at the CARVILON MQTT broker over TLS and hardens it (cloud off, HTTP auth set) - it runs automatically on approval; use it to retry or re-apply. Removing forgets the device on the CARVILON side and stops re-discovery (sticky); the device itself is not otherwise changed. Release it again from the Ignored group below.</p>
+                  </div>
+                {{end}}
+                {{/* Pending (discovered, not-yet-adopted): inline approve /
+                     ignore, reusing the store approval pipeline. The device is
+                     not contacted until approved. */}}
+                {{if eq $r.Kind "shelly-pending"}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Approve this device</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <div class="dc-act-row">
+                      <form method="post" action="/a/devices/shelly/approve" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ShellyID}}">
+                        <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Approve &amp; provision</button>
+                      </form>
+                      <form method="post" action="/a/devices/shelly/reject" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ShellyID}}">
+                        <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>Ignore</button>
+                      </form>
+                    </div>
+                    <p class="dc-act-hint">Found on the network but not contacted yet. Approve to add it to the active set and provision it onto the CARVILON MQTT broker (TLS, cloud off). Ignore to keep it out - you can release it later from the Ignored group.</p>
+                  </div>
+                {{end}}
+                {{/* Ignored (sticky-removed / rejected): inline release so
+                     discovery can surface it again. */}}
+                {{if eq $r.Kind "shelly-ignored"}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Ignored device</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <div class="dc-act-row">
+                      <form method="post" action="/a/devices/shelly/release" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ShellyID}}">
+                        <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><path d="M3 3v5h5"/></svg>Release (allow re-discovery)</button>
+                      </form>
+                    </div>
+                    <p class="dc-act-hint">Removed or rejected earlier, so discovery does not re-adopt it. Release it to let a future announcement or network scan surface it again.</p>
                   </div>
                 {{end}}
               </template>
@@ -382,6 +430,14 @@
         if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
         return;
       }
+      // Pending / ignored Shelly: never contacted, so no cockpit and no lazy
+      // fetch. fillLeft returns false for these, so dcInit's default clones
+      // the pre-rendered overview + approve/reject/release into the LEFT
+      // column; keep the right empty so the panel is not rendered twice.
+      if (kind === 'shelly-pending' || kind === 'shelly-ignored') {
+        rightCol.innerHTML = '';
+        return;
+      }
       // Shelly Gen2 cockpit: the right column is information (the
       // pre-rendered overview sections) + per-channel settings; the
       // "Device controls" block stays at the bottom ("the rest").
@@ -401,12 +457,13 @@
     function afterSlide(row, rightCol) {
       var kind = row.getAttribute('data-kind');
       if (kind === 'rpi-reader') return;
+      if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
       if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
       loadDetail(kind, row.getAttribute('data-id'), rightCol, row);
     }
 
     var dc = window.dcInit({
-      filterDims: { category: 'cat', source: 'source', status: 'status', model: 'model' },
+      filterDims: { category: 'cat', source: 'source', status: 'status', model: 'model', lifecycle: 'lifecycle' },
       modeDim: 'category',
       modeLabels: { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', switch: 'Switches', door: 'Doors', other: 'Other devices' },
       modeDefault: 'All devices',
@@ -2234,6 +2291,10 @@
       if (kind === 'camera' || kind === 'sensor') hasProtectRows = true;
       else if (kind === 'rpi-reader') hasLocalRows = true;
       else if (kind === 'shelly') hasShellyRows = true;
+      // Pending/ignored discovery rows are static (never polled): they must
+      // not count as a UA source, or a Shelly-only page would see a
+      // permanent source-mismatch and freeze its live counters.
+      else if (kind === 'shelly-pending' || kind === 'shelly-ignored') { /* static */ }
       else hasUARows = true;
     });
     // Auto-reload guards: never from a knowingly-incomplete render
@@ -2373,6 +2434,43 @@
       if (!document.hidden) schedulePoll(250);
     });
     schedulePoll(POLL_MS);
+  })();
+
+  // "Scan network": an on-demand active subnet sweep, moved here from the
+  // (retired) settings discovery panel. Start returns at once; we poll the
+  // status endpoint for progress + a final summary, then reload so any new
+  // Pending rows appear at the top of the table.
+  (function () {
+    var btn = document.querySelector('[data-shscan-btn]');
+    var out = document.querySelector('[data-shscan-status]');
+    if (!btn || !out) return;
+    var poll = null;
+    function show(msg) { out.hidden = false; out.textContent = msg; }
+    function stop() { if (poll) { clearInterval(poll); poll = null; } btn.disabled = false; }
+    function tick() {
+      fetch('/a/devices/shelly/scan-network/status', { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          if (d.running) { show('Probing ' + d.probed + ' / ' + d.total + '...'); return; }
+          stop();
+          if (d.message) { show(d.message); return; }
+          show('Found ' + d.found + ' device' + (d.found === 1 ? '' : 's') + ', ' + d.new + ' new.');
+          if (d.new > 0) { setTimeout(function () { location.reload(); }, 1200); }
+        })
+        .catch(function () { stop(); show('Scan status unavailable.'); });
+    }
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      show('Starting scan...');
+      fetch('/a/devices/shelly/scan-network', { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.ok) { stop(); show((d && d.message) || 'Scan could not be started.'); return; }
+          tick(); poll = setInterval(tick, 700);
+        })
+        .catch(function () { stop(); show('Scan could not be started.'); });
+    });
   })();
 </script>
 {{end}}

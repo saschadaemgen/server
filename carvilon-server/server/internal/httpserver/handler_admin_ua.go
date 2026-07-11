@@ -74,6 +74,18 @@ type uaOverviewData struct {
 	// UniFi integration, same page-keeping role as the other sources.
 	ShellyAvailable bool
 
+	// ShellyEnabled: the Shelly integration toggle is on (discovery runs),
+	// regardless of whether any device is adopted yet. Gates the discovery
+	// actions in the toolbar (Scan Shelly / Scan network) so they are
+	// reachable even before the first device lands.
+	ShellyEnabled bool
+
+	// ShellyDiscovery keeps the table (not the gate card) on screen whenever
+	// Shelly discovery is relevant: the integration is enabled, OR there are
+	// pending/ignored devices to show. So a discovered device appears even
+	// before anything is adopted and with every UniFi integration off.
+	ShellyDiscovery bool
+
 	// Flash is the outcome banner after a reader rename (the page's
 	// only write). Set from a stable code in the redirect query -
 	// never from free text. FlashType is "ok" or "err".
@@ -94,10 +106,11 @@ type uaOverviewData struct {
 
 	Rows []uaRow
 
-	CategoryFacets []uaFacet
-	SourceFacets   []uaFacet
-	StatusFacets   []uaFacet
-	ModelFacets    []uaFacet
+	CategoryFacets  []uaFacet
+	SourceFacets    []uaFacet
+	StatusFacets    []uaFacet
+	ModelFacets     []uaFacet
+	LifecycleFacets []uaFacet
 
 	// Fleet-status counters (two-digit displays in the left column).
 	OnlineCount  int
@@ -173,6 +186,13 @@ type uaRow struct {
 	AutoName   string
 	CustomName string
 
+	// Lifecycle is the discovery axis, orthogonal to Category: "" / "adopted"
+	// for the normal active set, "pending" for a discovered-but-not-adopted
+	// Shelly (pinned to the top group), "ignored" for a sticky-removed one
+	// (pinned to the bottom group). Drives the lifecycle facet + the row's
+	// inline approve/reject/release actions.
+	Lifecycle string
+
 	// Shelly extras: how the device entered the set ("manual" |
 	// "discovered"), for the panel's origin line + the sticky Remove
 	// control, and the MQTT provisioning state. Empty for non-Shelly rows.
@@ -221,7 +241,13 @@ type uaSection struct {
 // categoryOrder ranks the natures for the flat table (hubs first, doors
 // last) so the pre-sorted rows read top-down like the topology.
 var categoryOrder = map[string]int{
-	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "rgbw": 6, "other": 7, "door": 8,
+	// "pending" and "ignored" are lifecycle pseudo-categories: their ranks
+	// pin the discovery groups to the very top / very bottom of the table,
+	// with the real device categories in between (existing within-group sort
+	// preserved). See uaRow.Lifecycle.
+	"pending": -2,
+	"hub":     0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "rgbw": 6, "other": 7, "door": 8,
+	"ignored": 99,
 }
 
 // handleAdminUA renders the Device Center (read-only except for the
@@ -233,6 +259,7 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 		Enabled:          s.uaEnabled(r.Context()),
 		ProtectAvailable: s.protectReady(r.Context()),
 		ShellyAvailable:  s.shellyReady(r.Context()),
+		ShellyEnabled:    s.shellyEnabled(r.Context()),
 	}
 	data.Configured = data.Enabled && s.ua != nil
 	if f, ok := uaFlash[r.URL.Query().Get("flash")]; ok {
@@ -240,13 +267,18 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	}
 	readers := s.localReaders(r.Context())
 	data.LocalAvailable = len(readers) > 0
+	// Discovered-but-not-adopted (pending) + ignored Shelly devices surface
+	// as rows in the table (pinned top / bottom). Fetched here so their mere
+	// presence keeps the page rendered even before anything is adopted.
+	pendingRows, ignoredRows := s.shellyLifecycleRows(r.Context())
+	data.ShellyDiscovery = data.ShellyEnabled || len(pendingRows)+len(ignoredRows) > 0
 	// No source can fill the page -> no calls at all, just the gate
-	// hints (Etappe-1 contract, now covering all four sources).
-	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyAvailable {
+	// hints (Etappe-1 contract, now covering all four sources + discovery).
+	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyDiscovery {
 		s.renderAdminPage(w, "ua", data)
 		return
 	}
-	s.buildUAOverview(r.Context(), &data, readers)
+	s.buildUAOverview(r.Context(), &data, readers, pendingRows, ignoredRows)
 	s.renderAdminPage(w, "ua", data)
 }
 
@@ -257,7 +289,7 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 // doors failure does not blank the (already loaded) devices, a Protect
 // failure only drops a banner, and with another source available a UA
 // failure degrades to a banner instead of a gate.
-func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader) {
+func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader, pendingRows, ignoredRows []uaRow) {
 	// The Shelly probe fans out over the configured devices with its
 	// own per-device timeout; run it alongside the UniFi fetches so a
 	// dead box delays the page by max(sources), not their sum. The
@@ -331,7 +363,7 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx))
+	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx), pendingRows, ignoredRows)
 }
 
 // shellyRowInfo carries the store-side facts a Shelly row shows beyond the
@@ -379,7 +411,7 @@ func (s *Server) shellyRowInfoByAddr(ctx context.Context) map[string]shellyRowIn
 // buildRows turns devices + doors + Protect cameras/sensors + local
 // readers + Shelly devices into the flat, pre-sorted row list and
 // computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool) {
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool, pendingRows, ignoredRows []uaRow) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -420,6 +452,19 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		data.Rows = append(data.Rows, row)
 		catCount["door"]++
 	}
+	// Discovered-but-not-adopted (pending) + sticky-removed (ignored) Shelly
+	// devices. Like doors they carry no online/offline contribution (never
+	// probed); their category ranks (pending -2, ignored 99) pin them to the
+	// top / bottom group. Counted for their group heading only - the Category
+	// facet stays the real natures; the Lifecycle facet filters these.
+	for _, row := range pendingRows {
+		data.Rows = append(data.Rows, row)
+		catCount["pending"]++
+	}
+	for _, row := range ignoredRows {
+		data.Rows = append(data.Rows, row)
+		catCount["ignored"]++
+	}
 
 	// Stable order: category rank, then name (case-insensitive).
 	sort.SliceStable(data.Rows, func(i, j int) bool {
@@ -435,9 +480,16 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	// count the sources for their facet.
 	lastCat := ""
 	srcCount := map[string]int{}
+	lifeCount := map[string]int{}
 	for i := range data.Rows {
 		data.Rows[i].Index = i + 1
 		srcCount[data.Rows[i].Source]++
+		// Every normal (active) row is "adopted" for the lifecycle facet;
+		// pending/ignored rows set their own value in the row builder.
+		if data.Rows[i].Lifecycle == "" {
+			data.Rows[i].Lifecycle = "adopted"
+		}
+		lifeCount[data.Rows[i].Lifecycle]++
 		if data.Rows[i].Category != lastCat {
 			lastCat = data.Rows[i].Category
 			data.Rows[i].GroupStart = true
@@ -490,6 +542,20 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		uaFacet{Key: "online", Label: "Online", Count: data.OnlineCount},
 		uaFacet{Key: "offline", Label: "Offline", Count: data.OfflineCount},
 	)
+
+	// Lifecycle facet: the discovery axis. "Adopted" (the normal active set)
+	// always renders; Pending / Ignored only when present, so a clean fleet
+	// shows just Adopted.
+	data.LifecycleFacets = append(data.LifecycleFacets,
+		uaFacet{Key: "adopted", Label: "Adopted", Count: lifeCount["adopted"]})
+	if n := lifeCount["pending"]; n > 0 {
+		data.LifecycleFacets = append(data.LifecycleFacets,
+			uaFacet{Key: "pending", Label: "Pending", Count: n})
+	}
+	if n := lifeCount["ignored"]; n > 0 {
+		data.LifecycleFacets = append(data.LifecycleFacets,
+			uaFacet{Key: "ignored", Label: "Ignored", Count: n})
+	}
 
 	// Model facet: distinct device models, most common first.
 	for m, n := range modelCount {
@@ -728,11 +794,15 @@ var uaFlash = map[string]struct{ msg, typ string }{
 	"reset":               {"Reader name reset to the auto-generated name.", "ok"},
 	"err-name":            {"Renaming failed.", "err"},
 	"err-notfd":           {"Reader not found.", "err"},
-	"shelly-removed":      {"Shelly device removed. It will not be re-discovered until released under Settings.", "ok"},
+	"shelly-removed":      {"Shelly device removed. It will not be re-discovered until released.", "ok"},
 	"shelly-notfd":        {"Shelly device not found.", "err"},
 	"shelly-err":          {"The Shelly device action failed.", "err"},
 	"shelly-provisioning": {"Provisioning the Shelly onto the MQTT broker - this can take a moment.", "ok"},
 	"shelly-noprov":       {"The MQTT broker is not running - start it under Settings before provisioning.", "err"},
+	"shelly-approved":     {"Shelly device approved - provisioning it onto the MQTT broker.", "ok"},
+	"shelly-ignored":      {"Shelly device moved to Ignored. Release it to allow re-discovery.", "ok"},
+	"shelly-released":     {"Shelly device released - discovery can find it again.", "ok"},
+	"shelly-cap":          {"Active Shelly device limit reached - remove one before approving another.", "err"},
 }
 
 // handleAdminUAReaderRename sets or clears a local reader's custom name
@@ -867,6 +937,10 @@ func categoryPlural(cat string) string {
 		return "RGBW Dimmers"
 	case "door":
 		return "Doors"
+	case "pending":
+		return "Pending approval"
+	case "ignored":
+		return "Ignored"
 	default:
 		return "Other devices"
 	}
@@ -1113,6 +1187,15 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, p := range <-shellyCh {
 		addOnline("shelly", p.client.Address(), p.err == nil)
+	}
+	// Pending + ignored Shelly rows are shown in the table but never polled
+	// (no online/offline contribution). Fold their count into the grand total
+	// so the header "shown / total" matches the rendered rows instead of
+	// flickering down on the first poll. Only when the snapshot is complete -
+	// counts are suppressed otherwise anyway.
+	if complete {
+		pend, ign := s.shellyLifecycleRows(r.Context())
+		total += len(pend) + len(ign)
 	}
 
 	// sources tells the client which integrations this snapshot covers,

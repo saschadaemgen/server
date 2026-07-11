@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -446,5 +447,101 @@ func TestParseShellyAddresses(t *testing.T) {
 		if _, err := parseShellyAddresses(bad); err == nil {
 			t.Errorf("%q accepted, want error", bad)
 		}
+	}
+}
+
+// seedShellyPending adopts a discovered device with the approval gate on, so
+// it lands in the pending state, and returns its store id.
+func seedShellyPending(t *testing.T, env *testEnv, addr, mac string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := env.srv.shellystore.Adopt(ctx, shellystore.Detected{
+		Address: addr, MAC: mac, Origin: shellystore.OriginScanned,
+	}, maxShellyAddresses, false); err != nil {
+		t.Fatalf("seed pending %s: %v", addr, err)
+	}
+	pend, err := env.srv.shellystore.ListPending(ctx)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	for _, d := range pend {
+		if d.Address == addr {
+			return d.ID
+		}
+	}
+	t.Fatalf("pending %s not found after adopt", addr)
+	return 0
+}
+
+// TestAdminDevices_ShellyLifecycle proves discovered (pending) and
+// sticky-removed (ignored) Shelly devices surface as rows in the Device
+// Center - pending pinned top, ignored pinned bottom - with a lifecycle
+// facet and the inline approve/reject/release actions.
+func TestAdminDevices_ShellyLifecycle(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	ctx := context.Background()
+	if err := env.platformCfg.Set(ctx, platformconfig.KeyShellyEnabled, "1"); err != nil {
+		t.Fatalf("enable shelly: %v", err)
+	}
+	pendingID := seedShellyPending(t, env, "192.168.44.51", "AABBCCDDEE01")
+	ignoredID := seedShellyPending(t, env, "192.168.44.52", "AABBCCDDEE02")
+	if err := env.srv.shellystore.RejectPending(ctx, ignoredID); err != nil {
+		t.Fatalf("reject -> ignore: %v", err)
+	}
+
+	body := getBody(t, env, "/a/devices")
+	// Rows carry the lifecycle axis + the pending/ignored pseudo-categories.
+	for _, want := range []string{
+		`data-lifecycle="pending"`, `data-lifecycle="ignored"`,
+		`data-dc-facet="lifecycle"`, `data-dc-value="pending"`, `data-dc-value="ignored"`,
+		"Pending approval", "Ignored", // group headings
+		`action="/a/devices/shelly/approve"`, `action="/a/devices/shelly/reject"`,
+		`action="/a/devices/shelly/release"`,
+		"192.168.44.51", "192.168.44.52",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("devices page missing %q", want)
+		}
+	}
+	// Pending is pinned above ignored.
+	pi := strings.Index(body, `data-lifecycle="pending"`)
+	ii := strings.Index(body, `data-lifecycle="ignored"`)
+	if pi < 0 || ii < 0 || pi > ii {
+		t.Errorf("pending must render before ignored (pi=%d ii=%d)", pi, ii)
+	}
+
+	// Release (un-ignore) the ignored device inline.
+	resp, err := env.client.PostForm(env.ts.URL+"/a/devices/shelly/release",
+		url.Values{"id": {strconv.FormatInt(ignoredID, 10)}})
+	if err != nil {
+		t.Fatalf("POST release: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("release status = %d, want 303", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/a/devices?flash=shelly-released" {
+		t.Errorf("release redirect = %q", loc)
+	}
+	if ig, _ := env.srv.shellystore.ListIgnored(ctx); len(ig) != 0 {
+		t.Errorf("ignored list not empty after release: %d", len(ig))
+	}
+
+	// Reject the still-pending device inline -> it becomes ignored.
+	resp2, err := env.client.PostForm(env.ts.URL+"/a/devices/shelly/reject",
+		url.Values{"id": {strconv.FormatInt(pendingID, 10)}})
+	if err != nil {
+		t.Fatalf("POST reject: %v", err)
+	}
+	resp2.Body.Close()
+	if loc := resp2.Header.Get("Location"); loc != "/a/devices?flash=shelly-ignored" {
+		t.Errorf("reject redirect = %q", loc)
+	}
+	if pend, _ := env.srv.shellystore.ListPending(ctx); len(pend) != 0 {
+		t.Errorf("pending list not empty after reject: %d", len(pend))
+	}
+	if ig, _ := env.srv.shellystore.ListIgnored(ctx); len(ig) != 1 {
+		t.Errorf("ignored list = %d after reject, want 1", len(ig))
 	}
 }

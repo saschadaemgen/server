@@ -550,6 +550,79 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 	return row
 }
 
+// makeShellyLifecycleRow builds a devices-table row for a discovered-but-not-
+// adopted (pending) or sticky-removed (ignored) Shelly. These devices were
+// never contacted, so the row carries only what the announcement/scan knew
+// (MAC + address + how it surfaced) and no live status or cockpit plumbing.
+// The store id (ShellyID) keys the inline approve/reject/release actions.
+func makeShellyLifecycleRow(d shellystore.Device, lifecycle string) uaRow {
+	name := d.Address
+	if name == "" && d.MAC != "" {
+		name = "Shelly " + d.MAC
+	}
+	if name == "" {
+		name = "Shelly device"
+	}
+	var typeLabel, statusText string
+	switch lifecycle {
+	case "pending":
+		typeLabel = "Pending"
+		statusText = "Awaiting approval"
+	default: // "ignored"
+		typeLabel = "Ignored"
+		statusText = "Ignored"
+	}
+	row := uaRow{
+		ID:          strconv.FormatInt(d.ID, 10),
+		Kind:        "shelly-" + lifecycle,
+		Category:    lifecycle,
+		TypeLabel:   typeLabel,
+		Lifecycle:   lifecycle,
+		Name:        name,
+		Source:      "shelly",
+		SourceLabel: "Shelly",
+		IP:          d.Address,
+		MAC:         d.MAC,
+		Model:       d.Model, // usually "" for a never-probed device
+		StatusState: lifecycle,
+		StatusText:  statusText,
+		ShellyID:    d.ID,
+		Origin:      d.Origin,
+	}
+	det := []kvRow{}
+	det = appendKVDash(det, "Address", d.Address)
+	det = appendKVDash(det, "MAC", d.MAC)
+	if origin := shellyOriginLabel(d.Origin); origin != "" {
+		det = appendKV(det, "Found via", origin)
+	}
+	row.Detail = det
+	row.Search = strings.ToLower(strings.Join([]string{row.Name, d.Address, d.MAC, typeLabel, "shelly"}, " "))
+	return row
+}
+
+// shellyLifecycleRows returns the pending + ignored Shelly devices as table
+// rows for the Device Center, nil-safe on any store trouble.
+func (s *Server) shellyLifecycleRows(ctx context.Context) (pending, ignored []uaRow) {
+	if s.shellystore == nil {
+		return nil, nil
+	}
+	if devs, err := s.shellystore.ListPending(ctx); err == nil {
+		for _, d := range devs {
+			pending = append(pending, makeShellyLifecycleRow(d, "pending"))
+		}
+	} else {
+		s.log.Warn("shelly: list pending for devices table failed", "err", err)
+	}
+	if devs, err := s.shellystore.ListIgnored(ctx); err == nil {
+		for _, d := range devs {
+			ignored = append(ignored, makeShellyLifecycleRow(d, "ignored"))
+		}
+	} else {
+		s.log.Warn("shelly: list ignored for devices table failed", "err", err)
+	}
+	return pending, ignored
+}
+
 // shellyGenLabel renders the stored generation ("" hides the line while
 // the device is unclassified - nothing is guessed).
 func shellyGenLabel(gen int) string {
@@ -927,6 +1000,71 @@ func (s *Server) handleAdminUAShellyScan(w http.ResponseWriter, r *http.Request)
 		s.shellyDisco.ScanNow()
 	}
 	http.Redirect(w, r, "/a/devices", http.StatusSeeOther)
+}
+
+// handleAdminUAShellyApprove adopts a pending (discovered) Shelly inline from
+// the Device Center - the one-click approval that first contacts the device
+// and kicks off MQTT provisioning. Reuses the same store pipeline as the
+// (now retired) settings approval, keyed by the store id.
+func (s *Server) handleAdminUAShellyApprove(w http.ResponseWriter, r *http.Request) {
+	s.uaShellyLifecycleAction(w, r, func(ctx context.Context, id int64) (string, error) {
+		if err := s.shellystore.ApprovePending(ctx, id, maxShellyAddresses); err != nil {
+			if errors.Is(err, shellystore.ErrAtCap) {
+				s.log.Warn("shelly: approval rejected, active device cap reached", "cap", maxShellyAddresses)
+			}
+			return "", err
+		}
+		s.rebuildShellyClients(ctx)
+		// Approval is when we first talk to the device: provision it onto the
+		// broker (async; the row reflects the state on the next poll).
+		s.startShellyProvision(id)
+		return "shelly-approved", nil
+	})
+}
+
+// handleAdminUAShellyReject sends a pending device to the sticky ignore list
+// (it drops to the bottom "Ignored" group). No fleet change - it was never
+// polled.
+func (s *Server) handleAdminUAShellyReject(w http.ResponseWriter, r *http.Request) {
+	s.uaShellyLifecycleAction(w, r, func(ctx context.Context, id int64) (string, error) {
+		return "shelly-ignored", s.shellystore.RejectPending(ctx, id)
+	})
+}
+
+// handleAdminUAShellyRelease un-ignores a device (removes it from the ignore
+// list) so discovery can surface it again.
+func (s *Server) handleAdminUAShellyRelease(w http.ResponseWriter, r *http.Request) {
+	s.uaShellyLifecycleAction(w, r, func(ctx context.Context, id int64) (string, error) {
+		return "shelly-released", s.shellystore.ReleaseByID(ctx, id)
+	})
+}
+
+// uaShellyLifecycleAction is the shared body of the inline approve/reject/
+// release actions: parse the store id, run the action, redirect to /a/devices
+// with a stable flash code (never reflected text). ErrNotFound (double-click /
+// already handled) and ErrAtCap (active-device cap) are expected outcomes.
+func (s *Server) uaShellyLifecycleAction(w http.ResponseWriter, r *http.Request, action func(context.Context, int64) (string, error)) {
+	if err := r.ParseForm(); err != nil || s.shellystore == nil {
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("id")), 10, 64)
+	if err != nil || id <= 0 {
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
+		return
+	}
+	flash, aerr := action(r.Context(), id)
+	switch {
+	case errors.Is(aerr, shellystore.ErrNotFound):
+		http.Redirect(w, r, "/a/devices?flash=shelly-notfd", http.StatusSeeOther)
+	case errors.Is(aerr, shellystore.ErrAtCap):
+		http.Redirect(w, r, "/a/devices?flash=shelly-cap", http.StatusSeeOther)
+	case aerr != nil:
+		s.log.Error("shelly: device-center lifecycle action failed", "err", aerr)
+		http.Redirect(w, r, "/a/devices?flash=shelly-err", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/a/devices?flash="+flash, http.StatusSeeOther)
+	}
 }
 
 // handleAdminUAShellyProvision (re)runs MQTT provisioning for one active

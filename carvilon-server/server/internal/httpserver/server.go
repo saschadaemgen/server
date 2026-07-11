@@ -668,6 +668,16 @@ func (s *Server) routes() {
 	// never writes to the device - control stays read-only.
 	s.mux.Handle("POST /a/devices/shelly/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRemove)))
 	s.mux.Handle("POST /a/devices/shelly/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyScan)))
+	// Discovery moved into the Device Center table (pending pinned top, ignored
+	// pinned bottom): the inline approve/reject/release actions + the active
+	// subnet sweep now live here, reusing the same store pipelines the retired
+	// settings discovery panel used. Scan-network start/status are the
+	// path-agnostic JSON endpoints shared with the (former) settings caller.
+	s.mux.Handle("POST /a/devices/shelly/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyApprove)))
+	s.mux.Handle("POST /a/devices/shelly/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyReject)))
+	s.mux.Handle("POST /a/devices/shelly/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyRelease)))
+	s.mux.Handle("POST /a/devices/shelly/scan-network", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetwork)))
+	s.mux.Handle("GET /a/devices/shelly/scan-network/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetworkStatus)))
 	// Shelly Etappe 3, Phase 1: (re)provision a device onto the MQTT broker.
 	s.mux.Handle("POST /a/devices/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
 	// Dev-only: feed a synthetic mDNS announcement through the real discovery

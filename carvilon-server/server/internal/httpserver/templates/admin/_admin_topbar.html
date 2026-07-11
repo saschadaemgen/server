@@ -433,9 +433,7 @@
     // handlers' ParseForm sees the fields); each handler redirects back to the
     // fragment, which we drop in place - fresh values + a flash banner.
     var setCat = null;
-    var shellyScanPoll = null; // shared so close/re-render can tear the poll down
-    function stopShellyScanPoll() { if (shellyScanPoll) { clearInterval(shellyScanPoll); shellyScanPoll = null; } }
-    function afterPanelLoad() { stopShellyScanPoll(); if (setCat === 'shelly') initShellyPanel(); }
+    function afterPanelLoad() { if (setCat === 'shelly') initShellyPanel(); }
     function loadPanel(cat) {
       fetch('/a/settings/panel/' + encodeURIComponent(cat), { credentials: 'same-origin', cache: 'no-store' })
         .then(function (r) { return r.ok ? r.text() : null; })
@@ -458,14 +456,11 @@
     }
     function closeSettingsModal() {
       if (!setOv || setOv.hidden) return;
-      stopShellyScanPoll();
       setOv.hidden = true;
       setCat = null;
       if (setBody) setBody.innerHTML = '';
       if (gearBtn) gearBtn.focus();
     }
-    // Lets an in-panel async action (Shelly network scan) refresh the body.
-    window.__cvSettingsReload = function () { if (setCat) loadPanel(setCat); };
 
     if (setMega) setMega.addEventListener('click', function (e) {
       var item = e.target.closest('[data-sp-cat]');
@@ -530,39 +525,8 @@
           })
           .catch(function () { set('Status unavailable', false); });
       })();
-      // "Scan network": active subnet sweep with progress polling; on new finds
-      // reload the panel body (not the page) so pending rows appear.
-      (function () {
-        var btn = setBody.querySelector('[data-shscan-btn]');
-        var out = setBody.querySelector('[data-shscan-status]');
-        if (!btn || !out) return;
-        function show(msg) { out.hidden = false; out.textContent = msg; }
-        function stop() { stopShellyScanPoll(); btn.disabled = false; }
-        function tick() {
-          fetch('/a/settings/shelly/scan-network/status', { credentials: 'same-origin', cache: 'no-store' })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-              if (!d) return;
-              if (d.running) { show('Probing ' + d.probed + ' / ' + d.total + ' addresses...'); return; }
-              stop();
-              if (d.message) { show(d.message); return; }
-              show('Scan complete - found ' + d.found + ' Shelly device' + (d.found === 1 ? '' : 's') + ', ' + d.new + ' new.');
-              if (d.new > 0) { setTimeout(function () { if (window.__cvSettingsReload) window.__cvSettingsReload(); }, 1200); }
-            })
-            .catch(function () { stop(); show('Scan status unavailable.'); });
-        }
-        btn.addEventListener('click', function () {
-          btn.disabled = true;
-          show('Starting scan...');
-          fetch('/a/settings/shelly/scan-network', { method: 'POST', credentials: 'same-origin' })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-              if (!d || !d.ok) { stop(); show((d && d.message) || 'Scan could not be started.'); return; }
-              tick(); shellyScanPoll = setInterval(tick, 700);
-            })
-            .catch(function () { stop(); show('Scan could not be started.'); });
-        });
-      })();
+      // Note: Shelly discovery (pending/ignored lists + the network scan)
+      // moved to the Devices list - this panel keeps only the base config.
     }
 
     document.addEventListener('keydown', function (e) {
