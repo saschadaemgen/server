@@ -93,8 +93,20 @@ export function buildNode(n){
 // weekly schedule. Best-effort: an unreachable device just leaves the CH-N
 // placeholders and no clocks (config runs over HTTP-RPC, independent of the
 // MQTT link).
+// RGBW2 COLOR-mode effect vocabulary, VERIFIED from the official Gen1
+// doc (#shelly-rgbw2-color-settings-color-0): 0-4, NOT the Bulb's 0-6.
+// id 4 is "Red/green change" on the RGBW2 (it is "Breath" on the Bulb -
+// ids are NOT portable across devices). [id, name]; 0 = off/static.
+const RGBW2_EFFECTS=[['0','Off (static)'],['1','Meteor shower'],['2','Gradual change'],['3','Flash'],['4','Red/green change']];
 async function loadShellyOverview(nodeId,storeId){
   if(!storeId)return;
+  const nd0=nodes[nodeId];
+  // seed the light faceplate controls (effect + colour + state) from the
+  // device so a running effect is VISIBLE and a manual change never starts
+  // from a stale 0 - the same seed the cockpit card does.
+  if(nd0&&nd0.def.shelly&&(nd0.def.shelly.channels||[]).some(c=>c.kind==='color'||c.kind==='white')){
+    seedShellyLights(nodeId,storeId);
+  }
   try{
     const r=await fetch('shelly/'+storeId+'/overview',{credentials:'same-origin'});
     if(!r.ok)return;
@@ -103,6 +115,41 @@ async function loadShellyOverview(nodeId,storeId){
     if(d.gen1)applyShelly1Schedule(nd,d.schedules||{});
     else applyShellySchedule(nd,d.jobs||[]);
   }catch(_){/* device unreachable: placeholders stay, no error */}
+}
+// seedShellyLights fills each light row's effect selector + sliders +
+// on/off state from the device's current values (per light channel), so
+// the faceplate shows the ACTIVE effect at a glance.
+async function seedShellyLights(nodeId,storeId){
+  const nd=nodes[nodeId];if(!nd)return;
+  for(const ch of (nd.def.shelly.channels||[])){
+    if(ch.kind!=='color'&&ch.kind!=='white')continue;
+    try{
+      const r=await fetch('shelly/'+storeId+'/gen1/channel/'+ch.id,{credentials:'same-origin'});
+      if(!r.ok)continue;
+      const d=await r.json(),cur=nodes[nodeId];if(!cur||!d||!d.state)continue;
+      paintLightSeed(cur.el.querySelector(`.sh-lrow[data-ch="${ch.id}"]`),d.state);
+    }catch(_){/* unreachable: placeholders stay */}
+  }
+}
+// paintLightSeed applies a light channel's current device state to its
+// faceplate row: state on/off, the sliders, the effect selector + swatch.
+function paintLightSeed(row,st){
+  if(!row||!st)return;
+  const on=st.ison===true; row.classList.toggle('on',on);
+  const se=row.querySelector('[data-chstate]'); if(se) se.textContent=on?'on':'off';
+  row.querySelectorAll('[data-lslider]').forEach(sl=>{
+    const map={r:'red',g:'green',b:'blue'}, k=map[sl.getAttribute('data-lslider')]||sl.getAttribute('data-lslider');
+    const v=Number(st[k]); if(isFinite(v)) sl.value=v;
+  });
+  const eff=row.querySelector('[data-leff]'); if(eff){ const e=Number(st.effect); if(isFinite(e)) eff.value=String(e); }
+  paintLightSwatch(row);
+}
+// paintLightSwatch tints the row's colour swatch from its RGB sliders.
+function paintLightSwatch(row){
+  const sw=row&&row.querySelector('[data-lswatch]'); if(!sw)return;
+  const g=k=>{const s=row.querySelector(`[data-lslider="${k}"]`);return s?Math.max(0,Math.min(255,Number(s.value)||0)):0;};
+  sw.style.background='rgb('+g('r')+','+g('g')+','+g('b')+')';
+  sw.style.backgroundImage='none';
 }
 // applyShelly1Schedule is the Gen1 sibling: schedules come as per-channel
 // rule-string sets ("0700-0123456-on"; weekday digits 0=Monday) instead
@@ -236,6 +283,7 @@ function shellyFaceplateHTML(n){
         <div class="sh-lctl" data-noselectdrag>
           <label class="sh-lc"><span>${color?'Gain':'Bright'}</span><input type="range" min="0" max="100" value="0" data-lslider="${color?'gain':'brightness'}" data-noselectdrag></label>
           ${rgb}
+          ${color?`<label class="sh-lc"><span>Effect</span><select class="sh-leff" data-leff data-noselectdrag>${RGBW2_EFFECTS.map(e=>`<option value="${e[0]}">${esc(e[1])}</option>`).join('')}</select></label>`:''}
         </div>
         <div class="sh-disp-foot"><span class="sh-disp-state" data-chstate>off</span><span class="sh-next" data-chnext></span></div>
       </div>

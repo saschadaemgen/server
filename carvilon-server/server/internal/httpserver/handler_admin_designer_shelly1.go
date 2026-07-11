@@ -102,12 +102,14 @@ var gen1RelayKeys = map[string]bool{
 }
 
 // gen1LightKeys whitelists the per-channel /settings/{color|white}/{i}
-// keys of a light-class device (RGBW2). Colour/gain/effect are LIVE
-// control, not settings - they ride the light control endpoint.
-// night_mode is deferred (nested write shape unverified).
+// keys of a light-class device (RGBW2). Colour/gain are LIVE control, not
+// settings - they ride the light control endpoint. effect is BOTH a live
+// control AND a persisted default (the doc lists it on /settings/color/0
+// too), so it is settable here as the power-on default. night_mode is
+// deferred (nested write shape unverified).
 var gen1LightKeys = map[string]bool{
 	"name": true, "default_state": true, "transition": true,
-	"btn_type": true, "btn_reverse": true,
+	"effect": true, "btn_type": true, "btn_reverse": true,
 	"auto_on": true, "auto_off": true,
 }
 
@@ -118,6 +120,9 @@ var gen1LightKeys = map[string]bool{
 var gen1EnumValues = map[string]map[string]bool{
 	"mode":          {"relay": true, "roller": true, "color": true, "white": true},
 	"default_state": {"off": true, "on": true, "last": true, "switch": true},
+	// RGBW2 color-mode effect ids (0-4); mirrors the live-control clamp so a
+	// crafted settings write cannot push an out-of-range effect either.
+	"effect": {"0": true, "1": true, "2": true, "3": true, "4": true},
 	"btn_type": {"momentary": true, "toggle": true, "edge": true,
 		"detached": true, "action": true, "momentary_on_release": true},
 }
@@ -268,6 +273,7 @@ func (s *Server) handleDesignerShelly1Channel(w http.ResponseWriter, r *http.Req
 				"name":          li.Name.String(),
 				"default_state": li.DefaultState.String(),
 				"transition":    li.Transition.String(),
+				"effect":        li.Effect.String(), // persisted default effect (0-4)
 				"btn_type":      li.BtnType.String(),
 				"btn_reverse":   flexBool(li.BtnReversed),
 				"auto_on":       li.AutoOn.String(),
@@ -360,7 +366,7 @@ func (s *Server) handleDesignerShelly1ChannelSettings(w http.ResponseWriter, r *
 var gen1LightParamBounds = map[string][2]int{
 	"red": {0, 255}, "green": {0, 255}, "blue": {0, 255}, "white": {0, 255},
 	"gain": {0, 100}, "brightness": {0, 100},
-	"effect": {0, 6}, "transition": {0, 5000},
+	"effect": {0, 4}, "transition": {0, 5000},
 }
 
 // handleDesignerShelly1Light drives one light channel live (on/off,

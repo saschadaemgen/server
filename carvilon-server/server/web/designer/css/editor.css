@@ -238,6 +238,8 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .sh-lc{display:flex;align-items:center;gap:7px;font:600 9px/1 var(--mono);letter-spacing:.05em;color:var(--muted)}
 .sh-lc span{flex:none;width:34px;text-transform:uppercase}
 .sh-lc input[type=range]{flex:1;height:4px;accent-color:var(--cyan-bright);cursor:pointer;min-width:0}
+.sh-leff{flex:1;min-width:0;background:var(--panel,#0d1520);color:var(--text,#dce6f2);
+  border:1px solid var(--border);border-radius:5px;padding:2px 5px;font:600 9px/1.4 var(--mono);cursor:pointer}
 /* graph-driven: manual colour+gain / just gain go inert (the established
    rule - a wired control owns the surface) */
 .sh-lrow.sh-ldriven .sh-lctl,.sh-lrow.sh-gaindriven .sh-lc:first-child{opacity:.4;pointer-events:none}

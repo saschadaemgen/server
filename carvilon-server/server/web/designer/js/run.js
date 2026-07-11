@@ -62,6 +62,9 @@ function buildShellyMap(){
         shellyMap[n.id+'__li'+c+'_pwr']={node:n.id,port:'li'+c+'_pwr'};
         shellyMap[n.id+'__li'+c+'_set']={node:n.id,port:'li'+c+'_set'};
         shellyMap[n.id+'__li'+c+'_gain']={node:n.id,port:'li'+c+'_gain'};
+        // portless status source: the whole color/N/status JSON, so the
+        // faceplate paints the ACTIVE effect + colour live during a run
+        shellyMap[n.id+'__li'+c+'_disp']={node:n.id,port:'li'+c+'_disp'};
         continue;
       }
       shellyMap[n.id+'__sw'+c+'_out']={node:n.id,port:'sw'+c+'_out'};
@@ -147,6 +150,9 @@ function serializeGraph(){
         const seg=ch.kind==='white'?'white':'color', gk=ch.kind==='white'?'brightness':'gain';
         emit(n.id+'__li'+c+'_out','source.channel',{channel:'mqtt:'+p+'/'+seg+'/'+c},n.id,'li'+c+'_out');
         emit(n.id+'__li'+c+'_pwr','source.channel.float',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/status#power'},n.id,'li'+c+'_pwr');
+        // display-only: the whole color/N status JSON as text (no graph
+        // port), so the faceplate shows the live effect + colour swatch.
+        emit(n.id+'__li'+c+'_disp','source.channel.text',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/status'},n.id,'li'+c+'_disp');
         if(GRAPH.edges.some(e=>e.to===n.id+':li'+c+'_set')) emit(n.id+'__li'+c+'_set','sink.channel',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/command',payload:'on-off'},n.id,'li'+c+'_set');
         if(GRAPH.edges.some(e=>e.to===n.id+':li'+c+'_gain')) emit(n.id+'__li'+c+'_gain','sink.channel.float',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/set',payload:'json:'+gk},n.id,'li'+c+'_gain');
         continue;
@@ -384,6 +390,17 @@ function paintShelly(nd,port,v){
     row.dataset.w=Number(w||0);
     let total=0; el.querySelectorAll('.sh-row').forEach(r=>{ total+=Number(r.dataset.w||0); });
     const tot=el.querySelector('[data-shtotal]'); if(tot) tot.textContent=fmtW(total);
+  }else if((m=/^li(\d+)_disp$/.exec(port))){
+    // the color/N status JSON: paint the ACTIVE effect + colour swatch
+    // live (a manual control is not re-driven from this - only the
+    // display, so the user's own selection is never clobbered mid-edit)
+    const row=el.querySelector(`.sh-row[data-ch="${m[1]}"]`); if(!row) return;
+    let o=null; try{ o=JSON.parse(v.s||''); }catch(_){ return; }
+    if(!o||typeof o!=='object') return;
+    const eff=row.querySelector('[data-leff]');
+    if(eff && o.effect!=null && document.activeElement!==eff) eff.value=String(Number(o.effect)||0);
+    ['red','green','blue'].forEach(k=>{ const sl=row.querySelector(`[data-lslider="${({red:'r',green:'g',blue:'b'})[k]}"]`); if(sl && o[k]!=null && document.activeElement!==sl) sl.value=Number(o[k])||0; });
+    tintLightSwatch(row);
   }else if((m=/^in(\d+)$/.exec(port))){
     const led=el.querySelector(`.sh-row[data-ch="${m[1]}"] [data-chin]`); if(led) led.classList.toggle('on',v.kind===0?!!v.b:isActive(v));
   }
@@ -421,6 +438,26 @@ function sendLight(def,ch,body){
   fetch('shelly/'+def.shelly.id+'/gen1/light/'+ch,{method:'POST',headers:{'Content-Type':'application/json'},
     credentials:'same-origin',body:JSON.stringify(body)}).catch(()=>{});
 }
+// coherentLightRowBody reads a faceplate light row's WHOLE visible state
+// into one payload: turn + the selected effect + colour/gain. So a manual
+// change never fights a running effect (effect=0 static, effect=N runs) -
+// what the user sees selected is what gets sent. Mirrors the cockpit.
+function coherentLightRowBody(row,def,ch,turnOn){
+  // the endpoint decodes on/off from the boolean `on` field (not a `turn`
+  // string) - sendLight adds `mode`
+  const kind=shellyLightMode(def,ch), body={on:turnOn};
+  if(kind==='color'){ const eff=row.querySelector('[data-leff]'); body.effect=eff?(Number(eff.value)||0):0; }
+  row.querySelectorAll('[data-lslider]').forEach(sl=>{
+    const map={r:'red',g:'green',b:'blue'}, k=map[sl.getAttribute('data-lslider')]||sl.getAttribute('data-lslider');
+    body[k]=Number(sl.value)||0;
+  });
+  return body;
+}
+function tintLightSwatch(row){
+  const sw=row&&row.querySelector('[data-lswatch]'); if(!sw) return;
+  const g=k=>{const s=row.querySelector(`[data-lslider="${k}"]`);return s?Math.max(0,Math.min(255,Number(s.value)||0)):0;};
+  sw.style.background='rgb('+g('r')+','+g('g')+','+g('b')+')'; sw.style.backgroundImage='none';
+}
 if(world) world.addEventListener('click', ev=>{
   const sw=ev.target.closest('[data-lsw]'); if(!sw) return;
   const nodeEl=sw.closest('.node'); if(!nodeEl) return;
@@ -429,24 +466,25 @@ if(world) world.addEventListener('click', ev=>{
   if(lightGraphDriven(nodeId,ch)) return; // graph owns on/off: inert
   const row=sw.closest('.sh-row'), on=!row.classList.contains('on');
   row.classList.toggle('on',on); const st=row.querySelector('[data-chstate]'); if(st) st.textContent=on?'on':'off';
-  sendLight(def,ch,{on});
+  sendLight(def,ch,coherentLightRowBody(row,def,ch,on));
 });
 if(world) world.addEventListener('change', ev=>{
-  const sl=ev.target.closest('[data-lslider]'); if(!sl) return;
-  const nodeEl=sl.closest('.node'); if(!nodeEl) return;
+  const el=ev.target.closest('[data-lslider],[data-leff]'); if(!el) return;
+  const nodeEl=el.closest('.node'); if(!nodeEl) return;
   const nodeId=nodeEl.dataset.id, def=nodes[nodeId]&&nodes[nodeId].def;
-  const row=sl.closest('.sh-row'); if(!def||!def.shelly||!row) return;
-  const ch=Number(row.dataset.ch), key=sl.getAttribute('data-lslider');
-  // Match the CSS lock exactly (keyboard agrees with mouse): when the
-  // on/off control is graph-driven the whole manual surface is inert
-  // (colour AND gain); gain is additionally inert when its own input is
-  // driven. Otherwise the control stays manual.
+  const row=el.closest('.sh-row'); if(!def||!def.shelly||!row) return;
+  const ch=Number(row.dataset.ch);
+  // Match the CSS lock (keyboard agrees with mouse): the whole manual
+  // surface (colour + gain + effect) is inert when the on/off control is
+  // graph-driven; gain is additionally inert when its own input is driven.
   if(lightGraphDriven(nodeId,ch)) return;
-  const isLevel=key==='gain'||key==='brightness';
-  if(isLevel && lightGainDriven(nodeId,ch)) return;
-  const map={r:'red',g:'green',b:'blue'}, body={};
-  body[map[key]||key]=Number(sl.value)||0;
-  sendLight(def,ch,body);
+  const key=el.getAttribute('data-lslider');
+  if((key==='gain'||key==='brightness') && lightGainDriven(nodeId,ch)) return;
+  tintLightSwatch(row);
+  // any colour/gain/effect change turns the light on with the coherent
+  // state - setting a colour never "does nothing" against a running effect
+  row.classList.add('on'); const st=row.querySelector('[data-chstate]'); if(st) st.textContent='on';
+  sendLight(def,ch,coherentLightRowBody(row,def,ch,true));
 });
 // formatLive renders a value for the source card's big live readout:
 // 1/0 for bool, a tidied number (+unit) for float, the string for text.

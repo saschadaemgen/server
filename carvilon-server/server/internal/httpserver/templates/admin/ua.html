@@ -475,6 +475,11 @@
       var DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
       var IN_MODES = [['follow', 'Follow'], ['flip', 'Flip'], ['momentary', 'Momentary'], ['detached', 'Detached']];
       var INIT_STATES = [['off', 'Off'], ['on', 'On'], ['restore_last', 'Restore last'], ['match_input', 'Match input']];
+      // RGBW2 COLOR-mode effect vocabulary, VERIFIED from the official Gen1
+      // doc (#shelly-rgbw2-color-settings-color-0): 0-4, NOT the Bulb's
+      // 0-6. id 4 is "Red/green change" on the RGBW2 (it is "Breath" on the
+      // Bulb - ids are NOT portable). [id, name]; 0 = off/static colour.
+      var RGBW2_EFFECTS = [['0', 'Off (static)'], ['1', 'Meteor shower'], ['2', 'Gradual change'], ['3', 'Flash'], ['4', 'Red/green change']];
       var IN_TYPES = [['switch', 'Switch'], ['button', 'Button']];
 
       function chansOf(row) {
@@ -592,12 +597,29 @@
         });
         if (ch.kind === 'color') {
           h += '<div class="dck-in"><span class="k">Effect</span><select class="dck-i" data-dcl-effect disabled>'
-            + '<option value="0">Off</option>'
-            + [1, 2, 3, 4, 5, 6].map(function (e) { return '<option value="' + e + '">Effect ' + e + '</option>'; }).join('')
+            + RGBW2_EFFECTS.map(function (e) { return '<option value="' + e[0] + '">' + esc(e[1]) + '</option>'; }).join('')
             + '</select></div>';
         }
         h += '<div class="dck-note err" data-dck-chmsg hidden></div></div>';
         return h;
+      }
+      // coherentLightBody reads a card's whole visible state into ONE
+      // payload so a manual change never fights a running effect: the
+      // selected effect is ALWAYS sent with turn + colour/gain. effect=0
+      // means static colour (the RGB/gain take); effect=N runs a mode.
+      // "What the user sees selected is what gets sent."
+      function coherentLightBody(card, kind, turnOn) {
+        // the endpoint decodes on/off from the boolean `on` field (not a
+        // `turn` string) - the field name IS the on/off contract
+        var body = { mode: kind, on: turnOn };
+        if (kind === 'color') {
+          var eff = card.querySelector('[data-dcl-effect]');
+          body.effect = eff ? (Number(eff.value) || 0) : 0;
+        }
+        card.querySelectorAll('[data-dcl]').forEach(function (sl) {
+          body[sl.getAttribute('data-dcl')] = Number(sl.value) || 0;
+        });
+        return body;
       }
       function lightSend(ch, kind, body, after) {
         if (!cur || !cur.sid) { if (after) after(false); return; }
@@ -619,8 +641,9 @@
             var want = !tog.classList.contains('on');
             tog.classList.add('pending');
             // HTTP control answers synchronously - the response IS the
-            // confirmation (no MQTT confirm-timer dance needed here)
-            lightSend(ch, kind, { on: want }, function (ok) {
+            // confirmation (no MQTT confirm-timer dance needed here). The
+            // send is coherent: turn + the selected effect + colour/gain.
+            lightSend(ch, kind, coherentLightBody(card, kind, want), function (ok) {
               tog.classList.remove('pending');
               if (!ok) { chFlash(ch, 'Light command failed.'); return; }
               lightPatchState(card, want);
@@ -632,15 +655,20 @@
             sl.addEventListener('click', function (e) { e.stopPropagation(); });
             sl.addEventListener('input', function () { if (out) out.textContent = sl.value; });
             sl.addEventListener('change', function () {
-              var body = {}; body[key] = Number(sl.value) || 0;
-              lightSend(ch, kind, body, function (ok) { if (!ok) chFlash(ch, 'Light command failed.'); });
+              // a colour/gain change turns the light on with the coherent
+              // state, so setting a colour never "does nothing" while off
+              lightSend(ch, kind, coherentLightBody(card, kind, true), function (ok) { if (!ok) chFlash(ch, 'Light command failed.'); });
             });
           });
           var eff = card.querySelector('[data-dcl-effect]');
           if (eff) {
             eff.addEventListener('click', function (e) { e.stopPropagation(); });
             eff.addEventListener('change', function () {
-              lightSend(ch, kind, { effect: Number(eff.value) || 0 }, function (ok) { if (!ok) chFlash(ch, 'Light command failed.'); });
+              // picking an effect (or Off) turns the light on and sends the
+              // whole coherent state - RGB stops fighting the effect
+              lightSend(ch, kind, coherentLightBody(card, kind, true), function (ok) {
+                if (ok) lightPatchState(card, true); else chFlash(ch, 'Light command failed.');
+              });
             });
           }
         });
@@ -1222,6 +1250,7 @@
           secHead('Light ' + n + ' settings', false)
           + field('Name', txt('name', li.name))
           + field('Power-on default', sel('default_state', li.default_state || 'off', G1_DEFAULTS))
+          + field('Default effect', sel('effect', String(li.effect == null ? 0 : li.effect), RGBW2_EFFECTS))
           + field('Button type', sel('btn_type', li.btn_type || 'toggle', G1_BTN_TYPES))
           + field('Reverse button', tog('btn_reverse', li.btn_reverse === true))
           + field('Transition', num('transition', li.transition, 'ms'))

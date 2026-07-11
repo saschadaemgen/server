@@ -282,6 +282,95 @@ func TestDesignerShelly1Light(t *testing.T) {
 	}
 }
 
+// TestDesignerShelly1LightEffect covers the effect correction: a coherent
+// control send carries turn + the selected effect + colour together, the
+// effect id is clamped to the RGBW2's 0-4 range (NOT the bulb's 0-6), and
+// effect is settable as a persisted default via the light settings path.
+func TestDesignerShelly1LightEffect(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	stub := newRGBW2Stub(t)
+	id := adoptRGBW2(t, env, stub)
+	base := "/a/designer/shelly/" + itoa64(id)
+	post := func(path, body string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, env.ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := env.client.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+	last := func(prefix string) url.Values {
+		t.Helper()
+		for _, u := range stub.requests() {
+			if strings.HasPrefix(u, prefix) {
+				pu, _ := url.Parse(u)
+				return pu.Query()
+			}
+		}
+		t.Fatalf("stub never saw %s; got %v", prefix, stub.requests())
+		return nil
+	}
+
+	// coherent send: turn + effect + colour together (effect 2 = Gradual).
+	// The body carries the boolean `on` field the JS coherent builders emit
+	// (NOT a `turn` string) - this pins the on/off contract the UI relies on.
+	if resp := post(base+"/gen1/light/0", `{"mode":"color","on":true,"effect":2,"red":10,"green":20,"blue":30,"gain":50}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("coherent effect send = %d", resp.StatusCode)
+	}
+	q := last("/color/0?")
+	if q.Get("turn") != "on" || q.Get("effect") != "2" || q.Get("red") != "10" || q.Get("gain") != "50" {
+		t.Errorf("coherent query = %v", q)
+	}
+	// a coherent OFF (on:false) must reach the device as turn=off - a
+	// regression here (e.g. sending `turn` in the body instead of `on`)
+	// would leave the light stuck on.
+	if resp := post(base+"/gen1/light/0", `{"mode":"color","on":false,"effect":0,"red":10,"gain":50}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("coherent off = %d", resp.StatusCode)
+	}
+	var lastTurn string
+	for _, u := range stub.requests() {
+		if strings.HasPrefix(u, "/color/0?") {
+			pu, _ := url.Parse(u)
+			lastTurn = pu.Query().Get("turn")
+		}
+	}
+	if lastTurn != "off" {
+		t.Errorf("coherent off turn = %q, want off", lastTurn)
+	}
+
+	// effect clamped to the RGBW2 max of 4 (not the bulb's 6)
+	if resp := post(base+"/gen1/light/0", `{"mode":"color","effect":99}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("effect clamp send = %d", resp.StatusCode)
+	}
+	var clamped string
+	for _, u := range stub.requests() {
+		if strings.HasPrefix(u, "/color/0?") && strings.Contains(u, "effect=") {
+			pu, _ := url.Parse(u)
+			clamped = pu.Query().Get("effect")
+		}
+	}
+	if clamped != "4" {
+		t.Errorf("effect 99 clamped to %q, want 4 (RGBW2 range 0-4)", clamped)
+	}
+
+	// effect is a persisted default via the light settings whitelist
+	if resp := post(base+"/gen1/channel/0/settings", `{"config":{"effect":3}}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("effect setting = %d", resp.StatusCode)
+	}
+	if got := last("/settings/color/0").Get("effect"); got != "3" {
+		t.Errorf("persisted effect = %q, want 3", got)
+	}
+	// an out-of-range effect is refused on the SETTINGS path too (0-4),
+	// matching the live-control clamp - a crafted 99 must not reach the device.
+	if resp := post(base+"/gen1/channel/0/settings", `{"config":{"effect":99}}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("settings effect 99 = %d, want 400", resp.StatusCode)
+	}
+}
+
 // The channel GET serves the light shape with the slider-seeding state.
 func TestDesignerShelly1LightChannel(t *testing.T) {
 	env := newTestServer(t)
@@ -303,6 +392,12 @@ func TestDesignerShelly1LightChannel(t *testing.T) {
 	}
 	if out.Light["name"] != "strip" || out.Light["default_state"] != "switch" {
 		t.Errorf("light shape = %v", out.Light)
+	}
+	// the persisted default effect rides in the LIGHT map (the settings
+	// forms read it there) - a regression that only put it under `state`
+	// would make every "Default effect" selector show 0.
+	if out.Light["effect"] == nil {
+		t.Error("light.effect missing - the settings-form default effect would show 0")
 	}
 	if out.State["red"] != "255" || out.State["gain"] != "80" || out.State["ison"] != true {
 		t.Errorf("seed state = %v", out.State)

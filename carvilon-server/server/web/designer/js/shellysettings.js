@@ -392,8 +392,14 @@ function renderChannel(container, nodeId, ch){
 // full schedule_rules editor - one editor, one whole-set writer).
 const G1_DEFAULTS=[['off','Off'],['on','On'],['last','Restore last'],['switch','Match switch']];
 const G1_BTN_TYPES=[['momentary','Momentary'],['toggle','Toggle'],['edge','Edge'],['detached','Detached'],['action','Action'],['momentary_on_release','Momentary on release']];
+// RGBW2 COLOR-mode effect vocabulary, VERIFIED from the official Gen1
+// doc (#shelly-rgbw2-color-settings-color-0): 0-4, NOT the Bulb's 0-6.
+// id 4 is "Red/green change" on the RGBW2 (it is "Breath" on the Bulb -
+// ids are NOT portable across devices). [id, name]; 0 = off/static.
+const RGBW2_EFFECTS=[['0','Off (static)'],['1','Meteor shower'],['2','Gradual change'],['3','Flash'],['4','Red/green change']];
 function g1sel(k,v,opts){ return `<select class="si-i" data-g1k="${k}">`+opts.map(o=>`<option value="${o[0]}"${o[0]===v?' selected':''}>${esc(o[1])}</option>`).join('')+`</select>`; }
 function renderGen1ChannelForm(body, sid, ch, d){
+  if(d.light){ renderGen1LightSettings(body, sid, ch, d); return; }
   const rl = d.relay||{}, sch = d.schedule||{enabled:false,rules:[]};
   body.innerHTML =
     `<div class="si-sec"><div class="si-h">Channel</div>`+
@@ -411,6 +417,12 @@ function renderGen1ChannelForm(body, sid, ch, d){
         `<div class="si-note">${sch.enabled?'Active.':'Present but disabled.'} Edit the schedule in the Device Center cockpit.</div>`
       : `<div class="si-note">No schedule set. Create one in the Device Center cockpit.</div>`)+
     `</div>`;
+  wireGen1Fields(body, sid, ch);
+}
+
+// wireGen1Fields wires every [data-g1k] settings field to the per-channel
+// settings write (shared by the relay + light channel forms).
+function wireGen1Fields(body, sid, ch){
   body.querySelectorAll('[data-g1k]').forEach(el=>{
     const key = el.dataset.g1k;
     const st = el.closest('.si-f') && el.closest('.si-f').querySelector('[data-st]');
@@ -419,6 +431,35 @@ function renderGen1ChannelForm(body, sid, ch, d){
     else if(el.type==='number'){ el.onchange=()=>{ if(el.value.trim()!=='') send(Number(el.value)||0); }; }
     else el.onchange=()=>send(el.value);
   });
+}
+
+// renderGen1LightSettings is the editor-sidebar light-channel form -
+// parity with the Device Center cockpit's light settings (one coverage,
+// two hosts). Colour/gain/effect are LIVE control on the module
+// faceplate + cockpit card; the PERSISTED settings live here:
+// name, power-on default, button, transition, the default effect, the
+// auto on/off timers, and the (read-only) weekly schedule. The effect
+// default writes to /settings/{color}/{ch}?effect=N.
+function renderGen1LightSettings(body, sid, ch, d){
+  const li = d.light||{}, sch = d.schedule||{enabled:false,rules:[]};
+  body.innerHTML =
+    `<div class="si-sec"><div class="si-h">Light</div>`+
+    field('Name', `<input class="si-i" data-g1k="name" type="text" value="${escAttr(li.name||'')}">`)+
+    field('Power-on default', g1sel('default_state', li.default_state||'off', G1_DEFAULTS))+
+    field('Default effect', g1sel('effect', String(li.effect==null?0:li.effect), RGBW2_EFFECTS))+
+    field('Button type', g1sel('btn_type', li.btn_type||'toggle', G1_BTN_TYPES))+
+    field('Reverse button', g1tog('btn_reverse', li.btn_reverse===true))+
+    field('Transition', `<input class="si-i" data-g1k="transition" type="number" value="${escAttr(li.transition==null?'':String(li.transition))}"> ms`)+
+    `</div><div class="si-sec"><div class="si-h">Timer <span class="si-ondev">on device</span></div>`+
+    field('Auto-OFF after', `<input class="si-i" data-g1k="auto_off" type="number" value="${escAttr(li.auto_off==null?'':String(li.auto_off))}"> s`)+
+    field('Auto-ON after', `<input class="si-i" data-g1k="auto_on" type="number" value="${escAttr(li.auto_on==null?'':String(li.auto_on))}"> s`)+
+    `</div><div class="si-sec"><div class="si-h">Weekly schedule <span class="si-ondev">on device</span></div>`+
+    (sch.rules && sch.rules.length
+      ? sch.rules.map(r=>`<div class="si-f"><span class="si-f-l">${esc(r)}</span></div>`).join('')+
+        `<div class="si-note">${sch.enabled?'Active.':'Present but disabled.'} Edit the schedule in the Device Center cockpit.</div>`
+      : `<div class="si-note">No schedule set. Create one in the Device Center cockpit.</div>`)+
+    `</div>`;
+  wireGen1Fields(body, sid, ch);
 }
 
 // setConfig POSTs a single-key partial config and flashes the field status.
