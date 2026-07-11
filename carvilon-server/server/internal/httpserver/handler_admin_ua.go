@@ -221,7 +221,7 @@ type uaSection struct {
 // categoryOrder ranks the natures for the flat table (hubs first, doors
 // last) so the pre-sorted rows read top-down like the topology.
 var categoryOrder = map[string]int{
-	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "light": 6, "other": 7, "door": 8,
+	"hub": 0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "rgbw": 6, "other": 7, "door": 8,
 }
 
 // handleAdminUA renders the Device Center (read-only except for the
@@ -458,7 +458,7 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	for _, c := range []struct{ key, label string }{
 		{"hub", "Hubs"}, {"reader", "Readers"}, {"viewer", "Viewers"},
 		{"camera", "Cameras"}, {"sensor", "Sensors"}, {"switch", "Switches"},
-		{"light", "Lights"}, {"other", "Other devices"}, {"door", "Doors"},
+		{"rgbw", "RGBW Dimmers"}, {"other", "Other devices"}, {"door", "Doors"},
 	} {
 		n := catCount[c.key]
 		switch c.key {
@@ -863,8 +863,8 @@ func categoryPlural(cat string) string {
 		return "Sensors"
 	case "switch":
 		return "Switches"
-	case "light":
-		return "Lights"
+	case "rgbw":
+		return "RGBW Dimmers"
 	case "door":
 		return "Doors"
 	default:

@@ -492,10 +492,10 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 			row.ChannelsJSON = string(raw)
 		}
 	}
-	// A light-class device is a light, not a switch - its own group,
-	// icon and facet in the Device Center.
+	// A light-class device (RGBW2) is its own "RGBW Dimmer" category in
+	// the Device Center - group, icon and facet distinct from switches.
 	if len(lights) > 0 && len(chans) == 0 {
-		row.Category, row.TypeLabel = "light", "Light"
+		row.Category, row.TypeLabel = "rgbw", "RGBW Dimmer"
 	}
 	if p.err == nil {
 		row.StatusState, row.StatusText = "online", "Online"

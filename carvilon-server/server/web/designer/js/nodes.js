@@ -204,15 +204,15 @@ const SHELLY_PTIP={
 function shellyFaceplateHTML(n){
   const sh=n.shelly||{}, model=sh.model||'', gen1=sh.gen===1;
   const metric=(k,u)=>`<div class="sh-m"><span class="sh-mv" data-${k}>—</span><span class="sh-ml">${u}</span></div>`;
-  const rows=(n.ports.in.filter(p=>p.srole==='relay')).map(rp=>{
-    const c=rp.ch, outs=n.ports.out.filter(p=>p.ch===c);
+  const outPorts=(c)=>n.ports.out.filter(p=>p.ch===c).map(p=>`<div class="sh-orow"><span class="sh-plabel">${esc(SHELLY_PLABEL[p.srole]||p.label||p.id)}</span><div class="port io-out sh-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(SHELLY_PTIP[p.srole]||p.label||'')}"><span class="socket${kindClass(p.kind)}"></span></div></div>`).join('');
+  const inPort=(id,tip,kind)=>`<div class="port io-in sh-pin" data-port="${escAttr(n.id+':'+id)}" data-tip="${escAttr(tip)}"><span class="socket${kindClass(kind)}"></span></div>`;
+  // one row per channel; a light-class channel (color/white) renders the
+  // colour+gain control, a relay channel the switch (existing shape).
+  const relayRow=(c)=>{
     const meterCh=(sh.channels||[]).some(x=>x.id===c&&x.meter);
-    // Gen1 meters report power only (no per-channel V/A/Hz on the frozen
-    // API) — the grid shows what the device really measures, nothing more.
     const grid=gen1?(meterCh?metric('chw','W'):''):(metric('chw','W')+metric('chv','V')+metric('cha','A')+metric('chhz','Hz'));
-    const poH=outs.map(p=>`<div class="sh-orow"><span class="sh-plabel">${esc(SHELLY_PLABEL[p.srole]||p.label||p.id)}</span><div class="port io-out sh-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(SHELLY_PTIP[p.srole]||p.label||'')}"><span class="socket${kindClass(p.kind)}"></span></div></div>`).join('');
     return `<div class="sh-row" data-ch="${c}">
-      <div class="sh-inport"><div class="port io-in sh-pin" data-port="${escAttr(n.id+':'+rp.id)}" data-tip="${escAttr(SHELLY_PTIP.relay)}"><span class="socket${kindClass(rp.kind)}"></span></div><span class="sh-plabel">${esc(SHELLY_PLABEL.relay)}</span></div>
+      <div class="sh-inport">${inPort('sw'+c+'_set',SHELLY_PTIP.relay,'bool')}<span class="sh-plabel">${esc(SHELLY_PLABEL.relay)}</span></div>
       <div class="sh-disp" data-chsettings="${c}" data-noselectdrag title="Channel settings">
         <div class="sh-disp-top"><span class="sh-disp-name" data-chname>CH${c+1}</span><span class="sh-in-led" data-chin title="Physical input state"></span><span class="sh-clock" data-chclock hidden><i data-lucide="clock"></i></span></div>
         ${grid?`<div class="sh-grid">${grid}</div>`:''}
@@ -220,9 +220,31 @@ function shellyFaceplateHTML(n){
       </div>
       <div class="sh-div"></div>
       <button type="button" class="sh-sw" data-chsw="${c}" data-noselectdrag title="Toggle relay"><span class="sh-track"><span class="sh-thumb"></span></span></button>
-      <div class="sh-pout">${poH}</div>
+      <div class="sh-pout">${outPorts(c)}</div>
     </div>`;
-  }).join('');
+  };
+  const lightRow=(ch)=>{
+    const c=ch.id, color=ch.kind!=='white';
+    const rgb=color?['r','g','b'].map(k=>`<label class="sh-lc"><span>${k.toUpperCase()}</span><input type="range" min="0" max="255" value="0" data-lslider="${k}" data-noselectdrag></label>`).join(''):'';
+    return `<div class="sh-row sh-lrow" data-ch="${c}">
+      <div class="sh-inport">${inPort('li'+c+'_set',SHELLY_PTIP.relay,'bool')}<span class="sh-plabel">On/off</span>
+        <div class="sh-inport" style="margin-top:6px;">${inPort('li'+c+'_gain','Brightness/gain 0-100','float')}<span class="sh-plabel">${color?'Gain':'Bright'}</span></div>
+      </div>
+      <div class="sh-disp" data-chsettings="${c}" data-noselectdrag title="Light settings">
+        <div class="sh-disp-top"><span class="sh-disp-name" data-chname>${color?'Color':'White'} ${c+1}</span><span class="sh-swatch" data-lswatch></span><span class="sh-clock" data-chclock hidden><i data-lucide="clock"></i></span></div>
+        <div class="sh-grid">${metric('chw','W')}</div>
+        <div class="sh-lctl" data-noselectdrag>
+          <label class="sh-lc"><span>${color?'Gain':'Bright'}</span><input type="range" min="0" max="100" value="0" data-lslider="${color?'gain':'brightness'}" data-noselectdrag></label>
+          ${rgb}
+        </div>
+        <div class="sh-disp-foot"><span class="sh-disp-state" data-chstate>off</span><span class="sh-next" data-chnext></span></div>
+      </div>
+      <div class="sh-div"></div>
+      <button type="button" class="sh-sw" data-lsw="${c}" data-noselectdrag title="Toggle light"><span class="sh-track"><span class="sh-thumb"></span></span></button>
+      <div class="sh-pout">${outPorts(c)}</div>
+    </div>`;
+  };
+  const rows=(sh.channels||[]).map(ch=>(ch.kind==='color'||ch.kind==='white')?lightRow(ch):relayRow(ch.id)).join('');
   return `<div class="sh-head">
       <div class="sh-badge"><i data-lucide="cpu"></i></div>
       <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">${esc(model)}</div></div>
@@ -247,7 +269,16 @@ export function markRequiredPorts(nodeId){
       // use" (and the wiring layer refuses a second driver). On a faceplate,
       // the clickable switch for that channel goes inert (graph owns it).
       pe.classList.toggle('io-driven',p.srole==='relay'&&wired);
-      if(p.srole==='relay'){const sw=nd.el.querySelector(`[data-chsw="${p.ch}"]`);if(sw)sw.classList.toggle('sh-locked',wired);}
+      if(p.srole==='relay'){
+        // graph-driven: the manual switch (relay data-chsw, or light
+        // data-lsw) goes inert. A light row also locks its colour/gain
+        // sliders when the on/off control is graph-driven.
+        const sw=nd.el.querySelector(`[data-chsw="${p.ch}"]`)||nd.el.querySelector(`[data-lsw="${p.ch}"]`);
+        if(sw)sw.classList.toggle('sh-locked',wired);
+        if(p.light){const row=nd.el.querySelector(`.sh-lrow[data-ch="${p.ch}"]`);if(row)row.classList.toggle('sh-ldriven',wired);}
+      }
+      // a graph-driven gain input dims that row's manual gain/colour too.
+      if(p.srole==='gain'){const row=nd.el.querySelector(`.sh-lrow[data-ch="${p.ch}"]`);if(row)row.classList.toggle('sh-gaindriven',wired);}
     }
   }
 }
@@ -403,7 +434,19 @@ function shellyDef(name){
   const s=NAME_SHELLY[name]; if(!s) return null;
   const chans=(s.channels||[]),inp=[],outp=[];
   for(const ch of chans){
-    const n=ch.id, lab='CH'+(n+1);
+    const n=ch.id;
+    if(ch.kind==='color'||ch.kind==='white'){
+      // Light-class channel (RGBW2): an on/off control + an optional
+      // gain/brightness driver in; state + per-light power out. The
+      // control reuses srole:'relay' so the single-driver exclusivity +
+      // manual-inert rules apply unchanged.
+      inp.push({id:'li'+n+'_set',label:'On/off',kind:'bool',srole:'relay',ch:n,light:true});
+      inp.push({id:'li'+n+'_gain',label:ch.kind==='white'?'Brightness':'Gain',kind:'float',srole:'gain',ch:n,light:true,optional:true});
+      outp.push({id:'li'+n+'_out',label:'State',kind:'bool',srole:'state',ch:n,light:true});
+      outp.push({id:'li'+n+'_pwr',label:'Power',kind:'float',srole:'power',ch:n,light:true});
+      continue;
+    }
+    const lab='CH'+(n+1);
     inp.push({id:'sw'+n+'_set',label:lab,kind:'bool',srole:'relay',ch:n});
     outp.push({id:'sw'+n+'_out',label:'State',kind:'bool',srole:'state',ch:n});
     if(ch.meter)outp.push({id:'sw'+n+'_pwr',label:'Power',kind:'float',srole:'power',ch:n});

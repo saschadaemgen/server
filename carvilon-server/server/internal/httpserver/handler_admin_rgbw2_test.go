@@ -136,7 +136,7 @@ func TestAdminUA_RGBW2Row(t *testing.T) {
 		t.Fatal("no shelly row rendered")
 	}
 	for _, want := range []string{
-		`data-cat="light"`, `data-gen="1"`,
+		`data-cat="rgbw"`, `data-gen="1"`,
 		`data-prefix="shellies/shelly-a4cf12c0ffee"`,
 		"&#34;kind&#34;:&#34;color&#34;",
 	} {
@@ -147,8 +147,8 @@ func TestAdminUA_RGBW2Row(t *testing.T) {
 	if !strings.Contains(body, "Shelly RGBW2") {
 		t.Error("model label 'Shelly RGBW2' missing")
 	}
-	if !strings.Contains(body, ">Lights<") && !strings.Contains(body, "Lights") {
-		t.Error("Lights group label missing")
+	if !strings.Contains(body, "RGBW Dimmer") {
+		t.Error("RGBW Dimmer group/facet label missing")
 	}
 }
 

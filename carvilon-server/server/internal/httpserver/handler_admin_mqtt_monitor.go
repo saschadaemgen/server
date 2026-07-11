@@ -218,10 +218,10 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 			// (mqtt_id = the broker username), not the carvilon/ prefix.
 			if d.Gen == shellystore.Gen1 {
 				prefix = "shellies/" + a.Username
-				// light-class devices (RGBW2) group as lights, not switches
+				// light-class devices (RGBW2) group as RGBW Dimmers
 				if len(shellycaps.Gen1Lights(d.Model, "")) > 0 &&
 					len(shellycaps.Gen1Channels(d.Model, "")) == 0 {
-					row.Category = "light"
+					row.Category = "rgbw"
 				}
 			}
 		}
@@ -248,7 +248,7 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 	// Category-major order (the Devices pattern: the table's group
 	// headers need contiguous categories), offline first inside each
 	// category (the operator's early warning), then by name.
-	catRank := map[string]int{"switch": 0, "light": 1, "other": 2}
+	catRank := map[string]int{"switch": 0, "rgbw": 1, "other": 2}
 	sort.SliceStable(out, func(i, j int) bool {
 		if catRank[out[i].Category] != catRank[out[j].Category] {
 			return catRank[out[i].Category] < catRank[out[j].Category]

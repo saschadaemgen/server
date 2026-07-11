@@ -230,6 +230,18 @@ body.running.signals-on .wire-flow{opacity:.5;animation:flow 2.6s linear infinit
 .sh-sw.sh-locked{opacity:.45;cursor:not-allowed}
 .sh-sw.sh-locked:hover .sh-track{border-color:var(--border)}
 
+/* ===== Light-class faceplate row (RGBW2): manual colour + gain ===== */
+.sh-lrow .sh-inport{flex-direction:column;align-items:flex-start;gap:2px}
+.sh-swatch{width:14px;height:14px;border-radius:4px;margin-left:6px;border:1px solid var(--border);
+  background:conic-gradient(#e33,#ee3,#3e6,#37e,#e33)}
+.sh-lctl{display:flex;flex-direction:column;gap:4px;margin:5px 0 2px}
+.sh-lc{display:flex;align-items:center;gap:7px;font:600 9px/1 var(--mono);letter-spacing:.05em;color:var(--muted)}
+.sh-lc span{flex:none;width:34px;text-transform:uppercase}
+.sh-lc input[type=range]{flex:1;height:4px;accent-color:var(--cyan-bright);cursor:pointer;min-width:0}
+/* graph-driven: manual colour+gain / just gain go inert (the established
+   rule - a wired control owns the surface) */
+.sh-lrow.sh-ldriven .sh-lctl,.sh-lrow.sh-gaindriven .sh-lc:first-child{opacity:.4;pointer-events:none}
+
 /* ===== Shelly settings IN THE INSPECTOR SIDEBAR (not a modal) =====
    Device view (channel picker) and channel view (config + weekly schedule),
    rendered into #insp-props. Timer and Weekly Schedule are distinct blocks. */

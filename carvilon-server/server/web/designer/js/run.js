@@ -57,6 +57,13 @@ function buildShellyMap(){
     if(n.type!=='shelly.device' || !n.shelly) continue;
     for(const ch of (n.shelly.channels||[])){
       const c=ch.id;
+      if(ch.kind==='color'||ch.kind==='white'){
+        shellyMap[n.id+'__li'+c+'_out']={node:n.id,port:'li'+c+'_out'};
+        shellyMap[n.id+'__li'+c+'_pwr']={node:n.id,port:'li'+c+'_pwr'};
+        shellyMap[n.id+'__li'+c+'_set']={node:n.id,port:'li'+c+'_set'};
+        shellyMap[n.id+'__li'+c+'_gain']={node:n.id,port:'li'+c+'_gain'};
+        continue;
+      }
       shellyMap[n.id+'__sw'+c+'_out']={node:n.id,port:'sw'+c+'_out'};
       shellyMap[n.id+'__sw'+c+'_set']={node:n.id,port:'sw'+c+'_set'};
       shellyMap[n.id+'__in'+c]={node:n.id,port:'in'+c};
@@ -130,6 +137,20 @@ function serializeGraph(){
     const p=n.shelly.prefix, gen1=n.shelly.gen===1;
     for(const ch of (n.shelly.channels||[])){
       const c=ch.id;
+      if(ch.kind==='color'||ch.kind==='white'){
+        // Gen1 light (RGBW2). Bindings against the color-mode topic set
+        // (VERIFICATION-PENDING - confirm the live tree per Step 0 before
+        // shipping; if it deviates, the capture wins): flat state on/off,
+        // per-light power from the status JSON, an on/off command sink and
+        // a gain/brightness sink via the JSON /set topic (payload:json:).
+        // White mode uses white/<c> + brightness (docs-only, pending).
+        const seg=ch.kind==='white'?'white':'color', gk=ch.kind==='white'?'brightness':'gain';
+        emit(n.id+'__li'+c+'_out','source.channel',{channel:'mqtt:'+p+'/'+seg+'/'+c},n.id,'li'+c+'_out');
+        emit(n.id+'__li'+c+'_pwr','source.channel.float',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/status#power'},n.id,'li'+c+'_pwr');
+        if(GRAPH.edges.some(e=>e.to===n.id+':li'+c+'_set')) emit(n.id+'__li'+c+'_set','sink.channel',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/command',payload:'on-off'},n.id,'li'+c+'_set');
+        if(GRAPH.edges.some(e=>e.to===n.id+':li'+c+'_gain')) emit(n.id+'__li'+c+'_gain','sink.channel.float',{channel:'mqtt:'+p+'/'+seg+'/'+c+'/set',payload:'json:'+gk},n.id,'li'+c+'_gain');
+        continue;
+      }
       const setPort=n.id+':sw'+c+'_set', setWired=GRAPH.edges.some(e=>e.to===setPort);
       if(gen1){
         emit(n.id+'__sw'+c+'_out', 'source.channel', {channel:'mqtt:'+p+'/relay/'+c}, n.id, 'sw'+c+'_out');
@@ -352,6 +373,17 @@ function paintShelly(nd,port,v){
     row.dataset.w=Number(w||0);
     let total=0; el.querySelectorAll('.sh-row').forEach(r=>{ total+=Number(r.dataset.w||0); });
     const tot=el.querySelector('[data-shtotal]'); if(tot) tot.textContent=fmtW(total);
+  }else if((m=/^li(\d+)_out$/.exec(port))){
+    const row=el.querySelector(`.sh-row[data-ch="${m[1]}"]`); if(!row) return;
+    const on=v.kind===0?!!v.b:isActive(v); row.classList.toggle('on',on);
+    const st=row.querySelector('[data-chstate]'); if(st) st.textContent=on?'on':'off';
+  }else if((m=/^li(\d+)_pwr$/.exec(port))){
+    const row=el.querySelector(`.sh-row[data-ch="${m[1]}"]`); if(!row) return;
+    const w=v.kind===1?v.f:Number(v.f||0);
+    const e=row.querySelector('[data-chw]'); if(e) e.textContent=fmtMetric(w,1);
+    row.dataset.w=Number(w||0);
+    let total=0; el.querySelectorAll('.sh-row').forEach(r=>{ total+=Number(r.dataset.w||0); });
+    const tot=el.querySelector('[data-shtotal]'); if(tot) tot.textContent=fmtW(total);
   }else if((m=/^in(\d+)$/.exec(port))){
     const led=el.querySelector(`.sh-row[data-ch="${m[1]}"] [data-chin]`); if(led) led.classList.toggle('on',v.kind===0?!!v.b:isActive(v));
   }
@@ -371,6 +403,50 @@ if(world) world.addEventListener('click', ev=>{
   row.classList.toggle('on',on); const st=row.querySelector('[data-chstate]'); if(st) st.textContent=on?'on':'off';
   fetch('shelly/switch',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',
     body:JSON.stringify({prefix:def.shelly.prefix, channel:ch, on})}).catch(()=>{});
+});
+// The light faceplate's manual on/off + colour/gain sliders drive the
+// real RGBW2 over the device's HTTP light endpoint (the same one the
+// cockpit card uses), independent of any run — but only while NOT
+// graph-driven: a wired on/off control owns the light (switch + colour
+// inert); a wired gain input owns the level (its slider inert).
+function shellyLightMode(def,ch){
+  const c=(def.shelly.channels||[]).find(x=>x.id===ch);
+  return c&&c.kind==='white'?'white':'color';
+}
+function lightGraphDriven(nodeId,ch){ return wires.some(o=>o.to===nodeId+':li'+ch+'_set'); }
+function lightGainDriven(nodeId,ch){ return wires.some(o=>o.to===nodeId+':li'+ch+'_gain'); }
+function sendLight(def,ch,body){
+  if(!def.shelly||!def.shelly.id) return;
+  body.mode=shellyLightMode(def,ch);
+  fetch('shelly/'+def.shelly.id+'/gen1/light/'+ch,{method:'POST',headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',body:JSON.stringify(body)}).catch(()=>{});
+}
+if(world) world.addEventListener('click', ev=>{
+  const sw=ev.target.closest('[data-lsw]'); if(!sw) return;
+  const nodeEl=sw.closest('.node'); if(!nodeEl) return;
+  const nodeId=nodeEl.dataset.id, ch=Number(sw.dataset.lsw), def=nodes[nodeId]&&nodes[nodeId].def;
+  if(!def||!def.shelly) return;
+  if(lightGraphDriven(nodeId,ch)) return; // graph owns on/off: inert
+  const row=sw.closest('.sh-row'), on=!row.classList.contains('on');
+  row.classList.toggle('on',on); const st=row.querySelector('[data-chstate]'); if(st) st.textContent=on?'on':'off';
+  sendLight(def,ch,{on});
+});
+if(world) world.addEventListener('change', ev=>{
+  const sl=ev.target.closest('[data-lslider]'); if(!sl) return;
+  const nodeEl=sl.closest('.node'); if(!nodeEl) return;
+  const nodeId=nodeEl.dataset.id, def=nodes[nodeId]&&nodes[nodeId].def;
+  const row=sl.closest('.sh-row'); if(!def||!def.shelly||!row) return;
+  const ch=Number(row.dataset.ch), key=sl.getAttribute('data-lslider');
+  // Match the CSS lock exactly (keyboard agrees with mouse): when the
+  // on/off control is graph-driven the whole manual surface is inert
+  // (colour AND gain); gain is additionally inert when its own input is
+  // driven. Otherwise the control stays manual.
+  if(lightGraphDriven(nodeId,ch)) return;
+  const isLevel=key==='gain'||key==='brightness';
+  if(isLevel && lightGainDriven(nodeId,ch)) return;
+  const map={r:'red',g:'green',b:'blue'}, body={};
+  body[map[key]||key]=Number(sl.value)||0;
+  sendLight(def,ch,body);
 });
 // formatLive renders a value for the source card's big live readout:
 // 1/0 for bool, a tidied number (+unit) for float, the string for text.

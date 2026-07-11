@@ -52,10 +52,14 @@ type CatalogBlock struct {
 	Shelly *ShellyDevice `json:"shelly,omitempty"`
 }
 
-// ShellyChannel is one relay channel a Shelly module exposes.
+// ShellyChannel is one controllable channel a Shelly module exposes. A
+// relay channel carries Meter; a light channel (RGBW2) carries Kind
+// ("color" | "white") and is driven differently (on/off command + a
+// gain/brightness set, both over the light topics).
 type ShellyChannel struct {
-	ID    int  `json:"id"`    // Gen2 component index (switch:ID)
-	Meter bool `json:"meter"` // reports power/energy (…PM models)
+	ID    int    `json:"id"`             // component index (switch:ID / color:ID)
+	Meter bool   `json:"meter"`          // reports power/energy (…PM models)
+	Kind  string `json:"kind,omitempty"` // "" relay | "color" | "white"
 }
 
 // ShellyDevice is one adopted Shelly device the catalog turns into a

@@ -422,3 +422,30 @@ func assertPorts(t *testing.T, typ, side string, got []CatalogPort, want []engin
 		}
 	}
 }
+
+// TestCatalog_ShellyLightChannel: a light-class device (RGBW2) becomes a
+// catalog module block whose channel carries its light Kind, so the
+// editor builds the light module (not a relay one) from it.
+func TestCatalog_ShellyLightChannel(t *testing.T) {
+	dev := ShellyDevice{
+		ID: 7, MAC: "AABBCCDDEEFF", Name: "Strip", Model: "Shelly RGBW2", Gen: 1,
+		Prefix:   "shellies/shelly-aabbccddeeff",
+		Channels: []ShellyChannel{{ID: 0, Kind: "color"}},
+	}
+	blocks := Catalog(false, nil, nil, false, false, []ShellyDevice{dev})
+	var found *CatalogBlock
+	for i := range blocks {
+		if blocks[i].Shelly != nil && blocks[i].Shelly.MAC == "AABBCCDDEEFF" {
+			found = &blocks[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("RGBW2 device produced no catalog block")
+	}
+	if found.Category != "shelly" || found.Shelly.Gen != 1 {
+		t.Errorf("block category/gen = %q/%d", found.Category, found.Shelly.Gen)
+	}
+	if len(found.Shelly.Channels) != 1 || found.Shelly.Channels[0].Kind != "color" {
+		t.Errorf("light channel kind not carried: %+v", found.Shelly.Channels)
+	}
+}

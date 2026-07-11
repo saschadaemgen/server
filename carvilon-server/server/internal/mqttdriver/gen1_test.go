@@ -115,6 +115,126 @@ func TestConfigureOutputPayloadStyle(t *testing.T) {
 	if err := drv.ConfigureOutput("t/bool", engine.ChannelConfig{}); err != nil {
 		t.Fatalf("default style: %v", err)
 	}
+	// json:<key> wraps the value; a bad key or an rpc target is refused.
+	if err := drv.ConfigureOutput("t/float", engine.ChannelConfig{"payload": "json:gain"}); err != nil {
+		t.Fatalf("json:gain on float: %v", err)
+	}
+	if err := drv.ConfigureOutput("t/rpc#Switch.Set:0", engine.ChannelConfig{"payload": "json:gain"}); err == nil {
+		t.Fatal("json wrap on an rpc sink must fail the bind")
+	}
+	if err := drv.ConfigureOutput("t/float", engine.ChannelConfig{"payload": "json:bad key"}); err == nil {
+		t.Fatal("an unsafe json wrap key must fail the bind")
+	}
+}
+
+// TestValidJSONWrapKey guards the key allowlist directly.
+func TestValidJSONWrapKey(t *testing.T) {
+	for _, ok := range []string{"gain", "red", "turn", "white", "auto_on", "g0"} {
+		if !validJSONWrapKey(ok) {
+			t.Errorf("valid key %q rejected", ok)
+		}
+	}
+	for _, bad := range []string{"", "0gain", "Gain", "a b", `a"b`, "a}b", "a:b"} {
+		if validJSONWrapKey(bad) {
+			t.Errorf("unsafe key %q accepted", bad)
+		}
+	}
+}
+
+// TestMQTTDriver_Gen1LightSinks proves the RGBW2 light bindings end to
+// end on a real embedded broker: the on/off control sink publishes raw
+// "on"/"off" to the command topic, and the gain sink publishes a
+// well-formed JSON object ({"gain":<n>}) to the /set topic - the exact
+// grammar a Gen1 light expects.
+func TestMQTTDriver_Gen1LightSinks(t *testing.T) {
+	cli := startBroker(t)
+	const cmdTopic = "shellies/shelly-abc/color/0/command"
+	const setTopic = "shellies/shelly-abc/color/0/set"
+	const stateTopic = "shellies/shelly-abc/color/0"
+
+	g := engine.Graph{
+		Schema: 1,
+		Nodes: []engine.GraphNode{
+			{ID: "onoff", Type: engine.TypeSourceChannel, Params: map[string]any{"channel": "mqtt:" + stateTopic}},
+			{ID: "cmd", Type: engine.TypeSinkChannel, Params: map[string]any{"channel": "mqtt:" + cmdTopic, "payload": "on-off"}},
+			{ID: "level", Type: engine.TypeSourceChannelFloat, Params: map[string]any{"channel": "mqtt:src/level"}},
+			{ID: "gain", Type: engine.TypeSinkChannelFloat, Params: map[string]any{"channel": "mqtt:" + setTopic, "payload": "json:gain"}},
+		},
+		Edges: []engine.GraphEdge{
+			{From: "onoff:out", To: "cmd:in"},
+			{From: "level:out", To: "gain:in"},
+		},
+	}
+	eng, err := engine.Build(g, engine.DefaultRegistry(), 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	drv := NewDriver(cli, []engine.Channel{
+		{Address: stateTopic, Kind: engine.Bool},
+		{Address: cmdTopic, Kind: engine.Bool},
+		{Address: "src/level", Kind: engine.Float},
+		{Address: setTopic, Kind: engine.Float},
+	}, nil)
+	t.Cleanup(func() { drv.Close() })
+	reg := engine.NewDriverRegistry()
+	reg.RegisterSource(engine.PrefixMQTT, drv)
+	reg.RegisterSink(engine.PrefixMQTT, drv)
+	table := engine.BindingTable{
+		"mqtt:" + stateTopic: {Prefix: engine.PrefixMQTT, Addr: stateTopic},
+		"mqtt:" + cmdTopic:   {Prefix: engine.PrefixMQTT, Addr: cmdTopic},
+		"mqtt:src/level":     {Prefix: engine.PrefixMQTT, Addr: "src/level"},
+		"mqtt:" + setTopic:   {Prefix: engine.PrefixMQTT, Addr: setTopic},
+	}
+	configs := map[string]engine.ChannelConfig{
+		"mqtt:" + cmdTopic: {"payload": "on-off"},
+		"mqtt:" + setTopic: {"payload": "json:gain"},
+	}
+	if err := engine.BindGraph(eng, g, table, configs, reg); err != nil {
+		t.Fatalf("BindGraph: %v", err)
+	}
+
+	cmd := make(chan []byte, 8)
+	set := make(chan []byte, 8)
+	subscribe := func(topic string, id int, ch chan []byte) {
+		if err := cli.Subscribe(topic, id, func(_ string, p []byte) {
+			b := make([]byte, len(p))
+			copy(b, p)
+			ch <- b
+		}); err != nil {
+			t.Fatalf("observe subscribe %s: %v", topic, err)
+		}
+		t.Cleanup(func() { _ = cli.Unsubscribe(topic, id) })
+	}
+	subscribe(cmdTopic, 9990, cmd)
+	subscribe(setTopic, 9991, set)
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	await := func(ch chan []byte, want string) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case raw := <-ch:
+				if got := string(raw); got != want {
+					t.Fatalf("payload = %q, want %q", got, want)
+				}
+				return
+			case <-ticker.C:
+				eng.Tick()
+			case <-deadline:
+				t.Fatalf("no %q within timeout", want)
+			}
+		}
+	}
+	// on/off control -> raw on/off on the command topic
+	_ = cli.Publish(stateTopic, []byte("on"), false, 0)
+	await(cmd, "on")
+	_ = cli.Publish(stateTopic, []byte("off"), false, 0)
+	await(cmd, "off")
+	// a gain level -> {"gain":<n>} on the set topic
+	_ = cli.Publish("src/level", []byte("50"), false, 0)
+	await(set, `{"gain":50}`)
 }
 
 // nopInline satisfies the inline-client seam for bind-time-only tests.

@@ -57,6 +57,17 @@ func (s *Server) writeShelly1Overview(w http.ResponseWriter, r *http.Request, id
 					schedules[key] = shelly1Schedule{Enabled: enabled, Rules: rl.ScheduleRules}
 				}
 			}
+			// Light-class devices (RGBW2) store names + schedules per light.
+			for i, li := range sett.Lights {
+				key := strconv.Itoa(i)
+				if n := strings.TrimSpace(li.Name.String()); n != "" {
+					names[key] = n
+				}
+				enabled, _ := li.Schedule.Bool()
+				if enabled || len(li.ScheduleRules) > 0 {
+					schedules[key] = shelly1Schedule{Enabled: enabled, Rules: li.ScheduleRules}
+				}
+			}
 		}
 	}
 	designerJSON(w, http.StatusOK, map[string]any{

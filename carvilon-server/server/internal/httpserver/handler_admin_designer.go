@@ -100,26 +100,30 @@ func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyD
 		// sets mqtt_id = the broker username), Gen2+ under the assigned
 		// carvilon/<user> prefix. An unclassified device modules as Gen2
 		// (the pre-Gen1 behaviour) until its identify probe says otherwise.
-		var caps []shellycaps.Channel
 		prefix := mqttstore.DefaultPrefix(username)
 		gen := 0
+		var chans []designer.ShellyChannel
 		if d.Gen == shellystore.Gen1 {
-			caps = shellycaps.Gen1Channels(d.Model, "")
 			prefix = "shellies/" + username
 			gen = shellystore.Gen1
-			// Light-class Gen1 devices (RGBW2) have no relay channels and
-			// their MQTT topic set is pending live-broker confirmation
-			// (briefing rule: confirm before wiring module bindings) - no
-			// editor module yet, the Device Center cockpit is their surface.
-			if len(caps) == 0 {
-				continue
+			// A Gen1 device is either relay-class (switches) or light-class
+			// (RGBW2). Light channels carry their mode as Kind so the editor
+			// builds the light module (on/off + gain, color/status readouts)
+			// against the color-mode topic set. Mode "" renders the device's
+			// default shape (color for the RGBW2).
+			for _, c := range shellycaps.Gen1Channels(d.Model, "") {
+				chans = append(chans, designer.ShellyChannel{ID: c.ID, Meter: c.Meter})
+			}
+			for _, l := range shellycaps.Gen1Lights(d.Model, "") {
+				chans = append(chans, designer.ShellyChannel{ID: l.ID, Kind: l.Kind})
+			}
+			if len(chans) == 0 {
+				continue // an unknown Gen1 model with no derivable channels
 			}
 		} else {
-			caps = shellycaps.Channels(d.Model)
-		}
-		chans := make([]designer.ShellyChannel, 0, len(caps))
-		for _, c := range caps {
-			chans = append(chans, designer.ShellyChannel{ID: c.ID, Meter: c.Meter})
+			for _, c := range shellycaps.Channels(d.Model) {
+				chans = append(chans, designer.ShellyChannel{ID: c.ID, Meter: c.Meter})
+			}
 		}
 		out = append(out, designer.ShellyDevice{
 			ID:       d.ID,

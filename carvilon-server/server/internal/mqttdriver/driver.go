@@ -67,14 +67,15 @@ type Driver struct {
 	chans []engine.Channel
 	info  map[string]*chanInfo // address -> parsed channel (immutable after New)
 
-	mu     sync.Mutex
-	retain map[string]bool    // sink address -> retain flag (plain-publish option)
-	onOff  map[string]bool    // sink address -> bool payload as "on"/"off" (Gen1 grammar)
-	rpc    map[string]rpcSpec // sink address -> RPC target (Switch.Set etc.)
-	subID  map[string]int     // subscribed address -> inline subscription id
-	nextID int
-	rpcSeq int64 // monotonic JSON-RPC request id
-	closed bool
+	mu      sync.Mutex
+	retain  map[string]bool    // sink address -> retain flag (plain-publish option)
+	onOff   map[string]bool    // sink address -> bool payload as "on"/"off" (Gen1 grammar)
+	jsonKey map[string]string  // sink address -> JSON-wrap key ({"<key>":v}, Gen1 light /set)
+	rpc     map[string]rpcSpec // sink address -> RPC target (Switch.Set etc.)
+	subID   map[string]int     // subscribed address -> inline subscription id
+	nextID  int
+	rpcSeq  int64 // monotonic JSON-RPC request id
+	closed  bool
 
 	// pub decouples Write from the actual inline publish. Write runs
 	// inside the engine tick (under the engine lock); the inline
@@ -127,14 +128,15 @@ func NewDriver(client mqttbroker.InlineClient, channels []engine.Channel, log *s
 		log = slog.Default()
 	}
 	d := &Driver{
-		client: client,
-		log:    log.With("component", "mqtt-driver"),
-		chans:  append([]engine.Channel(nil), channels...),
-		info:   make(map[string]*chanInfo, len(channels)),
-		retain: map[string]bool{},
-		onOff:  map[string]bool{},
-		rpc:    map[string]rpcSpec{},
-		subID:  map[string]int{},
+		client:  client,
+		log:     log.With("component", "mqtt-driver"),
+		chans:   append([]engine.Channel(nil), channels...),
+		info:    make(map[string]*chanInfo, len(channels)),
+		retain:  map[string]bool{},
+		onOff:   map[string]bool{},
+		jsonKey: map[string]string{},
+		rpc:     map[string]rpcSpec{},
+		subID:   map[string]int{},
 	}
 	for _, c := range channels {
 		topic, selector := splitAddr(c.Address)
@@ -192,10 +194,11 @@ func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
 	case "true", "1", "on", "yes":
 		retain = true
 	}
-	onOff := false
-	switch style := strings.ToLower(strings.TrimSpace(cfg["payload"])); style {
-	case "", "default":
-	case "on-off":
+	onOff, jsonKey := false, ""
+	style := strings.ToLower(strings.TrimSpace(cfg["payload"]))
+	switch {
+	case style == "" || style == "default":
+	case style == "on-off":
 		if ci.kind != engine.Bool {
 			return fmt.Errorf("mqttdriver: payload style %q requires a bool channel, got %s (node bound to %q)", style, kindName(ci.kind), addr)
 		}
@@ -203,6 +206,20 @@ func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
 			return fmt.Errorf("mqttdriver: payload style %q does not apply to an rpc sink (node bound to %q)", style, addr)
 		}
 		onOff = true
+	case strings.HasPrefix(style, "json:"):
+		// Wrap the value in a one-key JSON object ({"<key>": v}) - the
+		// Gen1 light /set topic takes a JSON with keys like gain/red/...
+		// A plain-publish sink cannot compose that, so this is the minimal
+		// documented Gen1-light sink extension. The key is validated to a
+		// safe identifier so it can never break the JSON structure.
+		key := strings.TrimPrefix(style, "json:")
+		if !validJSONWrapKey(key) {
+			return fmt.Errorf("mqttdriver: invalid json wrap key %q (node bound to %q)", key, addr)
+		}
+		if spec != nil {
+			return fmt.Errorf("mqttdriver: payload style %q does not apply to an rpc sink (node bound to %q)", style, addr)
+		}
+		jsonKey = key
 	default:
 		return fmt.Errorf("mqttdriver: unknown payload style %q (node bound to %q)", style, addr)
 	}
@@ -213,8 +230,28 @@ func (d *Driver) ConfigureOutput(addr string, cfg engine.ChannelConfig) error {
 	}
 	d.retain[addr] = retain
 	d.onOff[addr] = onOff
+	d.jsonKey[addr] = jsonKey
 	d.mu.Unlock()
 	return nil
+}
+
+// validJSONWrapKey accepts a lowercase identifier (the documented Gen1
+// light set keys: gain/red/green/blue/white/turn/effect/...) - never a
+// value that could escape the JSON object's key position.
+func validJSONWrapKey(key string) bool {
+	if key == "" || len(key) > 24 {
+		return false
+	}
+	for i, r := range key {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r == '_':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseRPCSelector parses a sink selector "<Method>:<id>" into an rpcSpec.
@@ -328,6 +365,10 @@ func (d *Driver) Write(addr string, v engine.Value) error {
 		} else {
 			payload = []byte("off")
 		}
+	} else if key := d.jsonKey[addr]; key != "" {
+		// the Gen1 light /set grammar: a one-key JSON object, value typed
+		// (gain -> number, turn -> bool, ...).
+		payload = formatJSONWrap(key, v)
 	} else {
 		payload = formatPayload(v)
 	}
@@ -486,6 +527,30 @@ func parsePayload(kind engine.Kind, payload []byte) (engine.Value, bool) {
 	default:
 		return engine.Value{}, false
 	}
+}
+
+// formatJSONWrap renders a value as a one-key JSON object for the Gen1
+// light /set topic ({"gain":50}, {"turn":true}). The value is typed by
+// its engine Kind: float -> number, bool -> bool, text -> string.
+// json.Marshal escapes the string value; the key is already validated to
+// a safe identifier at bind time.
+func formatJSONWrap(key string, v engine.Value) []byte {
+	var val any
+	switch v.Kind {
+	case engine.Bool:
+		val = v.B
+	case engine.Float:
+		val = v.F
+	case engine.Text:
+		val = v.S
+	default:
+		val = nil
+	}
+	b, err := json.Marshal(map[string]any{key: val})
+	if err != nil { // a scalar map never fails; belt and braces
+		return nil
+	}
+	return b
 }
 
 // formatPayload renders an engine Value as an MQTT payload per its kind.
