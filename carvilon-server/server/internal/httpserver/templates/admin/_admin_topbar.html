@@ -13,7 +13,13 @@
   .cv-brand:hover{ filter:brightness(1.12); background:linear-gradient(180deg, rgba(0,159,227,0.18), rgba(0,159,227,0.04)); }
   .cv-brand:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:2px; }
   .cv-brand-logo{ height:42px; width:auto; display:block; }
-  .cv-nav{ display:flex; align-items:center; gap:2px; }
+  /* min-width:0 + contained horizontal scroll: when the nav is wider than the
+     space left of the fixed right group (gear + user chip), it shrinks and
+     scrolls WITHIN cv-tb-left instead of overflowing onto - and clipping - the
+     right group. The scrollbar is hidden; at desktop widths where it fits,
+     nothing scrolls and the look is unchanged. */
+  .cv-nav{ display:flex; align-items:center; gap:2px; min-width:0; overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none; }
+  .cv-nav::-webkit-scrollbar{ display:none; }
   .cv-link{ display:inline-flex; align-items:center; gap:6px; padding:8px 10px; border-radius:6px; font-size:13px; font-weight:500; color:#9aa3ae; text-decoration:none; white-space:nowrap; border:1px solid transparent; background:transparent; cursor:pointer; transition:background 110ms,color 110ms; }
   .cv-link:hover{ background:rgba(255,255,255,0.05); color:#f4f6f8; text-decoration:none; }
   .cv-link.is-active{ color:var(--cv-acc); font-weight:600; background:color-mix(in srgb, var(--cv-acc) 13%, transparent); border-color:color-mix(in srgb, var(--cv-acc) 55%, transparent); }
@@ -133,19 +139,39 @@
   .cv-set-name{ font-size:14px; font-weight:600; color:#f4f6f8; }
   .cv-set-desc{ display:block; font-size:11.5px; color:#7b848f; margin-top:1px; }
 
-  /* ---- Settings: full-screen category modal ---- */
-  .cv-set-ov{ position:fixed; inset:0; z-index:400; display:flex; align-items:flex-start; justify-content:center; padding:56px 20px 24px; background:rgba(6,8,11,0.62); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:cv-ab-fade 150ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; overflow-y:auto; }
+  /* ---- Settings: full-screen tabbed modal ---- */
+  .cv-set-ov{ position:fixed; inset:0; z-index:400; display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; background:rgba(6,8,11,0.62); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:cv-ab-fade 150ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; overflow-y:auto; }
   .cv-set-ov[hidden]{ display:none; }
-  .cv-set{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:min(760px,100%); margin:auto 0; background:#0e1013; border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,0.66), inset 0 0 0 1px rgba(255,255,255,0.10); color:#f4f6f8; animation:cv-ab-pop 190ms cubic-bezier(.2,.8,.2,1) both; }
+  .cv-set{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:min(960px,100%); max-height:calc(100vh - 80px); margin:auto 0; display:flex; flex-direction:column; background:#0e1013; border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,0.66), inset 0 0 0 1px rgba(255,255,255,0.10); color:#f4f6f8; overflow:hidden; animation:cv-ab-pop 190ms cubic-bezier(.2,.8,.2,1) both; }
   .cv-set *{ box-sizing:border-box; }
-  .cv-set-head{ position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); background:#0e1013; border-radius:16px 16px 0 0; }
-  .cv-set-back{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
-  .cv-set-back:hover{ color:#f4f6f8; background:#1d2127; }
+  .cv-set-head{ flex:none; display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); background:#0e1013; }
   .cv-set-title{ flex:1 1 auto; min-width:0; font-size:17px; font-weight:600; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cv-set-x{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
   .cv-set-x:hover{ background:rgba(255,92,77,0.12); color:#ff8a7d; }
-  .cv-set-body{ padding:20px; }
+  /* rail (vertical tablist) + content */
+  .cv-set-main{ flex:1 1 auto; min-height:0; display:flex; align-items:stretch; }
+  .cv-set-rail{ flex:none; width:212px; padding:12px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; border-right:1px solid rgba(255,255,255,0.08); background:#0b0d10; }
+  .cv-set-tab{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:8px; border:none; cursor:pointer; text-align:left; width:100%; background:transparent; color:#9aa3ae; font:500 13.5px/1.2 inherit; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background 100ms,color 100ms,box-shadow 100ms; }
+  .cv-set-tab:hover{ background:rgba(255,255,255,0.05); color:#f4f6f8; }
+  .cv-set-tab:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:-2px; }
+  .cv-set-tab[aria-selected="true"]{ background:color-mix(in srgb, var(--cv-acc) 14%, transparent); color:#f4f6f8; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cv-acc) 45%, transparent); }
+  .cv-set-tab-ico{ flex:none; width:26px; height:26px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05); }
+  .cv-set-tab-ico svg{ width:15px; height:15px; }
+  .cv-set-tab[aria-selected="true"] .cv-set-tab-ico{ color:var(--cv-acc); }
+  .cv-set-tab-label{ min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .cv-set-body{ flex:1 1 auto; min-width:0; padding:20px; overflow-y:auto; }
   .cv-set-loading{ padding:44px 20px; text-align:center; color:#7b848f; font-size:13px; }
+  @media (max-width: 640px) {
+    .cv-set{ max-height:calc(100vh - 32px); }
+    .cv-set-ov{ padding:16px 12px; }
+    .cv-set-main{ flex-direction:column; }
+    .cv-set-rail{ width:auto; flex-direction:row; gap:4px; overflow-x:auto; overflow-y:hidden; border-right:none; border-bottom:1px solid rgba(255,255,255,0.08); scrollbar-width:none; }
+    .cv-set-rail::-webkit-scrollbar{ display:none; }
+    .cv-set-tab{ flex:none; }
+    /* icon-only tabs, but keep the label in the accessibility tree (a clipped
+       visually-hidden span) so every tab still has an accessible name. */
+    .cv-set-tab-label{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+  }
 
   /* self-contained settings-fragment styles (sp-): rendered inside the
      modal on both legacy AND new-design pages, so literal values + var(--cv-acc)
@@ -216,11 +242,11 @@
       <a class="cv-link{{if eq .ActiveNav "mqtt-monitor"}} is-active{{end}}" href="/a/mqtt-monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3.5" cy="20.5" r="1.5" fill="currentColor" stroke="none"/></svg>MQTT</a>
       <span class="cv-sep"></span>
       <a class="cv-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>Benutzer</a>
-      <span class="cv-sep"></span>
-      <button type="button" class="cv-link cv-gear-btn cv-drop-btn" data-cv-gear-btn aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></button>
     </nav>
   </div>
   <div class="cv-tb-right">
+    <button type="button" class="cv-link cv-gear-btn cv-drop-btn" data-cv-gear-btn aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></button>
+    <span class="cv-sep"></span>
     <button type="button" class="cv-user-chip" data-cv-user-btn aria-haspopup="true" aria-expanded="false"><span class="cv-avatar">{{.User.Initials}}</span><span class="cv-user-name">{{.User.Name}}</span><svg class="cv-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
   </div>
 
@@ -351,11 +377,13 @@
   <div class="cv-set-ov" data-cv-set-ov hidden>
     <div class="cv-set" role="dialog" aria-modal="true" aria-labelledby="cv-set-title">
       <div class="cv-set-head">
-        <button type="button" class="cv-set-back" data-cv-set-back aria-label="Back to settings" title="Back to settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
         <span class="cv-set-title" id="cv-set-title" data-cv-set-title>Settings</span>
-        <button type="button" class="cv-set-x" data-cv-set-close aria-label="Close" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        <button type="button" class="cv-set-x" data-cv-set-close aria-label="Close" title="Close (Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
-      <div class="cv-set-body" data-cv-set-body></div>
+      <div class="cv-set-main">
+        <div class="cv-set-rail" role="tablist" aria-orientation="vertical" aria-label="Settings categories" data-cv-set-rail></div>
+        <div class="cv-set-body" role="tabpanel" tabindex="0" id="cv-set-body" data-cv-set-body></div>
+      </div>
     </div>
   </div>
 </header>
@@ -432,7 +460,14 @@
     // Forms inside the modal submit via fetch (x-www-form-urlencoded so the Go
     // handlers' ParseForm sees the fields); each handler redirects back to the
     // fragment, which we drop in place - fresh values + a flash banner.
+    // The modal is a tabbed settings surface: a vertical tab rail (built once
+    // from the same category list the panel uses) + the fetched fragment.
+    // Opening a panel entry activates that category's tab; the rail switches
+    // categories in-modal. Tabs are an ARIA tablist (roving tabindex, arrow
+    // keys, Home/End; automatic activation loads the fragment).
+    var setRail = setOv ? setOv.querySelector('[data-cv-set-rail]') : null;
     var setCat = null;
+    var setTabs = [];
     function afterPanelLoad() { if (setCat === 'shelly') initShellyPanel(); }
     function loadPanel(cat) {
       fetch('/a/settings/panel/' + encodeURIComponent(cat), { credentials: 'same-origin', cache: 'no-store' })
@@ -445,14 +480,56 @@
         })
         .catch(function () { if (setCat === cat && setBody) setBody.innerHTML = '<div class="cv-set-loading">Could not load these settings.</div>'; });
     }
-    function openSettingsModal(cat, label) {
-      if (!setOv || !setBody) return;
-      closeAll();
+    function buildRail() {
+      if (!setRail || !setMega || setTabs.length) return;
+      setMega.querySelectorAll('[data-sp-cat]').forEach(function (entry) {
+        var cat = entry.getAttribute('data-sp-cat');
+        var label = entry.getAttribute('data-sp-label') || cat;
+        var tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'cv-set-tab';
+        tab.id = 'cv-set-tab-' + cat;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('data-sp-cat', cat);
+        tab.setAttribute('aria-selected', 'false');
+        tab.setAttribute('aria-controls', 'cv-set-body');
+        tab.tabIndex = -1;
+        tab.title = label;
+        var ico = document.createElement('span');
+        ico.className = 'cv-set-tab-ico';
+        var srcIco = entry.querySelector('.cv-set-ico svg');
+        if (srcIco) ico.appendChild(srcIco.cloneNode(true));
+        var lbl = document.createElement('span');
+        lbl.className = 'cv-set-tab-label';
+        lbl.textContent = label;
+        tab.appendChild(ico); tab.appendChild(lbl);
+        setRail.appendChild(tab);
+        setTabs.push(tab);
+      });
+    }
+    function activateTab(cat, focusTab) {
       setCat = cat;
-      if (setTitle) setTitle.textContent = label || 'Settings';
-      setBody.innerHTML = '<div class="cv-set-loading">Loading&hellip;</div>';
-      setOv.hidden = false;
+      var active = null;
+      setTabs.forEach(function (t) {
+        var on = t.getAttribute('data-sp-cat') === cat;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        if (on) active = t;
+      });
+      if (active) {
+        if (setTitle) setTitle.textContent = active.querySelector('.cv-set-tab-label').textContent;
+        if (setBody) setBody.setAttribute('aria-labelledby', active.id);
+        if (focusTab) active.focus();
+      }
+      if (setBody) setBody.innerHTML = '<div class="cv-set-loading">Loading&hellip;</div>';
       loadPanel(cat);
+    }
+    function openSettingsModal(cat) {
+      if (!setOv || !setBody) return;
+      buildRail();
+      closeAll();
+      setOv.hidden = false;
+      activateTab(cat, true);
     }
     function closeSettingsModal() {
       if (!setOv || setOv.hidden) return;
@@ -466,12 +543,28 @@
       var item = e.target.closest('[data-sp-cat]');
       if (!item) return;
       e.preventDefault();
-      openSettingsModal(item.getAttribute('data-sp-cat'), item.getAttribute('data-sp-label'));
+      openSettingsModal(item.getAttribute('data-sp-cat'));
     });
+    if (setRail) {
+      setRail.addEventListener('click', function (e) {
+        var tab = e.target.closest('[data-sp-cat]');
+        if (tab) activateTab(tab.getAttribute('data-sp-cat'), true);
+      });
+      setRail.addEventListener('keydown', function (e) {
+        var idx = setTabs.indexOf(document.activeElement);
+        if (idx < 0) return;
+        var next = -1;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % setTabs.length;
+        else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + setTabs.length) % setTabs.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = setTabs.length - 1;
+        else return;
+        e.preventDefault();
+        activateTab(setTabs[next].getAttribute('data-sp-cat'), true);
+      });
+    }
     if (setOv) {
-      var setBack = setOv.querySelector('[data-cv-set-back]');
       var setClose = setOv.querySelector('[data-cv-set-close]');
-      if (setBack) setBack.addEventListener('click', function () { closeSettingsModal(); toggle('settings'); });
       if (setClose) setClose.addEventListener('click', closeSettingsModal);
       setOv.addEventListener('mousedown', function (e) { if (e.target === setOv) closeSettingsModal(); });
     }
@@ -492,7 +585,11 @@
       var form = e.target;
       if (!form || form.tagName !== 'FORM') return;
       e.preventDefault();
-      var action = form.getAttribute('action') || ('/a/settings/panel/' + setCat);
+      // Pin the tab this submit belongs to: if the user switches tabs (or
+      // closes) before the POST resolves, its response must not clobber the
+      // now-active tab's content - same guard as loadPanel.
+      var cat = setCat;
+      var action = form.getAttribute('action') || ('/a/settings/panel/' + cat);
       var payload = new URLSearchParams(new FormData(form, e.submitter));
       fetch(action, {
         method: 'POST', body: payload, credentials: 'same-origin',
@@ -500,10 +597,11 @@
       })
         .then(function (r) { return r.ok ? r.text() : null; })
         .then(function (html) {
-          if (html != null && setBody) { setBody.innerHTML = html; afterPanelLoad(); }
+          if (setCat !== cat || !setBody) return;
+          if (html != null) { setBody.innerHTML = html; afterPanelLoad(); }
           else { showModalError('Could not save - the server rejected the request. Please try again.'); }
         })
-        .catch(function () { showModalError('Could not save - no connection to the server.'); });
+        .catch(function () { if (setCat === cat) showModalError('Could not save - no connection to the server.'); });
     });
 
     function initShellyPanel() {
@@ -551,7 +649,7 @@
       var wantCat = new URLSearchParams(location.search).get('settings');
       if (wantCat && setMega) {
         var entry = setMega.querySelector('[data-sp-cat="' + wantCat.replace(/[^a-z]/g, '') + '"]');
-        if (entry) openSettingsModal(entry.getAttribute('data-sp-cat'), entry.getAttribute('data-sp-label'));
+        if (entry) openSettingsModal(entry.getAttribute('data-sp-cat'));
       }
     } catch (e) { /* no-op */ }
 
