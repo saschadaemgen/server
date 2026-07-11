@@ -33,8 +33,8 @@ func TestAdminAccent_PersistsAndInjects(t *testing.T) {
 
 	resp := postAccent(t, env, "#3D7BFF") // mixed case -> normalized lower
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("accent post status = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("accent post status = %d, want 303", resp.StatusCode)
 	}
 	got, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyAdminAccentColor)
 	if got != "#3d7bff" {
@@ -99,11 +99,9 @@ func TestAdminAccent_RejectsBad(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 
 	resp := postAccent(t, env, "not-a-color")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (re-render with error)", resp.StatusCode)
-	}
-	if !contains(readBody(t, resp), "Ungueltige Farbe") {
+	body := followSettings(t, env, resp)
+	resp.Body.Close()
+	if !contains(body, "Invalid color") {
 		t.Errorf("expected validation error flash")
 	}
 	if got, _ := env.platformCfg.Get(context.Background(), platformconfig.KeyAdminAccentColor); got != "" {
@@ -111,14 +109,15 @@ func TestAdminAccent_RejectsBad(t *testing.T) {
 	}
 }
 
-// TestAdminAccent_PickerOnSettings proves the picker UI renders on /a/settings.
+// TestAdminAccent_PickerOnSettings proves the picker UI renders in the
+// Appearance settings fragment.
 func TestAdminAccent_PickerOnSettings(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 
-	resp, err := env.client.Get(env.ts.URL + "/a/settings")
+	resp, err := env.client.Get(env.ts.URL + "/a/settings/panel/appearance")
 	if err != nil {
-		t.Fatalf("GET settings: %v", err)
+		t.Fatalf("GET settings appearance panel: %v", err)
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)

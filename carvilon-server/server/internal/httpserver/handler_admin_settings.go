@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -117,8 +118,68 @@ type lockRow struct {
 	Attempts   int
 }
 
+// handleAdminSettingsGet used to render the monolithic settings page.
+// Settings are now reached through the gear in the top nav (a full-width
+// panel of category modals, rendered per category by handleAdminSettingsPanel).
+// The old path is kept as a redirect so bookmarks and old links don't 404.
 func (s *Server) handleAdminSettingsGet(w http.ResponseWriter, r *http.Request) {
-	s.renderAdminPage(w, "settings", s.buildSettingsData(r))
+	http.Redirect(w, r, "/a/", http.StatusSeeOther)
+}
+
+// settingsPanelData is the payload for one category fragment
+// ("settings-panel" partial): the full settings data plus which
+// category to render and an optional flash carried in the query.
+type settingsPanelData struct {
+	Cat       string
+	Page      adminSettingsData
+	Flash     string
+	FlashType string
+}
+
+// settingsPanelCats is the allow-list of category keys the gear panel
+// can open. Each maps 1:1 to a section of the retired settings page.
+var settingsPanelCats = map[string]bool{
+	"ua": true, "protect": true, "shelly": true, "weather": true,
+	"appearance": true, "password": true, "locks": true, "audit": true,
+	"mqtt": true, "telegram": true,
+}
+
+// handleAdminSettingsPanel renders a single settings category as a
+// fragment (no shell), for the full-screen modal opened from the gear
+// panel. The category comes from the path; an optional flash + type
+// come from the query (set by the POST handlers' redirect after a save).
+func (s *Server) handleAdminSettingsPanel(w http.ResponseWriter, r *http.Request) {
+	cat := r.PathValue("cat")
+	if !settingsPanelCats[cat] {
+		http.NotFound(w, r)
+		return
+	}
+	flashType := r.URL.Query().Get("type")
+	if flashType != "green" && flashType != "red" {
+		flashType = ""
+	}
+	data := settingsPanelData{
+		Cat:       cat,
+		Page:      s.buildSettingsData(r),
+		Flash:     r.URL.Query().Get("flash"),
+		FlashType: flashType,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tpl.renderPartial(w, "settings-panel", data); err != nil {
+		s.log.Error("render settings panel", "cat", cat, "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// settingsPanelRedirect sends the caller back to a category fragment
+// with an optional flash. The modal's form submit follows the 303 via
+// fetch, so the fresh fragment (with the banner) replaces the modal body.
+func settingsPanelRedirect(w http.ResponseWriter, r *http.Request, cat, flash, flashType string) {
+	target := "/a/settings/panel/" + cat
+	if flash != "" {
+		target += "?flash=" + url.QueryEscape(flash) + "&type=" + url.QueryEscape(flashType)
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleAdminSettingsPost(w http.ResponseWriter, r *http.Request) {
@@ -167,10 +228,7 @@ func (s *Server) handleAdminSettingsPost(w http.ResponseWriter, r *http.Request)
 		s.ua = uaapi.New(uaapi.Options{BaseURL: storedURL, Token: storedToken})
 	}
 
-	data := s.buildSettingsData(r)
-	data.Flash = "Gespeichert."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "ua", "Saved.", "green")
 }
 
 // handleAdminProtectSettingsPost speichert Host + X-API-KEY + den
@@ -220,10 +278,7 @@ func (s *Server) handleAdminProtectSettingsPost(w http.ResponseWriter, r *http.R
 		s.protect = protectapi.New(protectapi.Options{BaseURL: storedURL, APIKey: storedKey})
 	}
 
-	data := s.buildSettingsData(r)
-	data.Flash = "Gespeichert."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "protect", "Saved.", "green")
 }
 
 // protectEnabled ist der effektive "Protect aktiv"-Schalter, gleiche
@@ -256,29 +311,19 @@ func (s *Server) handleAdminPasswordPost(w http.ResponseWriter, r *http.Request)
 	neu := r.PostForm.Get("new_password")
 	confirm := r.PostForm.Get("confirm_password")
 
-	data := s.buildSettingsData(r)
 	if neu == "" || neu != confirm {
-		data.Flash = "Neues Passwort und Bestaetigung muessen uebereinstimmen."
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "password", "New password and confirmation must match.", "red")
 		return
 	}
 	if err := s.admin.Login(r.Context(), username, old); err != nil {
-		data.Flash = "Altes Passwort falsch."
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "password", "Current password is wrong.", "red")
 		return
 	}
 	if err := s.admin.SetPassword(r.Context(), username, neu); err != nil {
-		data.Flash = friendlyAdminError(err)
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "password", friendlyAdminError(err), "red")
 		return
 	}
-	data = s.buildSettingsData(r)
-	data.Flash = "Passwort geaendert."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "password", "Password changed.", "green")
 }
 
 // handleAdminUnlockLock clears an IP- or username-based lockout
@@ -320,7 +365,7 @@ func (s *Server) handleAdminUnlockLock(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		Outcome:   loginaudit.OutcomeUnlocked,
 	})
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "locks", "Lock cleared.", "green")
 }
 
 func (s *Server) buildSettingsData(r *http.Request) adminSettingsData {
@@ -443,19 +488,14 @@ func (s *Server) handleAdminStationPost(w http.ResponseWriter, r *http.Request) 
 	latStr := strings.TrimSpace(r.PostForm.Get("station_lat"))
 	lonStr := strings.TrimSpace(r.PostForm.Get("station_lon"))
 
-	data := s.buildSettingsData(r)
 	lat, err := parseLatLon(latStr, -90, 90)
 	if err != nil {
-		data.Flash = "Breitengrad: " + err.Error()
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "weather", "Latitude: "+err.Error(), "red")
 		return
 	}
 	lon, err := parseLatLon(lonStr, -180, 180)
 	if err != nil {
-		data.Flash = "Laengengrad: " + err.Error()
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "weather", "Longitude: "+err.Error(), "red")
 		return
 	}
 	// Persist as canonical 4-decimal strings so the saved value
@@ -472,10 +512,7 @@ func (s *Server) handleAdminStationPost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	data = s.buildSettingsData(r)
-	data.Flash = "Standort gespeichert. Wirkt beim naechsten Wetter-Refresh (max 15 Minuten)."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "weather", "Location saved. Takes effect at the next weather refresh (max 15 minutes).", "green")
 }
 
 // parseLatLon parses a float and bounds it. The bounds catch
@@ -483,14 +520,14 @@ func (s *Server) handleAdminStationPost(w http.ResponseWriter, r *http.Request) 
 // else (locale-comma vs dot, whitespace) is the caller's problem.
 func parseLatLon(s string, low, high float64) (float64, error) {
 	if s == "" {
-		return 0, fmt.Errorf("darf nicht leer sein")
+		return 0, fmt.Errorf("must not be empty")
 	}
 	v, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
 	if err != nil {
-		return 0, fmt.Errorf("keine gueltige Zahl (%s)", s)
+		return 0, fmt.Errorf("not a valid number (%s)", s)
 	}
 	if v < low || v > high {
-		return 0, fmt.Errorf("muss zwischen %.0f und %.0f liegen", low, high)
+		return 0, fmt.Errorf("must be between %.0f and %.0f", low, high)
 	}
 	return v, nil
 }

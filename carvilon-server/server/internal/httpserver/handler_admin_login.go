@@ -198,8 +198,6 @@ func navSlotFor(name string) string {
 		return "mqtt-monitor"
 	case "telegram":
 		return "telegram"
-	case "settings":
-		return "settings"
 	case "viewer-detail":
 		// The detail page does not belong to a single nav slot -
 		// it is the drill-down view from web-viewers / esp-viewers.

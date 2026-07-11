@@ -561,7 +561,11 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /a/logout", s.requireAdminSession(http.HandlerFunc(s.handleAdminLogout)))
 	s.mux.Handle("GET /a/{$}", s.requireAdminSession(http.HandlerFunc(s.handleAdminDashboard)))
 
+	// Settings are reached through the gear in the top nav: a full-width
+	// panel of categories, each opening as a full-screen modal whose body is
+	// this per-category fragment. The old monolithic page redirects to /a/.
 	s.mux.Handle("GET /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsGet)))
+	s.mux.Handle("GET /a/settings/panel/{cat}", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsPanel)))
 	s.mux.Handle("POST /a/settings", s.requireAdminSession(http.HandlerFunc(s.handleAdminSettingsPost)))
 	s.mux.Handle("POST /a/settings/admin-password", s.requireAdminSession(http.HandlerFunc(s.handleAdminPasswordPost)))
 	s.mux.Handle("POST /a/settings/unlock", s.requireAdminSession(http.HandlerFunc(s.handleAdminUnlockLock)))

@@ -81,7 +81,8 @@ func (s *Server) accentSettingsBlock() accentSettingsBlock {
 }
 
 // handleAdminAccentPost stores the chosen accent (swatch button value or the
-// free color input, both POST field "accent") and re-renders the settings page.
+// free color input, both POST field "accent") and redirects back to the
+// Appearance settings fragment with a flash.
 func (s *Server) handleAdminAccentPost(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -92,11 +93,8 @@ func (s *Server) handleAdminAccentPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hex, ok := normalizeAccentHex(r.PostForm.Get("accent"))
-	data := s.buildSettingsData(r)
 	if !ok {
-		data.Flash = "Ungueltige Farbe. Erwartet wird ein Hex-Wert wie #ff7a1a."
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "appearance", "Invalid color. A hex value like #ff7a1a is expected.", "red")
 		return
 	}
 	if err := s.platformCfg.Set(r.Context(), platformconfig.KeyAdminAccentColor, hex); err != nil {
@@ -104,8 +102,5 @@ func (s *Server) handleAdminAccentPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	data = s.buildSettingsData(r)
-	data.Flash = "Akzentfarbe gespeichert."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "appearance", "Accent color saved.", "green")
 }

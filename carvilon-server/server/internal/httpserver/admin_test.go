@@ -150,20 +150,59 @@ func TestAdminDashboard_HappyPath(t *testing.T) {
 
 // ---------- Settings ----------
 
+// TestAdminSettings_Get proves the retired monolithic page now redirects to the
+// dashboard (settings live behind the gear panel + per-category fragments).
 func TestAdminSettings_Get(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
-	resp, err := env.client.Get(env.ts.URL + "/a/settings")
+	// Don't auto-follow so we can assert the redirect itself.
+	noRedirect := *env.client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := noRedirect.Get(env.ts.URL + "/a/settings")
 	if err != nil {
 		t.Fatalf("GET /a/settings: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 redirect", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/a/" {
+		t.Errorf("redirect Location = %q, want /a/", loc)
+	}
+}
+
+// TestAdminSettings_PanelUA proves the UA category fragment renders its form.
+func TestAdminSettings_PanelUA(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/settings/panel/ua")
+	if err != nil {
+		t.Fatalf("GET /a/settings/panel/ua: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
 	body := readBody(t, resp)
-	if !strings.Contains(body, "Controller-URL") {
+	if !strings.Contains(body, "Controller URL") {
 		t.Errorf("missing UA controller url field")
 	}
-	if !strings.Contains(body, "Einstellungen") {
-		t.Errorf("missing settings heading")
+	if !strings.Contains(body, `action="/a/settings"`) {
+		t.Errorf("missing UA save form")
+	}
+}
+
+// TestAdminSettings_PanelUnknown proves an unknown category is a 404.
+func TestAdminSettings_PanelUnknown(t *testing.T) {
+	env := newTestServer(t)
+	loginAdmin(t, env, adminTestUser, adminTestPassword)
+	resp, err := env.client.Get(env.ts.URL + "/a/settings/panel/bogus")
+	if err != nil {
+		t.Fatalf("GET panel/bogus: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -914,6 +953,23 @@ func post(t *testing.T, env *testEnv, path string, form url.Values, wantStatus i
 	if resp.StatusCode != wantStatus {
 		t.Fatalf("POST %s status = %d, want %d", path, resp.StatusCode, wantStatus)
 	}
+}
+
+// followSettings follows the 303 our settings POST handlers return (to a
+// category fragment) using the same cookie jar, and returns that fragment
+// body. The test client does not auto-follow redirects (login-flow
+// inspection), so tests that need the resulting fragment call this - it is
+// the server-side equivalent of the modal's fetch following the redirect.
+func followSettings(t *testing.T, env *testEnv, resp *http.Response) string {
+	t.Helper()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect to a settings fragment, got %d", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		t.Fatalf("303 without a Location header")
+	}
+	return getBody(t, env, loc)
 }
 
 // getBody GETs a path and returns the body, asserting HTTP 200.

@@ -55,7 +55,6 @@ func macIDFromMAC(mac string) string {
 var adminLibraryFor = map[string][]string{
 	"login":           {"admin-login.html"},
 	"dashboard":       {},
-	"settings":        {},
 	"web-viewers":     {},
 	"esp-viewers":     {},
 	"users":           {},
@@ -114,6 +113,10 @@ func newAdminTemplates() (*adminTemplates, error) {
 			"templates/admin/" + name + ".html",
 			"templates/admin/_credentials_modal.html",
 			"templates/admin/_admin_topbar.html",
+			// The gear in the topbar opens settings category modals whose body
+			// is the "settings-panel" fragment; parse it for every page so the
+			// fragment endpoint (renderPartial) can find it.
+			"templates/admin/_settings_panels.html",
 		}
 		if newDesignPages[name] {
 			// _device_center.html is the shared Device Center shell

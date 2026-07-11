@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,7 +30,9 @@ func newUAStub(t *testing.T) *uaStub {
 	s.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&s.hits, 1)
 		w.Header().Set("Content-Type", "application/json")
-		env := func(data any) { _ = json.NewEncoder(w).Encode(map[string]any{"code": "SUCCESS", "msg": "ok", "data": data}) }
+		env := func(data any) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": "SUCCESS", "msg": "ok", "data": data})
+		}
 		p := r.URL.Path
 		switch {
 		case strings.HasSuffix(p, "/developer/devices"):
@@ -135,8 +136,8 @@ func TestAdminUA_FlatOverview(t *testing.T) {
 		"Haupt-Hub", "Leser Eingang", "Mock Cam", "UA Cam", // device names (data)
 		"Hauseingang", "Kellertür", // door names (data)
 		">Hubs<", ">Readers<", ">Viewers<", ">Doors<", // group headings (English)
-		"CARVILON mock viewer", // viewer-origin detail (mock)
-		"Read only",            // read-only indicator
+		"CARVILON mock viewer",  // viewer-origin detail (mock)
+		"Read only",             // read-only indicator
 		"Fleet status", "UniFi", // left column + source facet
 	} {
 		if !strings.Contains(body, want) {
@@ -275,7 +276,7 @@ func TestAdminUA_DeviceSettingsLazy(t *testing.T) {
 	var out struct {
 		OK       bool `json:"ok"`
 		Sections []struct {
-			Title string `json:"title"`
+			Title string                        `json:"title"`
 			Rows  []struct{ Key, Value string } `json:"rows"`
 		} `json:"sections"`
 	}
@@ -362,16 +363,16 @@ func TestUAValidID(t *testing.T) {
 		id   string
 		want bool
 	}{
-		{"0cea14000001", true},        // bare MAC
+		{"0cea14000001", true},                         // bare MAC
 		{"00000000-0000-0000-0000-000000000000", true}, // UUID
 		{"door-1", true},
 		{"", false},
 		{"..", false},
 		{"a..b", false},
 		{"../../etc", false},
-		{"a/b", false},   // slash
-		{"a b", false},   // space
-		{"a!b", false},   // bang
+		{"a/b", false},                    // slash
+		{"a b", false},                    // space
+		{"a!b", false},                    // bang
 		{strings.Repeat("a", 129), false}, // too long
 	}
 	for _, c := range cases {
@@ -545,7 +546,7 @@ func TestAdminUA_ProtectCameraDetailLazy(t *testing.T) {
 	var out struct {
 		OK       bool `json:"ok"`
 		Sections []struct {
-			Title string `json:"title"`
+			Title string                        `json:"title"`
 			Rows  []struct{ Key, Value string } `json:"rows"`
 		} `json:"sections"`
 	}
@@ -626,13 +627,10 @@ func TestAdminSettings_ProtectStoresKeyEncrypted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST protect settings: %v", err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := followSettings(t, env, resp)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if strings.Contains(string(body), "super-secret-test-key") {
-		t.Errorf("API key echoed back into the page")
+	if strings.Contains(body, "super-secret-test-key") {
+		t.Errorf("API key echoed back into the fragment")
 	}
 
 	stored, err := env.platformCfg.GetSecret(context.Background(), platformconfig.KeyProtectAPIKey)
@@ -647,11 +645,11 @@ func TestAdminSettings_ProtectStoresKeyEncrypted(t *testing.T) {
 		t.Errorf("API key stored in plaintext")
 	}
 
-	page := getBody(t, env, "/a/settings")
-	if !strings.Contains(page, "UniFi Protect Integration") || !strings.Contains(page, "(gesetzt)") {
-		t.Errorf("protect settings section incomplete")
+	page := getBody(t, env, "/a/settings/panel/protect")
+	if !strings.Contains(page, "API key") || !strings.Contains(page, "* * * (set)") {
+		t.Errorf("protect settings fragment incomplete")
 	}
 	if strings.Contains(page, "super-secret-test-key") {
-		t.Errorf("API key leaked into the settings page")
+		t.Errorf("API key leaked into the settings fragment")
 	}
 }

@@ -290,13 +290,10 @@ func TestAdminSettings_ShellyStoresPasswordEncrypted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST shelly settings: %v", err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := followSettings(t, env, resp)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if strings.Contains(string(body), "super-secret-shelly-pw") {
-		t.Errorf("password echoed back into the page")
+	if strings.Contains(body, "super-secret-shelly-pw") {
+		t.Errorf("password echoed back into the fragment")
 	}
 
 	// Normalised, deduped list is reconciled into the device table as
@@ -327,15 +324,15 @@ func TestAdminSettings_ShellyStoresPasswordEncrypted(t *testing.T) {
 		t.Errorf("fleet size after save = %d, want 2", n)
 	}
 
-	page := getBody(t, env, "/a/settings")
-	if !strings.Contains(page, "Shelly Integration") || !strings.Contains(page, "* * * (set)") {
-		t.Errorf("shelly settings section incomplete")
+	page := getBody(t, env, "/a/settings/panel/shelly")
+	if !strings.Contains(page, "Manual IP addresses") || !strings.Contains(page, "* * * (set)") {
+		t.Errorf("shelly settings fragment incomplete")
 	}
 	if !strings.Contains(page, "192.168.33.51, 192.168.33.52:8080") {
 		t.Errorf("addresses not rendered back into the form")
 	}
 	if strings.Contains(page, "super-secret-shelly-pw") {
-		t.Errorf("password leaked into the settings page")
+		t.Errorf("password leaked into the settings fragment")
 	}
 }
 
@@ -374,9 +371,9 @@ func TestAdminSettings_ShellyRejectsBadAddresses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST %q: %v", bad, err)
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body := followSettings(t, env, resp)
 		resp.Body.Close()
-		if !strings.Contains(string(body), "Device addresses:") {
+		if !strings.Contains(body, "Device addresses:") {
 			t.Errorf("%q: validation flash missing", bad)
 		}
 		if v := manualAddrs(); v != "192.168.33.51" {

@@ -1,0 +1,373 @@
+{{define "settings-panel"}}
+{{if .Flash}}<div class="sp-banner sp-banner-{{.FlashType}}" role="status">{{.Flash}}</div>{{end}}
+
+{{if eq .Cat "ua"}}
+  <form class="sp-card" method="post" action="/a/settings">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">UA enabled</span>
+        <span class="sp-sub">Controls only the Users page: on additionally shows the UA users, off shows only CARVILON's own users (no UA call). Without a token set the default is off.</span>
+      </div>
+      <label class="sp-toggle">
+        <input type="checkbox" name="ua_enabled" value="1" {{if .Page.UA.Enabled}}checked{{end}} class="sp-check"/>
+        <span class="sp-sub sp-m0">Use UniFi Access</span>
+      </label>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Controller URL</span>
+        <span class="sp-sub">UA controller on the local network, e.g. https://unifi.local</span>
+      </div>
+      <input class="sp-input" name="ua_controller_url" type="url" value="{{.Page.UA.BaseURL}}" placeholder="https://unifi.local:12445"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">API token</span>
+        <span class="sp-sub">Bearer token from the UA portal. Stored AES-256-GCM encrypted. Enter a new value here to replace it.</span>
+      </div>
+      <input class="sp-input" name="token" type="password" value="" placeholder="{{if .Page.UA.HasToken}}* * * (set){{else}}not set yet{{end}}"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Connection</span>
+        <span class="sp-sub">Status of the UA API configuration.</span>
+      </div>
+      {{if eq .Page.UA.Status "connected"}}
+        <span class="sp-pill is-ok"><span class="sp-dot"></span>Configured</span>
+      {{else}}
+        <span class="sp-pill"><span class="sp-dot"></span>Not tested</span>
+      {{end}}
+    </div>
+    <div class="sp-row sp-row-actions">
+      <button class="sp-btn sp-btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+
+{{else if eq .Cat "protect"}}
+  <form class="sp-card" method="post" action="/a/settings/protect">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Protect enabled</span>
+        <span class="sp-sub">Additionally shows the Protect cameras and sensors in the Device Center (read only, no control). Without a key set the default is off.</span>
+      </div>
+      <label class="sp-toggle">
+        <input type="checkbox" name="protect_enabled" value="1" {{if .Page.Protect.Enabled}}checked{{end}} class="sp-check"/>
+        <span class="sp-sub sp-m0">Use UniFi Protect</span>
+      </label>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Controller URL</span>
+        <span class="sp-sub">The UDM on the local network, e.g. https://192.168.1.1 (the integration API lives under /proxy/protect/integration).</span>
+      </div>
+      <input class="sp-input" name="protect_controller_url" type="url" value="{{.Page.Protect.BaseURL}}" placeholder="https://192.168.1.1"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">API key</span>
+        <span class="sp-sub">X-API-KEY from the Protect settings (Control Plane, Integrations). Stored AES-256-GCM encrypted. Enter a new value here to replace it.</span>
+      </div>
+      <input class="sp-input" name="protect_api_key" type="password" value="" placeholder="{{if .Page.Protect.HasKey}}* * * (set){{else}}not set yet{{end}}"/>
+    </div>
+    <div class="sp-row sp-row-actions">
+      <button class="sp-btn sp-btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+
+{{else if eq .Cat "shelly"}}
+  <form class="sp-card" method="post" action="/a/settings/shelly">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Shelly enabled</span>
+        <span class="sp-sub">Shows the configured Shelly devices as their own category in the Device Center (read only, no switching) and turns on mDNS auto-discovery. Without any configured device the default is off.</span>
+      </div>
+      <label class="sp-toggle">
+        <input type="checkbox" name="shelly_enabled" value="1" {{if .Page.Shelly.Enabled}}checked{{end}} class="sp-check"/>
+        <span class="sp-sub sp-m0">Use Shelly devices</span>
+      </label>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Manual IP addresses</span>
+        <span class="sp-sub">Only needed as a fallback for devices in another subnet or VLAN, where multicast discovery cannot reach them. Gen2+ devices on the same LAN are found automatically. LAN IPv4 addresses, comma-separated, e.g. 192.168.1.51, 192.168.1.52. Saving an empty list removes the manual pins (discovered devices are kept).</span>
+      </div>
+      <input class="sp-input" name="shelly_addresses" type="text" value="{{.Page.Shelly.Addresses}}" placeholder="192.168.1.51, 192.168.1.52" autocomplete="off" spellcheck="false"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Auth password</span>
+        <span class="sp-sub">Only needed when the devices are password protected (digest authentication, user "admin"). Stored AES-256-GCM encrypted and never shown again - enter a new value to replace it.</span>
+      </div>
+      <input class="sp-input" name="shelly_password" type="password" value="" placeholder="{{if .Page.Shelly.HasPassword}}* * * (set){{else}}not set yet{{end}}" autocomplete="new-password"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Connection</span>
+        <span class="sp-sub">Live reachability of the configured devices.</span>
+      </div>
+      <span class="sp-pill" data-shelly-conn><span class="sp-dot"></span><span data-shelly-conn-text>Checking&hellip;</span></span>
+    </div>
+    <div class="sp-row sp-row-actions">
+      <button class="sp-btn sp-btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+
+  <div class="sp-card sp-mt">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Auto-discovery</span>
+        <span class="sp-sub">Gen2+ Shelly devices on the local network are found automatically over mDNS.{{if .Page.Shelly.DiscoveredCount}} Currently {{.Page.Shelly.DiscoveredCount}} discovered device{{if ne .Page.Shelly.DiscoveredCount 1}}s{{end}} active.{{end}} Removed devices stay removed - release them below to allow re-discovery.</span>
+      </div>
+      <form method="post" action="/a/settings/shelly/scan" class="sp-m0">
+        <button class="sp-btn sp-btn-secondary" type="submit">Scan now</button>
+      </form>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Scan network</span>
+        <span class="sp-sub">Actively sweep your local network for Shelly devices - this finds devices that hide from mDNS (some ship with discovery off), so you never need to type an IP. Only the harmless identify endpoint is probed, never outside your own private subnet. Found devices appear under Pending approval below.</span>
+        <span class="sp-sub" data-shscan-status hidden style="margin-top:6px;"></span>
+      </div>
+      <button type="button" class="sp-btn sp-btn-secondary" data-shscan-btn>Scan network</button>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Auto-activate discovered devices</span>
+        <span class="sp-sub">Off (recommended): a found device waits for your approval below and is not contacted until then - safe on any network. On: found devices become active immediately (only recommended on a segmented VLAN you trust). This affects new finds only; devices already pending are left as they are.</span>
+      </div>
+      <form method="post" action="/a/settings/shelly/autoadopt" class="sp-m0">
+        <label class="sp-toggle">
+          <input type="checkbox" name="shelly_auto_adopt" value="1" {{if .Page.Shelly.AutoAdopt}}checked{{end}} onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" class="sp-check"/>
+          <span class="sp-sub sp-m0">Auto-activate</span>
+        </label>
+        <noscript><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit" style="margin-left:8px;">Save</button></noscript>
+      </form>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Keep Shelly cloud</span>
+        <span class="sp-sub">When a device is approved it is provisioned onto the CARVILON MQTT broker (TLS) and hardened. Off (recommended): the device's Shelly-cloud connection is turned off. On: it is left enabled (Gen2+ can run the cloud and our broker in parallel). Applies at the next provisioning.</span>
+      </div>
+      <form method="post" action="/a/settings/shelly/keepcloud" class="sp-m0">
+        <label class="sp-toggle">
+          <input type="checkbox" name="shelly_keep_cloud" value="1" {{if .Page.Shelly.KeepCloud}}checked{{end}} onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" class="sp-check"/>
+          <span class="sp-sub sp-m0">Keep cloud on</span>
+        </label>
+        <noscript><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit" style="margin-left:8px;">Save</button></noscript>
+      </form>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Pending approval</span>
+        <span class="sp-sub">Devices found on the network waiting for your approval. They are not contacted or polled until you approve them, so a pending row shows only what the announcement carried (MAC + address). Approve to start polling it, or reject to keep it out.</span>
+      </div>
+    </div>
+    {{if .Page.Shelly.Pending}}
+      <table class="sp-table">
+        <thead><tr><th>Identity (MAC)</th><th>Address</th><th>Found via</th><th></th></tr></thead>
+        <tbody>
+          {{range .Page.Shelly.Pending}}
+            <tr>
+              <td><code>{{if .MAC}}{{.MAC}}{{else}}-{{end}}</code></td>
+              <td><code>{{.Addr}}</code></td>
+              <td>{{if .Origin}}<span class="sp-sub sp-m0">{{.Origin}}</span>{{else}}-{{end}}</td>
+              <td class="sp-cell-actions">
+                <form method="post" action="/a/settings/shelly/approve" class="sp-m0">
+                  <input type="hidden" name="id" value="{{.ID}}"/>
+                  <button class="sp-btn sp-btn-primary sp-btn-sm" type="submit">Approve</button>
+                </form>
+                <form method="post" action="/a/settings/shelly/reject" class="sp-m0">
+                  <input type="hidden" name="id" value="{{.ID}}"/>
+                  <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Reject</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="sp-sub sp-empty">No devices pending approval.</p>
+    {{end}}
+    <div class="sp-row sp-mt">
+      <div class="sp-row-main">
+        <span class="sp-label">Ignored devices</span>
+        <span class="sp-sub">Devices you removed or rejected are on this list and are not re-adopted by discovery. Release one to allow it to be found again.</span>
+      </div>
+    </div>
+    {{if .Page.Shelly.Ignored}}
+      <table class="sp-table">
+        <thead><tr><th>Identity</th><th>Last address</th><th></th></tr></thead>
+        <tbody>
+          {{range .Page.Shelly.Ignored}}
+            <tr>
+              <td><code>{{.Label}}</code></td>
+              <td><code>{{if .Addr}}{{.Addr}}{{else}}-{{end}}</code></td>
+              <td class="sp-cell-actions">
+                <form method="post" action="/a/settings/shelly/release" class="sp-m0">
+                  <input type="hidden" name="id" value="{{.ID}}"/>
+                  <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Release</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="sp-sub sp-empty">No ignored devices.</p>
+    {{end}}
+  </div>
+
+{{else if eq .Cat "weather"}}
+  <form class="sp-card" method="post" action="/a/settings/station">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Latitude</span>
+        <span class="sp-sub">Decimal degrees, e.g. 51.6144 for Recklinghausen.</span>
+      </div>
+      <input class="sp-input" name="station_lat" type="text" inputmode="decimal" value="{{.Page.Station.Lat}}" placeholder="51.6144" required/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Longitude</span>
+        <span class="sp-sub">Decimal degrees, e.g. 7.1959 for Recklinghausen.</span>
+      </div>
+      <input class="sp-input" name="station_lon" type="text" inputmode="decimal" value="{{.Page.Station.Lon}}" placeholder="7.1959" required/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Source</span>
+        <span class="sp-sub">Open-Meteo (no API key needed). Takes effect at the next 15-minute refresh.</span>
+      </div>
+      <a class="sp-btn sp-btn-secondary sp-btn-sm" href="/a/weather" target="_blank" rel="noopener">Preview (JSON)</a>
+    </div>
+    <div class="sp-row sp-row-actions">
+      <button class="sp-btn sp-btn-primary" type="submit">Save location</button>
+    </div>
+  </form>
+
+{{else if eq .Cat "appearance"}}
+  <div class="sp-card">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Presets</span>
+        <span class="sp-sub">One click saves immediately and recolors the whole admin.</span>
+      </div>
+      <form method="post" action="/a/settings/accent" class="sp-swatches">
+        {{range .Page.Accent.Presets}}
+        <button type="submit" name="accent" value="{{.Hex}}" title="{{.Name}} ({{.Hex}})" aria-label="{{.Name}}"
+          class="sp-swatch{{if eq $.Page.Accent.Current .Hex}} is-current{{end}}" style="background:{{.Hex}};"></button>
+        {{end}}
+      </form>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Custom color</span>
+        <span class="sp-sub">Current: <code>{{.Page.Accent.Current}}</code>. Default is blue (#3d7bff).</span>
+      </div>
+      <form method="post" action="/a/settings/accent" class="sp-inline">
+        <input type="color" name="accent" value="{{.Page.Accent.Current}}" class="sp-color"/>
+        <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+
+{{else if eq .Cat "password"}}
+  <form class="sp-card" method="post" action="/a/settings/admin-password">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Current password</span>
+      </div>
+      <input class="sp-input" name="old_password" type="password" required/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">New password</span>
+        <span class="sp-sub">At least 12 characters.</span>
+      </div>
+      <input class="sp-input" name="new_password" type="password" required minlength="12"/>
+    </div>
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Confirmation</span>
+      </div>
+      <input class="sp-input" name="confirm_password" type="password" required minlength="12"/>
+    </div>
+    <div class="sp-row sp-row-actions">
+      <button class="sp-btn sp-btn-secondary" type="submit">Change password</button>
+    </div>
+  </form>
+
+{{else if eq .Cat "locks"}}
+  <div class="sp-card">
+    {{if .Page.Locks}}
+      <table class="sp-table">
+        <thead><tr><th>Type</th><th>Value</th><th>Attempts</th><th>Lock expires</th><th></th></tr></thead>
+        <tbody>
+          {{range .Page.Locks}}
+            <tr>
+              <td>{{.Kind}}</td>
+              <td><code>{{.Value}}</code></td>
+              <td>{{.Attempts}}</td>
+              <td>{{if .UntilLabel}}{{.UntilLabel}}{{else}}-{{end}}</td>
+              <td class="sp-cell-actions">
+                <form method="post" action="/a/settings/unlock" class="sp-m0">
+                  <input type="hidden" name="kind" value="{{.Kind}}"/>
+                  <input type="hidden" name="value" value="{{.Value}}"/>
+                  <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Unlock</button>
+                </form>
+              </td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="sp-sub sp-empty">No active locks.</p>
+    {{end}}
+  </div>
+
+{{else if eq .Cat "audit"}}
+  <div class="sp-card">
+    {{if .Page.Audit}}
+      <table class="sp-table">
+        <thead><tr><th>Time</th><th>Realm</th><th>User</th><th>IP</th><th>Outcome</th></tr></thead>
+        <tbody>
+          {{range .Page.Audit}}
+            <tr>
+              <td>{{.When}}</td>
+              <td>{{.Realm}}</td>
+              <td>{{.User}}</td>
+              <td>{{.IP}}</td>
+              <td>{{.Outcome}}</td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    {{else}}
+      <p class="sp-sub sp-empty">No logins yet.</p>
+    {{end}}
+  </div>
+
+{{else if eq .Cat "mqtt"}}
+  <div class="sp-card">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Devices, ACL &amp; broker</span>
+        <span class="sp-sub">Create device credentials, manage topic rules, broker on/off + ports/TLS. Its own hardened page.</span>
+      </div>
+      <a class="sp-btn sp-btn-secondary" href="/a/mqtt">Manage MQTT</a>
+    </div>
+  </div>
+
+{{else if eq .Cat "telegram"}}
+  <div class="sp-card">
+    <div class="sp-row">
+      <div class="sp-row-main">
+        <span class="sp-label">Bot, chat approvals &amp; test send</span>
+        <span class="sp-sub">Messages from the logic to your phone, commands from your phone into the logic. Bot on/off, token, chat allowlist. Its own hardened page.</span>
+      </div>
+      <a class="sp-btn sp-btn-secondary" href="/a/telegram">Manage Telegram</a>
+    </div>
+  </div>
+
+{{end}}
+{{end}}

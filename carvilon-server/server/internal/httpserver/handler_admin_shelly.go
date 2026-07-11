@@ -689,10 +689,7 @@ func (s *Server) handleAdminShellySettingsPost(w http.ResponseWriter, r *http.Re
 	// set untouched and flashes red.
 	parsed, perr := parseShellyAddresses(rawAddrs)
 	if perr != nil {
-		data := s.buildSettingsData(r)
-		data.Flash = "Device addresses: " + perr.Error()
-		data.FlashType = "red"
-		s.renderAdminPage(w, "settings", data)
+		settingsPanelRedirect(w, r, "shelly", "Device addresses: "+perr.Error(), "red")
 		return
 	}
 	if s.shellystore != nil {
@@ -725,21 +722,18 @@ func (s *Server) handleAdminShellySettingsPost(w http.ResponseWriter, r *http.Re
 
 	s.rebuildShellyClients(r.Context())
 
-	data := s.buildSettingsData(r)
-	data.Flash = "Saved."
-	data.FlashType = "green"
-	s.renderAdminPage(w, "settings", data)
+	settingsPanelRedirect(w, r, "shelly", "Saved.", "green")
 }
 
-// handleAdminShellyScan triggers one active mDNS scan from the settings
-// page ("Scan now"). Discovery adopts on its own timeline; this only nudges
-// the network. Redirects back so the async adoption surfaces on the next
-// settings render / device-center poll.
+// handleAdminShellyScan triggers one active mDNS scan from the Shelly
+// settings panel ("Scan now"). Discovery adopts on its own timeline; this
+// only nudges the network. Redirects back so the async adoption surfaces on
+// the next fragment render / device-center poll.
 func (s *Server) handleAdminShellyScan(w http.ResponseWriter, r *http.Request) {
 	if s.shellyDisco != nil {
 		s.shellyDisco.ScanNow()
 	}
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "shelly", "mDNS scan triggered.", "green")
 }
 
 // handleAdminShellyRelease removes one device from the ignore list (the
@@ -751,7 +745,7 @@ func (s *Server) handleAdminShellyRelease(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.shellystore == nil {
-		http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+		settingsPanelRedirect(w, r, "shelly", "", "")
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("id")), 10, 64)
@@ -762,7 +756,7 @@ func (s *Server) handleAdminShellyRelease(w http.ResponseWriter, r *http.Request
 	if err := s.shellystore.ReleaseByID(r.Context(), id); err != nil && !errors.Is(err, shellystore.ErrNotFound) {
 		s.log.Error("shelly: release ignored device failed", "err", err)
 	}
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "shelly", "Device released for re-discovery.", "green")
 }
 
 // shellyAutoAdopt is the effective "auto-activate discovered devices"
@@ -793,7 +787,7 @@ func (s *Server) handleAdminShellyAutoAdopt(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "shelly", "", "")
 }
 
 // handleAdminShellyKeepCloud saves the "keep Shelly cloud" opt-in used
@@ -812,7 +806,7 @@ func (s *Server) handleAdminShellyKeepCloud(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "shelly", "", "")
 }
 
 // handleAdminShellyApprove activates a pending (discovered) device: it joins
@@ -856,7 +850,7 @@ func (s *Server) shellyPendingAction(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 	if s.shellystore == nil {
-		http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+		settingsPanelRedirect(w, r, "shelly", "", "")
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimSpace(r.PostForm.Get("id")), 10, 64)
@@ -871,7 +865,7 @@ func (s *Server) shellyPendingAction(w http.ResponseWriter, r *http.Request, act
 		!errors.Is(err, shellystore.ErrNotFound) && !errors.Is(err, shellystore.ErrAtCap) {
 		s.log.Error("shelly: pending action failed", "err", err)
 	}
-	http.Redirect(w, r, "/a/settings", http.StatusSeeOther)
+	settingsPanelRedirect(w, r, "shelly", "", "")
 }
 
 // handleAdminUAShellyRemove is the sticky per-device removal from the Device

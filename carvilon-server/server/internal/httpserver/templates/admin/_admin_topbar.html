@@ -119,6 +119,81 @@
   @media (max-width: 560px) {
     .cv-ab-k{ width:108px; }
   }
+
+  /* ---- Settings: gear + full-width category panel ---- */
+  .cv-gear-btn{ padding:8px 9px; }
+  .cv-gear-btn svg{ width:17px; height:17px; }
+  .cv-set-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(228px,1fr)); gap:10px; }
+  .cv-set-item{ display:flex; align-items:center; gap:11px; padding:11px 12px; border-radius:8px; background:#121519; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05),0 1px 2px rgba(0,0,0,0.5); border:none; cursor:pointer; text-align:left; width:100%; color:inherit; font-family:inherit; transition:background 110ms,box-shadow 110ms; }
+  .cv-set-item:hover{ background:#171a1f; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cv-acc) 45%, transparent); }
+  .cv-set-item:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:2px; }
+  .cv-set-ico{ flex:none; width:34px; height:34px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; background:#0a0c0f; color:var(--cv-acc); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05); }
+  .cv-set-ico svg{ width:17px; height:17px; }
+  .cv-set-txt{ min-width:0; }
+  .cv-set-name{ font-size:14px; font-weight:600; color:#f4f6f8; }
+  .cv-set-desc{ display:block; font-size:11.5px; color:#7b848f; margin-top:1px; }
+
+  /* ---- Settings: full-screen category modal ---- */
+  .cv-set-ov{ position:fixed; inset:0; z-index:400; display:flex; align-items:flex-start; justify-content:center; padding:56px 20px 24px; background:rgba(6,8,11,0.62); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:cv-ab-fade 150ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; overflow-y:auto; }
+  .cv-set-ov[hidden]{ display:none; }
+  .cv-set{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:min(760px,100%); margin:auto 0; background:#0e1013; border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,0.66), inset 0 0 0 1px rgba(255,255,255,0.10); color:#f4f6f8; animation:cv-ab-pop 190ms cubic-bezier(.2,.8,.2,1) both; }
+  .cv-set *{ box-sizing:border-box; }
+  .cv-set-head{ position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); background:#0e1013; border-radius:16px 16px 0 0; }
+  .cv-set-back{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
+  .cv-set-back:hover{ color:#f4f6f8; background:#1d2127; }
+  .cv-set-title{ flex:1 1 auto; min-width:0; font-size:17px; font-weight:600; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cv-set-x{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
+  .cv-set-x:hover{ background:rgba(255,92,77,0.12); color:#ff8a7d; }
+  .cv-set-body{ padding:20px; }
+  .cv-set-loading{ padding:44px 20px; text-align:center; color:#7b848f; font-size:13px; }
+
+  /* self-contained settings-fragment styles (sp-): rendered inside the
+     modal on both legacy AND new-design pages, so literal values + var(--cv-acc)
+     only - never the page token sets (which differ across the two worlds). */
+  .cv-set-body .sp-banner{ padding:11px 14px; border-radius:8px; font-size:13px; font-weight:500; margin-bottom:16px; }
+  .cv-set-body .sp-banner-green{ background:rgba(44,198,106,0.12); color:#7ee2a8; box-shadow:inset 0 0 0 1px rgba(44,198,106,0.4); }
+  .cv-set-body .sp-banner-red{ background:rgba(255,92,77,0.12); color:#ff9d92; box-shadow:inset 0 0 0 1px rgba(255,92,77,0.4); }
+  .cv-set-body .sp-card{ background:#121519; border:1px solid rgba(255,255,255,0.08); border-radius:12px; overflow:hidden; }
+  .cv-set-body .sp-mt{ margin-top:16px; }
+  .cv-set-body .sp-row{ display:flex; align-items:center; justify-content:space-between; gap:20px; padding:16px; min-height:56px; }
+  .cv-set-body .sp-row + .sp-row{ border-top:1px solid rgba(255,255,255,0.06); }
+  .cv-set-body .sp-row-actions{ justify-content:flex-end; }
+  .cv-set-body .sp-row-main{ display:flex; flex-direction:column; min-width:0; gap:3px; }
+  .cv-set-body .sp-label{ font-size:14.5px; font-weight:500; color:#f4f6f8; }
+  .cv-set-body .sp-sub{ font-size:12.5px; line-height:1.5; color:#8b939d; }
+  .cv-set-body .sp-m0{ margin:0; }
+  .cv-set-body .sp-empty{ padding:14px 16px; }
+  .cv-set-body .sp-input{ appearance:none; width:100%; max-width:340px; background:#0b0d10; border:1px solid rgba(255,255,255,0.14); color:#f4f6f8; font:500 14px/1.4 inherit; padding:9px 12px; border-radius:7px; transition:border-color 120ms,box-shadow 120ms; }
+  .cv-set-body .sp-input:focus{ outline:none; border-color:var(--cv-acc); box-shadow:0 0 0 3px color-mix(in srgb, var(--cv-acc) 26%, transparent); }
+  .cv-set-body .sp-input::placeholder{ color:#5f6771; }
+  .cv-set-body .sp-toggle{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap; }
+  .cv-set-body .sp-check{ width:18px; height:18px; accent-color:var(--cv-acc); cursor:pointer; }
+  .cv-set-body .sp-btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; font:600 13.5px inherit; border-radius:7px; border:1px solid transparent; padding:9px 15px; cursor:pointer; white-space:nowrap; text-decoration:none; transition:background 110ms,border-color 110ms,filter 110ms; }
+  .cv-set-body .sp-btn:active{ transform:scale(0.98); }
+  .cv-set-body .sp-btn-primary{ background:var(--cv-acc); color:#0b0f17; }
+  .cv-set-body .sp-btn-primary:hover{ filter:brightness(1.08); }
+  .cv-set-body .sp-btn-secondary{ background:#171a1f; color:#f4f6f8; border-color:rgba(255,255,255,0.14); }
+  .cv-set-body .sp-btn-secondary:hover{ background:#1d2127; }
+  .cv-set-body .sp-btn-sm{ padding:6px 11px; font-size:12.5px; }
+  .cv-set-body .sp-pill{ display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:500; color:#f4f6f8; padding:5px 11px; border-radius:999px; background:#171a1f; border:1px solid rgba(255,255,255,0.09); white-space:nowrap; }
+  .cv-set-body .sp-dot{ width:7px; height:7px; border-radius:50%; background:#7b848f; flex:none; }
+  .cv-set-body .sp-pill.is-ok .sp-dot{ background:#2cc66a; box-shadow:0 0 7px rgba(44,198,106,0.7); }
+  .cv-set-body .sp-table{ width:100%; border-collapse:collapse; text-align:left; }
+  .cv-set-body .sp-table thead th{ font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#7b848f; padding:11px 16px; border-bottom:1px solid rgba(255,255,255,0.08); white-space:nowrap; }
+  .cv-set-body .sp-table tbody td{ font-size:13.5px; color:#f4f6f8; padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.06); vertical-align:middle; }
+  .cv-set-body .sp-table tbody tr:last-child td{ border-bottom:0; }
+  .cv-set-body .sp-cell-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .cv-set-body code{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; color:#c7ccd2; }
+  .cv-set-body .sp-swatches{ display:flex; flex-wrap:wrap; gap:8px; margin:0; justify-content:flex-end; }
+  .cv-set-body .sp-swatch{ width:30px; height:30px; border-radius:7px; cursor:pointer; padding:0; border:2px solid transparent; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.45); }
+  .cv-set-body .sp-swatch.is-current{ border-color:#fff; }
+  .cv-set-body .sp-inline{ display:flex; gap:8px; align-items:center; margin:0; }
+  .cv-set-body .sp-color{ width:44px; height:34px; padding:0; border:1px solid rgba(255,255,255,0.14); border-radius:7px; background:none; cursor:pointer; }
+  @media (max-width: 560px) {
+    .cv-set-body .sp-row{ flex-direction:column; align-items:flex-start; gap:10px; }
+    .cv-set-body .sp-input{ max-width:100%; }
+    .cv-set-body .sp-row-actions{ align-items:stretch; }
+  }
 </style>
 
 <header class="cv-topbar" data-cv-topbar>
@@ -141,6 +216,8 @@
       <a class="cv-link{{if eq .ActiveNav "mqtt-monitor"}} is-active{{end}}" href="/a/mqtt-monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3.5" cy="20.5" r="1.5" fill="currentColor" stroke="none"/></svg>MQTT</a>
       <span class="cv-sep"></span>
       <a class="cv-link{{if eq .ActiveNav "users"}} is-active{{end}}" href="/a/users"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>Benutzer</a>
+      <span class="cv-sep"></span>
+      <button type="button" class="cv-link cv-gear-btn cv-drop-btn" data-cv-gear-btn aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></button>
     </nav>
   </div>
   <div class="cv-tb-right">
@@ -167,10 +244,57 @@
     </div>
   </div>
 
+  <div class="cv-mega" data-cv-set-mega hidden>
+    <div class="cv-mega-inner">
+      <div class="cv-mega-eyebrow">Settings</div>
+      <div class="cv-set-grid">
+        <button type="button" class="cv-set-item" data-sp-cat="ua" data-sp-label="UniFi Access">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4M8 8h.01M12 8h4"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">UniFi Access</span><span class="cv-set-desc">Controller URL &amp; API token</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="protect" data-sp-label="UniFi Protect">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="10" r="2.4"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">UniFi Protect</span><span class="cv-set-desc">Cameras &amp; sensors</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="shelly" data-sp-label="Shelly">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Shelly</span><span class="cv-set-desc">Devices &amp; discovery</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="weather" data-sp-label="Weather location">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6 1.5A3.5 3.5 0 0 0 6.5 19z"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Weather location</span><span class="cv-set-desc">Coordinates for weather</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="appearance" data-sp-label="Accent color">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8H16a6 6 0 0 0 6-6c0-5-4.5-8-10-8z"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Accent color</span><span class="cv-set-desc">Admin UI accent</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="password" data-sp-label="Admin password">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Admin password</span><span class="cv-set-desc">Change your password</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="locks" data-sp-label="Login locks">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><rect x="9.5" y="10" width="5" height="4.5" rx="1"/><path d="M10.5 10V9a1.5 1.5 0 0 1 3 0v1"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Login locks</span><span class="cv-set-desc">Active lockouts</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="audit" data-sp-label="Login audit">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Login audit</span><span class="cv-set-desc">Recent sign-ins</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="mqtt" data-sp-label="MQTT broker">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 12a10 10 0 0 1 10 10M2 5a17 17 0 0 1 17 17"/><circle cx="3.5" cy="20.5" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">MQTT broker</span><span class="cv-set-desc">Devices, ACL &amp; broker</span></span>
+        </button>
+        <button type="button" class="cv-set-item" data-sp-cat="telegram" data-sp-label="Telegram bot">
+          <span class="cv-set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M22 3 2 10.5l6 2.5 2.5 6L14 15l5 5 3-17z"/><path d="M8 13l8-6"/></svg></span>
+          <span class="cv-set-txt"><span class="cv-set-name">Telegram bot</span><span class="cv-set-desc">Bot &amp; chat approvals</span></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="cv-flyout" data-cv-flyout hidden>
     <div class="cv-fly-head"><span class="cv-avatar lg">{{.User.Initials}}</span><span style="min-width:0"><b>{{.User.Name}}</b><small>Administrator</small></span></div>
     <div class="cv-fly-sep"></div>
-    <a class="cv-fly-item" href="/a/settings"><span class="cv-fly-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 2.82 1.17l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9"/></svg></span>Einstellungen</a>
     <div class="cv-fly-row"><span class="cv-fly-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/></svg></span>Sprache<span class="cv-seg" data-cv-lang><button type="button" data-lang="en">EN</button><button type="button" data-lang="de">DE</button></span></div>
     <div class="cv-fly-row"><span class="cv-fly-ico" data-cv-sound-ico><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></svg></span>Klick-Töne<button type="button" class="cv-switch" data-cv-sound role="switch" aria-label="Klick-Töne"><span class="cv-knob"></span></button></div>
     <div class="cv-fly-row"><span class="cv-fly-ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></span>Darstellung<span class="cv-seg" data-cv-theme><button type="button" data-theme="light">Hell</button><button type="button" data-theme="dark">Dunkel</button></span></div>
@@ -223,6 +347,17 @@
       </div>
     </div>
   </div>
+
+  <div class="cv-set-ov" data-cv-set-ov hidden>
+    <div class="cv-set" role="dialog" aria-modal="true" aria-labelledby="cv-set-title">
+      <div class="cv-set-head">
+        <button type="button" class="cv-set-back" data-cv-set-back aria-label="Back to settings" title="Back to settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <span class="cv-set-title" id="cv-set-title" data-cv-set-title>Settings</span>
+        <button type="button" class="cv-set-x" data-cv-set-close aria-label="Close" title="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="cv-set-body" data-cv-set-body></div>
+    </div>
+  </div>
 </header>
 
 <script>
@@ -242,22 +377,32 @@
     var userBtn = bar.querySelector('[data-cv-user-btn]');
     var aboutOv = bar.querySelector('[data-cv-about]');
     var aboutBtn = bar.querySelector('[data-cv-about-btn]');
+    var setMega = bar.querySelector('[data-cv-set-mega]');
+    var gearBtn = bar.querySelector('[data-cv-gear-btn]');
+    var setOv = bar.querySelector('[data-cv-set-ov]');
+    var setBody = setOv ? setOv.querySelector('[data-cv-set-body]') : null;
+    var setTitle = setOv ? setOv.querySelector('[data-cv-set-title]') : null;
 
     function closeAll() {
       mega.hidden = true; fly.hidden = true; scrim.hidden = true;
-      bar.classList.remove('mega-open', 'user-open');
+      if (setMega) setMega.hidden = true;
+      bar.classList.remove('mega-open', 'user-open', 'set-open');
       if (megaBtn) megaBtn.setAttribute('aria-expanded', 'false');
       if (userBtn) userBtn.setAttribute('aria-expanded', 'false');
+      if (gearBtn) gearBtn.setAttribute('aria-expanded', 'false');
     }
     function toggle(which) {
       var openMega = which === 'mega' && mega.hidden;
       var openUser = which === 'user' && fly.hidden;
+      var openSet = which === 'settings' && setMega && setMega.hidden;
       closeAll();
       if (openMega) { mega.hidden = false; scrim.hidden = false; bar.classList.add('mega-open'); megaBtn.setAttribute('aria-expanded', 'true'); }
       if (openUser) { fly.hidden = false; scrim.hidden = false; bar.classList.add('user-open'); userBtn.setAttribute('aria-expanded', 'true'); }
+      if (openSet) { setMega.hidden = false; scrim.hidden = false; bar.classList.add('set-open'); gearBtn.setAttribute('aria-expanded', 'true'); }
     }
     if (megaBtn) megaBtn.addEventListener('click', function (e) { e.preventDefault(); toggle('mega'); });
     if (userBtn) userBtn.addEventListener('click', function (e) { e.preventDefault(); toggle('user'); });
+    if (gearBtn) gearBtn.addEventListener('click', function (e) { e.preventDefault(); toggle('settings'); });
     if (scrim) scrim.addEventListener('click', closeAll);
 
     // ---- About / Über-Modal ----
@@ -281,12 +426,170 @@
       });
     }
 
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeAll(); closeAbout(); } });
+    // ---- Settings: gear panel entries + full-screen category modal ----
+    // The gear opens a full-width panel of categories; each category opens as a
+    // full-screen modal whose body is lazily fetched from /a/settings/panel/{cat}.
+    // Forms inside the modal submit via fetch (x-www-form-urlencoded so the Go
+    // handlers' ParseForm sees the fields); each handler redirects back to the
+    // fragment, which we drop in place - fresh values + a flash banner.
+    var setCat = null;
+    var shellyScanPoll = null; // shared so close/re-render can tear the poll down
+    function stopShellyScanPoll() { if (shellyScanPoll) { clearInterval(shellyScanPoll); shellyScanPoll = null; } }
+    function afterPanelLoad() { stopShellyScanPoll(); if (setCat === 'shelly') initShellyPanel(); }
+    function loadPanel(cat) {
+      fetch('/a/settings/panel/' + encodeURIComponent(cat), { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (html) {
+          if (setCat !== cat || !setBody) return;
+          if (html == null) { setBody.innerHTML = '<div class="cv-set-loading">Could not load these settings.</div>'; return; }
+          setBody.innerHTML = html;
+          afterPanelLoad();
+        })
+        .catch(function () { if (setCat === cat && setBody) setBody.innerHTML = '<div class="cv-set-loading">Could not load these settings.</div>'; });
+    }
+    function openSettingsModal(cat, label) {
+      if (!setOv || !setBody) return;
+      closeAll();
+      setCat = cat;
+      if (setTitle) setTitle.textContent = label || 'Settings';
+      setBody.innerHTML = '<div class="cv-set-loading">Loading&hellip;</div>';
+      setOv.hidden = false;
+      loadPanel(cat);
+    }
+    function closeSettingsModal() {
+      if (!setOv || setOv.hidden) return;
+      stopShellyScanPoll();
+      setOv.hidden = true;
+      setCat = null;
+      if (setBody) setBody.innerHTML = '';
+      if (gearBtn) gearBtn.focus();
+    }
+    // Lets an in-panel async action (Shelly network scan) refresh the body.
+    window.__cvSettingsReload = function () { if (setCat) loadPanel(setCat); };
+
+    if (setMega) setMega.addEventListener('click', function (e) {
+      var item = e.target.closest('[data-sp-cat]');
+      if (!item) return;
+      e.preventDefault();
+      openSettingsModal(item.getAttribute('data-sp-cat'), item.getAttribute('data-sp-label'));
+    });
+    if (setOv) {
+      var setBack = setOv.querySelector('[data-cv-set-back]');
+      var setClose = setOv.querySelector('[data-cv-set-close]');
+      if (setBack) setBack.addEventListener('click', function () { closeSettingsModal(); toggle('settings'); });
+      if (setClose) setClose.addEventListener('click', closeSettingsModal);
+      setOv.addEventListener('mousedown', function (e) { if (e.target === setOv) closeSettingsModal(); });
+    }
+    // Surfaces a runtime error banner WITHOUT wiping the form (used when a
+    // POST genuinely fails - a validation error goes through the 303 path and
+    // arrives as a re-rendered fragment instead).
+    function showModalError(msg) {
+      if (!setBody) return;
+      var old = setBody.querySelector('.sp-banner-runtime');
+      if (old) old.remove();
+      var b = document.createElement('div');
+      b.className = 'sp-banner sp-banner-red sp-banner-runtime';
+      b.setAttribute('role', 'status');
+      b.textContent = msg;
+      setBody.insertBefore(b, setBody.firstChild);
+    }
+    if (setBody) setBody.addEventListener('submit', function (e) {
+      var form = e.target;
+      if (!form || form.tagName !== 'FORM') return;
+      e.preventDefault();
+      var action = form.getAttribute('action') || ('/a/settings/panel/' + setCat);
+      var payload = new URLSearchParams(new FormData(form, e.submitter));
+      fetch(action, {
+        method: 'POST', body: payload, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      })
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (html) {
+          if (html != null && setBody) { setBody.innerHTML = html; afterPanelLoad(); }
+          else { showModalError('Could not save - the server rejected the request. Please try again.'); }
+        })
+        .catch(function () { showModalError('Could not save - no connection to the server.'); });
+    });
+
+    function initShellyPanel() {
+      if (!setBody) return;
+      // "Connection" line: async reachability probe (counts only).
+      (function () {
+        var pill = setBody.querySelector('[data-shelly-conn]');
+        var text = setBody.querySelector('[data-shelly-conn-text]');
+        if (!pill || !text) return;
+        function set(label, ok) { text.textContent = label; pill.classList.toggle('is-ok', !!ok); }
+        fetch('/a/settings/shelly/status', { credentials: 'same-origin', cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.ok) { set('Status unavailable', false); return; }
+            if (!d.enabled) { set('Disabled', false); return; }
+            if (!d.total) { set('No devices configured', false); return; }
+            var n = d.reachable == null ? 0 : d.reachable;
+            set(n + ' / ' + d.total + ' devices reachable', n === d.total);
+          })
+          .catch(function () { set('Status unavailable', false); });
+      })();
+      // "Scan network": active subnet sweep with progress polling; on new finds
+      // reload the panel body (not the page) so pending rows appear.
+      (function () {
+        var btn = setBody.querySelector('[data-shscan-btn]');
+        var out = setBody.querySelector('[data-shscan-status]');
+        if (!btn || !out) return;
+        function show(msg) { out.hidden = false; out.textContent = msg; }
+        function stop() { stopShellyScanPoll(); btn.disabled = false; }
+        function tick() {
+          fetch('/a/settings/shelly/scan-network/status', { credentials: 'same-origin', cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d) return;
+              if (d.running) { show('Probing ' + d.probed + ' / ' + d.total + ' addresses...'); return; }
+              stop();
+              if (d.message) { show(d.message); return; }
+              show('Scan complete - found ' + d.found + ' Shelly device' + (d.found === 1 ? '' : 's') + ', ' + d.new + ' new.');
+              if (d.new > 0) { setTimeout(function () { if (window.__cvSettingsReload) window.__cvSettingsReload(); }, 1200); }
+            })
+            .catch(function () { stop(); show('Scan status unavailable.'); });
+        }
+        btn.addEventListener('click', function () {
+          btn.disabled = true;
+          show('Starting scan...');
+          fetch('/a/settings/shelly/scan-network', { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !d.ok) { stop(); show((d && d.message) || 'Scan could not be started.'); return; }
+              tick(); shellyScanPoll = setInterval(tick, 700);
+            })
+            .catch(function () { stop(); show('Scan could not be started.'); });
+        });
+      })();
+    }
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (setOv && !setOv.hidden) { closeSettingsModal(); return; }
+      closeAll(); closeAbout();
+    });
     document.addEventListener('mousedown', function (e) {
-      if (mega.hidden && fly.hidden) return;
-      if (mega.contains(e.target) || fly.contains(e.target) || (megaBtn && megaBtn.contains(e.target)) || (userBtn && userBtn.contains(e.target))) return;
+      if (mega.hidden && fly.hidden && (!setMega || setMega.hidden)) return;
+      if (mega.contains(e.target) || fly.contains(e.target)
+        || (setMega && setMega.contains(e.target))
+        || (megaBtn && megaBtn.contains(e.target)) || (userBtn && userBtn.contains(e.target))
+        || (gearBtn && gearBtn.contains(e.target))) return;
       closeAll();
     });
+
+    // Deep-link: ?settings=<cat> opens that category modal on load, so the
+    // in-app "under Settings" links (e.g. the Device Center when UA has no
+    // token) still land on the right settings now that the page is gone. A
+    // bad/absent value or malformed selector just no-ops (fail closed).
+    try {
+      var wantCat = new URLSearchParams(location.search).get('settings');
+      if (wantCat && setMega) {
+        var entry = setMega.querySelector('[data-sp-cat="' + wantCat.replace(/[^a-z]/g, '') + '"]');
+        if (entry) openSettingsModal(entry.getAttribute('data-sp-cat'), entry.getAttribute('data-sp-label'));
+      }
+    } catch (e) { /* no-op */ }
 
     // ---- flyout toggles (localStorage) ----
     function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
