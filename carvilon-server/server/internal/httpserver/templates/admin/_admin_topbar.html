@@ -139,37 +139,37 @@
   .cv-set-name{ font-size:14px; font-weight:600; color:#f4f6f8; }
   .cv-set-desc{ display:block; font-size:11.5px; color:#7b848f; margin-top:1px; }
 
-  /* ---- Settings: full-screen tabbed modal ---- */
-  .cv-set-ov{ position:fixed; inset:0; z-index:400; display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; background:rgba(6,8,11,0.62); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:cv-ab-fade 150ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; overflow-y:auto; }
+  /* ---- Settings: TRUE full-screen modal, tabs across the top ---- */
+  .cv-set-ov{ position:fixed; inset:0; z-index:400; display:flex; background:#0e1013; animation:cv-ab-fade 130ms ease both; font-family:'IBM Plex Sans',system-ui,sans-serif; }
   .cv-set-ov[hidden]{ display:none; }
-  .cv-set{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:min(960px,100%); max-height:calc(100vh - 80px); margin:auto 0; display:flex; flex-direction:column; background:#0e1013; border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,0.66), inset 0 0 0 1px rgba(255,255,255,0.10); color:#f4f6f8; overflow:hidden; animation:cv-ab-pop 190ms cubic-bezier(.2,.8,.2,1) both; }
+  /* edge-to-edge: fills the viewport, no border, no radius, no floating card. */
+  .cv-set{ --cv-acc: var(--accent, var(--color-accent, #009fe3)); width:100%; height:100%; display:flex; flex-direction:column; background:#0e1013; color:#f4f6f8; animation:cv-ab-pop 160ms cubic-bezier(.2,.8,.2,1) both; }
   .cv-set *{ box-sizing:border-box; }
-  .cv-set-head{ flex:none; display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid rgba(255,255,255,0.08); background:#0e1013; }
-  .cv-set-title{ flex:1 1 auto; min-width:0; font-size:17px; font-weight:600; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .cv-set-x{ flex:none; width:32px; height:32px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
+  .cv-set-head{ flex:none; display:flex; align-items:center; gap:12px; padding:16px 24px; border-bottom:1px solid rgba(255,255,255,0.07); }
+  .cv-set-title{ flex:1 1 auto; min-width:0; font-size:18px; font-weight:600; letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cv-set-x{ flex:none; width:34px; height:34px; border-radius:8px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.07); transition:background 110ms,color 110ms; }
   .cv-set-x:hover{ background:rgba(255,92,77,0.12); color:#ff8a7d; }
-  /* rail (vertical tablist) + content */
-  .cv-set-main{ flex:1 1 auto; min-height:0; display:flex; align-items:stretch; }
-  .cv-set-rail{ flex:none; width:212px; padding:12px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; border-right:1px solid rgba(255,255,255,0.08); background:#0b0d10; }
-  .cv-set-tab{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:8px; border:none; cursor:pointer; text-align:left; width:100%; background:transparent; color:#9aa3ae; font:500 13.5px/1.2 inherit; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background 100ms,color 100ms,box-shadow 100ms; }
-  .cv-set-tab:hover{ background:rgba(255,255,255,0.05); color:#f4f6f8; }
-  .cv-set-tab:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:-2px; }
-  .cv-set-tab[aria-selected="true"]{ background:color-mix(in srgb, var(--cv-acc) 14%, transparent); color:#f4f6f8; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--cv-acc) 45%, transparent); }
-  .cv-set-tab-ico{ flex:none; width:26px; height:26px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; background:#171a1f; color:#9aa3ae; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05); }
-  .cv-set-tab-ico svg{ width:15px; height:15px; }
-  .cv-set-tab[aria-selected="true"] .cv-set-tab-ico{ color:var(--cv-acc); }
-  .cv-set-tab-label{ min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  .cv-set-body{ flex:1 1 auto; min-width:0; padding:20px; overflow-y:auto; }
-  .cv-set-loading{ padding:44px 20px; text-align:center; color:#7b848f; font-size:13px; }
-  @media (max-width: 640px) {
-    .cv-set{ max-height:calc(100vh - 32px); }
-    .cv-set-ov{ padding:16px 12px; }
-    .cv-set-main{ flex-direction:column; }
-    .cv-set-rail{ width:auto; flex-direction:row; gap:4px; overflow-x:auto; overflow-y:hidden; border-right:none; border-bottom:1px solid rgba(255,255,255,0.08); scrollbar-width:none; }
-    .cv-set-rail::-webkit-scrollbar{ display:none; }
-    .cv-set-tab{ flex:none; }
-    /* icon-only tabs, but keep the label in the accessibility tree (a clipped
-       visually-hidden span) so every tab still has an accessible name. */
+  /* horizontal tab strip across the top, above the content */
+  .cv-set-tabs{ flex:none; display:flex; align-items:stretch; gap:2px; padding:0 16px; border-bottom:1px solid rgba(255,255,255,0.08); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -ms-overflow-style:none; }
+  .cv-set-tabs::-webkit-scrollbar{ display:none; }
+  .cv-set-tab{ flex:none; display:inline-flex; align-items:center; gap:8px; padding:12px 14px; border:none; border-bottom:2px solid transparent; margin-bottom:-1px; cursor:pointer; background:transparent; color:#9aa3ae; font:500 13.5px/1.2 inherit; white-space:nowrap; transition:color 100ms,border-color 100ms; }
+  .cv-set-tab:hover{ color:#f4f6f8; }
+  .cv-set-tab:focus-visible{ outline:2px solid var(--cv-acc); outline-offset:-2px; border-radius:4px; }
+  .cv-set-tab[aria-selected="true"]{ color:#f4f6f8; border-bottom-color:var(--cv-acc); }
+  .cv-set-tab-ico{ flex:none; display:inline-flex; align-items:center; justify-content:center; color:#7b848f; }
+  .cv-set-tab-ico svg{ width:16px; height:16px; }
+  .cv-set-tab:hover .cv-set-tab-ico, .cv-set-tab[aria-selected="true"] .cv-set-tab-ico{ color:var(--cv-acc); }
+  .cv-set-tab-label{ min-width:0; }
+  .cv-set-body{ flex:1 1 auto; min-height:0; overflow-y:auto; padding:28px 24px 48px; }
+  /* centre the content column for readability on wide screens */
+  .cv-set-body > *{ max-width:940px; margin-left:auto; margin-right:auto; }
+  .cv-set-loading{ padding:60px 20px; text-align:center; color:#7b848f; font-size:13px; }
+  /* never rely on the entrance animation for visibility (reduced-motion /
+     animation-disabled contexts show the settled state immediately). */
+  @media (prefers-reduced-motion: reduce){ .cv-set-ov, .cv-set{ animation:none; } }
+  @media (max-width: 620px) {
+    .cv-set-head{ padding:14px 16px; }
+    .cv-set-body{ padding:20px 14px 40px; }
     .cv-set-tab-label{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
   }
 
@@ -380,10 +380,8 @@
         <span class="cv-set-title" id="cv-set-title" data-cv-set-title>Settings</span>
         <button type="button" class="cv-set-x" data-cv-set-close aria-label="Close" title="Close (Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
-      <div class="cv-set-main">
-        <div class="cv-set-rail" role="tablist" aria-orientation="vertical" aria-label="Settings categories" data-cv-set-rail></div>
-        <div class="cv-set-body" role="tabpanel" tabindex="0" id="cv-set-body" data-cv-set-body></div>
-      </div>
+      <div class="cv-set-tabs" role="tablist" aria-orientation="horizontal" aria-label="Settings categories" data-cv-set-rail></div>
+      <div class="cv-set-body" role="tabpanel" tabindex="0" id="cv-set-body" data-cv-set-body></div>
     </div>
   </div>
 </header>

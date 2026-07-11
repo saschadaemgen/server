@@ -36,23 +36,25 @@ type telegramPageData struct {
 var telegramFlash = map[string]struct {
 	msg, typ string
 }{
-	"saved":           {"Einstellungen gespeichert.", "green"},
-	"chat-added":      {"Chat freigegeben.", "green"},
-	"chat-deleted":    {"Chat entfernt.", "green"},
-	"chat-approved":   {"Chat freigegeben.", "green"},
-	"chat-rejected":   {"Chat abgelehnt.", "green"},
-	"test-sent":       {"Testnachricht gesendet.", "green"},
-	"err-chatid":      {"Ungültige Chat-ID (ganze Zahl, bei Gruppen negativ).", "red"},
-	"err-exists":      {"Dieser Chat ist bereits freigegeben.", "red"},
-	"err-notfound":    {"Chat nicht gefunden.", "red"},
-	"err-not-allowed": {"Dieser Chat ist nicht freigegeben.", "red"},
-	"err-not-running": {"Der Bot ist nicht aktiv (aktivieren + Token setzen).", "red"},
-	"err-send":        {"Senden fehlgeschlagen – Details im Status.", "red"},
-	"err-apply":       {"Übernehmen fehlgeschlagen – Details im Status.", "red"},
-	"err-internal":    {"Interner Fehler.", "red"},
+	"saved":           {"Settings saved.", "green"},
+	"chat-added":      {"Chat approved.", "green"},
+	"chat-deleted":    {"Chat removed.", "green"},
+	"chat-approved":   {"Chat approved.", "green"},
+	"chat-rejected":   {"Chat rejected.", "green"},
+	"test-sent":       {"Test message sent.", "green"},
+	"err-chatid":      {"Invalid chat ID (a whole number, negative for groups).", "red"},
+	"err-exists":      {"This chat is already approved.", "red"},
+	"err-notfound":    {"Chat not found.", "red"},
+	"err-not-allowed": {"This chat is not approved.", "red"},
+	"err-not-running": {"The bot is not running (enable it and set a token).", "red"},
+	"err-send":        {"Send failed - see status for details.", "red"},
+	"err-apply":       {"Apply failed - see status for details.", "red"},
+	"err-internal":    {"Internal error.", "red"},
 }
 
-func (s *Server) handleAdminTelegramGet(w http.ResponseWriter, r *http.Request) {
+// buildTelegramPageData assembles the bot status + settings + chat lists.
+// Shared by the (now redirect-only) standalone page and the Telegram tab.
+func (s *Server) buildTelegramPageData(r *http.Request) telegramPageData {
 	username := AdminUserFromContext(r.Context())
 	data := telegramPageData{
 		User:      adminUser{Name: username, Initials: initialsOf(username)},
@@ -84,7 +86,13 @@ func (s *Server) handleAdminTelegramGet(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	s.renderAdminPage(w, "telegram", data)
+	return data
+}
+
+// handleAdminTelegramGet redirects to the Telegram settings tab (the bot
+// config is folded into the settings modal now).
+func (s *Server) handleAdminTelegramGet(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/a/?settings=telegram", http.StatusSeeOther)
 }
 
 // handleAdminTelegramJSON serves the counters the page's auto-refresh
@@ -108,10 +116,11 @@ func (s *Server) handleAdminTelegramJSON(w http.ResponseWriter, r *http.Request)
 	_ = json.NewEncoder(w).Encode(map[string]int{"waiting": waiting, "allowed": allowed})
 }
 
-// redirectTelegram performs a POST/redirect/GET back to /a/telegram
-// with a stable flash code.
+// redirectTelegram performs a POST/redirect/GET back to the Telegram
+// settings tab. The stable flash code is carried through; the panel handler
+// resolves it via telegramFlash.
 func (s *Server) redirectTelegram(w http.ResponseWriter, r *http.Request, code string) {
-	http.Redirect(w, r, "/a/telegram?flash="+code, http.StatusSeeOther)
+	http.Redirect(w, r, "/a/settings/panel/telegram?flash="+code, http.StatusSeeOther)
 }
 
 // handleAdminTelegramSettingsPost persists enabled + token, then

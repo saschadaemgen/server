@@ -37,22 +37,25 @@ type mqttDeviceView struct {
 var mqttFlash = map[string]struct {
 	msg, typ string
 }{
-	"broker-saved": {"Broker-Einstellungen gespeichert.", "green"},
-	"created":      {"Gerät angelegt.", "green"},
-	"deleted":      {"Gerät gelöscht.", "green"},
-	"pw-set":       {"Passwort gesetzt.", "green"},
-	"acl-added":    {"ACL-Regel hinzugefügt.", "green"},
-	"acl-deleted":  {"ACL-Regel gelöscht.", "green"},
-	"err-exists":   {"Ein Gerät mit diesem Namen existiert bereits.", "red"},
-	"err-username": {"Ungültiger Benutzername (erlaubt: A–Z a–z 0–9 . _ -).", "red"},
-	"err-password": {"Passwort zu kurz (mindestens 8 Zeichen).", "red"},
-	"err-acl":      {"Ungültige ACL-Regel (Aktion oder Topic-Filter).", "red"},
-	"err-notfound": {"Gerät nicht gefunden.", "red"},
-	"err-broker":   {"Broker-Neustart fehlgeschlagen – Details im Status.", "red"},
-	"err-internal": {"Interner Fehler.", "red"},
+	"broker-saved": {"Broker settings saved.", "green"},
+	"created":      {"Device created.", "green"},
+	"deleted":      {"Device deleted.", "green"},
+	"pw-set":       {"Password set.", "green"},
+	"acl-added":    {"ACL rule added.", "green"},
+	"acl-deleted":  {"ACL rule deleted.", "green"},
+	"err-exists":   {"A device with that name already exists.", "red"},
+	"err-username": {"Invalid username (allowed: A-Z a-z 0-9 . _ -).", "red"},
+	"err-password": {"Password too short (at least 8 characters).", "red"},
+	"err-acl":      {"Invalid ACL rule (action or topic filter).", "red"},
+	"err-notfound": {"Device not found.", "red"},
+	"err-broker":   {"Broker restart failed - see status for details.", "red"},
+	"err-internal": {"Internal error.", "red"},
 }
 
-func (s *Server) handleAdminMQTTGet(w http.ResponseWriter, r *http.Request) {
+// buildMQTTPageData assembles the broker status + settings + device/ACL
+// list. Shared by the (now redirect-only) standalone page and the MQTT
+// settings tab.
+func (s *Server) buildMQTTPageData(r *http.Request) mqttPageData {
 	username := AdminUserFromContext(r.Context())
 	data := mqttPageData{
 		User:      adminUser{Name: username, Initials: initialsOf(username)},
@@ -82,13 +85,21 @@ func (s *Server) handleAdminMQTTGet(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	s.renderAdminPage(w, "mqtt", data)
+	return data
 }
 
-// redirectMQTT performs a POST/redirect/GET back to /a/mqtt with a
-// stable flash code.
+// handleAdminMQTTGet redirects to the MQTT settings tab: the broker config
+// is folded into the settings modal now, so the standalone page is a
+// deep-link into it (old bookmarks keep working).
+func (s *Server) handleAdminMQTTGet(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/a/?settings=mqtt", http.StatusSeeOther)
+}
+
+// redirectMQTT performs a POST/redirect/GET back to the MQTT settings tab.
+// The stable flash code is carried through; the panel handler resolves it to
+// a message via mqttFlash (so nothing user-supplied is reflected).
 func (s *Server) redirectMQTT(w http.ResponseWriter, r *http.Request, code string) {
-	http.Redirect(w, r, "/a/mqtt?flash="+code, http.StatusSeeOther)
+	http.Redirect(w, r, "/a/settings/panel/mqtt?flash="+code, http.StatusSeeOther)
 }
 
 func (s *Server) handleAdminMQTTBrokerPost(w http.ResponseWriter, r *http.Request) {

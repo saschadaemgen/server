@@ -20,15 +20,17 @@ func mqttPost(t *testing.T, env *testEnv, path string, form url.Values) *http.Re
 	return resp
 }
 
+// mqttGetBody fetches the MQTT settings tab fragment (the broker config now
+// lives inside the settings modal; /a/mqtt itself redirects into it).
 func mqttGetBody(t *testing.T, env *testEnv) string {
 	t.Helper()
-	resp, err := env.client.Get(env.ts.URL + "/a/mqtt")
+	resp, err := env.client.Get(env.ts.URL + "/a/settings/panel/mqtt")
 	if err != nil {
-		t.Fatalf("GET /a/mqtt: %v", err)
+		t.Fatalf("GET /a/settings/panel/mqtt: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /a/mqtt status = %d", resp.StatusCode)
+		t.Fatalf("GET mqtt panel status = %d", resp.StatusCode)
 	}
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
@@ -50,10 +52,10 @@ func TestAdminMQTT_DeviceAndACLLifecycle(t *testing.T) {
 	env := newTestServer(t)
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 
-	// Page renders.
+	// Tab renders the broker config form.
 	body := mqttGetBody(t, env)
-	if !strings.Contains(body, "MQTT-Broker") || !strings.Contains(body, "Broker-Einstellungen") {
-		t.Fatal("page missing expected sections")
+	if !strings.Contains(body, `action="/a/mqtt/broker"`) || !strings.Contains(body, "Broker enabled") {
+		t.Fatal("mqtt tab missing the broker config form")
 	}
 
 	// Create a device.

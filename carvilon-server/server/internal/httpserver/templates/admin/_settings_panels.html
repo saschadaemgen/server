@@ -279,26 +279,128 @@
   </div>
 
 {{else if eq .Cat "mqtt"}}
+  {{if not .MQTT.Available}}
+    <div class="sp-card"><div class="sp-row"><div class="sp-row-main"><span class="sp-sub">The MQTT broker subsystem is not included in this build.</span></div></div></div>
+  {{else}}{{with .MQTT}}
   <div class="sp-card">
     <div class="sp-row">
-      <div class="sp-row-main">
-        <span class="sp-label">Devices, ACL &amp; broker</span>
-        <span class="sp-sub">Create device credentials, manage topic rules, broker on/off + ports/TLS. Its own hardened page.</span>
-      </div>
-      <a class="sp-btn sp-btn-secondary" href="/a/mqtt">Manage MQTT</a>
+      <div class="sp-row-main"><span class="sp-label">Broker status</span>
+        <span class="sp-sub">Plaintext binds to the LAN interface only (never the internet); TLS is authenticated + encrypted.</span></div>
+      {{if .Status.Running}}<span class="sp-pill is-ok"><span class="sp-dot"></span>Running</span>
+      {{else if .Status.Enabled}}<span class="sp-pill"><span class="sp-dot"></span>Enabled, not started</span>
+      {{else}}<span class="sp-pill"><span class="sp-dot"></span>Disabled</span>{{end}}
     </div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Plaintext (LAN)</span></div><code>{{if .Status.TCPAddr}}{{.Status.TCPAddr}}{{else}}—{{end}}</code></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">TLS</span></div><code>{{if .Status.TLSAddr}}{{.Status.TLSAddr}}{{else}}—{{end}}</code></div>
+    {{if .Status.Error}}<div class="sp-row"><div class="sp-row-main"><span class="sp-label">Error</span></div><span class="sp-sub" style="color:#ff9d92">{{.Status.Error}}</span></div>{{end}}
   </div>
 
-{{else if eq .Cat "telegram"}}
-  <div class="sp-card">
-    <div class="sp-row">
-      <div class="sp-row-main">
-        <span class="sp-label">Bot, chat approvals &amp; test send</span>
-        <span class="sp-sub">Messages from the logic to your phone, commands from your phone into the logic. Bot on/off, token, chat allowlist. Its own hardened page.</span>
-      </div>
-      <a class="sp-btn sp-btn-secondary" href="/a/telegram">Manage Telegram</a>
+  <form class="sp-card sp-mt" method="post" action="/a/mqtt/broker">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Broker enabled</span><span class="sp-sub">Turn the embedded broker on. Without a cert path a self-signed certificate is generated once.</span></div>
+      <label class="sp-toggle"><input type="checkbox" name="enabled" {{if .Settings.Enabled}}checked{{end}} class="sp-check"/><span class="sp-sub sp-m0">Broker active</span></label>
     </div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Plaintext port (LAN)</span></div><input class="sp-input" type="number" name="tcp_port" min="1" max="65535" value="{{.Settings.TCPPort}}"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">TLS port</span></div><input class="sp-input" type="number" name="tls_port" min="1" max="65535" value="{{.Settings.TLSPort}}"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">TLS certificate (PEM, optional)</span></div><input class="sp-input" type="text" name="cert_file" value="{{.Settings.CertFile}}" placeholder="empty = self-signed"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">TLS key (PEM, optional)</span></div><input class="sp-input" type="text" name="key_file" value="{{.Settings.KeyFile}}" placeholder="empty = self-signed"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">WebSocket listener</span><span class="sp-sub">For the browser console.</span></div>
+      <label class="sp-toggle"><input type="checkbox" name="ws_enabled" {{if .Settings.WSEnabled}}checked{{end}} class="sp-check"/><span class="sp-sub sp-m0">Enable WS</span></label>
+    </div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">WebSocket port (LAN)</span></div><input class="sp-input" type="number" name="ws_port" min="1" max="65535" value="{{.Settings.WSPort}}"/></div>
+    <div class="sp-row sp-row-actions"><button class="sp-btn sp-btn-primary" type="submit">Save &amp; apply</button></div>
+  </form>
+
+  <form class="sp-card sp-mt" method="post" action="/a/mqtt/devices">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">New device</span><span class="sp-sub">The password is Argon2id-hashed on save and never shown again — note it now.</span></div></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Username</span></div><input class="sp-input" name="username" required autocomplete="off" pattern="[A-Za-z0-9._-]+" placeholder="e.g. flur-eg"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Password (min 8)</span></div><input class="sp-input" name="password" required autocomplete="off" minlength="8"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Label (optional)</span></div><input class="sp-input" name="label" autocomplete="off"/></div>
+    <div class="sp-row sp-row-actions"><button class="sp-btn sp-btn-primary" type="submit">Create device</button></div>
+  </form>
+
+  <div class="sp-card sp-mt">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Devices &amp; ACL</span></div></div>
+    {{if not .Devices}}<p class="sp-sub sp-empty">No devices yet.</p>{{end}}
+    {{range .Devices}}
+      <div class="sp-row">
+        <div class="sp-row-main"><span class="sp-label"><code>{{.Username}}</code>{{if .Label}} · {{.Label}}{{end}}</span>
+          <span class="sp-sub">{{len .Rules}} ACL rule(s). Default: own subtree <code>{{.DefaultSubtree}}</code> allowed, all else denied.</span></div>
+        <div class="sp-cell-actions">
+          <form class="sp-m0 sp-inline" method="post" action="/a/mqtt/devices/{{.Username}}/set-password"><input class="sp-input" type="text" name="password" minlength="8" placeholder="new pw" autocomplete="off" style="max-width:120px"/><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Set</button></form>
+          <form class="sp-m0" method="post" action="/a/mqtt/devices/{{.Username}}/delete"><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Delete</button></form>
+        </div>
+      </div>
+      {{range .Rules}}
+        <div class="sp-row">
+          <div class="sp-row-main"><span class="sp-sub">{{if .Allow}}allow{{else}}deny{{end}} · {{.Action}} · <code>{{.TopicFilter}}</code></span></div>
+          <form class="sp-m0" method="post" action="/a/mqtt/acl/{{.ID}}/delete"><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit" title="Delete rule">×</button></form>
+        </div>
+      {{end}}
+      <form class="sp-row" method="post" action="/a/mqtt/acl">
+        <input type="hidden" name="username" value="{{.Username}}"/>
+        <div class="sp-inline" style="flex-wrap:wrap;gap:8px">
+          <select class="sp-input" name="action" style="max-width:120px"><option value="both">both</option><option value="publish">publish</option><option value="subscribe">subscribe</option></select>
+          <select class="sp-input" name="allow" style="max-width:110px"><option value="allow">allow</option><option value="deny">deny</option></select>
+          <input class="sp-input" name="topic_filter" placeholder="carvilon/+/sensor/#" required style="max-width:230px"/>
+        </div>
+        <button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Add rule</button>
+      </form>
+    {{end}}
   </div>
+  {{end}}{{end}}
+
+{{else if eq .Cat "telegram"}}
+  {{if not .Telegram.Available}}
+    <div class="sp-card"><div class="sp-row"><div class="sp-row-main"><span class="sp-sub">The Telegram bot subsystem is not included in this build.</span></div></div></div>
+  {{else}}{{with .Telegram}}
+  <form class="sp-card" method="post" action="/a/telegram/settings">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Bot enabled</span><span class="sp-sub">Runs the getUpdates poller + the throttled send worker. Needs a token.</span></div>
+      <label class="sp-toggle"><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}} class="sp-check"/><span class="sp-sub sp-m0">Bot active</span></label>
+    </div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Bot token</span><span class="sp-sub">From @BotFather. Stored AES-256-GCM encrypted; enter a new value to replace it.</span></div>
+      <input class="sp-input" type="password" name="token" value="" placeholder="{{if .HasToken}}* * * (set){{else}}not set yet{{end}}"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Status</span></div>
+      {{if .Status.Running}}<span class="sp-pill is-ok"><span class="sp-dot"></span>Running</span>{{else}}<span class="sp-pill"><span class="sp-dot"></span>{{if .Enabled}}Enabled, not running{{else}}Disabled{{end}}</span>{{end}}
+    </div>
+    <div class="sp-row sp-row-actions"><button class="sp-btn sp-btn-primary" type="submit">Save</button></div>
+  </form>
+
+  <form class="sp-card sp-mt" method="post" action="/a/telegram/chats">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Approve a chat</span><span class="sp-sub">The numeric chat ID (negative for groups). Message the bot first to have it appear below.</span></div>
+      <input class="sp-input" name="chat_id" inputmode="numeric" placeholder="e.g. 123456789" required style="max-width:200px"/></div>
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Label (optional)</span></div><input class="sp-input" name="label" autocomplete="off" style="max-width:200px"/></div>
+    <div class="sp-row sp-row-actions"><button class="sp-btn sp-btn-secondary" type="submit">Approve chat</button></div>
+  </form>
+
+  <div class="sp-card sp-mt">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Allowed chats</span></div></div>
+    {{if not .Allowed}}<p class="sp-sub sp-empty">No chats approved yet.</p>{{end}}
+    {{range .Allowed}}
+      <div class="sp-row">
+        <div class="sp-row-main"><span class="sp-label"><code>{{.ChatID}}</code>{{if .Label}} · {{.Label}}{{end}}</span></div>
+        <div class="sp-cell-actions">
+          <form class="sp-m0" method="post" action="/a/telegram/test"><input type="hidden" name="chat_id" value="{{.ChatID}}"/><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Test send</button></form>
+          <form class="sp-m0" method="post" action="/a/telegram/chats/{{.ChatID}}/delete"><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Remove</button></form>
+        </div>
+      </div>
+    {{end}}
+  </div>
+
+  {{if .Waiting}}
+  <div class="sp-card sp-mt">
+    <div class="sp-row"><div class="sp-row-main"><span class="sp-label">Waiting for approval</span><span class="sp-sub">Chats that messaged the bot.</span></div></div>
+    {{range .Waiting}}
+      <div class="sp-row">
+        <div class="sp-row-main"><span class="sp-label"><code>{{.ChatID}}</code>{{if .Username}} · @{{.Username}}{{else if .FirstName}} · {{.FirstName}}{{end}}</span></div>
+        <div class="sp-cell-actions">
+          <form class="sp-m0" method="post" action="/a/telegram/pending/{{.ChatID}}/approve"><button class="sp-btn sp-btn-primary sp-btn-sm" type="submit">Approve</button></form>
+          <form class="sp-m0" method="post" action="/a/telegram/pending/{{.ChatID}}/reject"><button class="sp-btn sp-btn-secondary sp-btn-sm" type="submit">Reject</button></form>
+        </div>
+      </div>
+    {{end}}
+  </div>
+  {{end}}
+  {{end}}{{end}}
 
 {{end}}
 {{end}}

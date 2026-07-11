@@ -129,9 +129,13 @@ func (s *Server) handleAdminSettingsGet(w http.ResponseWriter, r *http.Request) 
 // settingsPanelData is the payload for one category fragment
 // ("settings-panel" partial): the full settings data plus which
 // category to render and an optional flash carried in the query.
+// MQTT + Telegram carry their own page data (the broker config and the
+// bot config, folded in as full tabs) - populated only for their cat.
 type settingsPanelData struct {
 	Cat       string
 	Page      adminSettingsData
+	MQTT      *mqttPageData
+	Telegram  *telegramPageData
 	Flash     string
 	FlashType string
 }
@@ -160,9 +164,32 @@ func (s *Server) handleAdminSettingsPanel(w http.ResponseWriter, r *http.Request
 	}
 	data := settingsPanelData{
 		Cat:       cat,
-		Page:      s.buildSettingsData(r),
 		Flash:     r.URL.Query().Get("flash"),
 		FlashType: flashType,
+	}
+	// MQTT + Telegram fold in their own config; the others share the
+	// settings data. Build only what this tab needs. MQTT/Telegram carry a
+	// stable flash CODE (not a message) in the query - resolve it here via
+	// their own maps so nothing user-supplied is reflected into the banner.
+	switch cat {
+	case "mqtt":
+		m := s.buildMQTTPageData(r)
+		data.MQTT = &m
+		if f, ok := mqttFlash[data.Flash]; ok {
+			data.Flash, data.FlashType = f.msg, f.typ
+		} else {
+			data.Flash = ""
+		}
+	case "telegram":
+		t := s.buildTelegramPageData(r)
+		data.Telegram = &t
+		if f, ok := telegramFlash[data.Flash]; ok {
+			data.Flash, data.FlashType = f.msg, f.typ
+		} else {
+			data.Flash = ""
+		}
+	default:
+		data.Page = s.buildSettingsData(r)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tpl.renderPartial(w, "settings-panel", data); err != nil {

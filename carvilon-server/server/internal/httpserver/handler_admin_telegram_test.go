@@ -104,29 +104,31 @@ func telegramPost(t *testing.T, env *testEnv, path string, form url.Values) *htt
 	return resp
 }
 
+// telegramGetBody fetches the Telegram settings tab fragment (the bot config
+// now lives inside the settings modal; /a/telegram itself redirects into it).
 func telegramGetBody(t *testing.T, env *testEnv) string {
 	t.Helper()
-	resp, err := env.client.Get(env.ts.URL + "/a/telegram")
+	resp, err := env.client.Get(env.ts.URL + "/a/settings/panel/telegram")
 	if err != nil {
-		t.Fatalf("GET /a/telegram: %v", err)
+		t.Fatalf("GET /a/settings/panel/telegram: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /a/telegram status = %d", resp.StatusCode)
+		t.Fatalf("GET telegram panel status = %d", resp.StatusCode)
 	}
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
 }
 
-// wantFlash asserts a POST came back as the PRG redirect to /a/telegram
-// with the given stable flash code.
+// wantFlash asserts a POST came back as the PRG redirect to the Telegram
+// settings tab with the given stable flash code.
 func wantFlash(t *testing.T, resp *http.Response, code string) {
 	t.Helper()
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303", resp.StatusCode)
 	}
-	if loc := resp.Header.Get("Location"); loc != "/a/telegram?flash="+code {
+	if loc := resp.Header.Get("Location"); loc != "/a/settings/panel/telegram?flash="+code {
 		t.Fatalf("Location = %q, want flash=%s", loc, code)
 	}
 }
@@ -155,14 +157,11 @@ func TestAdminTelegramPage_NotWired(t *testing.T) {
 	loginAdmin(t, env, adminTestUser, adminTestPassword)
 
 	body := telegramGetBody(t, env)
-	if !strings.Contains(body, "nicht eingebunden") {
-		t.Error("page without Telegram deps should say the subsystem is nicht eingebunden")
+	if !strings.Contains(body, "not included in this build") {
+		t.Error("tab without Telegram deps should say the subsystem is not included")
 	}
-	if strings.Contains(body, "Bot-Einstellungen") {
+	if strings.Contains(body, `action="/a/telegram/settings"`) {
 		t.Error("settings form must not render without the subsystem")
-	}
-	if !strings.Contains(body, adminTestUser) {
-		t.Errorf("user chip missing admin name %q (extractUser case for telegramPageData?)", adminTestUser)
 	}
 }
 
@@ -183,14 +182,11 @@ func TestAdminTelegramPage_TokenIsWriteOnly(t *testing.T) {
 	if !strings.Contains(body, `name="token" value=""`) {
 		t.Error("token input must render with an empty value even when a token is set")
 	}
-	if !strings.Contains(body, "gesetzt") {
-		t.Error("placeholder should say the token is gesetzt")
+	if !strings.Contains(body, "(set)") {
+		t.Error("placeholder should say the token is set")
 	}
 	if strings.Contains(body, secretToken) {
 		t.Error("the stored token leaked into the page")
-	}
-	if !strings.Contains(body, adminTestUser) {
-		t.Errorf("user chip missing admin name %q", adminTestUser)
 	}
 }
 
@@ -268,7 +264,7 @@ func TestAdminTelegramChats_Lifecycle(t *testing.T) {
 		t.Fatalf("UpsertPending: %v", err)
 	}
 	body := telegramGetBody(t, env)
-	if !strings.Contains(body, "222") || !strings.Contains(body, "wartet") {
+	if !strings.Contains(body, "222") || !strings.Contains(body, "Waiting") {
 		t.Error("pending chat 222 not rendered as waiting")
 	}
 
