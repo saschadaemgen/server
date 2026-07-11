@@ -70,12 +70,14 @@ func (s *Server) writeShelly1Overview(w http.ResponseWriter, r *http.Request, id
 // ---- M2: the settings surface from the real /settings tree ----
 
 // gen1DeviceKeys whitelists the device-level /settings keys the panel may
-// write. Deliberately absent (see the coverage doc): mqtt_* (provisioning
-// owns them), login (the fleet auth rotation owns it), timezone/location
+// write. discoverable is the mDNS announce switch - a real RGBW2 shipped
+// with it OFF, so the surface offers to make the device findable.
+// Deliberately absent (see the coverage doc): mqtt_* (provisioning owns
+// them), login (the fleet auth rotation owns it), timezone/location
 // (deferred), coiot (deliberately unused), factory reset (destructive,
 // not offered on this surface).
 var gen1DeviceKeys = map[string]bool{
-	"name": true, "mode": true,
+	"name": true, "mode": true, "discoverable": true,
 	"led_status_disable": true, "led_power_disable": true,
 }
 
@@ -88,10 +90,22 @@ var gen1RelayKeys = map[string]bool{
 	"auto_on": true, "auto_off": true, "max_power": true,
 }
 
+// gen1LightKeys whitelists the per-channel /settings/{color|white}/{i}
+// keys of a light-class device (RGBW2). Colour/gain/effect are LIVE
+// control, not settings - they ride the light control endpoint.
+// night_mode is deferred (nested write shape unverified).
+var gen1LightKeys = map[string]bool{
+	"name": true, "default_state": true, "transition": true,
+	"btn_type": true, "btn_reverse": true,
+	"auto_on": true, "auto_off": true,
+}
+
 // gen1EnumValues constrains the enum-valued keys so a crafted body cannot
-// push an out-of-vocabulary value at the device.
+// push an out-of-vocabulary value at the device. The mode vocabulary is
+// the union over device types; the device itself rejects a mode outside
+// its alt_modes.
 var gen1EnumValues = map[string]map[string]bool{
-	"mode":          {"relay": true, "roller": true},
+	"mode":          {"relay": true, "roller": true, "color": true, "white": true},
 	"default_state": {"off": true, "on": true, "last": true, "switch": true},
 	"btn_type": {"momentary": true, "toggle": true, "edge": true,
 		"detached": true, "action": true, "momentary_on_release": true},
@@ -114,13 +128,40 @@ func (s *Server) handleDesignerShelly1Device(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	typeCode := strings.TrimSpace(sett.Device.Type.String())
+	mode := strings.TrimSpace(sett.Mode.String())
+	// The mode option list: the device's own mode + its alt_modes when
+	// they survive the vocabulary filter (alt_modes is foreign input
+	// from a plain-HTTP device - only known mode words pass to the UI),
+	// else the type-code vocabulary. alt_modes was only ever measured on
+	// the RGBW2; trusting it everywhere would strip a 2.5's relay/roller
+	// switch on firmware that omits (or garbles) the field. The current
+	// mode always renders, even off-vocabulary - never hide what the
+	// device actually runs (escaped client-side).
+	modes := []string{}
+	if mode != "" {
+		modes = append(modes, mode)
+	}
+	for _, m := range sett.AltModes {
+		m = strings.TrimSpace(m)
+		if m != mode && gen1EnumValues["mode"][m] {
+			modes = append(modes, m)
+		}
+	}
+	if len(modes) <= 1 {
+		for _, m := range shellycaps.Gen1Modes(typeCode) {
+			if m != mode {
+				modes = append(modes, m)
+			}
+		}
+	}
 	view := map[string]any{
 		"ok":    true,
 		"type":  typeCode,
 		"model": shellycaps.Gen1ModelLabel(typeCode),
 		"name":  strings.TrimSpace(sett.Name.String()),
 		"fw":    strings.TrimSpace(sett.FW.String()),
-		"mode":  strings.TrimSpace(sett.Mode.String()),
+		"mode":  mode,
+		"modes": modes,
 		"mqtt": map[string]any{
 			"enable": flexBool(sett.MQTT.Enable), "server": sett.MQTT.Server.String(),
 			"user": sett.MQTT.User.String(), "id": sett.MQTT.ID.String(),
@@ -139,6 +180,18 @@ func (s *Server) handleDesignerShelly1Device(w http.ResponseWriter, r *http.Requ
 		view["led"] = map[string]any{
 			"status_disable": flexBool(sett.LEDStatusDisable),
 			"power_disable":  flexBool(sett.LEDPowerDisable),
+		}
+	}
+	// mDNS announce state: a device with it OFF can only be adopted by
+	// its manual address - the panel offers the toggle.
+	if !sett.Discoverable.Empty() {
+		view["discoverable"] = flexBool(sett.Discoverable)
+	}
+	// WiFi signal (from /status, best-effort): a weak RSSI explains a
+	// flaky WiFi-only device better than any other single number.
+	if st, serr := cl.GetStatus(r.Context()); serr == nil {
+		if rssi := st.RSSILabel(); rssi != "" {
+			view["rssi"] = rssi
 		}
 	}
 	if ota, oerr := cl.GetOTA(r.Context()); oerr == nil {
@@ -170,8 +223,20 @@ func (s *Server) handleDesignerShelly1DeviceSettings(w http.ResponseWriter, r *h
 	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// gen1LightMode maps a device mode onto the light control surface: white
+// mode drives the independent white outputs, everything else the
+// combined color light (the measured RGBW2 default).
+func gen1LightMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), "white") {
+		return "white"
+	}
+	return "color"
+}
+
 // handleDesignerShelly1Channel returns one channel's settings + schedule
-// for the panel pre-fill. Route: GET /a/designer/shelly/{id}/gen1/channel/{ch}.
+// for the panel pre-fill - the relay shape, or the light shape on a
+// light-class device (the device's own settings tree decides, never the
+// caller). Route: GET /a/designer/shelly/{id}/gen1/channel/{ch}.
 func (s *Server) handleDesignerShelly1Channel(w http.ResponseWriter, r *http.Request) {
 	cl, ch, ok := s.shelly1ClientChFromPath(w, r)
 	if !ok {
@@ -180,6 +245,37 @@ func (s *Server) handleDesignerShelly1Channel(w http.ResponseWriter, r *http.Req
 	sett, err := cl.GetSettings(r.Context())
 	if err != nil {
 		http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
+		return
+	}
+	if len(sett.Relays) == 0 && ch < len(sett.Lights) {
+		li := sett.Lights[ch]
+		enabled, _ := li.Schedule.Bool()
+		designerJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"kind": gen1LightMode(sett.Mode.String()),
+			"light": map[string]any{
+				"name":          li.Name.String(),
+				"default_state": li.DefaultState.String(),
+				"transition":    li.Transition.String(),
+				"btn_type":      li.BtnType.String(),
+				"btn_reverse":   flexBool(li.BtnReversed),
+				"auto_on":       li.AutoOn.String(),
+				"auto_off":      li.AutoOff.String(),
+			},
+			// The current output values seed the cockpit's sliders (the
+			// settings tree carries them on Gen1 light devices).
+			"state": map[string]any{
+				"ison":       flexBool(li.IsOn),
+				"red":        li.Red.String(),
+				"green":      li.Green.String(),
+				"blue":       li.Blue.String(),
+				"white":      li.White.String(),
+				"gain":       li.Gain.String(),
+				"brightness": li.Brightness.String(),
+				"effect":     li.Effect.String(),
+			},
+			"schedule": shelly1Schedule{Enabled: enabled, Rules: li.ScheduleRules},
+		})
 		return
 	}
 	if ch >= len(sett.Relays) {
@@ -208,17 +304,118 @@ func (s *Server) handleDesignerShelly1Channel(w http.ResponseWriter, r *http.Req
 }
 
 // handleDesignerShelly1ChannelSettings applies whitelisted per-channel
-// keys. Route: POST /a/designer/shelly/{id}/gen1/channel/{ch}/settings.
+// keys - to /settings/relay/{ch}, or /settings/{color|white}/{ch} on a
+// light-class device (the device's settings tree decides the surface AND
+// the whitelist). Route: POST /a/designer/shelly/{id}/gen1/channel/{ch}/settings.
 func (s *Server) handleDesignerShelly1ChannelSettings(w http.ResponseWriter, r *http.Request) {
 	cl, ch, ok := s.shelly1ClientChFromPath(w, r)
 	if !ok {
 		return
 	}
-	params, ok := gen1ConfigParams(w, r, gen1RelayKeys)
-	if !ok {
+	sett, err := cl.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
+		return
+	}
+	if len(sett.Relays) == 0 && len(sett.Lights) > 0 {
+		if ch >= len(sett.Lights) {
+			http.Error(w, "no such channel", http.StatusNotFound)
+			return
+		}
+		params, pok := gen1ConfigParams(w, r, gen1LightKeys)
+		if !pok {
+			return
+		}
+		if err := cl.SetLightSettings(r.Context(), gen1LightMode(sett.Mode.String()), ch, params); err != nil {
+			http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
+			return
+		}
+		designerJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	params, pok := gen1ConfigParams(w, r, gen1RelayKeys)
+	if !pok {
 		return
 	}
 	if err := cl.SetRelaySettings(r.Context(), ch, params); err != nil {
+		http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
+		return
+	}
+	designerJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// gen1LightParamBounds clamps the live light-control parameters to the
+// device vocabulary (measured RGBW2 ranges).
+var gen1LightParamBounds = map[string][2]int{
+	"red": {0, 255}, "green": {0, 255}, "blue": {0, 255}, "white": {0, 255},
+	"gain": {0, 100}, "brightness": {0, 100},
+	"effect": {0, 6}, "transition": {0, 5000},
+}
+
+// handleDesignerShelly1Light drives one light channel live (on/off,
+// colour, gain/brightness, effect, transition) over the documented REST
+// control endpoint - the MQTT command/set topics for lights stay unwired
+// until confirmed on the live broker (briefing rule). Route:
+// POST /a/designer/shelly/{id}/gen1/light/{ch}, body {"mode":"color",
+// "on":bool?, "red":n?, ...} - only the provided keys are sent, so a
+// gain nudge never re-sends a stale colour.
+func (s *Server) handleDesignerShelly1Light(w http.ResponseWriter, r *http.Request) {
+	cl, ch, ok := s.shelly1ClientChFromPath(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Mode string `json:"mode"`
+		On   *bool  `json:"on"`
+
+		Red        *int `json:"red"`
+		Green      *int `json:"green"`
+		Blue       *int `json:"blue"`
+		White      *int `json:"white"`
+		Gain       *int `json:"gain"`
+		Brightness *int `json:"brightness"`
+		Effect     *int `json:"effect"`
+		Transition *int `json:"transition"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if in.Mode != "color" && in.Mode != "white" {
+		http.Error(w, "invalid mode", http.StatusBadRequest)
+		return
+	}
+	params := url.Values{}
+	if in.On != nil {
+		if *in.On {
+			params.Set("turn", "on")
+		} else {
+			params.Set("turn", "off")
+		}
+	}
+	for key, v := range map[string]*int{
+		"red": in.Red, "green": in.Green, "blue": in.Blue, "white": in.White,
+		"gain": in.Gain, "brightness": in.Brightness,
+		"effect": in.Effect, "transition": in.Transition,
+	} {
+		if v == nil {
+			continue
+		}
+		b := gen1LightParamBounds[key]
+		n := *v
+		if n < b[0] {
+			n = b[0]
+		}
+		if n > b[1] {
+			n = b[1]
+		}
+		params.Set(key, strconv.Itoa(n))
+	}
+	if len(params) == 0 {
+		http.Error(w, "no light parameter in body", http.StatusBadRequest)
+		return
+	}
+	if err := cl.SetLight(r.Context(), in.Mode, ch, params); err != nil {
 		http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
 		return
 	}
@@ -279,6 +476,25 @@ func (s *Server) handleDesignerShelly1Schedule(w http.ResponseWriter, r *http.Re
 			http.Error(w, "invalid schedule rule", http.StatusBadRequest)
 			return
 		}
+	}
+	// The device's settings tree decides which channel class owns the
+	// schedule - a light-class device stores it per light.
+	sett, serr := cl.GetSettings(r.Context())
+	if serr != nil {
+		http.Error(w, shellyFriendlyError(serr), http.StatusBadGateway)
+		return
+	}
+	if len(sett.Relays) == 0 && len(sett.Lights) > 0 {
+		if ch >= len(sett.Lights) {
+			http.Error(w, "no such channel", http.StatusNotFound)
+			return
+		}
+		if err := cl.SetLightScheduleRules(r.Context(), gen1LightMode(sett.Mode.String()), ch, in.Enabled, in.Rules); err != nil {
+			http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)
+			return
+		}
+		designerJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
 	}
 	if err := cl.SetScheduleRules(r.Context(), ch, in.Enabled, in.Rules); err != nil {
 		http.Error(w, shellyFriendlyError(err), http.StatusBadGateway)

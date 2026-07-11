@@ -92,3 +92,36 @@ func TestIsGen1Type(t *testing.T) {
 		}
 	}
 }
+
+// TestGen1Lights pins the light-class capability: an RGBW2 in color mode
+// drives one combined RGBW light, in white mode four independent white
+// channels; relay-class codes have no lights at all.
+func TestGen1Lights(t *testing.T) {
+	color := Gen1Lights("SHRGBW2", "color")
+	if len(color) != 1 || color[0].Kind != "color" || color[0].ID != 0 {
+		t.Errorf("color mode = %+v, want one color light", color)
+	}
+	// an empty/odd mode renders the color default rather than nothing
+	if got := Gen1Lights(" shrgbw2 ", ""); len(got) != 1 || got[0].Kind != "color" {
+		t.Errorf("default mode = %+v, want the color shape", got)
+	}
+	white := Gen1Lights("SHRGBW2", "White")
+	if len(white) != 4 {
+		t.Fatalf("white mode = %+v, want four white channels", white)
+	}
+	for i, l := range white {
+		if l.ID != i || l.Kind != "white" {
+			t.Errorf("white[%d] = %+v", i, l)
+		}
+	}
+	if got := Gen1Lights("SHSW-25", "relay"); got != nil {
+		t.Errorf("relay-class device has lights: %+v", got)
+	}
+	// the RGBW2 exposes NO relay channels - its surface is the lights
+	if got := Gen1Channels("SHRGBW2", "color"); len(got) != 0 {
+		t.Errorf("SHRGBW2 relay channels = %+v, want none", got)
+	}
+	if Gen1ModelLabel("SHRGBW2") != "Shelly RGBW2" {
+		t.Errorf("label = %q", Gen1ModelLabel("SHRGBW2"))
+	}
+}

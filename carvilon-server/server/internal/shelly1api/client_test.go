@@ -486,3 +486,83 @@ func TestSetLogin(t *testing.T) {
 		}
 	}
 }
+
+// TestLightShapes decodes the light-class settings/status shapes measured
+// on a real SHRGBW2 (fw v1.14.0, color mode) and pins the RSSI label.
+func TestLightShapes(t *testing.T) {
+	ts := newGen1Server(t, map[string]string{
+		"/settings": `{"device":{"type":"SHRGBW2"},"mode":"color","alt_modes":["white"],"discoverable":false,
+			"lights":[{"name":"strip","ison":true,"red":255,"green":120,"blue":40,"white":0,"gain":80,
+			           "transition":0,"effect":0,"default_state":"switch","schedule":false,"schedule_rules":[]}]}`,
+		"/status": `{"lights":[{"ison":true,"mode":"color","red":255,"green":120,"blue":40,"white":0,"gain":80,"power":9.6}],
+			"meters":[{"power":9.6,"total":600}],"wifi_sta":{"rssi":-94},
+			"update":{"status":"idle","has_update":true,"new_version":"v1.14.1"}}`,
+	})
+	c := New(Options{Address: addrOf(ts)})
+	sett, err := c.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if len(sett.Lights) != 1 || sett.Lights[0].Name.String() != "strip" {
+		t.Fatalf("lights = %+v", sett.Lights)
+	}
+	if got := sett.Lights[0].DefaultState.String(); got != "switch" {
+		t.Errorf("default_state = %q", got)
+	}
+	if v, ok := sett.Discoverable.Bool(); !ok || v {
+		t.Errorf("discoverable = %v/%v, want false", v, ok)
+	}
+	if len(sett.AltModes) != 1 || sett.AltModes[0] != "white" {
+		t.Errorf("alt_modes = %v", sett.AltModes)
+	}
+	st, err := c.GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if len(st.Lights) != 1 || st.Lights[0].StateLabel() != "On" || st.Lights[0].PowerLabel() != "9.6 W" {
+		t.Fatalf("light status = %+v", st.Lights)
+	}
+	if got := st.RSSILabel(); got != "-94 dBm" {
+		t.Errorf("rssi = %q", got)
+	}
+	if v, ok := st.Update.HasUpdate.Bool(); !ok || !v {
+		t.Errorf("update.has_update = %v/%v", v, ok)
+	}
+}
+
+// TestSetLight pins the control transport: mode dispatch into the URL
+// path, params passed through, and the mode/channel guards failing
+// locally (no request ever leaves for a bad mode).
+func TestSetLight(t *testing.T) {
+	rs := newRecordingServer(t)
+	c := rs.client()
+	if err := c.SetLight(context.Background(), "color", 0, url.Values{"turn": {"on"}, "red": {"255"}}); err != nil {
+		t.Fatalf("SetLight: %v", err)
+	}
+	last := rs.last()
+	if last.Path != "/color/0" || last.Query.Get("turn") != "on" || last.Query.Get("red") != "255" {
+		t.Errorf("request = %s %v", last.Path, last.Query)
+	}
+	if err := c.SetLightSettings(context.Background(), "white", 3, url.Values{"transition": {"500"}}); err != nil {
+		t.Fatalf("SetLightSettings: %v", err)
+	}
+	if last := rs.last(); last.Path != "/settings/white/3" || last.Query.Get("transition") != "500" {
+		t.Errorf("settings request = %s %v", last.Path, last.Query)
+	}
+	if err := c.SetLightScheduleRules(context.Background(), "color", 0, true, []string{"0700-0123456-on"}); err != nil {
+		t.Fatalf("SetLightScheduleRules: %v", err)
+	}
+	if last := rs.last(); last.Path != "/settings/color/0" || last.Query.Get("schedule_rules") != "0700-0123456-on" {
+		t.Errorf("schedule request = %s %v", last.Path, last.Query)
+	}
+	before := rs.count()
+	if err := c.SetLight(context.Background(), "settings", 0, url.Values{}); err == nil {
+		t.Error("bogus mode accepted")
+	}
+	if err := c.SetLight(context.Background(), "color", 9, url.Values{}); err == nil {
+		t.Error("out-of-range channel accepted")
+	}
+	if rs.count() != before {
+		t.Error("guarded calls still sent requests")
+	}
+}

@@ -107,6 +107,13 @@ func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyD
 			caps = shellycaps.Gen1Channels(d.Model, "")
 			prefix = "shellies/" + username
 			gen = shellystore.Gen1
+			// Light-class Gen1 devices (RGBW2) have no relay channels and
+			// their MQTT topic set is pending live-broker confirmation
+			// (briefing rule: confirm before wiring module bindings) - no
+			// editor module yet, the Device Center cockpit is their surface.
+			if len(caps) == 0 {
+				continue
+			}
 		} else {
 			caps = shellycaps.Channels(d.Model)
 		}

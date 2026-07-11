@@ -462,27 +462,40 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 		capModel = p.ident.TypeLabel()
 	}
 	var chans []shellycaps.Channel
+	var lights []shellycaps.Light
 	if isGen1 {
-		// Mode (relay vs roller on a 2.5) lives in the authenticated
-		// /settings tree, which the row probe deliberately never reads -
-		// the relay-mode shape is the M1 scope; a roller-mode device
-		// shows relay channels until the settings surface corrects it.
+		// Mode (relay vs roller on a 2.5, color vs white on an RGBW2)
+		// lives in the authenticated /settings tree, which the row probe
+		// deliberately never reads - the default-mode shape renders until
+		// the settings surface corrects it.
 		chans = shellycaps.Gen1Channels(capModel, "")
+		lights = shellycaps.Gen1Lights(capModel, "")
 	} else {
 		chans = shellycaps.Channels(capModel)
 	}
-	if len(chans) > 0 {
-		type chJSON struct {
-			ID    int  `json:"id"`
-			Meter bool `json:"meter"`
-		}
-		list := make([]chJSON, 0, len(chans))
-		for _, c := range chans {
-			list = append(list, chJSON{ID: c.ID, Meter: c.Meter})
-		}
+	// One channel vocabulary for the cockpit: relays carry no kind (the
+	// pre-light shape, unchanged for Gen2), lights carry theirs.
+	type chJSON struct {
+		ID    int    `json:"id"`
+		Meter bool   `json:"meter"`
+		Kind  string `json:"kind,omitempty"` // "" relay | "color" | "white"
+	}
+	list := make([]chJSON, 0, len(chans)+len(lights))
+	for _, c := range chans {
+		list = append(list, chJSON{ID: c.ID, Meter: c.Meter})
+	}
+	for _, l := range lights {
+		list = append(list, chJSON{ID: l.ID, Kind: l.Kind})
+	}
+	if len(list) > 0 {
 		if raw, err := json.Marshal(list); err == nil {
 			row.ChannelsJSON = string(raw)
 		}
+	}
+	// A light-class device is a light, not a switch - its own group,
+	// icon and facet in the Device Center.
+	if len(lights) > 0 && len(chans) == 0 {
+		row.Category, row.TypeLabel = "light", "Light"
 	}
 	if p.err == nil {
 		row.StatusState, row.StatusText = "online", "Online"
@@ -519,7 +532,7 @@ func makeShellyRow(p shellyProbe, info shellyRowInfo) uaRow {
 	}
 
 	det := []kvRow{
-		{Key: "Type", Value: "Switch"},
+		{Key: "Type", Value: row.TypeLabel},
 		{Key: "Status", Value: row.StatusText},
 		{Key: "Source", Value: row.SourceLabel},
 	}

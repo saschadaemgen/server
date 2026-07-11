@@ -35,6 +35,26 @@ type InputStatus struct {
 	EventCnt flexVal `json:"event_cnt"`
 }
 
+// LightStatus is one lights[] entry of a light-class device (RGBW2).
+// Confirmed on a real SHRGBW2: the per-light power (W) rides here, not
+// only on the shared meter.
+type LightStatus struct {
+	IsOn       flexVal `json:"ison"`
+	Source     flexVal `json:"source"`
+	HasTimer   flexVal `json:"has_timer"`
+	Mode       flexVal `json:"mode"`
+	Red        flexVal `json:"red"`
+	Green      flexVal `json:"green"`
+	Blue       flexVal `json:"blue"`
+	White      flexVal `json:"white"`
+	Gain       flexVal `json:"gain"`
+	Brightness flexVal `json:"brightness"`
+	Effect     flexVal `json:"effect"`
+	Transition flexVal `json:"transition"`
+	Power      flexVal `json:"power"` // W
+	Overpower  flexVal `json:"overpower"`
+}
+
 // TempStatus is the device temperature block (tmp) on models that report
 // one (1PM, 2.5, Plug S).
 type TempStatus struct {
@@ -45,6 +65,7 @@ type TempStatus struct {
 // Status is the subset of GET /status the Device Center renders.
 type Status struct {
 	Relays          []RelayStatus `json:"relays"`
+	Lights          []LightStatus `json:"lights"`
 	Meters          []MeterStatus `json:"meters"`
 	Inputs          []InputStatus `json:"inputs"`
 	Temperature     flexVal       `json:"temperature"` // °C scalar (fw-dependent)
@@ -56,6 +77,16 @@ type Status struct {
 	MQTT            struct {
 		Connected flexVal `json:"connected"`
 	} `json:"mqtt"`
+	Update struct {
+		Status     flexVal `json:"status"`
+		HasUpdate  flexVal `json:"has_update"`
+		NewVersion flexVal `json:"new_version"`
+		OldVersion flexVal `json:"old_version"`
+	} `json:"update"`
+	WiFiSta struct {
+		RSSI flexVal `json:"rssi"` // dBm - surfaced in the cockpit (a weak
+		// signal is the likeliest cause of a flaky WiFi-only device)
+	} `json:"wifi_sta"`
 }
 
 // GetStatus reads the device state (Basic auth when the device is
@@ -77,6 +108,35 @@ func (r RelayStatus) StateLabel() string {
 		return "Off"
 	}
 	return "-"
+}
+
+// StateLabel renders a light's state ("On"/"Off"/"-").
+func (l LightStatus) StateLabel() string {
+	if v, ok := l.IsOn.Bool(); ok {
+		if v {
+			return "On"
+		}
+		return "Off"
+	}
+	return "-"
+}
+
+// PowerLabel renders a light's own power reading ("12.4 W" / "-").
+func (l LightStatus) PowerLabel() string {
+	if v, ok := l.Power.Float(); ok {
+		return trimFloat(v) + " W"
+	}
+	return "-"
+}
+
+// RSSILabel renders the WiFi signal ("-94 dBm" / "") - the cockpit
+// surfaces it because a weak signal is the likeliest cause of a flaky
+// WiFi-only device.
+func (s *Status) RSSILabel() string {
+	if v, ok := s.WiFiSta.RSSI.Float(); ok {
+		return trimFloat(v) + " dBm"
+	}
+	return ""
 }
 
 // PowerLabel renders a meter's active power ("12.4 W" / "-").

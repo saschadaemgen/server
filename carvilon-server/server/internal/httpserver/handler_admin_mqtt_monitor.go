@@ -9,6 +9,7 @@ import (
 
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
+	"carvilon.local/server/internal/shellycaps"
 	"carvilon.local/server/internal/shellystore"
 )
 
@@ -217,6 +218,11 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 			// (mqtt_id = the broker username), not the carvilon/ prefix.
 			if d.Gen == shellystore.Gen1 {
 				prefix = "shellies/" + a.Username
+				// light-class devices (RGBW2) group as lights, not switches
+				if len(shellycaps.Gen1Lights(d.Model, "")) > 0 &&
+					len(shellycaps.Gen1Channels(d.Model, "")) == 0 {
+					row.Category = "light"
+				}
 			}
 		}
 		row.Prefix = prefix
@@ -242,7 +248,7 @@ func (s *Server) buildMQTTMonitorDevices(ctx context.Context) ([]mqttMonitorDevi
 	// Category-major order (the Devices pattern: the table's group
 	// headers need contiguous categories), offline first inside each
 	// category (the operator's early warning), then by name.
-	catRank := map[string]int{"switch": 0, "other": 1}
+	catRank := map[string]int{"switch": 0, "light": 1, "other": 2}
 	sort.SliceStable(out, func(i, j int) bool {
 		if catRank[out[i].Category] != catRank[out[j].Category] {
 			return catRank[out[i].Category] < catRank[out[j].Category]

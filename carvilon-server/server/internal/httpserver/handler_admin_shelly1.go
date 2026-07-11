@@ -50,7 +50,14 @@ func (s *Server) writeShelly1Detail(w http.ResponseWriter, r *http.Request, clie
 		return ""
 	}
 
-	sections := make([]uaSection, 0, len(st.Relays)+2)
+	lightName := func(i int) string {
+		if sett != nil && i < len(sett.Lights) {
+			return strings.TrimSpace(sett.Lights[i].Name.String())
+		}
+		return ""
+	}
+
+	sections := make([]uaSection, 0, len(st.Relays)+len(st.Lights)+2)
 	for i, rl := range st.Relays {
 		// 1-based titles match the terminal print on the device; the
 		// 0-based channel ids stay an internal detail (the Gen2 pattern).
@@ -65,6 +72,32 @@ func (s *Server) writeShelly1Detail(w http.ResponseWriter, r *http.Request, clie
 			sec.Rows = appendKVDash(sec.Rows, "Energy", st.Meters[i].EnergyLabel())
 		}
 		sections = append(sections, sec)
+	}
+	for i, l := range st.Lights {
+		title := "Light " + strconv.Itoa(i+1)
+		if name := lightName(i); name != "" {
+			title += " · " + name
+		}
+		sec := uaSection{Title: title}
+		sec.Rows = appendKVDash(sec.Rows, "State", l.StateLabel())
+		sec.Rows = appendKVDash(sec.Rows, "Power", l.PowerLabel())
+		if strings.EqualFold(strings.TrimSpace(l.Mode.String()), "color") || !l.Red.Empty() {
+			sec.Rows = appendKVDash(sec.Rows, "Color (R G B W)", strings.TrimSpace(
+				l.Red.String()+" "+l.Green.String()+" "+l.Blue.String()+" "+l.White.String()))
+			sec.Rows = appendKVDash(sec.Rows, "Gain", l.Gain.String())
+		} else {
+			sec.Rows = appendKVDash(sec.Rows, "Brightness", l.Brightness.String())
+		}
+		if v, ok := l.Effect.Float(); ok && v > 0 {
+			sec.Rows = appendKV(sec.Rows, "Effect", strconv.Itoa(int(v)))
+		}
+		sections = append(sections, sec)
+	}
+	if len(st.Lights) > 0 && len(st.Meters) > 0 {
+		// Lights carry their own power; the shared device meter still owns
+		// the energy counter (watt-minutes, reset on reboot).
+		sections[len(sections)-1].Rows = appendKVDash(
+			sections[len(sections)-1].Rows, "Energy", st.Meters[0].EnergyLabel())
 	}
 	if len(st.Relays) == 0 && strings.EqualFold(mode, "roller") {
 		// A 2.5 in roller mode has no relay channels; say so instead of
@@ -90,12 +123,22 @@ func (s *Server) writeShelly1Detail(w http.ResponseWriter, r *http.Request, clie
 	}
 	dev := uaSection{Title: "Device"}
 	dev.Rows = appendKV(dev.Rows, "Temperature", st.TempLabel())
+	// WiFi signal: a weak RSSI is the likeliest cause of a flaky
+	// WiFi-only device - measured -94 dBm on a real RGBW2.
+	dev.Rows = appendKV(dev.Rows, "WiFi signal", st.RSSILabel())
 	if v, ok := st.MQTT.Connected.Bool(); ok {
 		label := "Not connected"
 		if v {
 			label = "Connected"
 		}
 		dev.Rows = appendKV(dev.Rows, "MQTT (device view)", label)
+	}
+	if sett != nil {
+		if v, ok := sett.Discoverable.Bool(); ok && !v {
+			// Say it where the operator looks: this device hides from
+			// mDNS - it was (or must be) adopted by its manual address.
+			dev.Rows = appendKV(dev.Rows, "mDNS announce", "Off (adopt by IP; enable under Settings)")
+		}
 	}
 	if len(dev.Rows) > 0 {
 		sections = append(sections, dev)

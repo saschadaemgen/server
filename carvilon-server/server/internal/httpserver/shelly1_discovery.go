@@ -41,6 +41,7 @@ var gen1NamePrefixes = map[string]string{
 	"shellyplug-s":   "SHPLG-S",
 	"shellyswitch":   "SHSW-21",
 	"shellyplug-u1":  "SHPLG-U1",
+	"shellyrgbw2":    "SHRGBW2",
 	"shelly1pm":      "SHSW-PM",
 	"shellyplug":     "SHPLG-1",
 	"shelly1l":       "SHSW-L",
@@ -48,9 +49,14 @@ var gen1NamePrefixes = map[string]string{
 }
 
 // gen1PrefixOrder is the longest-first match order for gen1NamePrefixes.
+// Note a real RGBW2 shipped with mDNS announce OFF ("discoverable":
+// false) - this prefix only catches the ones that do announce; the
+// manual-address adoption path covers the silent ones, and the settings
+// surface offers the discoverable toggle.
 var gen1PrefixOrder = []string{
 	"shellyswitch25",
 	"shellyplug-u1",
+	"shellyrgbw2",
 	"shellyplug-s",
 	"shellyswitch",
 	"shellyplug",

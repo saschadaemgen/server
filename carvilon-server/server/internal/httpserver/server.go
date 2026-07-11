@@ -713,6 +713,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/designer/shelly/{id}/gen1/channel/{ch}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Channel)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/channel/{ch}/settings", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1ChannelSettings)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/channel/{ch}/schedule", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Schedule)))
+	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/light/{ch}", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Light)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/reboot", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1Reboot)))
 	s.mux.Handle("POST /a/designer/shelly/{id}/gen1/ota-update", s.requireAdminSession(http.HandlerFunc(s.handleDesignerShelly1OTAUpdate)))
 	s.mux.Handle("GET /a/designer/syslog", s.requireAdminSession(http.HandlerFunc(s.handleDesignerSysLog)))

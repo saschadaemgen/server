@@ -513,6 +513,10 @@
           h += '<div class="dck-note">The channel layout for this model is not known yet - live control appears once the device reports its switches.</div>';
         }
         cur.channels.forEach(function (ch) {
+          // light-class channels (RGBW2) render their own card: colour /
+          // brightness control over the device's HTTP endpoint (the MQTT
+          // command topics for lights await live-broker confirmation)
+          if (ch.kind === 'color' || ch.kind === 'white') { h += lightCardHTML(ch); return; }
           var n = ch.id + 1;
           h += '<div class="dck-ch" data-dck-ch="' + ch.id + '" role="button" tabindex="0" aria-label="Channel ' + n + ' settings">'
             + '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Switch ' + n
@@ -560,12 +564,123 @@
             toggle(Number(btn.getAttribute('data-dck-tog')), btn);
           });
         });
+        wireLightCards(leftCol);
         // Clicking a channel row selects it - the right column then shows
         // THAT channel's settings (the editor's device/channel pattern).
         leftCol.querySelectorAll('.dck-ch').forEach(function (el) {
           el.addEventListener('click', function () { select(Number(el.getAttribute('data-dck-ch'))); });
         });
         return true;
+      }
+
+      // ---- light card (gen1 light-class devices, e.g. RGBW2) ----
+      function lightCardHTML(ch) {
+        var n = ch.id + 1;
+        var sliders = ch.kind === 'color'
+          ? [['red', 'R', 255], ['green', 'G', 255], ['blue', 'B', 255], ['white', 'W', 255], ['gain', 'Gain', 100]]
+          : [['brightness', 'Brightness', 100]];
+        var h = '<div class="dck-ch" data-dck-ch="' + ch.id + '" data-dcl-kind="' + esc(ch.kind) + '" role="button" tabindex="0" aria-label="Light ' + n + ' settings">'
+          + '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Light ' + n
+          + '<span data-dck-name></span></span><span class="dck-go">settings &rsaquo;</span><span class="dc-hr"></span>'
+          + '<button type="button" class="dck-tog" data-dcl-tog="' + ch.id + '" disabled aria-label="Light ' + n + '"></button>'
+          + '<span class="dck-state" data-dck-state>—</span></div>'
+          + '<div class="dck-meters"><div class="dck-tile"><div class="k">Power</div><div class="v"><span data-dck-w>—</span> W</div></div></div>';
+        sliders.forEach(function (s) {
+          h += '<div class="dck-in"><span class="k">' + esc(s[1]) + '</span>'
+            + '<input type="range" min="0" max="' + s[2] + '" value="0" data-dcl="' + s[0] + '" style="flex:1;" disabled>'
+            + '<span data-dclv="' + s[0] + '">—</span></div>';
+        });
+        if (ch.kind === 'color') {
+          h += '<div class="dck-in"><span class="k">Effect</span><select class="dck-i" data-dcl-effect disabled>'
+            + '<option value="0">Off</option>'
+            + [1, 2, 3, 4, 5, 6].map(function (e) { return '<option value="' + e + '">Effect ' + e + '</option>'; }).join('')
+            + '</select></div>';
+        }
+        h += '<div class="dck-note err" data-dck-chmsg hidden></div></div>';
+        return h;
+      }
+      function lightSend(ch, kind, body, after) {
+        if (!cur || !cur.sid) { if (after) after(false); return; }
+        body.mode = kind;
+        fetch('/a/designer/shelly/' + cur.sid + '/gen1/light/' + ch, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        }).then(function (r) { if (after) after(r.ok); })
+          .catch(function () { if (after) after(false); });
+      }
+      function wireLightCards(leftCol) {
+        leftCol.querySelectorAll('[data-dcl-kind]').forEach(function (card) {
+          var ch = Number(card.getAttribute('data-dck-ch'));
+          var kind = card.getAttribute('data-dcl-kind');
+          var tog = card.querySelector('[data-dcl-tog]');
+          if (tog) tog.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (tog.disabled) return;
+            var want = !tog.classList.contains('on');
+            tog.classList.add('pending');
+            // HTTP control answers synchronously - the response IS the
+            // confirmation (no MQTT confirm-timer dance needed here)
+            lightSend(ch, kind, { on: want }, function (ok) {
+              tog.classList.remove('pending');
+              if (!ok) { chFlash(ch, 'Light command failed.'); return; }
+              lightPatchState(card, want);
+            });
+          });
+          card.querySelectorAll('[data-dcl]').forEach(function (sl) {
+            var key = sl.getAttribute('data-dcl');
+            var out = card.querySelector('[data-dclv="' + key + '"]');
+            sl.addEventListener('click', function (e) { e.stopPropagation(); });
+            sl.addEventListener('input', function () { if (out) out.textContent = sl.value; });
+            sl.addEventListener('change', function () {
+              var body = {}; body[key] = Number(sl.value) || 0;
+              lightSend(ch, kind, body, function (ok) { if (!ok) chFlash(ch, 'Light command failed.'); });
+            });
+          });
+          var eff = card.querySelector('[data-dcl-effect]');
+          if (eff) {
+            eff.addEventListener('click', function (e) { e.stopPropagation(); });
+            eff.addEventListener('change', function () {
+              lightSend(ch, kind, { effect: Number(eff.value) || 0 }, function (ok) { if (!ok) chFlash(ch, 'Light command failed.'); });
+            });
+          }
+        });
+      }
+      function lightPatchState(card, on) {
+        var tog = card.querySelector('[data-dcl-tog]');
+        var st = card.querySelector('[data-dck-state]');
+        if (tog) {
+          tog.setAttribute('data-dck-known', '1');
+          tog.classList.toggle('on', on);
+          tog.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        if (st) { st.textContent = on ? 'on' : 'off'; st.classList.toggle('on', on); }
+      }
+      // lightSeed pre-fills a card's controls from the device's current
+      // values (fetched once per panel open) and enables them - a control
+      // that silently starts at 0 would repaint the room on first touch.
+      function lightSeed(row) {
+        if (!cur || !cur.sid) return;
+        cur.channels.forEach(function (ch) {
+          if (ch.kind !== 'color' && ch.kind !== 'white') return;
+          fetch('/a/designer/shelly/' + cur.sid + '/gen1/channel/' + ch.id, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !d.state || !cur || cur.row !== row) return;
+              var card = cur.leftCol.querySelector('[data-dck-ch="' + ch.id + '"][data-dcl-kind]');
+              if (!card) return;
+              lightPatchState(card, d.state.ison === true);
+              var tog = card.querySelector('[data-dcl-tog]'); if (tog) tog.disabled = false;
+              card.querySelectorAll('[data-dcl]').forEach(function (sl) {
+                var v = Number(d.state[sl.getAttribute('data-dcl')]);
+                if (isFinite(v)) { sl.value = v; }
+                sl.disabled = false;
+                var out = card.querySelector('[data-dclv="' + sl.getAttribute('data-dcl') + '"]');
+                if (out) out.textContent = String(sl.value);
+              });
+              var eff = card.querySelector('[data-dcl-effect]');
+              if (eff) { var e = Number(d.state.effect); if (isFinite(e)) eff.value = String(e); eff.disabled = false; }
+            }).catch(function () {});
+        });
       }
 
       // select toggles the focused channel; re-clicking it (or the back
@@ -598,6 +713,9 @@
         }
         if (cur.linked && cur.prefix) stream();
         else if (!cur.linked) httpSnapshot(row);
+        // light cards (RGBW2) seed their sliders from the device's
+        // current values, linked or not - control runs over HTTP
+        lightSeed(row);
         // the right column starts in the device view (mounted at
         // fillRight time); channel settings load on selection
       }
@@ -667,6 +785,26 @@
         if (mE) { gen1SetTile(Number(mE[1]), '[data-dck-wh]', parseFloat(payload) / 60, 1); return; }
         var mIn = /^input\/(\d+)$/.exec(leaf);
         if (mIn) { patchInput(Number(mIn[1]), { state: payload === '1' }); return; }
+        // light topics (RGBW2) - the exact set is pending live-broker
+        // confirmation, so both the flat on/off state and the JSON status
+        // variant are accepted tolerantly; nothing depends on them (control
+        // and seeding run over HTTP).
+        var mL = /^(?:color|white)\/(\d+)$/.exec(leaf);
+        if (mL && (payload === 'on' || payload === 'off')) {
+          var lc = cur.leftCol.querySelector('[data-dck-ch="' + Number(mL[1]) + '"][data-dcl-kind]');
+          if (lc) lightPatchState(lc, payload === 'on');
+          return;
+        }
+        var mLS = /^(?:color|white)\/(\d+)\/status$/.exec(leaf);
+        if (mLS) {
+          var body = null; try { body = JSON.parse(payload); } catch (e) {}
+          if (!body || typeof body !== 'object') return;
+          var card = cur.leftCol.querySelector('[data-dck-ch="' + Number(mLS[1]) + '"][data-dcl-kind]');
+          if (!card) return;
+          if (typeof body.ison === 'boolean') lightPatchState(card, body.ison);
+          if (body.power != null) { var pw = card.querySelector('[data-dck-w]'); if (pw) pw.textContent = fmtNum(Number(body.power), 1); }
+          return;
+        }
         if (leaf === 'temperature') {
           var t = cur.leftCol.querySelector('[data-dck-devt]');
           if (t) t.textContent = fmtNum(parseFloat(payload), 1) + ' °C';
@@ -867,12 +1005,24 @@
       function renderGen1DeviceForm(box, d) {
         var sid = cur.sid;
 
-        // --- Device (name; the relay/roller mode only where it exists) ---
+        // --- Device (name; the device mode only where it exists - the
+        // option list comes from the device's own mode + alt_modes) ---
         var devHTML = field('Device name', txt('g1:name', d.name || ''))
-          + roRow('Model', d.model);
+          + roRow('Model', d.model)
+          + roRow('WiFi signal', d.rssi);
         if (d.mode) {
-          devHTML += field('Mode', sel('g1:mode', d.mode, [['relay', 'Relay'], ['roller', 'Roller']]))
-            + '<div class="dck-note warn">Switching the mode reboots the device and changes its channel layout - roller control is not supported here yet.</div>';
+          var MODE_LABELS = { relay: 'Relay', roller: 'Roller', color: 'Color', white: 'White' };
+          var modeOpts = (d.modes && d.modes.length ? d.modes : [d.mode]).map(function (m) { return [m, MODE_LABELS[m] || m]; });
+          devHTML += field('Mode', sel('g1:mode', d.mode, modeOpts))
+            + '<div class="dck-note warn">Switching the mode reboots the device and changes its channel layout.</div>';
+        }
+        if (d.discoverable === false) {
+          // measured on a real RGBW2: the device ships hidden from mDNS -
+          // offer to make it findable (it was adopted by its IP)
+          devHTML += field('mDNS announce', tog('g1:discoverable', false))
+            + '<div class="dck-note">This device hides from network discovery - it can only be adopted by its IP address until this is enabled.</div>';
+        } else if (d.discoverable === true) {
+          devHTML += field('mDNS announce', tog('g1:discoverable', true));
         }
         if (d.led) {
           devHTML += field('Disable status LED', tog('g1:led_status_disable', d.led.status_disable === true))
@@ -1011,6 +1161,7 @@
           });
       }
       function renderGen1ChannelForm(box, row, ch, d) {
+        if (d.light) { renderGen1LightForm(box, row, ch, d); return; }
         var rl = d.relay || {};
         var n = ch + 1;
         box.innerHTML =
@@ -1035,6 +1186,59 @@
           function send(val) {
             var c = {}; c[key] = val;
             devApply('/a/designer/shelly/' + sid + '/gen1/channel/' + ch + '/settings', c, st);
+          }
+          if (el.hasAttribute('data-tog')) {
+            el.addEventListener('click', function () {
+              var on = !el.classList.contains('on');
+              el.classList.toggle('on', on);
+              el.setAttribute('aria-pressed', on ? 'true' : 'false');
+              send(on);
+            });
+          } else if (el.tagName === 'SELECT') {
+            el.addEventListener('change', function () { send(el.value); });
+          } else if (el.type === 'number') {
+            el.addEventListener('change', function () {
+              if (el.value.trim() === '') { if (st) { st.textContent = 'unchanged'; st.className = 'dck-st'; } return; }
+              send(Number(el.value) || 0);
+            });
+          } else {
+            el.addEventListener('change', function () { send(el.value); });
+          }
+        });
+        var nameInp = box.querySelector('[data-k="name"]');
+        if (nameInp) nameInp.addEventListener('change', function () {
+          var nm = cur && cur.leftCol.querySelector('[data-dck-ch="' + ch + '"] [data-dck-name]');
+          if (nm) nm.textContent = nameInp.value ? ' · ' + nameInp.value : '';
+        });
+        renderGen1Schedule(box.querySelector('[data-g1sched]'), row, ch, d.schedule || { enabled: false, rules: [] });
+      }
+      // gen1 light-class channel (RGBW2): the /settings/{color|white}/{ch}
+      // surface. Colour/gain/effect are LIVE control on the left card, not
+      // settings - only the persisted per-channel config lives here.
+      function renderGen1LightForm(box, row, ch, d) {
+        var li = d.light || {};
+        var n = ch + 1;
+        box.innerHTML =
+          secHead('Light ' + n + ' settings', false)
+          + field('Name', txt('name', li.name))
+          + field('Power-on default', sel('default_state', li.default_state || 'off', G1_DEFAULTS))
+          + field('Button type', sel('btn_type', li.btn_type || 'toggle', G1_BTN_TYPES))
+          + field('Reverse button', tog('btn_reverse', li.btn_reverse === true))
+          + field('Transition', num('transition', li.transition, 'ms'))
+          + secHead('Light ' + n + ' timer', true)
+          + '<div class="dck-note">Relative auto on/off after a switch event (seconds, 0 disables).</div>'
+          + field('Auto-OFF after', num('auto_off', li.auto_off, 's'))
+          + field('Auto-ON after', num('auto_on', li.auto_on, 's'))
+          + secHead('Light ' + n + ' weekly schedule', true)
+          + '<div class="dck-note">Runs on the device (local, no internet). Gen1 stores it as rule strings; sunrise/sunset rules need the device to know its location and their exact format is pending a real-device check.</div>'
+          + '<div class="dck-sched" data-g1sched></div>';
+        box.querySelectorAll('[data-k]').forEach(function (el) {
+          var key = el.getAttribute('data-k');
+          var f = el.closest('.dck-f');
+          var st = f && f.querySelector('[data-st]');
+          function send(val) {
+            var c = {}; c[key] = val;
+            devApply('/a/designer/shelly/' + cur.sid + '/gen1/channel/' + ch + '/settings', c, st);
           }
           if (el.hasAttribute('data-tog')) {
             el.addEventListener('click', function () {
@@ -1232,8 +1436,12 @@
       function txt(k, v) { return '<input class="dck-i" data-k="' + k + '" type="text" value="' + esc(v == null ? '' : String(v)) + '">'; }
       function num(k, v, suf) { return '<input class="dck-i num" data-k="' + k + '" type="number" value="' + (v === '' || v == null ? '' : esc(String(v))) + '">' + (suf ? '<span class="dck-suf">' + esc(suf) + '</span>' : ''); }
       function sel(k, v, opts) {
+        // esc() on the VALUE too: the mode dropdown feeds device-derived
+        // strings here (mode/alt_modes from a plain-HTTP Gen1 device) -
+        // an unescaped attribute would hand a compromised device script
+        // in the admin session
         return '<select class="dck-i" data-k="' + k + '">' + opts.map(function (o) {
-          return '<option value="' + o[0] + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+          return '<option value="' + esc(o[0]) + '"' + (o[0] === v ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
         }).join('') + '</select>';
       }
       function tog(k, on) { return '<button type="button" class="dck-tog' + (on ? ' on' : '') + '" data-k="' + k + '" data-tog aria-pressed="' + (on ? 'true' : 'false') + '"></button>'; }

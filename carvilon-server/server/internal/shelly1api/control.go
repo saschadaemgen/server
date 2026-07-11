@@ -108,6 +108,61 @@ func (c *Client) SetRelaySettings(ctx context.Context, channel int, params url.V
 	return err
 }
 
+// lightPath validates a light-class mode + channel into its URL segment.
+// The mode names the control surface ("color" = the combined RGBW light,
+// "white" = one of the independent white outputs) - never caller-typed
+// free text into the URL.
+func lightPath(mode string, channel int) (string, error) {
+	if channel < 0 || channel > 7 {
+		return "", errors.New("shelly1api: light channel out of range")
+	}
+	switch mode {
+	case "color", "white":
+		return "/" + mode + "/" + strconv.Itoa(channel), nil
+	}
+	return "", errors.New("shelly1api: invalid light mode")
+}
+
+// SetLight drives one light channel over the mode's control endpoint
+// (/color/{ch}?turn=&red=... or /white/{ch}?turn=&brightness=). The
+// cockpit's light control rides this documented REST surface - the MQTT
+// command/set topics for lights stay unwired until confirmed on the live
+// broker. Callers whitelist and clamp the params; this is the raw
+// transport plus the mode dispatch.
+func (c *Client) SetLight(ctx context.Context, mode string, channel int, params url.Values) error {
+	p, err := lightPath(mode, channel)
+	if err != nil {
+		return err
+	}
+	_, err = c.get(ctx, p, params)
+	return err
+}
+
+// SetLightSettings writes per-channel configuration keys to
+// /settings/{color|white}/{channel}. Callers whitelist the keys.
+func (c *Client) SetLightSettings(ctx context.Context, mode string, channel int, params url.Values) error {
+	p, err := lightPath(mode, channel)
+	if err != nil {
+		return err
+	}
+	_, err = c.get(ctx, "/settings"+p, params)
+	return err
+}
+
+// SetLightScheduleRules replaces one light channel's on-device schedule
+// as a whole set (the same semantics as the relay variant).
+func (c *Client) SetLightScheduleRules(ctx context.Context, mode string, channel int, enable bool, rules []string) error {
+	p, err := lightPath(mode, channel)
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	q.Set("schedule", boolParam(enable))
+	q.Set("schedule_rules", joinRules(rules))
+	_, err = c.get(ctx, "/settings"+p, q)
+	return err
+}
+
 // SetDeviceSettings writes device-level configuration keys to /settings.
 // Callers whitelist the keys - this is the raw transport.
 func (c *Client) SetDeviceSettings(ctx context.Context, params url.Values) error {

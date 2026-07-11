@@ -29,6 +29,35 @@ type RelaySettings struct {
 	ScheduleRules []string `json:"schedule_rules"`
 }
 
+// LightSettings is one /settings lights[] entry - the per-channel config
+// of a light-class device (RGBW2). Keys confirmed on a real SHRGBW2
+// (fw v1.14.0, color mode).
+type LightSettings struct {
+	Name          flexVal  `json:"name"`
+	IsOn          flexVal  `json:"ison"`
+	Red           flexVal  `json:"red"`
+	Green         flexVal  `json:"green"`
+	Blue          flexVal  `json:"blue"`
+	White         flexVal  `json:"white"`
+	Gain          flexVal  `json:"gain"`       // 0-100, color-mode brightness
+	Brightness    flexVal  `json:"brightness"` // white mode
+	Transition    flexVal  `json:"transition"` // ms, 0-5000
+	Effect        flexVal  `json:"effect"`     // 0-6, 0 = off
+	DefaultState  flexVal  `json:"default_state"`
+	AutoOn        flexVal  `json:"auto_on"`
+	AutoOff       flexVal  `json:"auto_off"`
+	BtnType       flexVal  `json:"btn_type"`
+	BtnReversed   flexVal  `json:"btn_reverse"`
+	Schedule      flexVal  `json:"schedule"`
+	ScheduleRules []string `json:"schedule_rules"`
+	NightMode     struct {
+		Enabled    flexVal `json:"enabled"`
+		StartTime  flexVal `json:"start_time"`
+		EndTime    flexVal `json:"end_time"`
+		Brightness flexVal `json:"brightness"`
+	} `json:"night_mode"`
+}
+
 // MQTTSettings is the nested mqtt object (read-back keys, unprefixed).
 type MQTTSettings struct {
 	Enable       flexVal `json:"enable"`
@@ -62,15 +91,22 @@ type Settings struct {
 		Hostname flexVal `json:"hostname"`
 	} `json:"device"`
 	Name     flexVal         `json:"name"`
-	Mode     flexVal         `json:"mode"` // 2.5: relay|roller
+	Mode     flexVal         `json:"mode"`      // 2.5: relay|roller; RGBW2: color|white
+	AltModes []string        `json:"alt_modes"` // the other modes this device accepts
 	Timezone flexVal         `json:"timezone"`
 	FW       flexVal         `json:"fw"`
 	Relays   []RelaySettings `json:"relays"`
+	Lights   []LightSettings `json:"lights"`
 	MQTT     MQTTSettings    `json:"mqtt"`
 	Login    LoginSettings   `json:"login"`
 	Cloud    struct {
 		Enabled flexVal `json:"enabled"`
 	} `json:"cloud"`
+	// Discoverable is the device's mDNS announce switch. A real RGBW2
+	// shipped with it OFF - such a device never announces and can only be
+	// adopted by its manual address, so the settings surface offers the
+	// toggle to make it findable later.
+	Discoverable flexVal `json:"discoverable"`
 	// Plug S front-LED options (absent elsewhere).
 	LEDPowerDisable  flexVal `json:"led_power_disable"`
 	LEDStatusDisable flexVal `json:"led_status_disable"`
