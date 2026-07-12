@@ -29,6 +29,11 @@ let liveByPort = {}; // "node:port" -> last Value seen this run (both input + ou
 // per-channel source/sink) back to its editor module + port, so run-time
 // values land on the faceplate. Rebuilt by serializeGraph on every run.
 let shellyMap = {};
+// readoutMap is the same idea for a generic readout module (Protect sensor
+// etc.): a synthetic per-readout source engine node -> its editor module +
+// port, so live values land on the readout faceplate. Rebuilt alongside
+// shellyMap.
+let readoutMap = {};
 let activeGraphId = 0; // the open graph id, so a run can be tied to its graph
 const btnRun = document.getElementById('btn-run');
 
@@ -77,12 +82,27 @@ function buildShellyMap(){
     }
   }
 }
+// buildReadoutMap (re)builds the synthetic-engine-node -> readout-module-port
+// map for every generic readout device on the canvas. Each readout expands
+// to one source node id "<moduleId>__<key>"; the port id is the readout key.
+// Deterministic (a pure function of module id + readout key) so a
+// reload-restore rebuilds it identically without re-serializing.
+function buildReadoutMap(){
+  readoutMap={};
+  for(const n of GRAPH.nodes){
+    if(n.type!=='readout.device' || !n.readout) continue;
+    for(const r of (n.readout.readouts||[])){
+      readoutMap[n.id+'__'+r.key]={node:n.id,port:r.key};
+    }
+  }
+}
 function serializeGraph(){
   const out=[], ids=new Set();
   const portMap={}; // editor "moduleId:port" -> synthetic engine node id
   buildShellyMap();
+  buildReadoutMap();
   for(const n of GRAPH.nodes){
-    if(n.type==='shelly.device') continue; // expanded below
+    if(n.type==='shelly.device' || n.type==='readout.device') continue; // expanded below
     if(!n.type || !IMPL.has(n.type)) continue;
     const node={id:n.id, type:n.type};
     const params={};
@@ -174,6 +194,21 @@ function serializeGraph(){
       if(setWired) emit(n.id+'__sw'+c+'_set', 'sink.channel', {channel:'mqtt:'+p+'/rpc#Switch.Set:'+c}, n.id, 'sw'+c+'_set');
     }
   }
+  // Generic readout module expansion: each readout becomes one source node
+  // whose channel is the fully-formed physical ref the catalog baked in
+  // (e.g. "protect:<id>:temperature"). Readouts are freely consumable, so
+  // EVERY readout is emitted unconditionally (no wired gate, no sink) - the
+  // faceplate stays live like the real device and any port can be wired.
+  // The run binds the ref by its namespace prefix (bindRunIO), so the same
+  // mechanism serves any readout family - Protect sensors first.
+  const roType={float:'source.channel.float',text:'source.channel.text',bool:'source.channel'};
+  for(const n of GRAPH.nodes){
+    if(n.type!=='readout.device' || !n.readout) continue;
+    for(const r of (n.readout.readouts||[])){
+      if(!r.channel) continue;
+      emit(n.id+'__'+r.key, roType[r.kind]||'source.channel', {channel:r.channel}, n.id, r.key);
+    }
+  }
   const edges=[];
   for(const e of GRAPH.edges){
     // Rewrite an endpoint on a module port to its synthetic engine node
@@ -188,7 +223,7 @@ function serializeGraph(){
 // shellyPort translates an engine change coordinate to editor space: a
 // synthetic Shelly node maps back to its module + port; everything else
 // passes through unchanged.
-function shellyPort(node,port){ const r=shellyMap[node]; return r ? {node:r.node, port:r.port} : {node, port}; }
+function shellyPort(node,port){ const r=shellyMap[node]||readoutMap[node]; return r ? {node:r.node, port:r.port} : {node, port}; }
 
 function outPortOf(nodeId){ const def=nodes[nodeId]&&nodes[nodeId].def; if(!def||!def.ports.out.length) return null; return def.ports.out[0].id; }
 
@@ -275,6 +310,7 @@ export async function maybeRestoreRun(){
   }catch(_){ return; }
   if(!d || !d.running || Number(d.graph_id)!==activeGraphId) return;
   buildShellyMap(); // route Shelly faceplate values after a reload-restore
+  buildReadoutMap(); // ...and generic readout faceplate values too
   focusEngine();
   enterRunning('<span class="ok">RUN</span> reconnected to the running graph');
   openStream();
@@ -311,7 +347,7 @@ function applyChanges(changes){
     const def=nd.def, v=c.value||{}, key=ep.node+':'+ep.port, port=ep.port;
     const prev=liveByPort[key];
     liveByPort[key]=v;
-    if(def.faceplate) paintShelly(nd,port,v); else paintPort(nd,port,v);
+    if(def.faceplate){ if(def.readout) paintReadout(nd,port,v); else paintShelly(nd,port,v); } else paintPort(nd,port,v);
     // Source cards echo their own output value (fixes a blank Bool: a
     // digital source now shows 1/0, not nothing).
     if(def.live && isOwnOutput(def,port)) setNodeLive(ep.node, formatLive(def,v));
@@ -404,6 +440,27 @@ function paintShelly(nd,port,v){
   }else if((m=/^in(\d+)$/.exec(port))){
     const led=el.querySelector(`.sh-row[data-ch="${m[1]}"] [data-chin]`); if(led) led.classList.toggle('on',v.kind===0?!!v.b:isActive(v));
   }
+}
+// formatReadout renders a readout value for its faceplate tile: a tidy
+// number (float), on/off (bool state), or a truncated string (text).
+function formatReadout(v){
+  if(!v) return '—';
+  if(v.kind===1){ const n=Number(v.f||0); return Math.abs(n)>=100?n.toFixed(0):n.toFixed(1); }
+  if(v.kind===2){ const s=String(v.s||''); return s.length>12?s.slice(0,11)+'…':(s||'—'); }
+  return v.b?'on':'off';
+}
+// paintReadout routes a live readout value onto the generic readout
+// faceplate: the value into its tile, the active state onto the tile + its
+// output socket, and lights the device-online dot. Purely read-only - a
+// readout faceplate has no controls to lock.
+function paintReadout(nd,port,v){
+  const el=nd.el;
+  const online=el.querySelector('[data-roonline]'); if(online) online.classList.add('on');
+  const row=el.querySelector(`.ro-row[data-ro="${cssAttr(port)}"]`); if(!row) return;
+  const slot=row.querySelector('[data-roval]'); if(slot) slot.textContent=formatReadout(v);
+  const active=isActive(v);
+  row.classList.toggle('on',active);
+  const pe=el.querySelector(`[data-port="${cssAttr(nd.def.id+':'+port)}"]`); if(pe) pe.classList.toggle('io-on',active);
 }
 // The faceplate's clickable relay switch drives the real device over MQTT
 // (Switch.Set), independent of any run — but only when the relay is NOT
@@ -524,7 +581,7 @@ function engineFrameLine(f){
 }
 function fmtNum(n){ n=Number(n||0); return Math.abs(n)>=100?n.toFixed(0):n.toFixed(2); }
 function resetVisuals(){
-  liveByEdge={}; liveByPort={}; shellyMap={};
+  liveByEdge={}; liveByPort={}; shellyMap={}; readoutMap={};
   for(const o of wires) o.g.classList.remove('live');
   for(const id in nodes){
     const el=nodes[id].el, def=nodes[id].def;

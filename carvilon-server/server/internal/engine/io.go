@@ -88,6 +88,7 @@ const (
 	PrefixTelegram = "telegram"
 	PrefixESP      = "esp"
 	PrefixNFC      = "nfc"
+	PrefixProtect  = "protect"
 )
 
 // DriverRegistry maps a namespace prefix to its Source/Sink driver. A

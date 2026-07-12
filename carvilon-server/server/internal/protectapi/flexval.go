@@ -11,6 +11,7 @@ package protectapi
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -70,4 +71,23 @@ func (f flexVal) Bool() (val, ok bool) {
 	default:
 		return false, false
 	}
+}
+
+// Float interprets the value as a floating-point number. ok is false
+// when the value is absent or not a number - an object/array (a drifted
+// shape) or a non-numeric string - so a caller feeding an engine Float
+// channel can tell a real 0 from "no reading". A number sent as a JSON
+// string ("21.5") still parses, mirroring the tolerant reading the rest
+// of this package uses; the display accessors that glue a unit on stay
+// String-based, this is the numeric side for readout ports.
+func (f flexVal) Float() (float64, bool) {
+	s := strings.TrimSpace(f.String())
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }

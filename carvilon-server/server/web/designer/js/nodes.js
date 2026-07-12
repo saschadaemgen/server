@@ -7,7 +7,7 @@ import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduce
 import { selectOnly, clearSel } from './selection.js';
 import { renderMinimap } from './minimap.js';
 import { recomputeEndpoints } from './wires.js';
-import { NAME_ICON, NAME_CAT, NAME_TYPE, NAME_CHANNEL, NAME_UNIT, NAME_INPUTS, NAME_OUTPUTS, NAME_SHELLY } from './palette.js';
+import { NAME_ICON, NAME_CAT, NAME_TYPE, NAME_CHANNEL, NAME_UNIT, NAME_INPUTS, NAME_OUTPUTS, NAME_SHELLY, NAME_READOUT } from './palette.js';
 
 let idc=0;
 
@@ -63,9 +63,9 @@ export function buildNode(n){
   const c=CAT[n.cat]||(CAT[n.cat]={color:'#7f8c99',label:String(n.cat||'?').toUpperCase(),icon:'box'});
   if(n.color==null)n.color=c.color;normPorts(n);
   const el=document.createElement('div');
-  el.className='node'+(n.faceplate?' node-shelly':'');el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
+  el.className='node'+(n.faceplate?' node-shelly':'')+(n.readout?' node-readout':'');el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
   if(n.faceplate){
-    el.innerHTML=`<div class="node-accent"></div>`+shellyFaceplateHTML(n);
+    el.innerHTML=`<div class="node-accent"></div>`+(n.readout?readoutFaceplateHTML(n):shellyFaceplateHTML(n));
   }else{
     const insH=n.ports.in.map(p=>portRowHTML(n.id,p,'Input')).join('');
     const outH=n.ports.out.map(p=>portRowHTML(n.id,p,'Output')).join('');
@@ -83,7 +83,7 @@ export function buildNode(n){
   }
   world.appendChild(el);nodes[n.id]={def:n,el};
   markRequiredPorts(n.id);
-  if(n.faceplate)loadShellyOverview(n.id,(n.shelly||{}).id);
+  if(n.faceplate&&n.shelly)loadShellyOverview(n.id,(n.shelly||{}).id);
   if(window.lucide)lucide.createIcons();return el;
 }
 
@@ -416,6 +416,14 @@ function defFor(name,cat){
   // on/off, single-use) + a state OUTPUT and, on metered channels, a power
   // OUTPUT per channel (readouts, freely consumable). The mac/prefix travel
   // on def.shelly so the run can compose the topic bindings.
+  // Generic readout/sensor module: one capability-driven faceplate per
+  // adopted readout device (Protect sensors first). It is a COMPOSITE - not
+  // an engine node - that expands into per-readout source nodes at run time
+  // (run.js). Ports are OUTPUT-only (readouts, freely consumable, no
+  // exclusivity); the payload's channel refs travel on def.readout so the
+  // run binds them by prefix. Keyed off the readout payload, so any device
+  // class flows through the same path.
+  if(NAME_READOUT[name])return readoutDef(name);
   if(NAME_CAT[name]==='shelly')return shellyDef(name);
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
     // Like the other blocks (staircase shows Mode/Hold, lamp shows
@@ -506,6 +514,41 @@ function shellyDef(name){
     shelly:{id:s.id,mac:s.mac,prefix:s.prefix,model:s.model,name:s.name,gen:s.gen||0,channels:chans},
     ports:{in:inp,out:outp}};
 }
+// readoutDef builds a generic readout/sensor module from its catalog
+// payload: one OUTPUT port per readout (freely consumable - no control
+// input, so none of the relay single-use logic applies) + a live-value
+// faceplate. Vendor-neutral: the payload carries fully-formed channel refs,
+// so the same builder serves any readout family. cat is the device class
+// (drives the palette group); srole:'readout' tags the ports for the run
+// expansion + live paint.
+function readoutDef(name){
+  const s=NAME_READOUT[name]; if(!s) return null;
+  const outp=(s.readouts||[]).map(r=>({id:r.key,label:r.label||r.key,kind:r.kind||'float',unit:r.unit||'',srole:'readout'}));
+  return {cat:s.class||'sensor',icon:NAME_ICON[name]||s.icon||'thermometer',title:name,type:'readout.device',implemented:true,live:false,props:[],faceplate:true,
+    readout:{id:s.id,class:s.class,name:s.name,model:s.model,readouts:s.readouts||[]},
+    ports:{in:[],out:outp}};
+}
+// readoutFaceplateHTML renders the generic readout faceplate: a header
+// (name/model/online) and one tile per readout showing its live value +
+// unit, with the output socket beside it. It reuses the Shelly faceplate's
+// base classes (sh-head/sh-rows/…) for a consistent look, plus ro- hooks
+// the run's paintReadout writes into. Read-only: no switches, no controls.
+function readoutFaceplateHTML(n){
+  const ro=n.readout||{}, model=ro.model||'';
+  const rows=(n.ports.out||[]).map(p=>{
+    const unit=p.unit?`<span class="ro-unit">${esc(p.unit)}</span>`:'';
+    return `<div class="ro-row" data-ro="${escAttr(p.id)}">
+      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span><span class="ro-metric"><span class="ro-val" data-roval>—</span>${unit}</span></div>
+      <div class="port io-out ro-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' readout')}"><span class="socket${kindClass(p.kind)}"></span></div>
+    </div>`;
+  }).join('');
+  return `<div class="sh-head ro-head">
+      <div class="sh-badge"><i data-lucide="${escAttr(n.icon||'thermometer')}"></i></div>
+      <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">${esc(model)}</div></div>
+      <div class="sh-meta"><div class="sh-online ro-online" data-roonline title="Device status"></div></div>
+    </div>
+    <div class="sh-rows ro-rows">${rows}</div>`;
+}
 function constantDef(name,t){
   const seed=t.slice('input.constant.'.length); // bool | float | text
   const kindp={k:'Value type',v:seed,kind:'const-kind',
@@ -521,6 +564,12 @@ function createNode(name,wx,wy,cat){const t=defFor(name,cat);if(!t)return;
   // already on the canvas so the user finds it.
   if(t.type==='shelly.device'&&t.shelly){
     for(const id in nodes){const d=nodes[id].def;if(d.shelly&&d.shelly.mac===t.shelly.mac){selectOnly(id);return;}}
+  }
+  // One readout module per device per graph: its readouts are single
+  // physical channels, so a second instance would bind them twice (the run
+  // would reject it). Refuse the drop and select the existing module.
+  if(t.type==='readout.device'&&t.readout){
+    for(const id in nodes){const d=nodes[id].def;if(d.readout&&d.readout.id===t.readout.id){selectOnly(id);return;}}
   }
   const def=JSON.parse(JSON.stringify(t)),slug=name.toLowerCase().replace(/[^a-z0-9]/g,'');
   // idc restarts at 0 per page load, so skip ids a loaded graph occupies.

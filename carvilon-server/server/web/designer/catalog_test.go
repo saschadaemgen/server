@@ -449,3 +449,60 @@ func TestCatalog_ShellyLightChannel(t *testing.T) {
 		t.Errorf("light channel kind not carried: %+v", found.Shelly.Channels)
 	}
 }
+
+// TestCatalog_ReadoutDevice: a readout/sensor device becomes one composite
+// faceplate block whose category is the device class and whose Readout
+// payload carries every readout (with its channel + kind), so the editor
+// builds the module's output ports + faceplate from it.
+func TestCatalog_ReadoutDevice(t *testing.T) {
+	dev := ReadoutDevice{
+		ID: "sen-1", Class: "sensor", Name: "Keller", Model: "UP-Sense",
+		Readouts: []ReadoutPort{
+			{Key: "temperature", Label: "Temperature", Unit: "°C", Kind: "float", Channel: "protect:sen-1:temperature"},
+			{Key: "motion", Label: "Motion", Kind: "bool", Channel: "protect:sen-1:motion"},
+		},
+	}
+	blocks := Catalog(false, nil, nil, false, false, nil, dev)
+	var found *CatalogBlock
+	for i := range blocks {
+		if blocks[i].Readout != nil && blocks[i].Readout.ID == "sen-1" {
+			found = &blocks[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("readout device produced no catalog block")
+	}
+	if found.Category != "sensor" || found.Type != "readout.device:sen-1" || !found.Implemented {
+		t.Errorf("block category/type/impl = %q/%q/%v", found.Category, found.Type, found.Implemented)
+	}
+	if len(found.Readout.Readouts) != 2 || found.Readout.Readouts[0].Channel != "protect:sen-1:temperature" {
+		t.Errorf("readout payload not carried: %+v", found.Readout.Readouts)
+	}
+	// No control INPUT ports: readouts are freely consumable, exclusivity
+	// does not apply (the composite has no engine input of its own).
+	if len(found.Inputs) != 0 {
+		t.Errorf("readout module should have no catalog inputs, got %+v", found.Inputs)
+	}
+}
+
+// TestCatalog_ReadoutDuplicateNames: two same-named sensors get titles
+// disambiguated with the device id (the palette is title-keyed, so a
+// collision would bake one device's channels into the other's block).
+func TestCatalog_ReadoutDuplicateNames(t *testing.T) {
+	a := ReadoutDevice{ID: "sen-a", Class: "sensor", Name: "Room", Readouts: []ReadoutPort{{Key: "temperature", Kind: "float", Channel: "protect:sen-a:temperature"}}}
+	b := ReadoutDevice{ID: "sen-b", Class: "sensor", Name: "Room", Readouts: []ReadoutPort{{Key: "temperature", Kind: "float", Channel: "protect:sen-b:temperature"}}}
+	titles := map[string]int{}
+	for _, blk := range Catalog(false, nil, nil, false, false, nil, a, b) {
+		if blk.Readout != nil {
+			titles[blk.Title]++
+		}
+	}
+	if len(titles) != 2 {
+		t.Fatalf("duplicate names not disambiguated: %v", titles)
+	}
+	for tt, n := range titles {
+		if n != 1 {
+			t.Errorf("title %q not unique (%d)", tt, n)
+		}
+	}
+}

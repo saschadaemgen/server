@@ -21,13 +21,18 @@ export const NAME_INPUTS={},NAME_OUTPUTS={};
 // block title, so a dropped Shelly module builds its ports + mqtt: bindings
 // + faceplate from the adopted device. Read by nodes.js.
 export const NAME_SHELLY={};
+// Per-device readout module payload (id/class/name/model + the readouts
+// with their fully-formed channel refs), keyed by block title, so a dropped
+// readout module builds its OUTPUT ports + live faceplate from the device.
+// Vendor-neutral - Protect sensors are the first source. Read by nodes.js.
+export const NAME_READOUT={};
 
 // Categories beyond the five base ones (input/logic/time/memory/output)
 // surface only when the runtime catalog includes them - "gpio" on a GPIO
 // host, "system" where telemetry is readable, "nfc" when a tag reader is
 // detected, "telegram" while the bot runs. Their display metadata lives
 // here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'}};
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'},sensor:{color:'#F87171',label:'Sensors',icon:'thermometer'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of
@@ -48,6 +53,7 @@ export async function initPalette(){
      if(b.channel)NAME_CHANNEL[b.title]=b.channel;
      if(b.unit)NAME_UNIT[b.title]=b.unit;
      if(b.shelly)NAME_SHELLY[b.title]=b.shelly;
+     if(b.readout)NAME_READOUT[b.title]=b.readout;
      (LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);
    }
  }catch(err){console.error('designer: block catalog load failed',err);}

@@ -501,6 +501,16 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		reg.RegisterSource(engine.PrefixNFC, drv) // tags are read-only
 		closers = append(closers, drv)
 	}
+	if prefixes[engine.PrefixProtect] && s.protectMonitor != nil {
+		// The Protect poller runs continuously (feeds the Device Center +
+		// the editor); the run only attaches its engine callbacks to the
+		// persistent snapshot and detaches them on teardown - no second
+		// poll goroutine. Sensor readouts are strictly read-only, so this
+		// registers a Source only, never a Sink.
+		drv := s.protectMonitor.NewRunBinding()
+		reg.RegisterSource(engine.PrefixProtect, drv)
+		closers = append(closers, drv)
+	}
 	if prefixes[engine.PrefixMQTT] {
 		// MQTT topics ride on the broker's in-process inline client; a
 		// graph that binds mqtt: channels needs the broker actually

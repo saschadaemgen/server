@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/protectapi"
+	"carvilon.local/server/internal/protectmonitor"
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
@@ -469,6 +471,18 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	nfcMonitor := nfc.NewMonitor(log)
 	defer nfcMonitor.Close()
 
+	// Saison 21 - the capability-driven sensor readout editor modules + the
+	// engine protect: source driver read from ONE persistent Protect sensor
+	// poller (not the per-request Device Center calls). It re-derives its
+	// client from platform_config each cycle (see protectSensorSource), so a
+	// credential change or a disable takes effect without a restart and it
+	// never races the server's hot-swapped protect client. Stops on ctx.
+	protectMonitor := protectmonitor.New(protectmonitor.Config{
+		Source: protectSensorSource(platformCfg),
+		Log:    log,
+	})
+	go protectMonitor.Run(ctx)
+
 	srv, err := httpserver.New(httpserver.Deps{
 		Config:              cfg,
 		Sessions:            sessionSvc,
@@ -505,6 +519,7 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		DesignerStore:       designerStore,
 		ReaderStore:         readerStore,
 		NFCMonitor:          nfcMonitor,
+		ProtectMonitor:      protectMonitor,
 		LogBuffer:           logBuf,
 		Console:             consoleMgr,
 		ConsoleStore:        consolestore.New(database.DB, secretsSvc),
@@ -1163,5 +1178,40 @@ func runAuditCleanup(ctx context.Context, audit *loginaudit.Service, log *slog.L
 				log.Info("login_audit cleanup removed", "count", n)
 			}
 		}
+	}
+}
+
+// protectSensorSource returns the current Protect sensor source for the
+// persistent poller, re-derived from platform_config on each poll so a
+// credential change or a disable takes effect without a restart (and
+// without racing the server's hot-swapped protect client, which the poller
+// deliberately does not touch). It rebuilds the *protectapi.Client only when
+// the (base URL, api key) pair actually changes; a disabled or unconfigured
+// Protect returns nil, which the monitor reads as "no sensors". The key
+// never reaches a log line here - it only flows into protectapi.New.
+func protectSensorSource(pc *platformconfig.Service) func() protectmonitor.SensorSource {
+	var (
+		mu      sync.Mutex
+		lastURL string
+		lastKey string
+		cached  *protectapi.Client
+	)
+	return func() protectmonitor.SensorSource {
+		ctx := context.Background()
+		if v, err := pc.Get(ctx, platformconfig.KeyProtectEnabled); err == nil && v == "0" {
+			return nil // explicitly disabled
+		}
+		url, _ := pc.Get(ctx, platformconfig.KeyProtectAPIBaseURL)
+		key, _ := pc.GetSecret(ctx, platformconfig.KeyProtectAPIKey)
+		if url == "" || key == "" {
+			return nil // not configured
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if cached == nil || url != lastURL || key != lastKey {
+			cached = protectapi.New(protectapi.Options{BaseURL: url, APIKey: key})
+			lastURL, lastKey = url, key
+		}
+		return cached
 	}
 }

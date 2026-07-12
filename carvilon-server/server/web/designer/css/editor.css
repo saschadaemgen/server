@@ -326,6 +326,28 @@ select.si-i{cursor:pointer}
 .sh-po[data-tip]::after{right:0;transform:translateY(4px)}
 .sh-po[data-tip]:hover::after{transform:translateY(0)}
 
+/* Generic readout/sensor module faceplate (Protect sensors etc.). Reuses
+   the Shelly faceplate chrome (sh-head/sh-rows/…); read-only so it is
+   narrower (no control column) and each row is a compact value tile with an
+   output socket straddling the right edge, exactly like a Shelly readout. */
+.node-readout{width:300px}
+.ro-head{padding:12px 13px 10px}
+.ro-rows{padding:6px 14px 12px;gap:6px}
+.ro-row{position:relative;display:flex;align-items:center;gap:10px;min-height:0;padding:5px 0}
+.ro-row + .ro-row{border-top:1px solid rgba(255,255,255,.045)}
+.ro-disp{flex:1;min-width:0;display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  border-radius:8px;padding:7px 10px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07);transition:.2s}
+.ro-row.on .ro-disp{border-color:color-mix(in srgb,#43E08A 45%,transparent);background:color-mix(in srgb,#43E08A 8%,transparent)}
+.ro-label{min-width:0;font:600 11px/1.2 var(--font);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;letter-spacing:.04em}
+.ro-metric{flex:none;display:flex;align-items:baseline;gap:4px}
+.ro-val{font:800 15px/1 var(--mono);color:#eef4fb;font-variant-numeric:tabular-nums}
+.ro-row.on .ro-val{color:#fff}
+.ro-unit{font:700 9px/1 var(--mono);color:var(--muted);letter-spacing:.04em}
+.ro-po{flex:none;display:flex;align-items:center}
+.ro-po .socket{width:13px;height:13px;margin-right:-20.5px}   /* straddle the right card edge */
+.ro-po .socket::before{inset:-2px;border-width:1px}
+.ro-po[data-tip]::after{white-space:normal;text-transform:none;width:180px;text-align:center;left:auto;right:0}
+
 /* top bar */
 .topbar{position:fixed;top:0;left:0;right:0;height:54px;z-index:20;display:flex;align-items:center;gap:14px;padding:0 16px;
   background:rgba(11,12,15,.93);border-bottom:1px solid var(--border);backdrop-filter:blur(16px)}

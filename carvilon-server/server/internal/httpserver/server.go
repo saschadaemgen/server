@@ -52,6 +52,7 @@ import (
 	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/platformconfig"
 	"carvilon.local/server/internal/protectapi"
+	"carvilon.local/server/internal/protectmonitor"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/streampublish"
@@ -209,6 +210,12 @@ type Deps struct {
 	// on a host without readers; the NFC palette category then stays
 	// empty and no graph can bind a reader.
 	NFCMonitor *nfc.Monitor
+	// ProtectMonitor is the persistent UniFi Protect sensor poller. It
+	// feeds the capability-driven readout editor modules (a run binds its
+	// engine to it via a RunBinding under the protect: prefix). Nil when
+	// Protect is not configured; the sensor readout blocks then stay absent
+	// and no graph can bind a sensor readout.
+	ProtectMonitor *protectmonitor.Monitor
 	// LogBuffer is the server-wide recent-log ring the designer's
 	// System Log tab streams from (main wires it as a tee around the
 	// stdout handler). Nil leaves the tab's SSE endpoint on 503.
@@ -282,19 +289,20 @@ type Server struct {
 	// iceRequester pulls subscriber ICE from the cloud for the stream-start
 	// bundle. Set post-construction by main (SetICERequester) once the
 	// side-channel client exists; nil when the cloud link is unconfigured.
-	iceRequester  ICERequester
-	features      *featuregate.Store
-	mqtt          *mqttbroker.Manager
-	mqttStore     *mqttstore.Store
-	telegram      *telegrambot.Manager
-	telegramStore *telegramstore.Store
-	designerStore *designerstore.Store
-	readerStore   *readerstore.Store
-	nfcMonitor    *nfc.Monitor
-	logBuf        *logbuf.Buffer
-	console       *console.Manager
-	consoleStore  *consolestore.Store
-	log           *slog.Logger
+	iceRequester   ICERequester
+	features       *featuregate.Store
+	mqtt           *mqttbroker.Manager
+	mqttStore      *mqttstore.Store
+	telegram       *telegrambot.Manager
+	telegramStore  *telegramstore.Store
+	designerStore  *designerstore.Store
+	readerStore    *readerstore.Store
+	nfcMonitor     *nfc.Monitor
+	protectMonitor *protectmonitor.Monitor
+	logBuf         *logbuf.Buffer
+	console        *console.Manager
+	consoleStore   *consolestore.Store
+	log            *slog.Logger
 	// engineLog scopes the designer-run lifecycle lines to the "engine"
 	// subsystem (instead of this package's "httpserver"), so the System
 	// Log tab attributes them to the engine.
@@ -379,6 +387,7 @@ func New(deps Deps) (*Server, error) {
 		designerStore:   deps.DesignerStore,
 		readerStore:     deps.ReaderStore,
 		nfcMonitor:      deps.NFCMonitor,
+		protectMonitor:  deps.ProtectMonitor,
 		logBuf:          deps.LogBuffer,
 		console:         deps.Console,
 		consoleStore:    deps.ConsoleStore,

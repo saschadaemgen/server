@@ -207,6 +207,42 @@ func (s Sensor) MountTypeLabel() string { return scalarLabel(s.MountType) }
 // OpenedLabel renders isOpened as Yes/No ("" when absent).
 func (s Sensor) OpenedLabel() string { return boolLabel(s.IsOpened) }
 
+// The value accessors below are the numeric/boolean side of the display
+// labels above: they return the raw reading (no unit glued on) plus an
+// ok/present flag, for feeding engine readout channels and live cockpit
+// gauges. ok is false when the sensor does not report that reading, so a
+// bound source can hold its last value rather than snap a Float port to a
+// misleading 0.0 (a legitimate temperature) or a Bool port to false.
+
+// TemperatureValue returns stats.temperature.value in °C.
+func (s Sensor) TemperatureValue() (float64, bool) { return s.Stats.Temperature.Value.Float() }
+
+// HumidityValue returns stats.humidity.value in %RH.
+func (s Sensor) HumidityValue() (float64, bool) { return s.Stats.Humidity.Value.Float() }
+
+// LightValue returns stats.light.value (illuminance) in lux.
+func (s Sensor) LightValue() (float64, bool) { return s.Stats.Light.Value.Float() }
+
+// BatteryValue returns the battery percentage (0-100).
+func (s Sensor) BatteryValue() (float64, bool) { return s.Battery.Percentage.Float() }
+
+// MotionActive returns the live motion boolean (isMotionDetected).
+func (s Sensor) MotionActive() (val, ok bool) { return s.IsMotionDetected.Bool() }
+
+// OpenedActive returns the live door/contact boolean (isOpened).
+func (s Sensor) OpenedActive() (val, ok bool) { return s.IsOpened.Bool() }
+
+// LeakActive derives a live leak boolean from the leak event timestamps
+// (present is false when the sensor reports no leak fields at all).
+func (s Sensor) LeakActive(now time.Time) (active, present bool) {
+	return recentEventActive(now, s.LeakDetectedAt, s.ExternalLeakDetectedAt)
+}
+
+// TamperActive derives a live tamper boolean from the tamper timestamp.
+func (s Sensor) TamperActive(now time.Time) (active, present bool) {
+	return recentEventActive(now, s.TamperingDetectedAt)
+}
+
 // scalarLabel renders a flexVal like String(), but an object/array (a
 // drifted shape) reads as absent - a measurement must show "-" rather
 // than raw JSON with a unit glued on.
@@ -242,6 +278,36 @@ const recentEventWindow = 10 * time.Minute
 // because an ongoing event whose timestamp never refreshes must not
 // read like certainty), or "" (no timestamp fields at all -> "-").
 func recentEventLabel(now time.Time, vals ...flexVal) string {
+	newest, seen := newestEvent(vals...)
+	if !seen {
+		return ""
+	}
+	age := now.Sub(newest)
+	if abs := age.Abs(); abs <= recentEventWindow {
+		return "Yes"
+	}
+	if age < 0 {
+		age = 0 // far-future timestamp (broken clock): age reads as fresh-ish zero
+	}
+	return "No (last " + coarseAge(age) + ")"
+}
+
+// recentEventActive is the boolean form of recentEventLabel for engine
+// readout ports: active is true while the newest timestamp is inside the
+// window (symmetric around now, same clock-skew tolerance as the label);
+// present is false when the sensor reports no such timestamp at all, so
+// the driver can skip the channel rather than push a misleading false.
+func recentEventActive(now time.Time, vals ...flexVal) (active, present bool) {
+	newest, seen := newestEvent(vals...)
+	if !seen {
+		return false, false
+	}
+	return now.Sub(newest).Abs() <= recentEventWindow, true
+}
+
+// newestEvent returns the most recent parseable timestamp across vals and
+// whether any was present (shared by the label + active accessors).
+func newestEvent(vals ...flexVal) (time.Time, bool) {
 	var newest time.Time
 	seen := false
 	for _, v := range vals {
@@ -254,17 +320,7 @@ func recentEventLabel(now time.Time, vals ...flexVal) string {
 			newest = at
 		}
 	}
-	if !seen {
-		return ""
-	}
-	age := now.Sub(newest)
-	if abs := age.Abs(); abs <= recentEventWindow {
-		return "Yes"
-	}
-	if age < 0 {
-		age = 0 // far-future timestamp (broken clock): age reads as fresh-ish zero
-	}
-	return "No (last " + coarseAge(age) + ")"
+	return newest, seen
 }
 
 // coarseAge renders an event age coarsely for the stale-event label.

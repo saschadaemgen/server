@@ -62,8 +62,38 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	// bot enabled with a token set (the telegram: driver binds to the
 	// manager's Conn).
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning(), s.shellyDevicesForCatalog(r.Context())),
+		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning(), s.shellyDevicesForCatalog(r.Context()), s.readoutDevicesForCatalog(r.Context())...),
 	})
+}
+
+// readoutDevicesForCatalog bridges every adopted readout/sensor device to
+// the designer catalog's generic ReadoutDevice type, so any such device
+// gets a capability-driven editor block (output ports + live faceplate)
+// with no per-vendor catalog code - the generalisation of
+// shellyDevicesForCatalog beyond one vendor. UniFi Protect UP-Sense sensors
+// are the first source (via the persistent poller's snapshot); a future
+// readout module or the climate controller appends here and gets its blocks
+// for free. Each readout already carries its fully-formed physical channel
+// ref (e.g. "protect:<id>:temperature"), so the editor bakes it straight
+// into the expanded source node and the run binds it by prefix.
+func (s *Server) readoutDevicesForCatalog(ctx context.Context) []designer.ReadoutDevice {
+	var out []designer.ReadoutDevice
+	if s.protectMonitor != nil {
+		for _, d := range s.protectMonitor.Devices() {
+			rd := designer.ReadoutDevice{ID: d.ID, Class: "sensor", Name: d.Name, Model: d.Model, Icon: "thermometer"}
+			for _, ro := range d.Readouts {
+				rd.Readouts = append(rd.Readouts, designer.ReadoutPort{
+					Key:     ro.Token,
+					Label:   ro.Label,
+					Unit:    ro.Unit,
+					Kind:    ro.KindString(),
+					Channel: ro.Channel,
+				})
+			}
+			out = append(out, rd)
+		}
+	}
+	return out
 }
 
 // shellyDevicesForCatalog bridges the adopted Shelly device set to the

@@ -50,6 +50,12 @@ type CatalogBlock struct {
 	// MQTT topic prefix and the capability-derived channel set the editor
 	// builds the module's ports and faceplate from. Omitted elsewhere.
 	Shelly *ShellyDevice `json:"shelly,omitempty"`
+	// Readout carries the per-device payload on a generic readout-module
+	// block: the readout capabilities (with their fully-formed channel refs)
+	// the editor builds the module's output ports + live faceplate from.
+	// Capability-driven and vendor-neutral (Protect sensors are the first
+	// source; any readout device produces one). Omitted elsewhere.
+	Readout *ReadoutDevice `json:"readout,omitempty"`
 }
 
 // ShellyChannel is one controllable channel a Shelly module exposes. A
@@ -78,6 +84,35 @@ type ShellyDevice struct {
 	Gen      int             `json:"gen,omitempty"`
 	Prefix   string          `json:"prefix"`
 	Channels []ShellyChannel `json:"channels"`
+}
+
+// ReadoutPort is one readout a device exposes as an OUTPUT port on its
+// editor module: a stable key, display label + unit, value kind ("bool" |
+// "float" | "text"), and the fully-formed physical channel ref the editor
+// bakes into the expanded source node (e.g. "protect:<id>:temperature").
+// Readouts are freely consumable - no exclusivity - unlike a relay control.
+type ReadoutPort struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Unit    string `json:"unit,omitempty"`
+	Kind    string `json:"kind"`
+	Channel string `json:"channel"`
+}
+
+// ReadoutDevice is one adopted device with readout/sensor capabilities the
+// catalog turns into a capability-driven editor module: a faceplate whose
+// OUTPUT ports are the device's readouts, with live values during a run.
+// Class drives the palette category. It is vendor-neutral by design - any
+// device family that produces these (Protect sensors first, the future
+// UniFi module and the climate controller next) gets an editor block
+// through the same generic path, no per-vendor catalog code.
+type ReadoutDevice struct {
+	ID       string        `json:"id"`
+	Class    string        `json:"class"`
+	Name     string        `json:"name"`
+	Model    string        `json:"model,omitempty"`
+	Icon     string        `json:"icon,omitempty"`
+	Readouts []ReadoutPort `json:"readouts"`
 }
 
 // SysMetric is one available system-telemetry metric the catalog turns
@@ -109,7 +144,10 @@ type NFCReader struct {
 // filled from the engine registry; the catalog-only ones have empty
 // ports/params until their engine nodes land. The httpserver passes the
 // runtime flags and serializes this to /a/designer/catalog.json.
-func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, includeMQTT, includeTelegram bool, shellyDevices []ShellyDevice) []CatalogBlock {
+// readoutDevices is variadic so the existing call sites (and tests) that
+// predate the readout modules keep compiling unchanged; the httpserver
+// spreads the bridge's slice.
+func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, includeMQTT, includeTelegram bool, shellyDevices []ShellyDevice, readoutDevices ...ReadoutDevice) []CatalogBlock {
 	blocks := rawBlocks()
 	if includeGPIO {
 		blocks = append(blocks, gpioBlocks()...)
@@ -128,6 +166,9 @@ func Catalog(includeGPIO bool, sysMetrics []SysMetric, nfcReaders []NFCReader, i
 	}
 	if len(shellyDevices) > 0 {
 		blocks = append(blocks, shellyBlocks(shellyDevices)...)
+	}
+	if len(readoutDevices) > 0 {
+		blocks = append(blocks, readoutBlocks(readoutDevices)...)
 	}
 	for i := range blocks {
 		b := &blocks[i]
@@ -238,6 +279,59 @@ func shellyBlocks(devices []ShellyDevice) []CatalogBlock {
 			Icon:        "toggle-right",
 			Implemented: true,
 			Shelly:      &dev,
+		})
+	}
+	return out
+}
+
+// readoutBlocks turns readout devices into one composite faceplate block
+// each - the capability-driven generalisation of shellyBlocks for pure
+// readout/sensor devices. The block is NOT an engine node: the editor
+// expands it into one source.channel[.float/.text] per readout at run time
+// (run.js), each freely consumable (readouts carry no exclusivity, unlike a
+// relay control). Category is the device class so the palette groups it
+// appropriately; the whole device payload rides on the block's Readout
+// field. Titles must be unique across the catalog (the palette is
+// title-keyed), so a duplicate display name is disambiguated with the
+// device id - otherwise one device's channels would bake into another's.
+func readoutBlocks(devices []ReadoutDevice) []CatalogBlock {
+	label := func(d ReadoutDevice) string {
+		switch {
+		case d.Name != "":
+			return d.Name
+		case d.Model != "":
+			return d.Model
+		default:
+			return "Sensor " + d.ID
+		}
+	}
+	count := map[string]int{}
+	for _, d := range devices {
+		count[label(d)]++
+	}
+	out := make([]CatalogBlock, 0, len(devices))
+	for i := range devices {
+		d := devices[i]
+		name := label(d)
+		if count[name] > 1 && d.ID != "" {
+			name += " (" + d.ID + ")"
+		}
+		cat := d.Class
+		if cat == "" {
+			cat = "sensor"
+		}
+		icon := d.Icon
+		if icon == "" {
+			icon = "thermometer"
+		}
+		dev := d
+		out = append(out, CatalogBlock{
+			Type:        "readout.device:" + d.ID,
+			Category:    cat,
+			Title:       name,
+			Icon:        icon,
+			Implemented: true,
+			Readout:     &dev,
 		})
 	}
 	return out
