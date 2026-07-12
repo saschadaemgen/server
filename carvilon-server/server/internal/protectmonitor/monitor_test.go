@@ -209,6 +209,32 @@ func TestMonitor_PollErrorHoldsLastAndPushesNothing(t *testing.T) {
 	}
 }
 
+func TestMonitor_OnReadingTapEmitsAllReadings(t *testing.T) {
+	fake := &fakeSource{}
+	fake.set([]protectapi.Sensor{
+		mkSensor(t, `{"id":"sen-1","state":"CONNECTED","isMotionDetected":true,"stats":{"temperature":{"value":21.5},"humidity":{"value":48}}}`),
+	}, nil)
+
+	var mu sync.Mutex
+	got := map[string]float64{}
+	now := time.UnixMilli(1_700_000_000_000)
+	m := New(Config{
+		Source:    func() SensorSource { return fake },
+		Now:       func() time.Time { return now },
+		OnReading: func(id, metric string, v float64, at time.Time) { mu.Lock(); got[id+":"+metric] = v; mu.Unlock() },
+	})
+	m.pollOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got["sen-1:temperature"] != 21.5 || got["sen-1:humidity"] != 48 {
+		t.Fatalf("float readings not tapped: %+v", got)
+	}
+	if got["sen-1:motion"] != 1 { // bool -> 1/0
+		t.Fatalf("bool motion should tap as 1, got %v", got["sen-1:motion"])
+	}
+}
+
 func TestMonitor_DevicesReadoutModel(t *testing.T) {
 	fake := &fakeSource{}
 	fake.set([]protectapi.Sensor{

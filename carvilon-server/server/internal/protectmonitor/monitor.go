@@ -138,14 +138,22 @@ type Config struct {
 	Now func() time.Time
 	// Log sink (default slog.Default()).
 	Log *slog.Logger
+	// OnReading, when set, receives EVERY reading of every sensor on each
+	// poll (the STORED-path tap for sensor history: device id, metric token,
+	// numeric value, timestamp; a bool metric arrives as 0/1). It is called
+	// AFTER the live delivery to the engine bindings and MUST be non-blocking
+	// - the sensor-history recorder buffers and drops rather than block - so
+	// recording never delays or throttles the real-time output. Optional.
+	OnReading func(deviceID, metric string, value float64, at time.Time)
 }
 
 // Monitor is the persistent poller. Safe for concurrent use.
 type Monitor struct {
-	source   func() SensorSource
-	interval time.Duration
-	now      func() time.Time
-	log      *slog.Logger
+	source    func() SensorSource
+	interval  time.Duration
+	now       func() time.Time
+	log       *slog.Logger
+	onReading func(deviceID, metric string, value float64, at time.Time)
 
 	mu       sync.RWMutex
 	snap     Snapshot
@@ -168,12 +176,13 @@ func New(cfg Config) *Monitor {
 		cfg.Log = slog.Default()
 	}
 	return &Monitor{
-		source:   cfg.Source,
-		interval: cfg.Interval,
-		now:      cfg.Now,
-		log:      cfg.Log,
-		snap:     Snapshot{ByID: map[string]protectapi.Sensor{}},
-		bindings: map[*RunBinding]struct{}{},
+		source:    cfg.Source,
+		interval:  cfg.Interval,
+		now:       cfg.Now,
+		log:       cfg.Log,
+		onReading: cfg.OnReading,
+		snap:      Snapshot{ByID: map[string]protectapi.Sensor{}},
+		bindings:  map[*RunBinding]struct{}{},
 	}
 }
 
@@ -270,6 +279,37 @@ func (m *Monitor) pollOnce(ctx context.Context) {
 
 	for _, j := range jobs {
 		j.cb(j.v)
+	}
+
+	// STORED-path tap: emit EVERY present reading (not just the changed ones
+	// the live bindings got) so the recorder can average a full bucket. This
+	// runs AFTER the live delivery and the callback is contractually
+	// non-blocking, so it cannot delay the real-time output.
+	if m.onReading != nil {
+		for _, s := range sensors {
+			for token, v := range readings(s, now) {
+				if f, ok := valueFloat(v); ok {
+					m.onReading(s.ID, token, f, now)
+				}
+			}
+		}
+	}
+}
+
+// valueFloat renders an engine value as the numeric a history sample stores:
+// a float verbatim, a bool as 0/1 (so a bool metric averages to its duty
+// fraction), and text as not-a-number (skipped - no numeric history).
+func valueFloat(v engine.Value) (float64, bool) {
+	switch v.Kind {
+	case engine.Float:
+		return v.F, true
+	case engine.Bool:
+		if v.B {
+			return 1, true
+		}
+		return 0, true
+	default:
+		return 0, false
 	}
 }
 

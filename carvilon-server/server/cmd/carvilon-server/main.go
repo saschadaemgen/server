@@ -55,6 +55,7 @@ import (
 	"carvilon.local/server/internal/publishtoken"
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
+	"carvilon.local/server/internal/sensorhistory"
 	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
@@ -477,9 +478,28 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// client from platform_config each cycle (see protectSensorSource), so a
 	// credential change or a disable takes effect without a restart and it
 	// never races the server's hot-swapped protect client. Stops on ctx.
-	protectMonitor := protectmonitor.New(protectmonitor.Config{
-		Source: protectSensorSource(platformCfg),
+	// Sensor History H1 - the STORED path. The recorder taps the reading
+	// stream (protectMonitor.OnReading below) and averages readings into
+	// interval buckets in SQLite (migration 041), pruning each sensor's
+	// retention. It is strictly decoupled from the LIVE path: Record is a
+	// non-blocking hand-off, so recording never delays the real-time output
+	// the editor block + cockpit + climate loop consume.
+	sensorHistStore := sensorhistory.New(database.DB)
+	sensorHistCfg := sensorhistory.NewConfigStore(database.DB)
+	if err := sensorHistCfg.Load(ctx); err != nil {
+		log.Warn("sensor history: recording config load failed (using defaults)", "err", err)
+	}
+	sensorHistRec := sensorhistory.NewRecorder(sensorhistory.RecorderConfig{
+		Store:  sensorHistStore,
+		Config: sensorHistCfg,
 		Log:    log,
+	})
+	go sensorHistRec.Run(ctx)
+
+	protectMonitor := protectmonitor.New(protectmonitor.Config{
+		Source:    protectSensorSource(platformCfg),
+		Log:       log,
+		OnReading: sensorHistRec.Record,
 	})
 	go protectMonitor.Run(ctx)
 
@@ -520,6 +540,8 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		ReaderStore:         readerStore,
 		NFCMonitor:          nfcMonitor,
 		ProtectMonitor:      protectMonitor,
+		SensorHistory:       sensorHistStore,
+		SensorHistoryConfig: sensorHistCfg,
 		LogBuffer:           logBuf,
 		Console:             consoleMgr,
 		ConsoleStore:        consolestore.New(database.DB, secretsSvc),

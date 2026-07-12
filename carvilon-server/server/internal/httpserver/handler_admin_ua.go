@@ -212,6 +212,15 @@ type uaRow struct {
 	ShellyPrefix string
 	ChannelsJSON string
 
+	// Sensor History H1: the per-sensor recording knobs prefilled into the
+	// cockpit form. RecIntervalSec/RecRetentionSec are the stored OVERRIDE
+	// seconds (0 = inherit the global default); the Default*Label pair names
+	// what "Default" resolves to so the form can show it. Empty for non-sensors.
+	RecIntervalSec           int64
+	RecRetentionSec          int64
+	RecDefaultIntervalLabel  string
+	RecDefaultRetentionLabel string
+
 	// Lowercased "name model ip mac" for the client search box.
 	Search string
 }
@@ -439,7 +448,9 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 		addDeviceRow(makeCameraRow(c), c.IsOnline())
 	}
 	for _, sn := range sens {
-		addDeviceRow(makeSensorRow(sn, now), sn.IsOnline())
+		row := makeSensorRow(sn, now)
+		s.fillSensorRecording(&row)
+		addDeviceRow(row, sn.IsOnline())
 	}
 	for _, rd := range readers {
 		addDeviceRow(makeReaderRow(rd), rd.Online)
@@ -717,6 +728,49 @@ func makeSensorRow(sn protectapi.Sensor, now time.Time) uaRow {
 	return row
 }
 
+// fillSensorRecording prefills a sensor row's recording-settings fields
+// (Sensor History H1) from the per-sensor config: the stored override
+// seconds (0 = inherit) so the form selects the right option, plus the
+// human labels of what "Default" resolves to. A nil config store (history
+// disabled) leaves the zero values and the form shows only its defaults.
+func (s *Server) fillSensorRecording(row *uaRow) {
+	if s.sensorHistCfg == nil {
+		return
+	}
+	row.RecIntervalSec, row.RecRetentionSec = s.sensorHistCfg.Raw(row.ID)
+	def := s.sensorHistCfg.Defaults()
+	row.RecDefaultIntervalLabel = recordingIntervalLabel(int64(def.Interval.Seconds()))
+	row.RecDefaultRetentionLabel = recordingRetentionLabel(int64(def.Retention.Seconds()))
+}
+
+// recordingIntervalLabel renders an interval (seconds) as a compact label
+// ("30 s", "1 min", "1 h"); "" when unset.
+func recordingIntervalLabel(sec int64) string {
+	switch {
+	case sec <= 0:
+		return ""
+	case sec%3600 == 0:
+		return strconv.FormatInt(sec/3600, 10) + " h"
+	case sec%60 == 0:
+		return strconv.FormatInt(sec/60, 10) + " min"
+	default:
+		return strconv.FormatInt(sec, 10) + " s"
+	}
+}
+
+// recordingRetentionLabel renders a retention age (seconds) as days ("30
+// days"), or hours below a day; "" when unset.
+func recordingRetentionLabel(sec int64) string {
+	switch {
+	case sec <= 0:
+		return ""
+	case sec >= 86400:
+		return strconv.FormatInt(sec/86400, 10) + " days"
+	default:
+		return strconv.FormatInt(sec/3600, 10) + " h"
+	}
+}
+
 // makeReaderRow builds the flat row for a CARVILON reader from the
 // local registry (source "RPi"). It shares the Readers category with
 // the UA readers - the Source facet is what tells them apart. All the
@@ -793,6 +847,8 @@ var uaFlash = map[string]struct{ msg, typ string }{
 	"renamed":             {"Reader name saved.", "ok"},
 	"reset":               {"Reader name reset to the auto-generated name.", "ok"},
 	"err-name":            {"Renaming failed.", "err"},
+	"rec-saved":           {"Recording settings saved.", "ok"},
+	"rec-err":             {"Saving the recording settings failed.", "err"},
 	"err-notfd":           {"Reader not found.", "err"},
 	"shelly-removed":      {"Shelly device removed. It will not be re-discovered until released.", "ok"},
 	"shelly-notfd":        {"Shelly device not found.", "err"},

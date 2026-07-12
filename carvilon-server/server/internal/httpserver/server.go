@@ -54,6 +54,7 @@ import (
 	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/protectmonitor"
 	"carvilon.local/server/internal/readerstore"
+	"carvilon.local/server/internal/sensorhistory"
 	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/streampublish"
 	"carvilon.local/server/internal/streams"
@@ -216,6 +217,13 @@ type Deps struct {
 	// Protect is not configured; the sensor readout blocks then stay absent
 	// and no graph can bind a sensor readout.
 	ProtectMonitor *protectmonitor.Monitor
+	// SensorHistory is the stored-path query gateway (Sensor History H1):
+	// device+metric range queries with downsampling, for the cockpit + H2
+	// charts. Nil leaves the history endpoints on 503.
+	SensorHistory *sensorhistory.Store
+	// SensorHistoryConfig holds the per-sensor recording knobs (interval +
+	// retention) the sensor settings form edits. Nil disables the form.
+	SensorHistoryConfig *sensorhistory.ConfigStore
 	// LogBuffer is the server-wide recent-log ring the designer's
 	// System Log tab streams from (main wires it as a tee around the
 	// stdout handler). Nil leaves the tab's SSE endpoint on 503.
@@ -299,6 +307,8 @@ type Server struct {
 	readerStore    *readerstore.Store
 	nfcMonitor     *nfc.Monitor
 	protectMonitor *protectmonitor.Monitor
+	sensorHistory  *sensorhistory.Store
+	sensorHistCfg  *sensorhistory.ConfigStore
 	logBuf         *logbuf.Buffer
 	console        *console.Manager
 	consoleStore   *consolestore.Store
@@ -388,6 +398,8 @@ func New(deps Deps) (*Server, error) {
 		readerStore:     deps.ReaderStore,
 		nfcMonitor:      deps.NFCMonitor,
 		protectMonitor:  deps.ProtectMonitor,
+		sensorHistory:   deps.SensorHistory,
+		sensorHistCfg:   deps.SensorHistoryConfig,
 		logBuf:          deps.LogBuffer,
 		console:         deps.Console,
 		consoleStore:    deps.ConsoleStore,
@@ -668,6 +680,10 @@ func (s *Server) routes() {
 	// Protect Etappe 1: lazy camera/sensor detail for the same page.
 	s.mux.Handle("GET /a/devices/protect/cameras/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectCamera)))
 	s.mux.Handle("GET /a/devices/protect/sensors/{id}", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAProtectSensor)))
+	// Sensor History H1: the stored-path query API (H2 charts consume it) and
+	// the per-sensor recording-settings save (interval + retention).
+	s.mux.Handle("GET /a/devices/sensors/history", s.requireAdminSession(http.HandlerFunc(s.handleSensorHistory)))
+	s.mux.Handle("POST /a/devices/sensors/recording", s.requireAdminSession(http.HandlerFunc(s.handleSensorRecordingSave)))
 	// Shelly Etappe 1: lazy live channel detail for the same page. The
 	// {id} is the configured device address; the handler only ever
 	// dials addresses that are part of the stored configuration.

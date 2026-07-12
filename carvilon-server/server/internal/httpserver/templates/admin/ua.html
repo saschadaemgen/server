@@ -394,6 +394,38 @@
                 </form>
               </template>
               {{end}}
+              {{/* Sensor recording settings (Sensor History H1): the
+                   averaging interval + retention, per sensor. The LIVE
+                   reading is unaffected - only the stored history. */}}
+              {{if eq $r.Kind "sensor"}}
+              <template data-dc-actions="{{$r.Index}}">
+                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Recording</span><span class="dc-hr"></span></div>
+                <form class="dc-act-form" method="post" action="/a/devices/sensors/recording">
+                  <input type="hidden" name="device" value="{{$r.ID}}">
+                  <span class="dc-act-label">Averaging interval</span>
+                  <select class="dc-act-input" name="interval_sec" aria-label="Averaging interval">
+                    <option value="0"{{if eq $r.RecIntervalSec 0}} selected{{end}}>Default ({{$r.RecDefaultIntervalLabel}})</option>
+                    <option value="30"{{if eq $r.RecIntervalSec 30}} selected{{end}}>30 seconds</option>
+                    <option value="60"{{if eq $r.RecIntervalSec 60}} selected{{end}}>1 minute</option>
+                    <option value="300"{{if eq $r.RecIntervalSec 300}} selected{{end}}>5 minutes</option>
+                    <option value="900"{{if eq $r.RecIntervalSec 900}} selected{{end}}>15 minutes</option>
+                    <option value="3600"{{if eq $r.RecIntervalSec 3600}} selected{{end}}>Hourly</option>
+                  </select>
+                  <span class="dc-act-label">Keep history for</span>
+                  <select class="dc-act-input" name="retention_sec" aria-label="Retention">
+                    <option value="0"{{if eq $r.RecRetentionSec 0}} selected{{end}}>Default ({{$r.RecDefaultRetentionLabel}})</option>
+                    <option value="604800"{{if eq $r.RecRetentionSec 604800}} selected{{end}}>7 days</option>
+                    <option value="2592000"{{if eq $r.RecRetentionSec 2592000}} selected{{end}}>30 days</option>
+                    <option value="7776000"{{if eq $r.RecRetentionSec 7776000}} selected{{end}}>90 days</option>
+                    <option value="31536000"{{if eq $r.RecRetentionSec 31536000}} selected{{end}}>1 year</option>
+                  </select>
+                  <div class="dc-act-row">
+                    <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save recording</button>
+                  </div>
+                  <p class="dc-act-hint">The live reading stays real-time and is unaffected by this - only the stored history is averaged over the interval, then auto-deleted after the retention age.</p>
+                </form>
+              </template>
+              {{end}}
             {{end}}
           </div>
           <div class="dc-empty-rows" data-dc-noresults hidden>No devices match the current filters.</div>
@@ -448,7 +480,20 @@
         cockpit.mountSettingsSkeleton(row, rightCol);
         return;
       }
-      var lazyTitle = { door: 'Door details', camera: 'Camera details', sensor: 'Sensor details' }[kind] || 'Access methods';
+      // Sensor cockpit: the recording-settings form (pre-rendered, prefilled)
+      // on top, then the lazily-fetched readings detail in its own sub-block
+      // below (so loadDetail's innerHTML swap never clobbers the form).
+      if (kind === 'sensor') {
+        rightCol.innerHTML = '';
+        var sact = dc.tbody.querySelector('[data-dc-actions="' + row.getAttribute('data-idx') + '"]');
+        if (sact && sact.content) rightCol.appendChild(sact.content.cloneNode(true));
+        var sdet = document.createElement('div');
+        sdet.setAttribute('data-sensor-detail', '');
+        sdet.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Sensor readings</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
+        rightCol.appendChild(sdet);
+        return;
+      }
+      var lazyTitle = { door: 'Door details', camera: 'Camera details' }[kind] || 'Access methods';
       rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
         + lazyTitle
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
@@ -459,6 +504,7 @@
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
       if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
+      if (kind === 'sensor') { loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row); return; }
       loadDetail(kind, row.getAttribute('data-id'), rightCol, row);
     }
 
