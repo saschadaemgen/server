@@ -32,7 +32,7 @@ export const NAME_READOUT={};
 // host, "system" where telemetry is readable, "nfc" when a tag reader is
 // detected, "telegram" while the bot runs. Their display metadata lives
 // here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'},sensor:{color:'#F87171',label:'Sensors',icon:'thermometer'}};
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'},sensor:{color:'#F87171',label:'Sensors',icon:'thermometer'},climate:{color:'#5EC8E5',label:'Climate',icon:'snowflake'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of

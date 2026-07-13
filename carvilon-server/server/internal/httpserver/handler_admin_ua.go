@@ -900,7 +900,7 @@ var uaFlash = map[string]struct{ msg, typ string }{
 	"midea-released":         {"Midea device released - discovery can find it again.", "ok"},
 	"midea-removed":          {"Midea device removed and its stored credentials dropped.", "ok"},
 	"midea-sent":             {"Command sent to the Midea device.", "ok"},
-	"midea-ctrl-err":         {"The Midea device did not accept the command.", "err"},
+	"midea-ctrl-err":         {"The command could not be sent to the Midea device (tried a reconnect). Open the device for the exact error.", "err"},
 	"midea-badval":           {"That value is out of range.", "err"},
 	"midea-profile":          {"Profile saved.", "ok"},
 	"midea-advanced-locked":  {"The advanced profile (server-side control loop) is not available yet - it lands in a later update.", "err"},

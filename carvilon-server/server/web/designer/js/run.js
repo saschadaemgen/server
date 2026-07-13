@@ -94,6 +94,11 @@ function buildReadoutMap(){
     for(const r of (n.readout.readouts||[])){
       readoutMap[n.id+'__'+r.key]={node:n.id,port:r.key};
     }
+    // Control sinks map back too, so a wired control's live driven value paints
+    // onto its faceplate row (unwired controls never emit, so this is harmless).
+    for(const c of (n.readout.controls||[])){
+      readoutMap[n.id+'__'+c.key]={node:n.id,port:c.key};
+    }
   }
 }
 function serializeGraph(){
@@ -202,11 +207,22 @@ function serializeGraph(){
   // The run binds the ref by its namespace prefix (bindRunIO), so the same
   // mechanism serves any readout family - Protect sensors first.
   const roType={float:'source.channel.float',text:'source.channel.text',bool:'source.channel'};
+  const siType={float:'sink.channel.float',text:'sink.channel.text',bool:'sink.channel'};
   for(const n of GRAPH.nodes){
     if(n.type!=='readout.device' || !n.readout) continue;
     for(const r of (n.readout.readouts||[])){
       if(!r.channel) continue;
       emit(n.id+'__'+r.key, roType[r.kind]||'source.channel', {channel:r.channel}, n.id, r.key);
+    }
+    // Control INPUT ports become SINK nodes, emitted ONLY when wired (an
+    // unwired sink would write a zero value at tick 0 and disturb the device).
+    // The channel is the fully-formed physical ref the catalog baked in
+    // (e.g. "midea:<id>:setpoint"); the run binds it by prefix to the device's
+    // Sink driver, so the editor drives the real device like the cockpit.
+    for(const c of (n.readout.controls||[])){
+      if(!c.channel) continue;
+      if(!GRAPH.edges.some(e=>e.to===n.id+':'+c.key)) continue;
+      emit(n.id+'__'+c.key, siType[c.kind]||'sink.channel.float', {channel:c.channel}, n.id, c.key);
     }
   }
   const edges=[];
@@ -456,11 +472,20 @@ function formatReadout(v){
 function paintReadout(nd,port,v){
   const el=nd.el;
   const online=el.querySelector('[data-roonline]'); if(online) online.classList.add('on');
-  const row=el.querySelector(`.ro-row[data-ro="${cssAttr(port)}"]`); if(!row) return;
-  const slot=row.querySelector('[data-roval]'); if(slot) slot.textContent=formatReadout(v);
   const active=isActive(v);
-  row.classList.toggle('on',active);
   const pe=el.querySelector(`[data-port="${cssAttr(nd.def.id+':'+port)}"]`); if(pe) pe.classList.toggle('io-on',active);
+  const row=el.querySelector(`.ro-row[data-ro="${cssAttr(port)}"]`);
+  if(row){
+    const slot=row.querySelector('[data-roval]'); if(slot) slot.textContent=formatReadout(v);
+    row.classList.toggle('on',active);
+    return;
+  }
+  // Control INPUT row: the live value being driven into the port.
+  const crow=el.querySelector(`.ro-ctl[data-roctl="${cssAttr(port)}"]`);
+  if(crow){
+    const slot=crow.querySelector('[data-roctlval]'); if(slot) slot.textContent=formatReadout(v);
+    crow.classList.toggle('on',active);
+  }
 }
 // The faceplate's clickable relay switch drives the real device over MQTT
 // (Switch.Set), independent of any run — but only when the relay is NOT

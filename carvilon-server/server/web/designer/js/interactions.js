@@ -29,7 +29,7 @@ function portOf(sel){const i=sel.indexOf(':');const nd=nodes[sel.slice(0,i)];if(
 // isDrivenRelay reports whether an input is a Shelly relay control that is
 // already wired - the single-use rule: two graph sources must never fight
 // over one physical relay, so a second driver is refused (not replaced).
-function isDrivenRelay(inSel){const p=portOf(inSel);return !!p&&p.srole==='relay'&&wires.some(o=>o.to===inSel);}
+function isDrivenRelay(inSel){const p=portOf(inSel);return !!p&&(p.srole==='relay'||p.srole==='control')&&wires.some(o=>o.to===inSel);}
 
 /* ===== pan / drag / marquee ===== */
 let mode=null,pan=null,drag=null,mq=null;

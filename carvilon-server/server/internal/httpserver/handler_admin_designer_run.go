@@ -511,6 +511,17 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 		reg.RegisterSource(engine.PrefixProtect, drv)
 		closers = append(closers, drv)
 	}
+	if prefixes[engine.PrefixMidea] && s.mideaMon != nil {
+		// The Midea monitor runs continuously (it backs the Device Center
+		// cockpit); the run attaches to the SAME live client - sensor readouts
+		// as a Source, standard-profile controls (setpoint/mode/fan) as a Sink.
+		// So a control wired in the editor drives the device exactly like the
+		// cockpit does. The Sink writes are non-blocking (queued to a worker).
+		drv := s.mideaMon.NewRunBinding()
+		reg.RegisterSource(engine.PrefixMidea, drv)
+		reg.RegisterSink(engine.PrefixMidea, drv)
+		closers = append(closers, drv)
+	}
 	if prefixes[engine.PrefixMQTT] {
 		// MQTT topics ride on the broker's in-process inline client; a
 		// graph that binds mqtt: channels needs the broker actually

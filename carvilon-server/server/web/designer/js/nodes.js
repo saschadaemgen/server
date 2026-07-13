@@ -313,10 +313,10 @@ export function markRequiredPorts(nodeId){
       const pe=nd.el.querySelector(`[data-port="${cssAttr(id+':'+p.id)}"]`);if(!pe)continue;
       const required=p.optional===false&&!!p.kind,wired=wires.some(o=>o.to===id+':'+p.id);
       pe.classList.toggle('io-req',required&&!wired);
-      // A Shelly relay control is single-use: once driven, it renders "in
-      // use" (and the wiring layer refuses a second driver). On a faceplate,
-      // the clickable switch for that channel goes inert (graph owns it).
-      pe.classList.toggle('io-driven',p.srole==='relay'&&wired);
+      // A Shelly relay or a generic device control is single-use: once driven,
+      // it renders "in use" (and the wiring layer refuses a second driver). On
+      // a faceplate, the clickable switch for that channel goes inert.
+      pe.classList.toggle('io-driven',(p.srole==='relay'||p.srole==='control')&&wired);
       if(p.srole==='relay'){
         // graph-driven: the manual switch (relay data-chsw, or light
         // data-lsw) goes inert. A light row also locks its colour/gain
@@ -524,9 +524,13 @@ function shellyDef(name){
 function readoutDef(name){
   const s=NAME_READOUT[name]; if(!s) return null;
   const outp=(s.readouts||[]).map(r=>({id:r.key,label:r.label||r.key,kind:r.kind||'float',unit:r.unit||'',srole:'readout'}));
+  // Control capabilities (empty for a read-only sensor) become single-driver
+  // INPUT ports - srole:'control' reuses the relay exclusivity + faceplate
+  // lock. This is what makes the readout module a generic DEVICE module.
+  const inp=(s.controls||[]).map(c=>({id:c.key,label:c.label||c.key,kind:c.kind||'float',unit:c.unit||'',srole:'control',options:c.options||[]}));
   return {cat:s.class||'sensor',icon:NAME_ICON[name]||s.icon||'thermometer',title:name,type:'readout.device',implemented:true,live:false,props:[],faceplate:true,
-    readout:{id:s.id,class:s.class,name:s.name,model:s.model,readouts:s.readouts||[]},
-    ports:{in:[],out:outp}};
+    readout:{id:s.id,class:s.class,name:s.name,model:s.model,readouts:s.readouts||[],controls:s.controls||[]},
+    ports:{in:inp,out:outp}};
 }
 // readoutFaceplateHTML renders the generic readout faceplate: a header
 // (name/model/online) and one tile per readout showing its live value +
@@ -535,6 +539,16 @@ function readoutDef(name){
 // the run's paintReadout writes into. Read-only: no switches, no controls.
 function readoutFaceplateHTML(n){
   const ro=n.readout||{}, model=ro.model||'';
+  // Control INPUT rows first (a driver wires in here); then readout OUTPUT
+  // rows. An unwired control shows "—"; the run's paintReadout writes the live
+  // driven value into data-roctlval when the port is bound.
+  const ctlrows=(n.ports.in||[]).map(p=>{
+    const unit=p.unit?`<span class="ro-unit">${esc(p.unit)}</span>`:'';
+    return `<div class="ro-row ro-ctl" data-roctl="${escAttr(p.id)}">
+      <div class="port io-in ro-pi" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' control')}"><span class="socket${kindClass(p.kind)}"></span></div>
+      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span><span class="ro-metric"><span class="ro-val" data-roctlval>—</span>${unit}</span></div>
+    </div>`;
+  }).join('');
   const rows=(n.ports.out||[]).map(p=>{
     const unit=p.unit?`<span class="ro-unit">${esc(p.unit)}</span>`:'';
     return `<div class="ro-row" data-ro="${escAttr(p.id)}">
@@ -547,7 +561,7 @@ function readoutFaceplateHTML(n){
       <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">${esc(model)}</div></div>
       <div class="sh-meta"><div class="sh-online ro-online" data-roonline title="Device status"></div></div>
     </div>
-    <div class="sh-rows ro-rows">${rows}</div>`;
+    <div class="sh-rows ro-rows">${ctlrows}${rows}</div>`;
 }
 function constantDef(name,t){
   const seed=t.slice('input.constant.'.length); // bool | float | text

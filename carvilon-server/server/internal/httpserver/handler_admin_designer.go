@@ -93,6 +93,38 @@ func (s *Server) readoutDevicesForCatalog(ctx context.Context) []designer.Readou
 			out = append(out, rd)
 		}
 	}
+	// Midea climate controllers: a capability-driven DEVICE module - readout
+	// OUTPUT ports (sensor) PLUS control INPUT ports (setpoint/mode/fan). This
+	// is the readout path generalised to control capabilities and a non-Shelly
+	// module; the same live monitor backs the editor and the cockpit.
+	if s.mideaMon != nil {
+		names := map[string]string{}
+		if s.mideastore != nil {
+			if act, err := s.mideastore.ListActive(ctx); err == nil {
+				for _, d := range act {
+					names[d.ID] = mideaDisplayName(d)
+				}
+			}
+		}
+		for _, d := range s.mideaMon.Devices() {
+			name := names[d.ID]
+			if name == "" {
+				name = "Midea " + d.ID
+			}
+			rd := designer.ReadoutDevice{ID: d.ID, Class: "climate", Name: name, Model: d.Model, Icon: "snowflake"}
+			for _, ro := range d.Readouts {
+				rd.Readouts = append(rd.Readouts, designer.ReadoutPort{
+					Key: ro.Token, Label: ro.Label, Unit: ro.Unit, Kind: ro.Kind, Channel: ro.Channel,
+				})
+			}
+			for _, c := range d.Controls {
+				rd.Controls = append(rd.Controls, designer.ControlPort{
+					Key: c.Token, Label: c.Label, Unit: c.Unit, Kind: c.Kind, Options: c.Options, Channel: c.Channel,
+				})
+			}
+			out = append(out, rd)
+		}
+	}
 	return out
 }
 

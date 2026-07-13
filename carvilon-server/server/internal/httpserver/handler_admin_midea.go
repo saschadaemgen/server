@@ -188,6 +188,9 @@ func makeMideaRow(d mideastore.Device, r mideamonitor.Readout) uaRow {
 		{Key: "Profile", Value: mideaProfileLabel(d.Profile)},
 		{Key: "Protocol", Value: mideaProtocolLabel(d.ProtocolV3)},
 	}
+	if r.LastCtrlErr != "" {
+		detail = append(detail, kvRow{Key: "Last control error", Value: r.LastCtrlErr})
+	}
 	if !online && r.LastErr != "" {
 		detail = append(detail, kvRow{Key: "Last error", Value: r.LastErr})
 	}
@@ -476,7 +479,8 @@ func (s *Server) handleAdminUAMideaControl(w http.ResponseWriter, r *http.Reques
 		s.mideaRedirect(w, r, "midea-err")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	// Wide enough for a reconnect-and-retry (two connect+command cycles).
+	ctx, cancel := context.WithTimeout(r.Context(), 22*time.Second)
 	defer cancel()
 
 	var err error

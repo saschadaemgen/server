@@ -89,6 +89,7 @@ const (
 	PrefixESP      = "esp"
 	PrefixNFC      = "nfc"
 	PrefixProtect  = "protect"
+	PrefixMidea    = "midea"
 )
 
 // DriverRegistry maps a namespace prefix to its Source/Sink driver. A

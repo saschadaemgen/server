@@ -113,6 +113,27 @@ type ReadoutDevice struct {
 	Model    string        `json:"model,omitempty"`
 	Icon     string        `json:"icon,omitempty"`
 	Readouts []ReadoutPort `json:"readouts"`
+	// Controls are the device's control capabilities as INPUT ports (empty for
+	// a read-only device like a Protect sensor). This is what makes the readout
+	// module a generic DEVICE module: a device with controls (the Midea climate
+	// unit: setpoint/mode/fan) gets wireable control inputs bound to a driver
+	// SINK, alongside its readout outputs - capability-driven, not per-vendor.
+	Controls []ControlPort `json:"controls,omitempty"`
+}
+
+// ControlPort is one control capability a device exposes as an INPUT port on
+// its editor module: a stable key, display label + unit, value kind ("float" |
+// "text" | "bool"; an enum like mode/fan_mode is carried as "text" with its
+// Options), and the fully-formed physical channel ref the editor bakes into the
+// expanded SINK node (e.g. "midea:<id>:setpoint"). Controls are single-driver
+// (exclusive) - one wire may drive them - unlike freely-consumable readouts.
+type ControlPort struct {
+	Key     string   `json:"key"`
+	Label   string   `json:"label"`
+	Unit    string   `json:"unit,omitempty"`
+	Kind    string   `json:"kind"`
+	Options []string `json:"options,omitempty"`
+	Channel string   `json:"channel"`
 }
 
 // SysMetric is one available system-telemetry metric the catalog turns

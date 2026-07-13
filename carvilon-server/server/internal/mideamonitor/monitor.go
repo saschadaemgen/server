@@ -48,7 +48,8 @@ type Readout struct {
 	HasTemp      bool
 	OutdoorC     float64
 	HasOutdoor   bool
-	LastErr      string
+	LastErr      string // last poll/connection error
+	LastCtrlErr  string // last control command error (surfaced in the cockpit)
 	LastPollMS   int64
 }
 
@@ -62,6 +63,7 @@ type devState struct {
 	last         mideaclimate.State
 	hasState     bool
 	lastErr      string
+	lastCtrlErr  string
 	lastPollMS   int64
 }
 
@@ -74,10 +76,11 @@ type Monitor struct {
 	connectTimeout time.Duration
 	pollTimeout    time.Duration
 
-	mu      sync.Mutex
-	devs    map[string]*devState
-	trigger chan struct{}
-	now     func() time.Time
+	mu       sync.Mutex
+	devs     map[string]*devState
+	trigger  chan struct{}
+	bindings map[*RunBinding]struct{} // live Logic-Editor run drivers (readout push)
+	now      func() time.Time
 }
 
 // Option mutates a Monitor during construction.
@@ -97,11 +100,12 @@ func New(store Store, log *slog.Logger, opts ...Option) *Monitor {
 	m := &Monitor{
 		store:          store,
 		log:            log.With("component", "mideamonitor"),
-		interval:       20 * time.Second,
+		interval:       15 * time.Second, // also a keepalive: Midea drops idle TCP
 		connectTimeout: 6 * time.Second,
 		pollTimeout:    5 * time.Second,
 		devs:           make(map[string]*devState),
 		trigger:        make(chan struct{}, 1),
+		bindings:       make(map[*RunBinding]struct{}),
 		now:            time.Now,
 	}
 	for _, o := range opts {
@@ -197,13 +201,15 @@ func (m *Monitor) tick(ctx context.Context) {
 	}
 }
 
-// provisionAsync connects one adopted device from its persisted credentials.
+// provisionAsync connects one adopted device from its persisted credentials,
+// then polls it once immediately so the cockpit readouts populate without
+// waiting a full interval (and the fresh connection is exercised right away).
 func (m *Monitor) provisionAsync(ctx context.Context, d mideastore.Device) {
 	dev, err := m.connect(ctx, d)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ds := m.devs[d.ID]
 	if ds == nil { // removed while connecting
+		m.mu.Unlock()
 		if dev != nil {
 			go dev.Deprovision(context.Background())
 		}
@@ -214,6 +220,7 @@ func (m *Monitor) provisionAsync(ctx context.Context, d mideastore.Device) {
 	if err != nil {
 		ds.online = false
 		ds.lastErr = err.Error()
+		m.mu.Unlock()
 		m.log.Warn("provision failed", "id", d.ID, "err", err)
 		return
 	}
@@ -221,12 +228,16 @@ func (m *Monitor) provisionAsync(ctx context.Context, d mideastore.Device) {
 	// command during our connect window); keep it and close ours so we do not
 	// overwrite and leak a live connection.
 	if ds.dev != nil {
+		m.mu.Unlock()
 		go dev.Deprovision(context.Background())
 		return
 	}
 	ds.dev = dev
 	ds.online = true
 	ds.lastErr = ""
+	m.mu.Unlock()
+	// Immediate first poll (lock released) so status is fresh right after adopt.
+	m.pollOne(ctx, ds)
 }
 
 // connect provisions a device handle from the store's encrypted credentials.
@@ -260,18 +271,19 @@ func (m *Monitor) pollOne(ctx context.Context, ds *devState) {
 	cancel()
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ds.lastPollMS = m.now().UnixMilli()
 	// The handle may have been dropped (a failed control) or replaced (ensure)
 	// while we polled. If so, our result is stale and whoever swapped it already
 	// owns closing our handle - do not touch ds.dev or double-Deprovision.
 	if ds.dev != dev {
+		m.mu.Unlock()
 		return
 	}
 	if err != nil {
 		ds.online = false
 		ds.lastErr = err.Error()
 		ds.dev = nil
+		m.mu.Unlock()
 		go dev.Deprovision(context.Background())
 		return
 	}
@@ -279,6 +291,9 @@ func (m *Monitor) pollOne(ctx context.Context, ds *devState) {
 	ds.hasState = true
 	ds.online = true
 	ds.lastErr = ""
+	m.mu.Unlock()
+	// Feed the fresh readouts to any Logic-Editor run drivers.
+	m.pushReadouts(ds.id)
 }
 
 // Snapshot returns the cached status of every adopted device.
@@ -316,6 +331,7 @@ func (ds *devState) readout() Readout {
 		Online:       ds.online,
 		Provisioning: ds.provisioning,
 		LastErr:      ds.lastErr,
+		LastCtrlErr:  ds.lastCtrlErr,
 		LastPollMS:   ds.lastPollMS,
 	}
 	if ds.hasState {
@@ -355,10 +371,35 @@ func (m *Monitor) SetFan(ctx context.Context, id, fan string) error {
 	})
 }
 
-// control runs a command against a connected handle, connecting on demand (a
-// just-approved device, or one whose connection dropped). On success it
-// refreshes the cached state; on failure it drops the handle for a re-connect.
+// control runs a standard-profile command and RETRIES ONCE on failure with a
+// fresh connection: Midea units drop idle TCP and the protocol has no keepalive,
+// so the monitor's shared handle can be stale by the time the operator clicks -
+// a single reconnect is what "keep a live client" means in practice. The final
+// result (ok or the error text) is recorded so the cockpit can surface it
+// instead of silently doing nothing.
 func (m *Monitor) control(ctx context.Context, id string, fn func(*mideaclimate.Device) error) error {
+	err := m.attempt(ctx, id, fn)
+	if err != nil {
+		err = m.attempt(ctx, id, fn) // reconnect + retry once (handle was dropped)
+	}
+	m.mu.Lock()
+	if ds := m.devs[id]; ds != nil {
+		if err != nil {
+			ds.lastCtrlErr = err.Error()
+		} else {
+			ds.lastCtrlErr = ""
+		}
+	}
+	m.mu.Unlock()
+	if err != nil {
+		m.log.Warn("control failed after retry", "id", id, "err", err)
+	}
+	return err
+}
+
+// attempt runs fn against a (re)connected handle once; on failure it drops the
+// handle so the retry / next tick reconnects. On success it refreshes the cache.
+func (m *Monitor) attempt(ctx context.Context, id string, fn func(*mideaclimate.Device) error) error {
 	dev, err := m.ensure(ctx, id)
 	if err != nil {
 		return err
