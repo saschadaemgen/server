@@ -75,9 +75,9 @@ type uaOverviewData struct {
 	ShellyAvailable bool
 
 	// ShellyEnabled: the Shelly integration toggle is on (discovery runs),
-	// regardless of whether any device is adopted yet. Gates the discovery
-	// actions in the toolbar (Scan Shelly / Scan network) so they are
-	// reachable even before the first device lands.
+	// regardless of whether any device is adopted yet. Contributes (with
+	// MideaEnabled) to showing the unified "Scan network" action in the toolbar
+	// so it is reachable even before the first device lands.
 	ShellyEnabled bool
 
 	// ShellyDiscovery keeps the table (not the gate card) on screen whenever
@@ -873,37 +873,39 @@ func (s *Server) localReaders(ctx context.Context) []readerstore.Reader {
 // uaFlash maps a stable flash code (carried in the redirect query,
 // never free text) to the banner after a reader rename.
 var uaFlash = map[string]struct{ msg, typ string }{
-	"renamed":               {"Reader name saved.", "ok"},
-	"reset":                 {"Reader name reset to the auto-generated name.", "ok"},
-	"err-name":              {"Renaming failed.", "err"},
-	"rec-saved":             {"Recording settings saved.", "ok"},
-	"rec-err":               {"Saving the recording settings failed.", "err"},
-	"err-notfd":             {"Reader not found.", "err"},
-	"shelly-removed":        {"Shelly device removed. It will not be re-discovered until released.", "ok"},
-	"shelly-notfd":          {"Shelly device not found.", "err"},
-	"shelly-err":            {"The Shelly device action failed.", "err"},
-	"shelly-provisioning":   {"Provisioning the Shelly onto the MQTT broker - this can take a moment.", "ok"},
-	"shelly-noprov":         {"The MQTT broker is not running - start it under Settings before provisioning.", "err"},
-	"shelly-approved":       {"Shelly device approved - provisioning it onto the MQTT broker.", "ok"},
-	"shelly-ignored":        {"Shelly device moved to Ignored. Release it to allow re-discovery.", "ok"},
-	"shelly-released":       {"Shelly device released - discovery can find it again.", "ok"},
-	"shelly-cap":            {"Active Shelly device limit reached - remove one before approving another.", "err"},
-	"midea-scan-ok":         {"Discovery finished - new Midea devices appear in the Pending group.", "ok"},
-	"midea-scan-none":       {"No Midea devices answered discovery. Try a targeted IP if they are on another subnet.", "ok"},
-	"midea-scan-err":        {"Midea discovery failed.", "err"},
-	"midea-approved":        {"Midea device adopted - it is being connected now.", "ok"},
-	"midea-pair-err":        {"Adoption failed: could not obtain or verify credentials. Try again, choose the right region, or paste exported keys.", "err"},
-	"midea-import-bad":      {"The pasted credentials could not be read - expected the exported key file format.", "err"},
-	"midea-ignored":         {"Midea device moved to Ignored. Release it to allow re-discovery.", "ok"},
-	"midea-released":        {"Midea device released - discovery can find it again.", "ok"},
-	"midea-removed":         {"Midea device removed and its stored credentials dropped.", "ok"},
-	"midea-sent":            {"Command sent to the Midea device.", "ok"},
-	"midea-ctrl-err":        {"The Midea device did not accept the command.", "err"},
-	"midea-badval":          {"That value is out of range.", "err"},
-	"midea-profile":         {"Profile saved.", "ok"},
-	"midea-advanced-locked": {"The advanced profile (server-side control loop) is not available yet - it lands in a later update.", "err"},
-	"midea-notfd":           {"Midea device not found.", "err"},
-	"midea-err":             {"The Midea device action failed.", "err"},
+	"renamed":                {"Reader name saved.", "ok"},
+	"reset":                  {"Reader name reset to the auto-generated name.", "ok"},
+	"err-name":               {"Renaming failed.", "err"},
+	"rec-saved":              {"Recording settings saved.", "ok"},
+	"rec-err":                {"Saving the recording settings failed.", "err"},
+	"err-notfd":              {"Reader not found.", "err"},
+	"shelly-removed":         {"Shelly device removed. It will not be re-discovered until released.", "ok"},
+	"shelly-notfd":           {"Shelly device not found.", "err"},
+	"shelly-err":             {"The Shelly device action failed.", "err"},
+	"shelly-provisioning":    {"Provisioning the Shelly onto the MQTT broker - this can take a moment.", "ok"},
+	"shelly-noprov":          {"The MQTT broker is not running - start it under Settings before provisioning.", "err"},
+	"shelly-approved":        {"Shelly device approved - provisioning it onto the MQTT broker.", "ok"},
+	"shelly-ignored":         {"Shelly device moved to Ignored. Release it to allow re-discovery.", "ok"},
+	"shelly-released":        {"Shelly device released - discovery can find it again.", "ok"},
+	"shelly-cap":             {"Active Shelly device limit reached - remove one before approving another.", "err"},
+	"midea-approved":         {"Midea device adopted - it is being connected now.", "ok"},
+	"midea-pair-err":         {"Adoption failed: could not obtain or verify credentials. Open the device for the failing step, pick the right region, or paste exported keys.", "err"},
+	"midea-pair-cloud-login": {"Adoption failed at cloud login. Check internet + region, or paste exported keys (details in the device panel).", "err"},
+	"midea-pair-token":       {"Adoption failed: no key for this device in the chosen region. Try another region, or paste exported keys (details in the device panel).", "err"},
+	"midea-pair-cloud-api":   {"Adoption failed: the Midea cloud API returned an error. Paste exported keys to adopt now (details in the device panel).", "err"},
+	"midea-pair-handshake":   {"Adoption failed at the device handshake: credentials rejected by the device (details in the device panel).", "err"},
+	"midea-pair-import":      {"Adoption failed: the pasted keys did not match this device (details in the device panel).", "err"},
+	"midea-import-bad":       {"The pasted credentials could not be read - expected the exported key file format.", "err"},
+	"midea-ignored":          {"Midea device moved to Ignored. Release it to allow re-discovery.", "ok"},
+	"midea-released":         {"Midea device released - discovery can find it again.", "ok"},
+	"midea-removed":          {"Midea device removed and its stored credentials dropped.", "ok"},
+	"midea-sent":             {"Command sent to the Midea device.", "ok"},
+	"midea-ctrl-err":         {"The Midea device did not accept the command.", "err"},
+	"midea-badval":           {"That value is out of range.", "err"},
+	"midea-profile":          {"Profile saved.", "ok"},
+	"midea-advanced-locked":  {"The advanced profile (server-side control loop) is not available yet - it lands in a later update.", "err"},
+	"midea-notfd":            {"Midea device not found.", "err"},
+	"midea-err":              {"The Midea device action failed.", "err"},
 }
 
 // handleAdminUAReaderRename sets or clears a local reader's custom name

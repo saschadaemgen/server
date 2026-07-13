@@ -22,14 +22,90 @@ import (
 	"carvilon.local/server/internal/mideastore"
 )
 
-// mideaRegion is the default NetHome-Plus cloud region for auto-adoption
-// (briefing: WithRegion("DE") is the primary path). Overridable per-approval.
-const mideaDefaultRegion = "DE"
+// mideaDefaultRegion is the default NetHome-Plus cloud region for adoption.
+// US is the KNOWN-CORRECT value (Sascha's NetHome-Plus account authenticates
+// against US - the region the working msmart-ng CLI test used); it matches the
+// corrected cloud.go default. Overridable per-approval via the region selector.
+const mideaDefaultRegion = "US"
 
 // mideaReady reports whether the Midea device family is wired (store present).
 // E1 has no separate on/off toggle: the source is available whenever the store
 // is configured, and the approval gate keeps it safe out of the box.
 func (s *Server) mideaReady() bool { return s.mideastore != nil }
+
+// mideaAdoptDiag is the last adoption-failure diagnostic for one device: which
+// step failed, the region tried, and a short English hint. Rendered in the
+// pending device's panel so a cloud failure is diagnosable.
+type mideaAdoptDiag struct {
+	StepLabel string
+	Region    string
+	Detail    string
+	WhenMS    int64
+}
+
+func (s *Server) setMideaDiag(id string, d mideaAdoptDiag) {
+	s.mideaDiagMu.Lock()
+	defer s.mideaDiagMu.Unlock()
+	if s.mideaDiag == nil {
+		s.mideaDiag = map[string]mideaAdoptDiag{}
+	}
+	s.mideaDiag[id] = d
+}
+
+func (s *Server) clearMideaDiag(id string) {
+	s.mideaDiagMu.Lock()
+	defer s.mideaDiagMu.Unlock()
+	delete(s.mideaDiag, id)
+}
+
+func (s *Server) mideaDiagFor(id string) (mideaAdoptDiag, bool) {
+	s.mideaDiagMu.Lock()
+	defer s.mideaDiagMu.Unlock()
+	d, ok := s.mideaDiag[id]
+	return d, ok
+}
+
+// pairDiag classifies a mideaclimate.Pair failure into the specific step that
+// failed - so a generic "could not obtain credentials" becomes "cloud login
+// failed (region DE)" - plus the flash code and a short EN hint. It reads the
+// step sentinels (ErrCredentialFetch / ErrLocalHandshake) and, within a fetch
+// failure, the stable vendored cause markers. It never rewrites the cloud flow.
+type pairDiag struct {
+	flash     string
+	stepLabel string
+	detail    string
+}
+
+func classifyMideaPairError(err error, region string) pairDiag {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case errors.Is(err, mideaclimate.ErrLocalHandshake):
+		return pairDiag{"midea-pair-handshake", "Local device handshake",
+			"The device rejected the token/key - they are not valid for this unit. Re-fetch from the cloud, or paste the correct exported keys."}
+	case errors.Is(err, mideaclimate.ErrCredentialFetch):
+		switch {
+		case strings.Contains(msg, "importierten credentials"):
+			return pairDiag{"midea-pair-import", "Imported credentials",
+				"No pasted credentials matched this device id (paste the export for THIS unit)."}
+		case strings.Contains(msg, "cloud-fehler"):
+			// A cloud API error code (e.g. signature illegal) points at the cloud
+			// flow / API itself, whichever step it surfaced on.
+			return pairDiag{"midea-pair-cloud-api", "Cloud API error",
+				"The Midea cloud API returned an error (the API or account may have changed). Paste exported keys to adopt now."}
+		case strings.Contains(msg, "kein token/key"), strings.Contains(msg, "tokenlist"), strings.Contains(msg, "gettoken"):
+			return pairDiag{"midea-pair-token", "Token fetch / region",
+				"The cloud returned no key for this device in region " + region + ". Try another region (US/DE/KR), or paste exported keys."}
+		case strings.Contains(msg, "getloginid"), strings.Contains(msg, "loginid"), strings.Contains(msg, "sessionid"), strings.Contains(msg, "anmeldung"), strings.Contains(msg, "login"):
+			return pairDiag{"midea-pair-cloud-login", "Cloud login",
+				"NetHome-Plus cloud login failed. Check internet connectivity and the region, or paste exported keys."}
+		default:
+			return pairDiag{"midea-pair-err", "Credential fetch",
+				"Could not obtain credentials from the cloud. Paste exported keys to adopt now."}
+		}
+	default:
+		return pairDiag{"midea-pair-err", "Adoption", "Adoption failed. Paste exported keys to adopt now."}
+	}
+}
 
 // mideaLifecycleRows builds the Device-Center rows for the Midea source: the
 // adopted (active) devices with their live status, plus the pending / ignored
@@ -53,12 +129,16 @@ func (s *Server) mideaLifecycleRows(ctx context.Context) (active, pending, ignor
 	}
 	if pend, err := s.mideastore.ListPending(ctx); err == nil {
 		for _, d := range pend {
-			pending = append(pending, makeMideaLifecycleRow(d, "midea-pending"))
+			var diag *mideaAdoptDiag
+			if v, ok := s.mideaDiagFor(d.ID); ok {
+				diag = &v
+			}
+			pending = append(pending, makeMideaLifecycleRow(d, "midea-pending", diag))
 		}
 	}
 	if ign, err := s.mideastore.ListIgnored(ctx); err == nil {
 		for _, d := range ign {
-			ignored = append(ignored, makeMideaLifecycleRow(d, "midea-ignored"))
+			ignored = append(ignored, makeMideaLifecycleRow(d, "midea-ignored", nil))
 		}
 	}
 	return active, pending, ignored
@@ -138,7 +218,7 @@ func makeMideaRow(d mideastore.Device, r mideamonitor.Readout) uaRow {
 // makeMideaLifecycleRow renders a pending / ignored Midea device. Pending rows
 // are pinned to the top group, ignored to the bottom, via the lifecycle
 // pseudo-categories (shared with Shelly).
-func makeMideaLifecycleRow(d mideastore.Device, kind string) uaRow {
+func makeMideaLifecycleRow(d mideastore.Device, kind string, diag *mideaAdoptDiag) uaRow {
 	name := mideaDisplayName(d)
 	category := "pending"
 	life := "pending"
@@ -151,6 +231,19 @@ func makeMideaLifecycleRow(d mideastore.Device, kind string) uaRow {
 		{Key: "IP", Value: d.Address},
 		{Key: "Device id", Value: d.ID},
 		{Key: "Protocol", Value: mideaProtocolLabel(d.ProtocolV3)},
+	}
+	// Last failed adoption attempt (pending rows): which step + region, so a
+	// cloud failure is diagnosable right in the panel.
+	if diag != nil {
+		region := diag.Region
+		if region == "" {
+			region = "-"
+		}
+		detail = append(detail,
+			kvRow{Key: "Last adoption", Value: "failed at: " + diag.StepLabel},
+			kvRow{Key: "Region tried", Value: region},
+			kvRow{Key: "What to do", Value: diag.Detail},
+		)
 	}
 	return uaRow{
 		ID:          d.ID,
@@ -238,41 +331,9 @@ func (s *Server) mideaRedirect(w http.ResponseWriter, r *http.Request, flash str
 	http.Redirect(w, r, "/a/devices?flash="+flash, http.StatusSeeOther)
 }
 
-// handleAdminUAMideaScan runs a local UDP discovery (broadcast, or targeted at
-// a host IP for VLAN/Windows robustness) and inserts every find as pending.
-func (s *Server) handleAdminUAMideaScan(w http.ResponseWriter, r *http.Request) {
-	if s.mideastore == nil {
-		s.mideaRedirect(w, r, "midea-err")
-		return
-	}
-	_ = r.ParseForm()
-	host := strings.TrimSpace(r.PostForm.Get("host"))
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-	found, err := mideaclimate.DiscoverLocal(ctx, host, 4*time.Second)
-	if err != nil {
-		s.log.Warn("midea: discovery failed", "host", host, "err", err)
-		s.mideaRedirect(w, r, "midea-scan-err")
-		return
-	}
-	added := 0
-	for _, f := range found {
-		det := mideastore.Detected{DeviceID: f.DeviceID, Address: f.IP, Name: f.Name, ProtocolV3: f.ProtocolV3}
-		if host != "" {
-			det.Origin = mideastore.OriginManual
-		}
-		if _, err := s.mideastore.InsertDiscovered(ctx, det); err != nil {
-			s.log.Warn("midea: store discovered failed", "id", mideastore.IDFor(f.DeviceID), "err", err)
-			continue
-		}
-		added++
-	}
-	if added == 0 {
-		s.mideaRedirect(w, r, "midea-scan-none")
-		return
-	}
-	s.mideaRedirect(w, r, "midea-scan-ok")
-}
+// Midea discovery is triggered by the unified "Scan network" action (and the
+// automatic periodic sweep) via s.mideaDiscover - see discovery_periodic.go.
+// There is no separate Midea scan button anymore.
 
 // handleAdminUAMideaApprove adopts a pending device. Credential fetch is
 // cloud-primary (NetHome-Plus, region-selectable) with imported credentials as
@@ -325,13 +386,21 @@ func (s *Server) handleAdminUAMideaApprove(w http.ResponseWriter, r *http.Reques
 				}
 			} else {
 				s.log.Warn("midea: import parse failed", "id", id, "err", ierr)
+				s.setMideaDiag(id, mideaAdoptDiag{StepLabel: "Imported credentials", Region: region,
+					Detail: "The pasted text is not in the exported key format (needs device_id / token / key lines).",
+					WhenMS: time.Now().UnixMilli()})
 				s.mideaRedirect(w, r, "midea-import-bad")
 				return
 			}
 		}
 	}
 	if perr != nil {
-		s.mideaRedirect(w, r, "midea-pair-err")
+		// Surface WHICH step failed + the region, in the pending panel and the
+		// flash banner, so a cloud failure is diagnosable (import stays offered).
+		diag := classifyMideaPairError(perr, region)
+		s.setMideaDiag(id, mideaAdoptDiag{StepLabel: diag.stepLabel, Region: region,
+			Detail: diag.detail, WhenMS: time.Now().UnixMilli()})
+		s.mideaRedirect(w, r, diag.flash)
 		return
 	}
 	if err := s.mideastore.Approve(r.Context(), id, creds.Token, creds.Key, mideastore.ProfileStandard); err != nil {
@@ -339,6 +408,7 @@ func (s *Server) handleAdminUAMideaApprove(w http.ResponseWriter, r *http.Reques
 		s.mideaRedirect(w, r, "midea-err")
 		return
 	}
+	s.clearMideaDiag(id)
 	if s.mideaMon != nil {
 		s.mideaMon.Refresh()
 	}
@@ -386,6 +456,7 @@ func (s *Server) mideaLifecycleAction(w http.ResponseWriter, r *http.Request, ok
 		s.log.Error("midea: lifecycle action failed", "id", id, "err", err)
 		s.mideaRedirect(w, r, "midea-err")
 	default:
+		s.clearMideaDiag(id) // reject/release/remove clears any stale adopt diag
 		s.mideaRedirect(w, r, okFlash)
 	}
 }

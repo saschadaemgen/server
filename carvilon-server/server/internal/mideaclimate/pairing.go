@@ -22,10 +22,25 @@ package mideaclimate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"carvilon.local/server/internal/midea"
+)
+
+// Adoption-step sentinels so CARVILON can report WHICH step of Pair failed
+// (diagnostics only - the cloud flow itself is unchanged). errors.Is against
+// these classifies a Pair failure into the credential fetch (cloud login /
+// token / region, or a missing imported key) versus the local device handshake.
+var (
+	// ErrCredentialFetch wraps a failure to OBTAIN the token+key (cloud
+	// retrieval or an imported-credentials lookup). The wrapped error carries
+	// the finer cause (cloud login vs token/region vs a cloud API error).
+	ErrCredentialFetch = errors.New("credential fetch failed")
+	// ErrLocalHandshake wraps a failure of the local 8370 handshake that
+	// verifies the fetched credentials against the real device.
+	ErrLocalHandshake = errors.New("local handshake verification failed")
 )
 
 // Discovered ist ein lokal gefundenes Geraet (noch ohne Credentials).
@@ -107,14 +122,14 @@ func (i *importedCredentials) Fetch(_ context.Context, dev Discovered) ([]byte, 
 func Pair(ctx context.Context, dev Discovered, src CredentialSource) (Credentials, error) {
 	token, key, err := src.Fetch(ctx, dev)
 	if err != nil {
-		return Credentials{}, err
+		return Credentials{}, fmt.Errorf("%w: %w", ErrCredentialFetch, err)
 	}
 	creds := Credentials{IP: dev.IP, DeviceID: dev.DeviceID, Token: token, Key: key}
 
 	// VerifyLocal: rein lokaler Handshake-Test, dass Token+Key stimmen.
 	d, err := Provision(ctx, dev.IP, creds)
 	if err != nil {
-		return Credentials{}, fmt.Errorf("verifikation fehlgeschlagen: %w", err)
+		return Credentials{}, fmt.Errorf("%w: %w", ErrLocalHandshake, err)
 	}
 	_ = d.Deprovision(ctx)
 	return creds, nil

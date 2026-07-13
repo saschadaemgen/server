@@ -108,13 +108,13 @@
        it is incomplete - the status poller then never auto-reloads (a
        degraded render plus a healthy poll would otherwise reload in a
        loop). */}}
-  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery)}}
+  {{if and (not .Page.Enabled) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery) (not .Page.MideaEnabled)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/><path d="M4 4l16 16"/></svg></span>
       <h2>UniFi Access is disabled</h2>
       <p>The UniFi Access integration is turned off. Turn it on under <a href="?settings=ua">Settings</a> once UA credentials are stored, and the device and door overview appears here.</p>
     </div>
-  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery)}}
+  {{else if and (not .Page.Configured) (not .Page.ProtectAvailable) (not .Page.LocalAvailable) (not .Page.ShellyDiscovery) (not .Page.MideaEnabled)}}
     <div class="dc-gate">
       <span class="dc-gate-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span>
       <h2>No UA credentials stored</h2>
@@ -240,18 +240,9 @@
         <div class="dc-count"><span class="dc-shown" data-dc-shown>{{.Page.TotalCount}}</span><span class="dc-total">/ {{.Page.TotalCount}}</span></div>
         <button type="button" class="dc-sorted" data-dc-clearsort>sorted <b data-dc-sortlabel></b> <span aria-hidden="true">&times;</span></button>
         <span class="dc-spacer"></span>
-        {{if .Page.ShellyEnabled}}
-        <form class="dc-toolform" method="post" action="/a/devices/shelly/scan" title="Nudge mDNS discovery for Shelly devices on the local network">
-          <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8M20 12a8 8 0 0 1-8 8"/><path d="M12 4 9 7M12 20l3-3"/></svg>Scan Shelly</button>
-        </form>
-        <button type="button" class="dc-toolbtn" data-shscan-btn title="Actively sweep your local subnet for Shelly devices that hide from mDNS - found devices appear in the Pending group"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Scan network</button>
-        <span class="dc-mono" data-shscan-status hidden style="font-size:12px;opacity:0.75;white-space:nowrap;"></span>
-        {{end}}
-        {{if .Page.MideaEnabled}}
-        <form class="dc-toolform" method="post" action="/a/devices/midea/scan" title="Discover Midea climate units on the local network. Leave the IP empty for a broadcast, or target a specific IP to reach a device across a VLAN boundary. Found units appear in the Pending group.">
-          <input type="text" name="host" placeholder="Midea IP (optional)" autocomplete="off" spellcheck="false" style="width:130px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--dc-border,#3a3a3a);background:transparent;color:inherit;">
-          <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/><circle cx="12" cy="12" r="4"/></svg>Scan Midea</button>
-        </form>
+        {{if or .Page.ShellyEnabled .Page.MideaEnabled}}
+        <button type="button" class="dc-toolbtn" data-dcscan-btn title="Scan the local network for all supported device types at once (Shelly, Midea climate controllers). Discovery also runs automatically in the background - this triggers it now. Found devices appear in the Pending group for approval."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Scan network</button>
+        <span class="dc-mono" data-dcscan-status hidden style="font-size:12px;opacity:0.75;white-space:nowrap;"></span>
         {{end}}
         <span class="dc-readonly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Read only</span>
       </div>
@@ -457,14 +448,16 @@
                   <div class="dc-act-form">
                     <form class="dc-act-subform" method="post" action="/a/devices/midea/approve">
                       <input type="hidden" name="id" value="{{$r.ID}}">
-                      <span class="dc-act-label">Cloud region</span>
+                      <span class="dc-act-label">1. Cloud region <span style="opacity:0.6;font-weight:normal;">(for the automatic key fetch)</span></span>
                       <select class="dc-act-input" name="region" aria-label="Cloud region">
-                        <option value="DE" selected>Europe (DE)</option>
-                        <option value="US">US</option>
+                        <option value="US" selected>US / NetHome Plus (default)</option>
+                        <option value="DE">Europe / Germany (DE)</option>
                         <option value="KR">Asia (KR)</option>
                       </select>
-                      <span class="dc-act-label">Or paste exported credentials (fallback)</span>
-                      <textarea class="dc-act-input" name="import" rows="4" placeholder="device_id=... token=... key=..." autocomplete="off" spellcheck="false" style="resize:vertical;font-family:monospace;"></textarea>
+                      <p class="dc-act-hint" style="margin:2px 0 8px;">Pick the region your Midea / NetHome-Plus app account belongs to. NetHome Plus authenticates against US, so US is the default. The wrong region is the most common cloud-adoption failure - the panel above shows the exact failing step + region.</p>
+                      <span class="dc-act-label">2. Fallback - paste exported keys <span style="opacity:0.6;font-weight:normal;">(always works)</span></span>
+                      <textarea class="dc-act-input" name="import" rows="4" placeholder="device_id=...&#10;token=...&#10;key=..." autocomplete="off" spellcheck="false" style="resize:vertical;font-family:monospace;"></textarea>
+                      <p class="dc-act-hint" style="margin:2px 0 8px;">If the cloud path fails (or the Midea API is down), paste the exported key file for THIS device here - it adopts without the cloud. Export from any already-adopted unit under &ldquo;Credentials &amp; removal&rdquo;.</p>
                       <div class="dc-act-row">
                         <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Adopt device</button>
                       </div>
@@ -475,7 +468,7 @@
                         <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>Ignore</button>
                       </form>
                     </div>
-                    <p class="dc-act-hint">Found on the network but not contacted yet. Adopting fetches this device&rsquo;s V3 token/key from the Midea cloud (region above), verifies them by a local handshake and stores them encrypted; if the cloud path fails, paste keys you exported earlier. Ignore to keep it out - release it later from the Ignored group.</p>
+                    <p class="dc-act-hint">Found on the network but not contacted yet. Adopting fetches this device&rsquo;s V3 token/key from the Midea cloud (region above), verifies them by a local handshake and stores them encrypted. Ignore to keep it out - release it later from the Ignored group.</p>
                   </div>
                 {{end}}
                 {{/* Midea ignored: release so discovery can surface it again. */}}
@@ -2602,38 +2595,41 @@
     schedulePoll(POLL_MS);
   })();
 
-  // "Scan network": an on-demand active subnet sweep, moved here from the
-  // (retired) settings discovery panel. Start returns at once; we poll the
-  // status endpoint for progress + a final summary, then reload so any new
-  // Pending rows appear at the top of the table.
+  // Unified "Scan network": one action triggers EVERY registered discovery
+  // source at once (Shelly mDNS + active subnet + Midea broadcast) via
+  // /a/devices/scan. Discovery also runs automatically on a periodic background
+  // sweep; this is the on-demand nudge. Start returns at once; we poll the
+  // unified status for progress, then reload so new Pending rows appear.
   (function () {
-    var btn = document.querySelector('[data-shscan-btn]');
-    var out = document.querySelector('[data-shscan-status]');
+    var btn = document.querySelector('[data-dcscan-btn]');
+    var out = document.querySelector('[data-dcscan-status]');
     if (!btn || !out) return;
     var poll = null;
     function show(msg) { out.hidden = false; out.textContent = msg; }
     function stop() { if (poll) { clearInterval(poll); poll = null; } btn.disabled = false; }
     function tick() {
-      fetch('/a/devices/shelly/scan-network/status', { credentials: 'same-origin', cache: 'no-store' })
+      fetch('/a/devices/scan/status', { credentials: 'same-origin', cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (!d) return;
-          if (d.running) { show('Probing ' + d.probed + ' / ' + d.total + '...'); return; }
+          if (d.running) {
+            show(d.total ? ('Scanning ' + d.probed + ' / ' + d.total + '...') : 'Scanning network...');
+            return;
+          }
           stop();
-          if (d.message) { show(d.message); return; }
-          show('Found ' + d.found + ' device' + (d.found === 1 ? '' : 's') + ', ' + d.new + ' new.');
-          if (d.new > 0) { setTimeout(function () { location.reload(); }, 1200); }
+          show('Scan complete.');
+          setTimeout(function () { location.reload(); }, 1000);
         })
         .catch(function () { stop(); show('Scan status unavailable.'); });
     }
     btn.addEventListener('click', function () {
       btn.disabled = true;
       show('Starting scan...');
-      fetch('/a/devices/shelly/scan-network', { method: 'POST', credentials: 'same-origin' })
+      fetch('/a/devices/scan', { method: 'POST', credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (!d || !d.ok) { stop(); show((d && d.message) || 'Scan could not be started.'); return; }
-          tick(); poll = setInterval(tick, 700);
+          tick(); poll = setInterval(tick, 800);
         })
         .catch(function () { stop(); show('Scan could not be started.'); });
     });

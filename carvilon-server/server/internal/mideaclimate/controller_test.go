@@ -1,6 +1,8 @@
 package mideaclimate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 )
@@ -229,21 +231,17 @@ func TestNonOff(t *testing.T) {
 }
 
 func TestUdpID(t *testing.T) {
-	// Referenz: udpid = XOR der SHA256-Haelften. Deterministischer Selbsttest.
-	// Synthetic device-ID (placeholder), little endian.
-	import_binary_le := func(v uint64) []byte {
-		b := make([]byte, 8)
-		for i := 0; i < 8; i++ {
-			b[i] = byte(v >> (8 * i))
-		}
-		return b
+	// udpid = XOR der SHA256-Haelften der 6-Byte-Device-ID. Deterministisch,
+	// und little/big muessen sich unterscheiden.
+	le := udpID(deviceIDBytes(1234567890123, 6, "little"))
+	be := udpID(deviceIDBytes(1234567890123, 6, "big"))
+	if len(le) != 32 || len(be) != 32 {
+		t.Errorf("udpID Laenge falsch: le=%d be=%d (erwartet 32)", len(le), len(be))
 	}
-	got := udpID(import_binary_le(1234567890123))
-	if len(got) != 32 { // 16 Byte hex = 32 Zeichen
-		t.Errorf("udpID Laenge = %d, erwartet 32", len(got))
+	if le == be {
+		t.Error("little und big endian udpid sollten sich unterscheiden")
 	}
-	// Stabilitaet: gleicher Input -> gleicher Output
-	if got != udpID(import_binary_le(1234567890123)) {
+	if le != udpID(deviceIDBytes(1234567890123, 6, "little")) {
 		t.Error("udpID nicht deterministisch")
 	}
 }
@@ -261,10 +259,10 @@ func TestEncryptPassword(t *testing.T) {
 
 func TestSignDeterministic(t *testing.T) {
 	body := map[string]string{"b": "2", "a": "1", "c": "3"}
-	s1 := sign("/v1/user/login", body)
-	s2 := sign("/v1/user/login", body)
+	s1 := signBody("/v1/user/login", body)
+	s2 := signBody("/v1/user/login", body)
 	if s1 != s2 || len(s1) != 64 {
-		t.Errorf("sign nicht deterministisch oder falsche Laenge (%d)", len(s1))
+		t.Errorf("signBody nicht deterministisch oder falsche Laenge (%d)", len(s1))
 	}
 }
 
@@ -294,4 +292,45 @@ func hexEq(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// TestUdpID6ByteComputation independently cross-checks the udpid computation
+// that was the most critical cloud bug: it MUST be the XOR of the two SHA256
+// halves of the SIX-byte device id (not eight - the corrected cloud.go fix), in
+// both byte orders. The expected value is recomputed here straight from
+// crypto/sha256 over exactly six bytes, so any regression back to an 8-byte id
+// or a broken XOR-of-halves fails. (The msmart-ng Python reference vectors for
+// the real device were cross-checked in the climate chat; the real device id is
+// scrubbed here for the public repo, so this guards the algorithm structurally.)
+func TestUdpID6ByteComputation(t *testing.T) {
+	const deviceID = 1234567890123 // placeholder (real device id scrubbed)
+	for _, endian := range []string{"little", "big"} {
+		six := deviceIDBytes(deviceID, 6, endian)
+		if len(six) != 6 {
+			t.Fatalf("deviceIDBytes(%s) len = %d, want 6", endian, len(six))
+		}
+		h := sha256.Sum256(six)
+		want := make([]byte, 16)
+		for i := 0; i < 16; i++ {
+			want[i] = h[i] ^ h[i+16]
+		}
+		if got := udpID(six); got != hex.EncodeToString(want) {
+			t.Errorf("udpID(%s) = %s, want %s (independent 6-byte SHA256 XOR)", endian, got, hex.EncodeToString(want))
+		}
+	}
+	if udpID(deviceIDBytes(deviceID, 6, "little")) == udpID(deviceIDBytes(deviceID, 6, "big")) {
+		t.Error("little and big endian udpid should differ")
+	}
+}
+
+// TestEncryptPasswordGegenReferenz prueft den Passwort-Hash gegen die Python-
+// Referenz mit dem korrekten NetHome-APP_KEY.
+func TestEncryptPasswordGegenReferenz(t *testing.T) {
+	// Python: sha256("testid" + sha256("password1").hexdigest() + APP_KEY).hexdigest()
+	// mit APP_KEY = 3742e9e5842d4ad59c2db887e12449f9
+	got := encryptPassword("testid", "password1")
+	want := "3bf621e1791045f2870101e0dae20dab54723a03ec9bc68b625478c05098c1eb"
+	if got != want {
+		t.Errorf("encryptPassword: got %s, want %s (Python-Referenz)", got, want)
+	}
 }

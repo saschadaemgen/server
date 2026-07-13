@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"carvilon.local/server/internal/access"
@@ -284,8 +285,17 @@ type Server struct {
 	// Midea Climate Controller (Etappe 1): the device set + encrypted creds
 	// (mideastore) and the runtime that keeps adopted devices connected +
 	// polled and proxies control (mideaMon). Both nil disables the source.
-	mideastore      *mideastore.Store
-	mideaMon        *mideamonitor.Monitor
+	mideastore *mideastore.Store
+	mideaMon   *mideamonitor.Monitor
+	// mideaDiag holds the last adoption-failure diagnostic per device id (which
+	// step failed + the region tried), rendered in the pending device's panel so
+	// a cloud failure is diagnosable. In-memory + transient (cleared on success).
+	mideaDiagMu sync.Mutex
+	mideaDiag   map[string]mideaAdoptDiag
+	// mideaScanActive is >0 while a Midea UDP broadcast discovery is in flight,
+	// so the unified "Scan network" status reports it as running (the Shelly
+	// active scan tracks its own progress separately).
+	mideaScanActive atomic.Int64
 	userStore       UserStoreLike
 	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
@@ -733,11 +743,16 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/devices/shelly/scan-network/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetworkStatus)))
 	// Shelly Etappe 3, Phase 1: (re)provision a device onto the MQTT broker.
 	s.mux.Handle("POST /a/devices/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
-	// Midea Climate Controller (Etappe 1): local discovery + approval gate +
-	// standard-profile cockpit, all inline in the Device Center. Adoption
-	// fetches credentials (cloud-primary / import-fallback), verifies them by a
-	// local handshake and persists them encrypted - never committed.
-	s.mux.Handle("POST /a/devices/midea/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaScan)))
+	// Unified discovery: one "Scan network" action triggers every registered
+	// discovery source at once (Shelly mDNS + active subnet + Midea broadcast);
+	// the status endpoint backs the button's progress + reload. Discovery also
+	// runs automatically on a periodic background sweep (RunPeriodicDiscovery).
+	s.mux.Handle("POST /a/devices/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminDevicesScan)))
+	s.mux.Handle("GET /a/devices/scan/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminDevicesScanStatus)))
+	// Midea Climate Controller (Etappe 1): approval gate + standard-profile
+	// cockpit, inline in the Device Center. Adoption fetches credentials
+	// (cloud-primary / import-fallback), verifies them by a local handshake and
+	// persists them encrypted - never committed.
 	s.mux.Handle("POST /a/devices/midea/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaApprove)))
 	s.mux.Handle("POST /a/devices/midea/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaReject)))
 	s.mux.Handle("POST /a/devices/midea/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaRelease)))

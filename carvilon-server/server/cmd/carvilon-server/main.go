@@ -574,6 +574,11 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// startup. Stops when ctx is cancelled.
 	go srv.RunMideaMonitor(ctx)
 
+	// Unified automatic discovery: a periodic, LAN-guarded background sweep of
+	// every discovery source (Shelly active subnet + Midea broadcast; Shelly
+	// mDNS has its own backstop) so newly powered devices appear on their own.
+	go srv.RunPeriodicDiscovery(ctx)
+
 	// mDNS-Advertisement (Saison 13-02-FIX4-d). Adoptierte
 	// ESP-Viewer finden den Server via _carvilon._tcp.local statt
 	// einer haendischen IP-Konfiguration. Skip wenn keine IP
