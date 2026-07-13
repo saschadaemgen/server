@@ -46,6 +46,8 @@ import (
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/logbuf"
 	"carvilon.local/server/internal/mdns"
+	"carvilon.local/server/internal/mideamonitor"
+	"carvilon.local/server/internal/mideastore"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/nfc"
@@ -308,6 +310,13 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	if err := shellyStore.ResetStaleProvisioning(ctx); err != nil {
 		log.Warn("shelly: reset stale provisioning state failed", "err", err)
 	}
+	// Midea Climate Controller (Etappe 1): the persistent device set +
+	// AES-256-GCM credentials (migration 042) and the monitor that keeps
+	// adopted devices connected + polled and proxies standard-profile control.
+	// The monitor re-provisions the persisted active set on startup, so an
+	// adopted device survives a server restart.
+	mideaStore := mideastore.New(database.DB, secretsSvc)
+	mideaMonitor := mideamonitor.New(mideaStore, log)
 	shellyPassword, _ := platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
 	shellyActive, err := shellyStore.ListActive(ctx)
 	if err != nil {
@@ -519,6 +528,8 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		ShellyStore:         shellyStore,
 		ShellyDiscovery:     shellyBrowser,
 		ShellyGen1Discovery: shellyGen1Browser,
+		MideaStore:          mideaStore,
+		MideaMonitor:        mideaMonitor,
 		UserStore:           userStore,
 		NativeUsers:         nativeUserStore,
 		Hub:                 hub,
@@ -557,6 +568,11 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// Gen2+ devices into the set (while Shelly is enabled) and honours the
 	// sticky ignore list. Stops when ctx is cancelled.
 	go srv.RunShellyDiscovery(ctx)
+
+	// Midea Climate Controller (Etappe 1): keep adopted devices connected +
+	// polled for the process lifetime, re-provisioning the persisted set on
+	// startup. Stops when ctx is cancelled.
+	go srv.RunMideaMonitor(ctx)
 
 	// mDNS-Advertisement (Saison 13-02-FIX4-d). Adoptierte
 	// ESP-Viewer finden den Server via _carvilon._tcp.local statt

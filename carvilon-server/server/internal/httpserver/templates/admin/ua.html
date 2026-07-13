@@ -247,6 +247,12 @@
         <button type="button" class="dc-toolbtn" data-shscan-btn title="Actively sweep your local subnet for Shelly devices that hide from mDNS - found devices appear in the Pending group"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Scan network</button>
         <span class="dc-mono" data-shscan-status hidden style="font-size:12px;opacity:0.75;white-space:nowrap;"></span>
         {{end}}
+        {{if .Page.MideaEnabled}}
+        <form class="dc-toolform" method="post" action="/a/devices/midea/scan" title="Discover Midea climate units on the local network. Leave the IP empty for a broadcast, or target a specific IP to reach a device across a VLAN boundary. Found units appear in the Pending group.">
+          <input type="text" name="host" placeholder="Midea IP (optional)" autocomplete="off" spellcheck="false" style="width:130px;padding:5px 8px;font-size:12px;border-radius:6px;border:1px solid var(--dc-border,#3a3a3a);background:transparent;color:inherit;">
+          <button class="dc-toolbtn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/><circle cx="12" cy="12" r="4"/></svg>Scan Midea</button>
+        </form>
+        {{end}}
         <span class="dc-readonly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Read only</span>
       </div>
 
@@ -374,6 +380,117 @@
                     <p class="dc-act-hint">Removed or rejected earlier, so discovery does not re-adopt it. Release it to let a future announcement or network scan surface it again.</p>
                   </div>
                 {{end}}
+                {{/* Midea Climate Controller (adopted): the standard-profile
+                     cockpit - direct temperature/mode/fan passthrough, profile
+                     toggle (advanced gated off in E1), key export + removal. */}}
+                {{if eq $r.Kind "midea"}}
+                  {{$m := $r.MideaMode}}{{$f := $r.MideaFan}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Controls</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <form class="dc-act-subform" method="post" action="/a/devices/midea/control">
+                      <input type="hidden" name="id" value="{{$r.ID}}">
+                      <input type="hidden" name="field" value="temp">
+                      <span class="dc-act-label">Set temperature (°C)</span>
+                      <div class="dc-act-row">
+                        <input class="dc-act-input" type="number" name="value" min="17" max="30" step="0.5" value="{{$r.MideaSetpoint}}" aria-label="Set temperature" style="max-width:120px;">
+                        <button class="dc-act-btn accent" type="submit">Set</button>
+                      </div>
+                    </form>
+                    <form class="dc-act-subform" method="post" action="/a/devices/midea/control">
+                      <input type="hidden" name="id" value="{{$r.ID}}">
+                      <input type="hidden" name="field" value="mode">
+                      <span class="dc-act-label">Mode</span>
+                      <div class="dc-act-row">
+                        <select class="dc-act-input" name="value" aria-label="Mode">
+                          <option value="off"{{if eq $m "off"}} selected{{end}}>Off</option>
+                          <option value="cool"{{if eq $m "cool"}} selected{{end}}>Cool</option>
+                          <option value="heat"{{if eq $m "heat"}} selected{{end}}>Heat</option>
+                          <option value="dry"{{if eq $m "dry"}} selected{{end}}>Dry</option>
+                          <option value="fan_only"{{if eq $m "fan_only"}} selected{{end}}>Fan only</option>
+                          <option value="auto"{{if eq $m "auto"}} selected{{end}}>Auto</option>
+                        </select>
+                        <button class="dc-act-btn" type="submit">Set</button>
+                      </div>
+                    </form>
+                    <form class="dc-act-subform" method="post" action="/a/devices/midea/control">
+                      <input type="hidden" name="id" value="{{$r.ID}}">
+                      <input type="hidden" name="field" value="fan">
+                      <span class="dc-act-label">Fan</span>
+                      <div class="dc-act-row">
+                        <select class="dc-act-input" name="value" aria-label="Fan">
+                          <option value="auto"{{if eq $f "auto"}} selected{{end}}>Auto</option>
+                          <option value="low"{{if eq $f "low"}} selected{{end}}>Low</option>
+                          <option value="mid"{{if eq $f "mid"}} selected{{end}}>Mid</option>
+                          <option value="high"{{if eq $f "high"}} selected{{end}}>High</option>
+                        </select>
+                        <button class="dc-act-btn" type="submit">Set</button>
+                      </div>
+                    </form>
+                    <p class="dc-act-hint">Standard profile: the unit regulates on its own internal sensor (badge &ldquo;on device&rdquo;). Commands go straight to the device like a remote - they keep working through a server outage.</p>
+                  </div>
+
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Profile</span><span class="dc-hr"></span></div>
+                  <form class="dc-act-form" method="post" action="/a/devices/midea/profile">
+                    <input type="hidden" name="id" value="{{$r.ID}}">
+                    <label style="display:flex;align-items:center;gap:8px;margin:4px 0;"><input type="radio" name="profile" value="standard"{{if ne $r.MideaProfile "advanced"}} checked{{end}}> Standard &mdash; device-side, remote-like</label>
+                    <label style="display:flex;align-items:center;gap:8px;margin:4px 0;opacity:0.5;"><input type="radio" name="profile" value="advanced" disabled> Advanced &mdash; server-side control loop (later update)</label>
+                    <div class="dc-act-row"><button class="dc-act-btn" type="submit">Save profile</button></div>
+                    <p class="dc-act-hint">The advanced profile (external-sensor control loop, analysis, history) lands in a later etappe; standard is active and safe out of the box.</p>
+                  </form>
+
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Credentials &amp; removal</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <div class="dc-act-row">
+                      <a class="dc-act-btn" href="/a/devices/midea/{{$r.ID}}/export" download><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>Export keys</a>
+                      <form method="post" action="/a/devices/midea/remove" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ID}}">
+                        <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></svg>Remove device</button>
+                      </form>
+                    </div>
+                    <p class="dc-act-hint">Export saves this device&rsquo;s permanent V3 token/key so you can re-adopt it even if Midea shuts the cloud token service down - keep the file safe. Removing forgets the device and drops its stored credentials here; the device itself is not changed.</p>
+                  </div>
+                {{end}}
+                {{/* Midea pending (discovered, not contacted): adopt (cloud
+                     region + optional imported-key fallback) or ignore. */}}
+                {{if eq $r.Kind "midea-pending"}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Adopt this device</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <form class="dc-act-subform" method="post" action="/a/devices/midea/approve">
+                      <input type="hidden" name="id" value="{{$r.ID}}">
+                      <span class="dc-act-label">Cloud region</span>
+                      <select class="dc-act-input" name="region" aria-label="Cloud region">
+                        <option value="DE" selected>Europe (DE)</option>
+                        <option value="US">US</option>
+                        <option value="KR">Asia (KR)</option>
+                      </select>
+                      <span class="dc-act-label">Or paste exported credentials (fallback)</span>
+                      <textarea class="dc-act-input" name="import" rows="4" placeholder="device_id=... token=... key=..." autocomplete="off" spellcheck="false" style="resize:vertical;font-family:monospace;"></textarea>
+                      <div class="dc-act-row">
+                        <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Adopt device</button>
+                      </div>
+                    </form>
+                    <div class="dc-act-row">
+                      <form method="post" action="/a/devices/midea/reject" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ID}}">
+                        <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>Ignore</button>
+                      </form>
+                    </div>
+                    <p class="dc-act-hint">Found on the network but not contacted yet. Adopting fetches this device&rsquo;s V3 token/key from the Midea cloud (region above), verifies them by a local handshake and stores them encrypted; if the cloud path fails, paste keys you exported earlier. Ignore to keep it out - release it later from the Ignored group.</p>
+                  </div>
+                {{end}}
+                {{/* Midea ignored: release so discovery can surface it again. */}}
+                {{if eq $r.Kind "midea-ignored"}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Ignored device</span><span class="dc-hr"></span></div>
+                  <div class="dc-act-form">
+                    <div class="dc-act-row">
+                      <form method="post" action="/a/devices/midea/release" style="margin:0;">
+                        <input type="hidden" name="id" value="{{$r.ID}}">
+                        <button class="dc-act-btn accent" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><path d="M3 3v5h5"/></svg>Release (allow re-discovery)</button>
+                      </form>
+                    </div>
+                    <p class="dc-act-hint">Rejected or removed earlier, so discovery does not re-adopt it. Release it to let a future scan surface it again.</p>
+                  </div>
+                {{end}}
               </template>
 
               {{/* Local readers are CARVILON's own data: their panel's
@@ -462,11 +579,13 @@
         if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
         return;
       }
-      // Pending / ignored Shelly: never contacted, so no cockpit and no lazy
-      // fetch. fillLeft returns false for these, so dcInit's default clones
-      // the pre-rendered overview + approve/reject/release into the LEFT
-      // column; keep the right empty so the panel is not rendered twice.
-      if (kind === 'shelly-pending' || kind === 'shelly-ignored') {
+      // Pending / ignored Shelly + all Midea kinds: rendered entirely from the
+      // pre-rendered detail template (overview + control/approve/release forms),
+      // no cockpit and no lazy fetch. fillLeft returns false for these, so
+      // dcInit's default clones that template into the LEFT column; keep the
+      // right empty so the panel is not rendered twice.
+      if (kind === 'shelly-pending' || kind === 'shelly-ignored'
+          || kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') {
         rightCol.innerHTML = '';
         return;
       }
@@ -503,6 +622,7 @@
       var kind = row.getAttribute('data-kind');
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
+      if (kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') return;
       if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
       if (kind === 'sensor') { loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row); return; }
       loadDetail(kind, row.getAttribute('data-id'), rightCol, row);
@@ -511,7 +631,7 @@
     var dc = window.dcInit({
       filterDims: { category: 'cat', source: 'source', status: 'status', model: 'model', lifecycle: 'lifecycle' },
       modeDim: 'category',
-      modeLabels: { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', switch: 'Switches', door: 'Doors', other: 'Other devices' },
+      modeLabels: { hub: 'Hubs', reader: 'Readers', viewer: 'Viewers', camera: 'Cameras', sensor: 'Sensors', switch: 'Switches', 'midea-climate': 'Midea Climate Controllers', door: 'Doors', other: 'Other devices' },
       modeDefault: 'All devices',
       sortAttrs: { name: 'name', type: 'type', status: 'status', model: 'model', ip: 'ip', fw: 'fw', mac: 'mac' },
       sortLabels: { name: 'name', type: 'type', status: 'status', model: 'model', ip: 'IP address', fw: 'firmware', mac: 'MAC' },

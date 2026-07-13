@@ -1,0 +1,7 @@
+Das Paket "midea" ist eine Go-Portierung des nativen Midea-LAN-Protokolls
+(8370-Transport, 5A5A-Paket, 0xAA-Appliance-Frames, V3-Token-Handshake).
+
+Portiert aus der Referenzimplementierung msmart-ng (mill1000/midea-msmart),
+lizenziert unter der MIT-Lizenz. Diese Portierung enthaelt ausschliesslich
+Protokoll-Code und KEINE Geraete-Credentials (Token/Key/IP). Credentials werden
+zur Laufzeit ueber Provisioning bereitgestellt, niemals im Quellcode.

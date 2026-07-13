@@ -86,6 +86,12 @@ type uaOverviewData struct {
 	// before anything is adopted and with every UniFi integration off.
 	ShellyDiscovery bool
 
+	// MideaEnabled: the Midea Climate Controller source is wired (store present).
+	// Gates the local-discovery action in the toolbar so it is reachable even
+	// before the first device is adopted. E1 has no separate on/off toggle - the
+	// approval gate keeps discovery safe out of the box.
+	MideaEnabled bool
+
 	// Flash is the outcome banner after a reader rename (the page's
 	// only write). Set from a stable code in the redirect query -
 	// never from free text. FlashType is "ok" or "err".
@@ -212,6 +218,15 @@ type uaRow struct {
 	ShellyPrefix string
 	ChannelsJSON string
 
+	// Midea Climate Controller cockpit plumbing (empty for non-Midea rows):
+	// the current mode/fan/setpoint prefill the standard-profile control forms,
+	// MideaProfile ("standard" | "advanced") drives the profile toggle. The
+	// store id (uaRow.ID) keys the control/approve/export endpoints.
+	MideaMode     string
+	MideaFan      string
+	MideaSetpoint string
+	MideaProfile  string
+
 	// Sensor History H1: the per-sensor recording knobs prefilled into the
 	// cockpit form. RecIntervalSec/RecRetentionSec are the stored OVERRIDE
 	// seconds (0 = inherit the global default); the Default*Label pair names
@@ -255,7 +270,7 @@ var categoryOrder = map[string]int{
 	// with the real device categories in between (existing within-group sort
 	// preserved). See uaRow.Lifecycle.
 	"pending": -2,
-	"hub":     0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "rgbw": 6, "other": 7, "door": 8,
+	"hub":     0, "reader": 1, "viewer": 2, "camera": 3, "sensor": 4, "switch": 5, "rgbw": 6, "midea-climate": 7, "other": 8, "door": 9,
 	"ignored": 99,
 }
 
@@ -281,13 +296,20 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 	// presence keeps the page rendered even before anything is adopted.
 	pendingRows, ignoredRows := s.shellyLifecycleRows(r.Context())
 	data.ShellyDiscovery = data.ShellyEnabled || len(pendingRows)+len(ignoredRows) > 0
+	// Midea Climate Controller (Etappe 1): active devices become their own
+	// source rows; pending/ignored fold into the shared lifecycle groups.
+	mideaActive, mideaPending, mideaIgnored := s.mideaLifecycleRows(r.Context())
+	pendingRows = append(pendingRows, mideaPending...)
+	ignoredRows = append(ignoredRows, mideaIgnored...)
+	data.MideaEnabled = s.mideaReady()
+	mideaHasRows := len(mideaActive)+len(mideaPending)+len(mideaIgnored) > 0
 	// No source can fill the page -> no calls at all, just the gate
-	// hints (Etappe-1 contract, now covering all four sources + discovery).
-	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyDiscovery {
+	// hints (Etappe-1 contract, now covering all sources + discovery).
+	if !(data.Enabled && data.Configured) && !data.ProtectAvailable && !data.LocalAvailable && !data.ShellyDiscovery && !data.MideaEnabled && !mideaHasRows {
 		s.renderAdminPage(w, "ua", data)
 		return
 	}
-	s.buildUAOverview(r.Context(), &data, readers, pendingRows, ignoredRows)
+	s.buildUAOverview(r.Context(), &data, readers, mideaActive, pendingRows, ignoredRows)
 	s.renderAdminPage(w, "ua", data)
 }
 
@@ -298,7 +320,7 @@ func (s *Server) handleAdminUA(w http.ResponseWriter, r *http.Request) {
 // doors failure does not blank the (already loaded) devices, a Protect
 // failure only drops a banner, and with another source available a UA
 // failure degrades to a banner instead of a gate.
-func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader, pendingRows, ignoredRows []uaRow) {
+func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, readers []readerstore.Reader, mideaActive, pendingRows, ignoredRows []uaRow) {
 	// The Shelly probe fans out over the configured devices with its
 	// own per-device timeout; run it alongside the UniFi fetches so a
 	// dead box delays the page by max(sources), not their sum. The
@@ -372,7 +394,7 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx), pendingRows, ignoredRows)
+	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx), mideaActive, pendingRows, ignoredRows)
 }
 
 // shellyRowInfo carries the store-side facts a Shelly row shows beyond the
@@ -420,7 +442,7 @@ func (s *Server) shellyRowInfoByAddr(ctx context.Context) map[string]shellyRowIn
 // buildRows turns devices + doors + Protect cameras/sensors + local
 // readers + Shelly devices into the flat, pre-sorted row list and
 // computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool, pendingRows, ignoredRows []uaRow) {
+func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool, mideaActive, pendingRows, ignoredRows []uaRow) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -457,6 +479,12 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	}
 	for _, p := range shellies {
 		addDeviceRow(makeShellyRow(p, shellyInfo[p.client.Address()]), p.err == nil)
+	}
+	// Midea Climate Controllers (adopted): their live status comes from the
+	// monitor snapshot the row already carries, so they fold in like any other
+	// online/offline source.
+	for _, row := range mideaActive {
+		addDeviceRow(row, row.StatusState == "online")
 	}
 	for _, dr := range doors {
 		row := makeDoorRow(dr)
@@ -521,7 +549,8 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	for _, c := range []struct{ key, label string }{
 		{"hub", "Hubs"}, {"reader", "Readers"}, {"viewer", "Viewers"},
 		{"camera", "Cameras"}, {"sensor", "Sensors"}, {"switch", "Switches"},
-		{"rgbw", "RGBW Dimmers"}, {"other", "Other devices"}, {"door", "Doors"},
+		{"rgbw", "RGBW Dimmers"}, {"midea-climate", "Midea Climate Controllers"},
+		{"other", "Other devices"}, {"door", "Doors"},
 	} {
 		n := catCount[c.key]
 		switch c.key {
@@ -539,7 +568,7 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	// the UA + Protect rows, RPi the local reader registry, Shelly
 	// the configured Shelly devices.
 	for _, sc := range []struct{ key, label string }{
-		{"unifi", "UniFi"}, {"rpi", "RPi"}, {"shelly", "Shelly"},
+		{"unifi", "UniFi"}, {"rpi", "RPi"}, {"shelly", "Shelly"}, {"midea", "Midea"},
 	} {
 		if n := srcCount[sc.key]; n > 0 {
 			data.SourceFacets = append(data.SourceFacets, uaFacet{Key: sc.key, Label: sc.label, Count: n})
@@ -844,21 +873,37 @@ func (s *Server) localReaders(ctx context.Context) []readerstore.Reader {
 // uaFlash maps a stable flash code (carried in the redirect query,
 // never free text) to the banner after a reader rename.
 var uaFlash = map[string]struct{ msg, typ string }{
-	"renamed":             {"Reader name saved.", "ok"},
-	"reset":               {"Reader name reset to the auto-generated name.", "ok"},
-	"err-name":            {"Renaming failed.", "err"},
-	"rec-saved":           {"Recording settings saved.", "ok"},
-	"rec-err":             {"Saving the recording settings failed.", "err"},
-	"err-notfd":           {"Reader not found.", "err"},
-	"shelly-removed":      {"Shelly device removed. It will not be re-discovered until released.", "ok"},
-	"shelly-notfd":        {"Shelly device not found.", "err"},
-	"shelly-err":          {"The Shelly device action failed.", "err"},
-	"shelly-provisioning": {"Provisioning the Shelly onto the MQTT broker - this can take a moment.", "ok"},
-	"shelly-noprov":       {"The MQTT broker is not running - start it under Settings before provisioning.", "err"},
-	"shelly-approved":     {"Shelly device approved - provisioning it onto the MQTT broker.", "ok"},
-	"shelly-ignored":      {"Shelly device moved to Ignored. Release it to allow re-discovery.", "ok"},
-	"shelly-released":     {"Shelly device released - discovery can find it again.", "ok"},
-	"shelly-cap":          {"Active Shelly device limit reached - remove one before approving another.", "err"},
+	"renamed":               {"Reader name saved.", "ok"},
+	"reset":                 {"Reader name reset to the auto-generated name.", "ok"},
+	"err-name":              {"Renaming failed.", "err"},
+	"rec-saved":             {"Recording settings saved.", "ok"},
+	"rec-err":               {"Saving the recording settings failed.", "err"},
+	"err-notfd":             {"Reader not found.", "err"},
+	"shelly-removed":        {"Shelly device removed. It will not be re-discovered until released.", "ok"},
+	"shelly-notfd":          {"Shelly device not found.", "err"},
+	"shelly-err":            {"The Shelly device action failed.", "err"},
+	"shelly-provisioning":   {"Provisioning the Shelly onto the MQTT broker - this can take a moment.", "ok"},
+	"shelly-noprov":         {"The MQTT broker is not running - start it under Settings before provisioning.", "err"},
+	"shelly-approved":       {"Shelly device approved - provisioning it onto the MQTT broker.", "ok"},
+	"shelly-ignored":        {"Shelly device moved to Ignored. Release it to allow re-discovery.", "ok"},
+	"shelly-released":       {"Shelly device released - discovery can find it again.", "ok"},
+	"shelly-cap":            {"Active Shelly device limit reached - remove one before approving another.", "err"},
+	"midea-scan-ok":         {"Discovery finished - new Midea devices appear in the Pending group.", "ok"},
+	"midea-scan-none":       {"No Midea devices answered discovery. Try a targeted IP if they are on another subnet.", "ok"},
+	"midea-scan-err":        {"Midea discovery failed.", "err"},
+	"midea-approved":        {"Midea device adopted - it is being connected now.", "ok"},
+	"midea-pair-err":        {"Adoption failed: could not obtain or verify credentials. Try again, choose the right region, or paste exported keys.", "err"},
+	"midea-import-bad":      {"The pasted credentials could not be read - expected the exported key file format.", "err"},
+	"midea-ignored":         {"Midea device moved to Ignored. Release it to allow re-discovery.", "ok"},
+	"midea-released":        {"Midea device released - discovery can find it again.", "ok"},
+	"midea-removed":         {"Midea device removed and its stored credentials dropped.", "ok"},
+	"midea-sent":            {"Command sent to the Midea device.", "ok"},
+	"midea-ctrl-err":        {"The Midea device did not accept the command.", "err"},
+	"midea-badval":          {"That value is out of range.", "err"},
+	"midea-profile":         {"Profile saved.", "ok"},
+	"midea-advanced-locked": {"The advanced profile (server-side control loop) is not available yet - it lands in a later update.", "err"},
+	"midea-notfd":           {"Midea device not found.", "err"},
+	"midea-err":             {"The Midea device action failed.", "err"},
 }
 
 // handleAdminUAReaderRename sets or clears a local reader's custom name
@@ -991,6 +1036,8 @@ func categoryPlural(cat string) string {
 		return "Switches"
 	case "rgbw":
 		return "RGBW Dimmers"
+	case "midea-climate":
+		return "Midea Climate Controllers"
 	case "door":
 		return "Doors"
 	case "pending":
@@ -1145,6 +1192,7 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	uaOK := s.uaReady(r.Context())
 	protectOK := s.protectReady(r.Context())
 	shellyOK := s.shellyReady(r.Context())
+	mideaOK := s.mideaReady()
 	// Shelly devices are polled directly (one cheap RPC each); start
 	// the fan-out now so it overlaps the UniFi fetches below. A device
 	// that does not answer IS the offline signal - per-device failure
@@ -1169,8 +1217,8 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	localOK := len(localReaders) > 0
-	if !uaOK && !protectOK && !localOK && !shellyOK {
-		writeUADetailError(w, "No device source is available - UniFi Access, UniFi Protect and Shelly are off and no local reader is registered.")
+	if !uaOK && !protectOK && !localOK && !shellyOK && !mideaOK {
+		writeUADetailError(w, "No device source is available - UniFi Access, UniFi Protect, Shelly and Midea are off and no local reader is registered.")
 		return
 	}
 	var items []uaStatusItem
@@ -1244,6 +1292,23 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	for _, p := range <-shellyCh {
 		addOnline("shelly", p.client.Address(), p.err == nil)
 	}
+	// Midea Climate Controllers: online status comes from the monitor's cached
+	// snapshot (no live probe in the poll - the monitor polls on its own tick).
+	if mideaOK {
+		snap := map[string]bool{}
+		if s.mideaMon != nil {
+			for _, rr := range s.mideaMon.Snapshot() {
+				snap[rr.ID] = rr.Online
+			}
+		}
+		if act, err := s.mideastore.ListActive(r.Context()); err == nil {
+			for _, d := range act {
+				addOnline("midea", d.ID, snap[d.ID])
+			}
+		} else {
+			complete = false
+		}
+	}
 	// Pending + ignored Shelly rows are shown in the table but never polled
 	// (no online/offline contribution). Fold their count into the grand total
 	// so the header "shown / total" matches the rendered rows instead of
@@ -1252,6 +1317,14 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	if complete {
 		pend, ign := s.shellyLifecycleRows(r.Context())
 		total += len(pend) + len(ign)
+		if mideaOK {
+			if mp, err := s.mideastore.ListPending(r.Context()); err == nil {
+				total += len(mp)
+			}
+			if mi, err := s.mideastore.ListIgnored(r.Context()); err == nil {
+				total += len(mi)
+			}
+		}
 	}
 
 	// sources tells the client which integrations this snapshot covers,
@@ -1261,7 +1334,7 @@ func (s *Server) handleAdminUAStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"ok":      true,
 		"items":   items,
-		"sources": map[string]bool{"ua": uaOK, "protect": protectOK, "rpi": localOK, "shelly": shellyOK},
+		"sources": map[string]bool{"ua": uaOK, "protect": protectOK, "rpi": localOK, "shelly": shellyOK, "midea": mideaOK},
 	}
 	if complete {
 		out["counts"] = map[string]any{"online": online, "offline": offline, "updates": 0, "total": total}

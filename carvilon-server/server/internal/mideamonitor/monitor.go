@@ -1,0 +1,505 @@
+// Package mideamonitor keeps the adopted Midea split-AC units connected and
+// polled, and proxies the standard-profile control commands (set temperature /
+// mode / fan) to the device via the mideaclimate adapter.
+//
+// It is the runtime half of the Midea Climate Controller device family: the
+// store (internal/mideastore) owns which devices exist and their encrypted
+// credentials; this monitor owns the live TCP connections and the cached last
+// status the Device Center renders. On startup (and whenever a device is
+// adopted or removed) it reconciles the connected set against the store's active
+// set, so an adopted device is re-provisioned from persisted credentials after a
+// server restart - no cloud round-trip, the device keeps running on its own
+// internal sensor throughout ("survives a server outage").
+//
+// The standard profile is device-side control: there is no server control loop
+// here. Every command is a direct passthrough to the adapter, exactly like a
+// remote control.
+package mideamonitor
+
+import (
+	"context"
+	"log/slog"
+	"net"
+	"sync"
+	"time"
+
+	"carvilon.local/server/internal/mideaclimate"
+	"carvilon.local/server/internal/mideastore"
+)
+
+// Store is the subset of *mideastore.Store the monitor needs.
+type Store interface {
+	ListActive(ctx context.Context) ([]mideastore.Device, error)
+	Get(ctx context.Context, id string) (mideastore.Device, error)
+	Credential(ctx context.Context, id string) (token, key []byte, err error)
+}
+
+// Readout is the cached, display-ready status of one adopted device.
+type Readout struct {
+	ID           string
+	Address      string
+	Online       bool
+	Provisioning bool
+	Power        bool
+	Mode         string // "off" | "cool" | "heat" | "dry" | "fan_only"
+	Setpoint     float64
+	Fan          string  // "auto" | "low" | "mid" | "high"
+	DeviceTempC  float64 // device return-air sensor
+	HasTemp      bool
+	OutdoorC     float64
+	HasOutdoor   bool
+	LastErr      string
+	LastPollMS   int64
+}
+
+type devState struct {
+	id           string
+	address      string
+	deviceID     uint64
+	dev          *mideaclimate.Device
+	provisioning bool
+	online       bool
+	last         mideaclimate.State
+	hasState     bool
+	lastErr      string
+	lastPollMS   int64
+}
+
+// Monitor holds the live device connections + cached status.
+type Monitor struct {
+	store Store
+	log   *slog.Logger
+
+	interval       time.Duration
+	connectTimeout time.Duration
+	pollTimeout    time.Duration
+
+	mu      sync.Mutex
+	devs    map[string]*devState
+	trigger chan struct{}
+	now     func() time.Time
+}
+
+// Option mutates a Monitor during construction.
+type Option func(*Monitor)
+
+// WithInterval sets the poll interval (default 20s).
+func WithInterval(d time.Duration) Option { return func(m *Monitor) { m.interval = d } }
+
+// WithClock injects a test clock.
+func WithClock(now func() time.Time) Option { return func(m *Monitor) { m.now = now } }
+
+// New constructs a Monitor.
+func New(store Store, log *slog.Logger, opts ...Option) *Monitor {
+	if log == nil {
+		log = slog.Default()
+	}
+	m := &Monitor{
+		store:          store,
+		log:            log.With("component", "mideamonitor"),
+		interval:       20 * time.Second,
+		connectTimeout: 6 * time.Second,
+		pollTimeout:    5 * time.Second,
+		devs:           make(map[string]*devState),
+		trigger:        make(chan struct{}, 1),
+		now:            time.Now,
+	}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
+}
+
+// Run reconciles + polls until ctx is cancelled, then closes every connection.
+// A no-op when the store is nil.
+func (m *Monitor) Run(ctx context.Context) {
+	if m == nil || m.store == nil {
+		return
+	}
+	ticker := time.NewTicker(m.interval)
+	defer ticker.Stop()
+	for {
+		m.tick(ctx)
+		select {
+		case <-ctx.Done():
+			m.closeAll()
+			return
+		case <-ticker.C:
+		case <-m.trigger:
+		}
+	}
+}
+
+// Refresh nudges the monitor to reconcile now (after an adopt / remove), without
+// waiting for the next tick. Non-blocking.
+func (m *Monitor) Refresh() {
+	if m == nil {
+		return
+	}
+	select {
+	case m.trigger <- struct{}{}:
+	default:
+	}
+}
+
+// tick reconciles the connected set against the store's active set, then polls
+// the connected devices and (re)provisions the disconnected ones.
+func (m *Monitor) tick(ctx context.Context) {
+	active, err := m.store.ListActive(ctx)
+	if err != nil {
+		m.log.Warn("list active failed", "err", err)
+		return
+	}
+	activeByID := make(map[string]mideastore.Device, len(active))
+	for _, d := range active {
+		activeByID[d.ID] = d
+	}
+
+	// Drop devices no longer active; ensure a devState per active device.
+	var toClose []*mideaclimate.Device
+	var toPoll []*devState
+	var toProvision []mideastore.Device
+	m.mu.Lock()
+	for id, ds := range m.devs {
+		if _, ok := activeByID[id]; !ok {
+			if ds.dev != nil {
+				toClose = append(toClose, ds.dev)
+			}
+			delete(m.devs, id)
+		}
+	}
+	for id, d := range activeByID {
+		ds := m.devs[id]
+		if ds == nil {
+			ds = &devState{id: id, address: d.Address, deviceID: d.DeviceID}
+			m.devs[id] = ds
+		} else {
+			ds.address, ds.deviceID = d.Address, d.DeviceID
+		}
+		switch {
+		case ds.dev != nil:
+			toPoll = append(toPoll, ds)
+		case !ds.provisioning:
+			ds.provisioning = true
+			toProvision = append(toProvision, d)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, dev := range toClose {
+		_ = dev.Deprovision(context.Background())
+	}
+	for _, d := range toProvision {
+		go m.provisionAsync(ctx, d)
+	}
+	for _, ds := range toPoll {
+		m.pollOne(ctx, ds)
+	}
+}
+
+// provisionAsync connects one adopted device from its persisted credentials.
+func (m *Monitor) provisionAsync(ctx context.Context, d mideastore.Device) {
+	dev, err := m.connect(ctx, d)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ds := m.devs[d.ID]
+	if ds == nil { // removed while connecting
+		if dev != nil {
+			go dev.Deprovision(context.Background())
+		}
+		return
+	}
+	ds.provisioning = false
+	ds.lastPollMS = m.now().UnixMilli()
+	if err != nil {
+		ds.online = false
+		ds.lastErr = err.Error()
+		m.log.Warn("provision failed", "id", d.ID, "err", err)
+		return
+	}
+	// ensure() may have connected + installed a handle on demand (a control
+	// command during our connect window); keep it and close ours so we do not
+	// overwrite and leak a live connection.
+	if ds.dev != nil {
+		go dev.Deprovision(context.Background())
+		return
+	}
+	ds.dev = dev
+	ds.online = true
+	ds.lastErr = ""
+}
+
+// connect provisions a device handle from the store's encrypted credentials.
+func (m *Monitor) connect(ctx context.Context, d mideastore.Device) (*mideaclimate.Device, error) {
+	token, key, err := m.store.Credential(ctx, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	creds := mideaclimate.Credentials{
+		IP:       hostOnly(d.Address),
+		DeviceID: d.DeviceID,
+		Token:    token,
+		Key:      key,
+	}
+	cctx, cancel := context.WithTimeout(ctx, m.connectTimeout)
+	defer cancel()
+	return mideaclimate.Provision(cctx, d.Address, creds)
+}
+
+// pollOne reads live status from a connected device, updating its cache. On
+// error it drops the handle so the next tick re-provisions.
+func (m *Monitor) pollOne(ctx context.Context, ds *devState) {
+	m.mu.Lock()
+	dev := ds.dev
+	m.mu.Unlock()
+	if dev == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, m.pollTimeout)
+	st, err := dev.Status(pctx)
+	cancel()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ds.lastPollMS = m.now().UnixMilli()
+	// The handle may have been dropped (a failed control) or replaced (ensure)
+	// while we polled. If so, our result is stale and whoever swapped it already
+	// owns closing our handle - do not touch ds.dev or double-Deprovision.
+	if ds.dev != dev {
+		return
+	}
+	if err != nil {
+		ds.online = false
+		ds.lastErr = err.Error()
+		ds.dev = nil
+		go dev.Deprovision(context.Background())
+		return
+	}
+	ds.last = st
+	ds.hasState = true
+	ds.online = true
+	ds.lastErr = ""
+}
+
+// Snapshot returns the cached status of every adopted device.
+func (m *Monitor) Snapshot() []Readout {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Readout, 0, len(m.devs))
+	for _, ds := range m.devs {
+		out = append(out, ds.readout())
+	}
+	return out
+}
+
+// Get returns the cached status of one device.
+func (m *Monitor) Get(id string) (Readout, bool) {
+	if m == nil {
+		return Readout{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ds, ok := m.devs[id]
+	if !ok {
+		return Readout{}, false
+	}
+	return ds.readout(), true
+}
+
+func (ds *devState) readout() Readout {
+	r := Readout{
+		ID:           ds.id,
+		Address:      ds.address,
+		Online:       ds.online,
+		Provisioning: ds.provisioning,
+		LastErr:      ds.lastErr,
+		LastPollMS:   ds.lastPollMS,
+	}
+	if ds.hasState {
+		r.Power = ds.last.Power
+		r.Mode = string(ds.last.Mode)
+		r.Setpoint = ds.last.Setpoint
+		r.Fan = string(ds.last.Fan)
+		r.DeviceTempC, r.HasTemp = ds.last.DeviceTempC, ds.last.HasTemp
+		r.OutdoorC, r.HasOutdoor = ds.last.OutdoorC, ds.last.HasOutdoor
+	}
+	return r
+}
+
+// SetTemperature / SetMode / SetFan proxy the standard-profile commands.
+
+// SetTemperature sends a target temperature (17-30 C, 0.5 step; the device
+// regulates on its own internal sensor).
+func (m *Monitor) SetTemperature(ctx context.Context, id string, tempC float64) error {
+	return m.control(ctx, id, func(dev *mideaclimate.Device) error {
+		return dev.SetTemperature(ctx, tempC)
+	})
+}
+
+// SetMode switches the operating mode (off/cool/heat/dry/fan_only/auto).
+func (m *Monitor) SetMode(ctx context.Context, id, mode string) error {
+	md := parseMode(mode)
+	return m.control(ctx, id, func(dev *mideaclimate.Device) error {
+		return dev.SetMode(ctx, md)
+	})
+}
+
+// SetFan selects the fan step (auto/low/mid/high).
+func (m *Monitor) SetFan(ctx context.Context, id, fan string) error {
+	f := parseFan(fan)
+	return m.control(ctx, id, func(dev *mideaclimate.Device) error {
+		return dev.SetFan(ctx, f)
+	})
+}
+
+// control runs a command against a connected handle, connecting on demand (a
+// just-approved device, or one whose connection dropped). On success it
+// refreshes the cached state; on failure it drops the handle for a re-connect.
+func (m *Monitor) control(ctx context.Context, id string, fn func(*mideaclimate.Device) error) error {
+	dev, err := m.ensure(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := fn(dev); err != nil {
+		m.drop(id, dev)
+		return err
+	}
+	cctx, cancel := context.WithTimeout(ctx, m.pollTimeout)
+	st, serr := dev.Status(cctx)
+	cancel()
+	if serr == nil {
+		m.mu.Lock()
+		if ds := m.devs[id]; ds != nil {
+			ds.last, ds.hasState, ds.online, ds.lastErr = st, true, true, ""
+			ds.lastPollMS = m.now().UnixMilli()
+		}
+		m.mu.Unlock()
+	}
+	return nil
+}
+
+// ensure returns a connected handle for id, provisioning one from the store if
+// the device is not currently connected.
+func (m *Monitor) ensure(ctx context.Context, id string) (*mideaclimate.Device, error) {
+	m.mu.Lock()
+	if ds := m.devs[id]; ds != nil && ds.dev != nil {
+		dev := ds.dev
+		m.mu.Unlock()
+		return dev, nil
+	}
+	m.mu.Unlock()
+
+	d, err := m.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	dev, err := m.connect(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	ds := m.devs[id]
+	if ds == nil {
+		// The devState is absent: either tick has not registered a just-approved
+		// device yet, or the device was removed while we connected. Disambiguate
+		// against the store so a removed device is not resurrected with a live
+		// handle (it would otherwise linger until the next reconcile reaps it).
+		m.mu.Unlock()
+		if _, gerr := m.store.Get(ctx, id); gerr != nil {
+			go dev.Deprovision(context.Background())
+			return nil, gerr
+		}
+		m.mu.Lock()
+		ds = m.devs[id]
+		if ds == nil {
+			ds = &devState{id: id, address: d.Address, deviceID: d.DeviceID}
+			m.devs[id] = ds
+		}
+	}
+	// If a concurrent connect already installed a handle, keep it and close ours.
+	if ds.dev != nil {
+		existing := ds.dev
+		m.mu.Unlock()
+		go dev.Deprovision(context.Background())
+		return existing, nil
+	}
+	ds.dev = dev
+	ds.online = true
+	ds.provisioning = false
+	m.mu.Unlock()
+	return dev, nil
+}
+
+// drop discards the connected handle for id (after a control error) so the next
+// tick re-provisions it.
+func (m *Monitor) drop(id string, dev *mideaclimate.Device) {
+	m.mu.Lock()
+	if ds := m.devs[id]; ds != nil && ds.dev == dev {
+		ds.dev = nil
+		ds.online = false
+	}
+	m.mu.Unlock()
+	if dev != nil {
+		go dev.Deprovision(context.Background())
+	}
+}
+
+func (m *Monitor) closeAll() {
+	m.mu.Lock()
+	devs := make([]*mideaclimate.Device, 0, len(m.devs))
+	for _, ds := range m.devs {
+		if ds.dev != nil {
+			devs = append(devs, ds.dev)
+			ds.dev = nil
+			ds.online = false
+		}
+	}
+	m.mu.Unlock()
+	for _, dev := range devs {
+		_ = dev.Deprovision(context.Background())
+	}
+}
+
+func parseMode(s string) mideaclimate.Mode {
+	switch s {
+	case "cool":
+		return mideaclimate.ModeCool
+	case "heat":
+		return mideaclimate.ModeHeat
+	case "dry":
+		return mideaclimate.ModeDry
+	case "fan_only":
+		return mideaclimate.ModeFanOnly
+	case "auto":
+		return mideaclimate.ModeAuto
+	case "off":
+		return mideaclimate.ModeOff
+	default:
+		return mideaclimate.ModeCool
+	}
+}
+
+func parseFan(s string) mideaclimate.FanMode {
+	switch s {
+	case "low":
+		return mideaclimate.FanLow
+	case "mid":
+		return mideaclimate.FanMid
+	case "high":
+		return mideaclimate.FanHigh
+	default:
+		return mideaclimate.FanAuto
+	}
+}
+
+// hostOnly strips an optional :port from a stored address, leaving the bare IP
+// the Midea adapter dials (the protocol uses its own fixed TCP port).
+func hostOnly(addr string) string {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}

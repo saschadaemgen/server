@@ -47,6 +47,8 @@ import (
 	"carvilon.local/server/internal/eventbus"
 	"carvilon.local/server/internal/featuregate"
 	"carvilon.local/server/internal/logbuf"
+	"carvilon.local/server/internal/mideamonitor"
+	"carvilon.local/server/internal/mideastore"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/nfc"
@@ -123,6 +125,14 @@ type Deps struct {
 	// which the strict Gen1 name allowlist admits in-scope Gen1 devices.
 	// Nil disables Gen1 discovery (Gen2 discovery is unaffected).
 	ShellyGen1Discovery dnssd.Source
+	// MideaStore is the persistent Midea Climate Controller device set +
+	// encrypted V3 credentials (migration 042, Etappe 1). Nil disables the
+	// Midea source entirely (no discovery, adoption or cockpit).
+	MideaStore *mideastore.Store
+	// MideaMonitor keeps adopted Midea devices connected + polled and proxies
+	// the standard-profile control commands. Nil disables live status/control
+	// (the store still renders the rows). main starts it (RunMideaMonitor).
+	MideaMonitor *mideamonitor.Monitor
 	// UserStore is the UserStore wrapper around the UA client
 	// (see access/ua). Nil = UA not configured yet; the admin UI
 	// then shows a hint instead of an empty list.
@@ -269,8 +279,13 @@ type Server struct {
 	// provisioning: at most one provision runs per device id, so two
 	// overlapping triggers (retry double-click, approve + manual) cannot
 	// mint two broker passwords that diverge from what the device holds.
-	shellyProvMu    sync.Mutex
-	shellyProvo     map[int64]bool
+	shellyProvMu sync.Mutex
+	shellyProvo  map[int64]bool
+	// Midea Climate Controller (Etappe 1): the device set + encrypted creds
+	// (mideastore) and the runtime that keeps adopted devices connected +
+	// polled and proxies control (mideaMon). Both nil disables the source.
+	mideastore      *mideastore.Store
+	mideaMon        *mideamonitor.Monitor
 	userStore       UserStoreLike
 	nativeUsers     access.NativeUserStore
 	hub             *doorbellhub.Hub
@@ -422,6 +437,8 @@ func New(deps Deps) (*Server, error) {
 		srv.shellyScan = newShellyScanner(deps.ShellyStore, deps.Log, srv.shellyEnabled,
 			srv.shellyIdentifyProbe, enumerateOwnSubnets)
 	}
+	srv.mideastore = deps.MideaStore
+	srv.mideaMon = deps.MideaMonitor
 	srv.routes()
 	return srv, nil
 }
@@ -434,6 +451,17 @@ func (s *Server) RunShellyDiscovery(ctx context.Context) {
 		return
 	}
 	s.shellyDisco.Run(ctx)
+}
+
+// RunMideaMonitor keeps the adopted Midea devices connected + polled until ctx
+// is cancelled (re-provisioning the persisted set on startup, so an adopted
+// device survives a server restart). main launches it in its own goroutine; a
+// no-op when the Midea source is not wired.
+func (s *Server) RunMideaMonitor(ctx context.Context) {
+	if s.mideaMon == nil {
+		return
+	}
+	s.mideaMon.Run(ctx)
 }
 
 // SetUAClient lets main swap the UA client at runtime after the
@@ -705,6 +733,18 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /a/devices/shelly/scan-network/status", s.requireAdminSession(http.HandlerFunc(s.handleAdminShellyScanNetworkStatus)))
 	// Shelly Etappe 3, Phase 1: (re)provision a device onto the MQTT broker.
 	s.mux.Handle("POST /a/devices/shelly/provision", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAShellyProvision)))
+	// Midea Climate Controller (Etappe 1): local discovery + approval gate +
+	// standard-profile cockpit, all inline in the Device Center. Adoption
+	// fetches credentials (cloud-primary / import-fallback), verifies them by a
+	// local handshake and persists them encrypted - never committed.
+	s.mux.Handle("POST /a/devices/midea/scan", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaScan)))
+	s.mux.Handle("POST /a/devices/midea/approve", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaApprove)))
+	s.mux.Handle("POST /a/devices/midea/reject", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaReject)))
+	s.mux.Handle("POST /a/devices/midea/release", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaRelease)))
+	s.mux.Handle("POST /a/devices/midea/remove", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaRemove)))
+	s.mux.Handle("POST /a/devices/midea/control", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaControl)))
+	s.mux.Handle("POST /a/devices/midea/profile", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaProfile)))
+	s.mux.Handle("GET /a/devices/midea/{id}/export", s.requireAdminSession(http.HandlerFunc(s.handleAdminUAMideaExport)))
 	// Dev-only: feed a synthetic mDNS announcement through the real discovery
 	// path so the adopt/sticky-remove/release chain can be driven without a
 	// live device or OS multicast. Registered ONLY in DevMode - never in a
