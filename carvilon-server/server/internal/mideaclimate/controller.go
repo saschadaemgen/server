@@ -134,6 +134,7 @@ func DefaultParams() Params {
 // Inputs ist der pro Tick von der Engine gelieferte Satz.
 type Inputs struct {
 	Now         time.Time // Engine-Zeit dieses Ticks
+	DtMin       float64   // Zeit seit dem letzten Tick in Minuten (rate-robust)
 	RoomTemp    float64   // externer Sensor (Regelgroesse), verdrahtet
 	RoomHum     float64   // externe Feuchte (0 = n/a), verdrahtet
 	HasHum      bool
@@ -255,7 +256,7 @@ func Taupunkt(tempC, rhPct float64) float64 {
 
 // Tick fuehrt einen Regelschritt aus. Die Engine liefert Zeit und Eingaenge,
 // bekommt eine Stellentscheidung und Anzeigen zurueck. Der State bleibt in c.
-func (c *Controller) Tick(in Inputs, dtMin float64) (Outputs, Readouts) {
+func (c *Controller) Tick(in Inputs) (Outputs, Readouts) {
 	var out Outputs
 	var rd Readouts
 
@@ -335,8 +336,8 @@ func (c *Controller) Tick(in Inputs, dtMin float64) (Outputs, Readouts) {
 
 	// Tendenz (C/min).
 	tendenz := 0.0
-	if len(c.window) >= 2 && dtMin > 0 {
-		tendenz = (c.window[len(c.window)-1] - c.window[0]) / (float64(len(c.window)-1) * dtMin)
+	if len(c.window) >= 2 && in.DtMin > 0 {
+		tendenz = (c.window[len(c.window)-1] - c.window[0]) / (float64(len(c.window)-1) * in.DtMin)
 	}
 
 	// Bezugsgroesse fuer den Sollwert: Geraetefuehler, sonst Fallback auf Istwert.
@@ -380,7 +381,7 @@ func (c *Controller) Tick(in Inputs, dtMin float64) (Outputs, Readouts) {
 
 	// Integral-Anteil (nur im HALTEN aufziehen), Vorzeichen gemaess ctrlAbw.
 	if c.current == GangHalten {
-		c.iTerm = clamp(c.iTerm+ctrlAbw*dtMin*c.P.IGain, -c.P.IMax, c.P.IMax)
+		c.iTerm = clamp(c.iTerm+ctrlAbw*in.DtMin*c.P.IGain, -c.P.IMax, c.P.IMax)
 	} else {
 		c.iTerm *= 0.9
 	}

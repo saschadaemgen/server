@@ -377,6 +377,9 @@
                 {{if eq $r.Kind "midea"}}
                   {{$m := $r.MideaMode}}{{$f := $r.MideaFan}}
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Controls</span><span class="dc-hr"></span></div>
+                  {{if $r.MideaAutomatic}}
+                  <p class="dc-act-hint">Under automatic control by a Logic Editor control loop &mdash; manual temperature / mode / fan are locked (single-driver). Stop that run, or switch this device to the standard profile, to control it by hand.</p>
+                  {{else}}
                   <div class="dc-act-form">
                     <form class="dc-act-subform" method="post" action="/a/devices/midea/control">
                       <input type="hidden" name="id" value="{{$r.ID}}">
@@ -419,14 +422,15 @@
                     </form>
                     <p class="dc-act-hint">Standard profile: the unit regulates on its own internal sensor (badge &ldquo;on device&rdquo;). Commands go straight to the device like a remote - they keep working through a server outage.</p>
                   </div>
+                  {{end}}
 
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Profile</span><span class="dc-hr"></span></div>
                   <form class="dc-act-form" method="post" action="/a/devices/midea/profile">
                     <input type="hidden" name="id" value="{{$r.ID}}">
                     <label style="display:flex;align-items:center;gap:8px;margin:4px 0;"><input type="radio" name="profile" value="standard"{{if ne $r.MideaProfile "advanced"}} checked{{end}}> Standard &mdash; device-side, remote-like</label>
-                    <label style="display:flex;align-items:center;gap:8px;margin:4px 0;opacity:0.5;"><input type="radio" name="profile" value="advanced" disabled> Advanced &mdash; server-side control loop (later update)</label>
+                    <label style="display:flex;align-items:center;gap:8px;margin:4px 0;"><input type="radio" name="profile" value="advanced"{{if eq $r.MideaProfile "advanced"}} checked{{end}}> Advanced &mdash; server-side control loop (Logic Editor block)</label>
                     <div class="dc-act-row"><button class="dc-act-btn" type="submit">Save profile</button></div>
-                    <p class="dc-act-hint">The advanced profile (external-sensor control loop, analysis, history) lands in a later etappe; standard is active and safe out of the box.</p>
+                    <p class="dc-act-hint">Advanced enables the server-side control loop: a &ldquo;Midea Climate Controller - control loop&rdquo; block appears in the Logic Editor for this device. Wire an external room sensor into it and run the graph; while it runs, the manual controls above are locked. Standard is the safe device-side default.</p>
                   </form>
 
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Credentials &amp; removal</span><span class="dc-hr"></span></div>

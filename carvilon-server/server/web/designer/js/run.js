@@ -15,6 +15,7 @@ import { engineLine, focusEngine } from './dock.js';
 const IMPL = new Set(['input.manual', 'input.toggle',
   'input.constant.bool', 'input.constant.float', 'input.constant.text',
   'time.staircase', 'logic.or', 'output.lamp',
+  'midea.control_loop',
   'source.channel', 'sink.channel',
   'source.channel.float', 'source.channel.text', 'sink.channel.float', 'sink.channel.text']);
 // A press is a short true/false pulse so the engine sees a rising edge

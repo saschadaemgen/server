@@ -9,6 +9,8 @@ import (
 
 	"carvilon.local/server/internal/gpio"
 	"carvilon.local/server/internal/hostinfo"
+	"carvilon.local/server/internal/mideaengine"
+	"carvilon.local/server/internal/mideastore"
 	"carvilon.local/server/internal/mqttstore"
 	"carvilon.local/server/internal/nfc"
 	"carvilon.local/server/internal/shellycaps"
@@ -61,9 +63,40 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	// driver binds to its in-process inline client); Telegram needs the
 	// bot enabled with a token set (the telegram: driver binds to the
 	// manager's Conn).
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"blocks": designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning(), s.shellyDevicesForCatalog(r.Context()), s.readoutDevicesForCatalog(r.Context())...),
-	})
+	blocks := designer.Catalog(gpio.Enabled(), sysMetricsForCatalog(), s.nfcReadersForCatalog(r.Context()), s.mqttBrokerRunning(), s.telegramRunning(), s.shellyDevicesForCatalog(r.Context()), s.readoutDevicesForCatalog(r.Context())...)
+	blocks = append(blocks, s.mideaControlLoopBlocks(r.Context())...)
+	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": blocks})
+}
+
+// mideaControlLoopBlocks emits one "control loop" editor block per adopted Midea
+// device that is in the ADVANCED profile (E2). The block is the registered
+// midea.control_loop engine node (ports from its descriptor); the device id is
+// baked into the Channel field, which the editor maps to the node's "device"
+// param. Switching a device to standard removes its block on the next catalog
+// load - the E1 profile toggle gates the advanced control loop.
+func (s *Server) mideaControlLoopBlocks(ctx context.Context) []designer.CatalogBlock {
+	if s.mideastore == nil {
+		return nil
+	}
+	act, err := s.mideastore.ListActive(ctx)
+	if err != nil {
+		return nil
+	}
+	var out []designer.CatalogBlock
+	for _, d := range act {
+		if d.Profile != mideastore.ProfileAdvanced {
+			continue
+		}
+		out = append(out, designer.CatalogBlock{
+			Type:        mideaengine.TypeControlLoop,
+			Category:    "climate",
+			Title:       "Control loop · " + mideaDisplayName(d),
+			Icon:        "snowflake",
+			Channel:     d.ID, // baked device id → the node's "device" param
+			Implemented: true,
+		})
+	}
+	return out
 }
 
 // readoutDevicesForCatalog bridges every adopted readout/sensor device to

@@ -222,10 +222,11 @@ type uaRow struct {
 	// the current mode/fan/setpoint prefill the standard-profile control forms,
 	// MideaProfile ("standard" | "advanced") drives the profile toggle. The
 	// store id (uaRow.ID) keys the control/approve/export endpoints.
-	MideaMode     string
-	MideaFan      string
-	MideaSetpoint string
-	MideaProfile  string
+	MideaMode      string
+	MideaFan       string
+	MideaSetpoint  string
+	MideaProfile   string
+	MideaAutomatic bool // a Logic-Editor control loop is driving this device
 
 	// Sensor History H1: the per-sensor recording knobs prefilled into the
 	// cockpit form. RecIntervalSec/RecRetentionSec are the stored OVERRIDE
@@ -900,6 +901,7 @@ var uaFlash = map[string]struct{ msg, typ string }{
 	"midea-released":         {"Midea device released - discovery can find it again.", "ok"},
 	"midea-removed":          {"Midea device removed and its stored credentials dropped.", "ok"},
 	"midea-sent":             {"Command sent to the Midea device.", "ok"},
+	"midea-automatic":        {"This device is under automatic control by a Logic Editor control loop - manual control is locked. Stop that run to control it by hand.", "err"},
 	"midea-ctrl-err":         {"The command could not be sent to the Midea device (tried a reconnect). Open the device for the exact error.", "err"},
 	"midea-badval":           {"That value is out of range.", "err"},
 	"midea-profile":          {"Profile saved.", "ok"},

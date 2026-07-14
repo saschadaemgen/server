@@ -4,9 +4,9 @@ package httpserver
 // Center: local discovery -> approval gate -> adoption (cloud-primary /
 // import-fallback credential fetch, verified by a local handshake, persisted
 // encrypted) -> standard-profile cockpit (remote-like passthrough control +
-// device sensor readout), plus per-device credential export. The control loop,
-// analysis, history and setup wizard (the "advanced" profile) are gated off
-// here and land in later etappen.
+// device sensor readout), plus per-device credential export. The "advanced"
+// profile (Etappe 2) enables the Logic-Editor control_loop block; analysis,
+// history and the setup wizard land in later etappen.
 
 import (
 	"context"
@@ -178,8 +178,12 @@ func makeMideaRow(d mideastore.Device, r mideamonitor.Readout) uaRow {
 		setpoint = strconv.FormatFloat(r.Setpoint, 'f', 1, 64)
 	}
 
+	controlLabel := "on device"
+	if r.Automatic {
+		controlLabel = "under automatic control (Logic Editor)"
+	}
 	detail := []kvRow{
-		{Key: "Control", Value: "on device"},
+		{Key: "Control", Value: controlLabel},
 		{Key: "Mode", Value: mideaModeLabel(r.Mode, r.Power)},
 		{Key: "Set temperature", Value: setpoint + " °C"},
 		{Key: "Fan", Value: mideaFanLabel(fan)},
@@ -197,24 +201,25 @@ func makeMideaRow(d mideastore.Device, r mideamonitor.Readout) uaRow {
 
 	name := mideaDisplayName(d)
 	return uaRow{
-		ID:            d.ID,
-		Kind:          "midea",
-		Category:      "midea-climate",
-		TypeLabel:     "Climate controller",
-		Name:          name,
-		StatusState:   statusState,
-		StatusText:    statusText,
-		Source:        "midea",
-		SourceLabel:   "Midea",
-		Model:         "Midea Split AC",
-		IP:            d.Address,
-		Detail:        detail,
-		Capabilities:  []string{"setpoint", "mode", "fan_mode", "sensor"},
-		MideaMode:     mode,
-		MideaFan:      fan,
-		MideaSetpoint: setpoint,
-		MideaProfile:  mideaProfileValue(d.Profile),
-		Search:        strings.ToLower(name + " midea split ac " + d.Address + " " + d.ID),
+		ID:             d.ID,
+		Kind:           "midea",
+		Category:       "midea-climate",
+		TypeLabel:      "Climate controller",
+		Name:           name,
+		StatusState:    statusState,
+		StatusText:     statusText,
+		Source:         "midea",
+		SourceLabel:    "Midea",
+		Model:          "Midea Split AC",
+		IP:             d.Address,
+		Detail:         detail,
+		Capabilities:   []string{"setpoint", "mode", "fan_mode", "sensor"},
+		MideaMode:      mode,
+		MideaFan:       fan,
+		MideaSetpoint:  setpoint,
+		MideaProfile:   mideaProfileValue(d.Profile),
+		MideaAutomatic: r.Automatic,
+		Search:         strings.ToLower(name + " midea split ac " + d.Address + " " + d.ID),
 	}
 }
 
@@ -479,6 +484,12 @@ func (s *Server) handleAdminUAMideaControl(w http.ResponseWriter, r *http.Reques
 		s.mideaRedirect(w, r, "midea-err")
 		return
 	}
+	// Single-driver exclusivity: refuse manual control while a Logic-Editor
+	// control loop drives this device.
+	if s.mideaMon.IsAutomatic(id) {
+		s.mideaRedirect(w, r, "midea-automatic")
+		return
+	}
 	// Wide enough for a reconnect-and-retry (two connect+command cycles).
 	ctx, cancel := context.WithTimeout(r.Context(), 22*time.Second)
 	defer cancel()
@@ -531,14 +542,17 @@ func (s *Server) handleAdminUAMideaProfile(w http.ResponseWriter, r *http.Reques
 		s.mideaRedirect(w, r, "midea-err")
 		return
 	}
+	target := mideastore.ProfileStandard
 	if profile == mideastore.ProfileAdvanced {
-		s.mideaRedirect(w, r, "midea-advanced-locked")
-		return
+		target = mideastore.ProfileAdvanced // E2: advanced enables the control_loop block
 	}
-	if err := s.mideastore.SetProfile(r.Context(), id, mideastore.ProfileStandard); err != nil {
+	if err := s.mideastore.SetProfile(r.Context(), id, target); err != nil {
 		s.log.Warn("midea: set profile failed", "id", id, "err", err)
 		s.mideaRedirect(w, r, "midea-err")
 		return
+	}
+	if s.mideaMon != nil {
+		s.mideaMon.Refresh() // reconcile so the profile change is reflected promptly
 	}
 	s.mideaRedirect(w, r, "midea-profile")
 }

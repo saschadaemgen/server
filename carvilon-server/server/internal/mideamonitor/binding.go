@@ -212,6 +212,11 @@ func (b *RunBinding) Write(addr string, v engine.Value) error {
 	if !ok {
 		return fmt.Errorf("mideamonitor: unknown channel %q", addr)
 	}
+	// Single-driver exclusivity: while a control_loop run drives this device, the
+	// device block's manual control sink is inert (the loop owns the device).
+	if b.m.IsAutomatic(id) {
+		return nil
+	}
 	cmd := ctrlCmd{id: id}
 	switch token {
 	case chSetpoint:

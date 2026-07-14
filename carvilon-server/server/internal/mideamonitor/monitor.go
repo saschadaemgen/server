@@ -48,6 +48,8 @@ type Readout struct {
 	HasTemp      bool
 	OutdoorC     float64
 	HasOutdoor   bool
+	Profile      string // standard | advanced
+	Automatic    bool   // a control_loop run is currently driving this device
 	LastErr      string // last poll/connection error
 	LastCtrlErr  string // last control command error (surfaced in the cockpit)
 	LastPollMS   int64
@@ -57,6 +59,7 @@ type devState struct {
 	id           string
 	address      string
 	deviceID     uint64
+	profile      string // mideastore profile (standard | advanced)
 	dev          *mideaclimate.Device
 	provisioning bool
 	online       bool
@@ -76,11 +79,22 @@ type Monitor struct {
 	connectTimeout time.Duration
 	pollTimeout    time.Duration
 
-	mu       sync.Mutex
-	devs     map[string]*devState
-	trigger  chan struct{}
-	bindings map[*RunBinding]struct{} // live Logic-Editor run drivers (readout push)
-	now      func() time.Time
+	mu        sync.Mutex
+	devs      map[string]*devState
+	trigger   chan struct{}
+	bindings  map[*RunBinding]struct{} // live Logic-Editor run drivers (readout push)
+	automatic map[string]int           // ref-count of active control_loop runs per device
+	now       func() time.Time
+
+	// applyQueue carries full control decisions (setpoint+mode+fan) from the
+	// control_loop run driver to a worker, so the engine tick never blocks on
+	// device I/O.
+	applyQueue chan queuedApply
+}
+
+type queuedApply struct {
+	id  string
+	out mideaclimate.Outputs
 }
 
 // Option mutates a Monitor during construction.
@@ -106,6 +120,8 @@ func New(store Store, log *slog.Logger, opts ...Option) *Monitor {
 		devs:           make(map[string]*devState),
 		trigger:        make(chan struct{}, 1),
 		bindings:       make(map[*RunBinding]struct{}),
+		automatic:      make(map[string]int),
+		applyQueue:     make(chan queuedApply, 64),
 		now:            time.Now,
 	}
 	for _, o := range opts {
@@ -120,6 +136,7 @@ func (m *Monitor) Run(ctx context.Context) {
 	if m == nil || m.store == nil {
 		return
 	}
+	go m.applyWorker(ctx) // drains control_loop drive commands off the tick path
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 	for {
@@ -180,6 +197,7 @@ func (m *Monitor) tick(ctx context.Context) {
 		} else {
 			ds.address, ds.deviceID = d.Address, d.DeviceID
 		}
+		ds.profile = d.Profile
 		switch {
 		case ds.dev != nil:
 			toPoll = append(toPoll, ds)
@@ -305,7 +323,9 @@ func (m *Monitor) Snapshot() []Readout {
 	defer m.mu.Unlock()
 	out := make([]Readout, 0, len(m.devs))
 	for _, ds := range m.devs {
-		out = append(out, ds.readout())
+		r := ds.readout()
+		r.Automatic = m.automatic[ds.id] > 0
+		out = append(out, r)
 	}
 	return out
 }
@@ -321,7 +341,9 @@ func (m *Monitor) Get(id string) (Readout, bool) {
 	if !ok {
 		return Readout{}, false
 	}
-	return ds.readout(), true
+	r := ds.readout()
+	r.Automatic = m.automatic[id] > 0
+	return r, true
 }
 
 func (ds *devState) readout() Readout {
@@ -330,6 +352,7 @@ func (ds *devState) readout() Readout {
 		Address:      ds.address,
 		Online:       ds.online,
 		Provisioning: ds.provisioning,
+		Profile:      ds.profile,
 		LastErr:      ds.lastErr,
 		LastCtrlErr:  ds.lastCtrlErr,
 		LastPollMS:   ds.lastPollMS,

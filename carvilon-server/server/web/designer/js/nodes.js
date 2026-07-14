@@ -65,7 +65,7 @@ export function buildNode(n){
   const el=document.createElement('div');
   el.className='node'+(n.faceplate?' node-shelly':'')+(n.readout?' node-readout':'');el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
   if(n.faceplate){
-    el.innerHTML=`<div class="node-accent"></div>`+(n.readout?readoutFaceplateHTML(n):shellyFaceplateHTML(n));
+    el.innerHTML=`<div class="node-accent"></div>`+(n.type==='midea.control_loop'?climateFaceplateHTML(n):(n.readout?readoutFaceplateHTML(n):shellyFaceplateHTML(n)));
   }else{
     const insH=n.ports.in.map(p=>portRowHTML(n.id,p,'Input')).join('');
     const outH=n.ports.out.map(p=>portRowHTML(n.id,p,'Output')).join('');
@@ -423,6 +423,7 @@ function defFor(name,cat){
   // exclusivity); the payload's channel refs travel on def.readout so the
   // run binds them by prefix. Keyed off the readout payload, so any device
   // class flows through the same path.
+  if(t==='midea.control_loop')return climateLoopDef(name);
   if(NAME_READOUT[name])return readoutDef(name);
   if(NAME_CAT[name]==='shelly')return shellyDef(name);
   if(t==='source.channel'||t==='sink.channel'){const isSrc=t==='source.channel',gc=NAME_CAT[name]||'gpio';
@@ -562,6 +563,64 @@ function readoutFaceplateHTML(n){
       <div class="sh-meta"><div class="sh-online ro-online" data-roonline title="Device status"></div></div>
     </div>
     <div class="sh-rows ro-rows">${ctlrows}${rows}</div>`;
+}
+// climateLoopDef builds the Midea control_loop block: a registered stateful
+// engine node (NOT JS-expanded - it reaches Build with its "device" param and
+// its wired input edges, and drives the device through the monitor seam, not a
+// sink channel). Wired INPUT ports are the control variables (external room
+// temperature is the key one); OUTPUT ports are the live readouts; the bound
+// device id (baked into NAME_CHANNEL) rides in the "device" param, profile +
+// target VPD are inspector params. faceplate + readout:{climate} routes the live
+// output values through paintReadout onto the faceplate rows.
+function climateLoopDef(name){
+  const dev=NAME_CHANNEL[name]||'';
+  const inp=[
+    {id:'room_temp',label:'Room temp (sensor)',kind:'float'},
+    {id:'room_hum',label:'Humidity',kind:'float',optional:true},
+    {id:'target',label:'Target',kind:'float',optional:true},
+    {id:'enable',label:'Enable',kind:'bool',optional:true},
+    {id:'light_on',label:'Light on (FF)',kind:'bool',optional:true},
+    {id:'light_in_s',label:'Sec to light (FF)',kind:'float',optional:true},
+  ];
+  const outp=[
+    {id:'status',label:'Gear',kind:'text'},
+    {id:'deviation',label:'Deviation',kind:'float',unit:'°C'},
+    {id:'tendency',label:'Tendency',kind:'float',unit:'°C/min'},
+    {id:'dewpoint',label:'Dewpoint',kind:'float',unit:'°C'},
+    {id:'vpd',label:'VPD',kind:'float',unit:'kPa'},
+    {id:'cool_rate',label:'Cool rate',kind:'float',unit:'°C/min'},
+    {id:'alarm',label:'Alarm',kind:'text'},
+  ];
+  return {cat:'climate',icon:NAME_ICON[name]||'snowflake',title:name,type:'midea.control_loop',implemented:true,live:false,faceplate:true,
+    readout:{climate:true},
+    props:[
+      {k:'Device',v:dev,param:'device',inspectorOnly:true},
+      {k:'Profile',v:'komfort',param:'profile',kind:'enum',opts:[{v:'komfort',l:'Comfort'},{v:'kultivierung',l:'Cultivation (VPD)'},{v:'buero',l:'Office'},{v:'heizen',l:'Heating'}]},
+      {k:'Target VPD (kPa)',v:'0',param:'target_hum',kind:'number'},
+    ],
+    ports:{in:inp,out:outp}};
+}
+// climateFaceplateHTML renders the control_loop faceplate: the wired control
+// inputs (sockets left) then the live readout rows (paintReadout writes each
+// value into data-roval by the output port name). Reuses the readout classes.
+function climateFaceplateHTML(n){
+  const inrows=(n.ports.in||[]).map(p=>`<div class="ro-row ro-ctl">
+      <div class="port io-in ro-pi" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' input')}"><span class="socket${kindClass(p.kind)}"></span></div>
+      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span></div>
+    </div>`).join('');
+  const outrows=(n.ports.out||[]).map(p=>{
+    const unit=p.unit?`<span class="ro-unit">${esc(p.unit)}</span>`:'';
+    return `<div class="ro-row" data-ro="${escAttr(p.id)}">
+      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span><span class="ro-metric"><span class="ro-val" data-roval>—</span>${unit}</span></div>
+      <div class="port io-out ro-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' readout')}"><span class="socket${kindClass(p.kind)}"></span></div>
+    </div>`;
+  }).join('');
+  return `<div class="sh-head ro-head">
+      <div class="sh-badge"><i data-lucide="${escAttr(n.icon||'snowflake')}"></i></div>
+      <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">control loop</div></div>
+      <div class="sh-meta"><div class="sh-online ro-online" data-roonline title="Loop status"></div></div>
+    </div>
+    <div class="sh-rows ro-rows">${inrows}${outrows}</div>`;
 }
 function constantDef(name,t){
   const seed=t.slice('input.constant.'.length); // bool | float | text

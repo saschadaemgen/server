@@ -46,6 +46,7 @@ import (
 	"carvilon.local/server/internal/httpserver"
 	"carvilon.local/server/internal/logbuf"
 	"carvilon.local/server/internal/mdns"
+	"carvilon.local/server/internal/mideaengine"
 	"carvilon.local/server/internal/mideamonitor"
 	"carvilon.local/server/internal/mideastore"
 	"carvilon.local/server/internal/mqttbroker"
@@ -317,6 +318,12 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// adopted device survives a server restart.
 	mideaStore := mideastore.New(database.DB, secretsSvc)
 	mideaMonitor := mideamonitor.New(mideaStore, log)
+	// Midea Climate Controller (Etappe 2): register the control_loop editor node
+	// in the engine default registry so the designer catalog can offer it, and
+	// install the device seam so a running loop reads the device fühler + drives
+	// it through the monitor's shared connection.
+	mideaengine.Register()
+	mideaengine.SetDevice(mideaMonitor)
 	shellyPassword, _ := platformCfg.GetSecret(ctx, platformconfig.KeyShellyPassword)
 	shellyActive, err := shellyStore.ListActive(ctx)
 	if err != nil {

@@ -50,10 +50,10 @@ func TestControllerEinpendeln(t *testing.T) {
 	for i := 0; i < 400; i++ { // 200 Minuten
 		now = now.Add(dt)
 		in := Inputs{
-			Now: now, RoomTemp: room.temp, Target: 25.0, Enable: true,
+			Now: now, DtMin: dtMin, RoomTemp: room.temp, Target: 25.0, Enable: true,
 			DeviceTemp: room.device, HasDevice: true, SensorValid: true,
 		}
-		out, _ := c.Tick(in, dtMin)
+		out, _ := c.Tick(in)
 		if out.Send {
 			last = out
 		}
@@ -96,7 +96,7 @@ func TestSymmetrischesHalten(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			now = now.Add(30 * time.Second)
 			o, _ := c.Tick(Inputs{Now: now, RoomTemp: ref, Target: target, Enable: true,
-				DeviceTemp: ref, HasDevice: true, SensorValid: true}, 0.5)
+				DeviceTemp: ref, HasDevice: true, SensorValid: true, DtMin: 0.5})
 			if o.Send {
 				out = o
 			}
@@ -119,7 +119,7 @@ func TestSollBoden(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		now = now.Add(30 * time.Second)
 		out, _ := c.Tick(Inputs{Now: now, RoomTemp: 25.9, Target: 25.0, Enable: true,
-			DeviceTemp: 22.0, HasDevice: true, SensorValid: true}, 0.5)
+			DeviceTemp: 22.0, HasDevice: true, SensorValid: true, DtMin: 0.5})
 		if out.Send && out.Mode == ModeCool && out.Setpoint < 25.0-p.SollBoden {
 			t.Errorf("Sollwert-Boden verletzt: %.1f < %.1f", out.Setpoint, 25.0-p.SollBoden)
 		}
@@ -156,7 +156,7 @@ func TestSensorFallback(t *testing.T) {
 	for i := 0; i < 14; i++ {
 		now = now.Add(30 * time.Second)
 		got, _ = c.Tick(Inputs{Now: now, Target: 25.0, Enable: true,
-			HasDevice: true, DeviceTemp: 26, SensorValid: false}, 0.5)
+			HasDevice: true, DeviceTemp: 26, SensorValid: false, DtMin: 0.5})
 	}
 	if !c.failsafe {
 		t.Error("Failsafe nach Karenz nicht aktiv")
@@ -176,7 +176,7 @@ func TestHeizmodus(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		now = now.Add(30 * time.Second)
 		o, _ := c.Tick(Inputs{Now: now, RoomTemp: 19.0, Target: 22.0, Enable: true,
-			DeviceTemp: 19.0, HasDevice: true, SensorValid: true}, 0.5)
+			DeviceTemp: 19.0, HasDevice: true, SensorValid: true, DtMin: 0.5})
 		if o.Send {
 			out = o
 		}
@@ -203,7 +203,7 @@ func TestVpdDryOverride(t *testing.T) {
 		now = now.Add(30 * time.Second)
 		// 25 C, 80 % rF -> VPD ~0.63 kPa, deutlich unter Ziel 1.2
 		o, _ := c.Tick(Inputs{Now: now, RoomTemp: 25.0, RoomHum: 80, HasHum: true,
-			Target: 25.0, Enable: true, DeviceTemp: 25.0, HasDevice: true, SensorValid: true}, 0.5)
+			Target: 25.0, Enable: true, DeviceTemp: 25.0, HasDevice: true, SensorValid: true, DtMin: 0.5})
 		if o.Send {
 			out = o
 		}

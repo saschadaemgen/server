@@ -14,6 +14,7 @@ import (
 
 	"carvilon.local/server/internal/engine"
 	"carvilon.local/server/internal/gpio"
+	"carvilon.local/server/internal/mideaengine"
 	"carvilon.local/server/internal/mqttbroker"
 	"carvilon.local/server/internal/mqttdriver"
 	"carvilon.local/server/internal/sysmetrics"
@@ -454,12 +455,40 @@ func (s *Server) telegramConn() (telegrambot.Conn, bool) {
 // input.manual/output.lamp) binds nothing and runs as before. A channel
 // whose prefix has no driver here is rejected loudly by BindGraph.
 func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
+	// Control_loop (E2): mark every device a control_loop node drives as under
+	// automatic control for the run's lifetime (locks the cockpit + the device
+	// block's manual sink - single-driver exclusivity). Independent of the
+	// binding table: the loop drives via the monitor seam, not a sink channel,
+	// so this must run even when the graph has no bound channels at all.
+	var autoDevs []string
+	if s.mideaMon != nil {
+		seen := map[string]bool{}
+		for _, n := range g.Nodes {
+			if n.Type != mideaengine.TypeControlLoop {
+				continue
+			}
+			if dev, _ := n.Params[mideaengine.ParamDevice].(string); dev != "" && !seen[dev] {
+				seen[dev] = true
+				autoDevs = append(autoDevs, dev)
+			}
+		}
+		for _, dev := range autoDevs {
+			s.mideaMon.SetAutomatic(dev, true)
+		}
+	}
+	clearAuto := func() {
+		for _, dev := range autoDevs {
+			s.mideaMon.SetAutomatic(dev, false)
+		}
+	}
+
 	table, err := buildBindingTable(g)
 	if err != nil {
+		clearAuto()
 		return nil, err
 	}
 	if len(table) == 0 {
-		return func() {}, nil
+		return clearAuto, nil // no channels, but the automatic lock still needs clearing on stop
 	}
 	configs := buildChannelConfigs(g)
 	prefixes := map[string]bool{}
@@ -470,6 +499,7 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 	reg := engine.NewDriverRegistry()
 	var closers []io.Closer
 	cleanup := func() {
+		clearAuto()
 		for _, c := range closers {
 			_ = c.Close()
 		}
@@ -478,6 +508,7 @@ func (s *Server) bindRunIO(eng *engine.Engine, g engine.Graph) (func(), error) {
 	if prefixes[engine.PrefixGPIO] && gpio.Enabled() {
 		drv, err := gpio.NewDriver()
 		if err != nil {
+			cleanup() // release the control_loop automatic lock (+ any opened I/O)
 			return nil, fmt.Errorf("gpio driver: %w", err)
 		}
 		reg.RegisterSource(engine.PrefixGPIO, drv)
