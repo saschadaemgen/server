@@ -336,7 +336,10 @@ export function markRequiredPorts(nodeId){
       const w=nd.el.querySelector(`[data-clctl="${cssAttr(p.id)}"]`);
       if(w){
         w.classList.toggle('cl-locked',wired);
-        if(w.tagName==='INPUT')w.disabled=wired;
+        // The rocker is a container, so reach its buttons: the CSS lock stops
+        // the mouse, disabled also stops the keyboard.
+        if(w.disabled!==undefined)w.disabled=wired;
+        w.querySelectorAll('button').forEach(b=>{b.disabled=wired;});
         const row=w.closest('.ro-row'); if(row)row.classList.toggle('cl-wired',wired);
       }
     }
@@ -590,15 +593,32 @@ function readoutFaceplateHTML(n){
 const CLIMATE_PTIP={
   room_temp:'Measured room temperature — wire your external room sensor here. This is the value the loop controls. The device\'s own built-in sensor is read automatically and needs no wire.',
   room_hum:'Measured room humidity in % — optional. Needed for the dew point and VPD readouts.',
-  target:'The temperature you WANT, in °C — not a sensor. Leave unwired and set it in the field on this block; wire it only if the graph should own it (then the wire wins).',
-  enable:'Runs the loop. Leave unwired and use the switch on this block; wire it only if the graph should own it (then the wire wins). Off does not just stop controlling — it switches the device OFF.',
+  target:'The temperature you WANT, in °C — not a sensor. Leave unwired and dial it in with the up/down rocker on this block (17–30 °C, half-degree steps); wire it only if the graph should own it (then the wire wins).',
+  enable:'Runs the loop. Leave unwired and use the ON/OFF switch on this block; wire it only if the graph should own it (then the wire wins). Off does not just stop controlling — it switches the device OFF.',
   light_on:'Grow light on/off, fed forward into the decision. Only used by the Cultivation (VPD) profile.',
   light_in_s:'Seconds until the grow light switches, fed forward into the decision. Only used by the Cultivation (VPD) profile.',
 };
-// CLIMATE_TARGET_MIN/MAX bound the on-block target field. The node clamps to the
-// same range server-side (mideaengine: minTarget/maxTarget) — this is only the
-// convenience half of the guard.
-const CLIMATE_TARGET_MIN=5, CLIMATE_TARGET_MAX=35;
+// The on-block thermostat rocker's range + step: the device's own setpoint
+// window, which the node clamps to server-side as well (mideaengine:
+// minTarget/maxTarget) — this is only the convenience half of the guard.
+const CLIMATE_TARGET_MIN=17, CLIMATE_TARGET_MAX=30, CLIMATE_TARGET_STEP=0.5;
+// climateClampTarget snaps a target into the device's range on the step grid.
+function climateClampTarget(v){
+  const n=Math.round(Number(v)/CLIMATE_TARGET_STEP)*CLIMATE_TARGET_STEP;
+  if(!Number.isFinite(n))return 25;
+  return Math.min(CLIMATE_TARGET_MAX,Math.max(CLIMATE_TARGET_MIN,n));
+}
+// climateFmtTarget shows the half-degree without trailing noise: 21.5 / 22.
+export function climateFmtTarget(v){
+  const n=Number(v);
+  return Number.isInteger(n)?String(n):n.toFixed(1);
+}
+// climateStepTarget moves the target one rocker press up (+1) or down (-1),
+// stopping at the ends of the device's range. Returns the value unchanged when
+// there is nowhere left to go, so the caller can skip a pointless send.
+export function climateStepTarget(cur,dir){
+  return climateClampTarget(Number(cur)+dir*CLIMATE_TARGET_STEP);
+}
 function climateLoopDef(name){
   const dev=NAME_CHANNEL[name]||'';
   // optional:false on room_temp is load-bearing: markRequiredPorts tests
@@ -666,6 +686,12 @@ function upgradeClimateDef(n){
     if(fp.param==='device'&&sp.v==='')continue;
     fp.v=sp.v;
   }
+  // Normalise a stored target into the device's range on the step grid: an
+  // earlier build let the target be set outside it, and the node falls back to
+  // its default for such a value — the rocker would then show one number while
+  // the loop regulated to another.
+  const tp=fresh.props.find(p=>p.param==='target_temp');
+  if(tp)tp.v=climateClampTarget(tp.v);
   n.ports=fresh.ports;n.props=fresh.props;n.cat=fresh.cat;n.icon=fresh.icon;
   n.readout=fresh.readout;n.faceplate=true;
   n.help=fresh.help||n.help||'';
@@ -688,16 +714,32 @@ function climateFaceplateHTML(n){
   // the ambiguity this block is being fixed for.
   const live=`<span class="ro-val cl-live" data-roctlval>—</span>`;
   const widget=(p)=>{
+    // The target is a thermostat: a set value with an up/down rocker. It only
+    // SETS — the measuring is the external sensor's job on the port above.
     if(p.id==='target'){
-      const v=climatePropVal(n,'target_temp',25);
-      return live+`<input type="number" class="cl-num" data-clctl="target" data-noselectdrag
-        step="0.5" min="${CLIMATE_TARGET_MIN}" max="${CLIMATE_TARGET_MAX}" value="${escAttr(v)}"
-        title="Target temperature — the value you want"><span class="ro-unit">°C</span>`;
+      const v=climateClampTarget(climatePropVal(n,'target_temp',25));
+      // The wired row swaps the whole dial for the live value, so it carries its
+      // OWN °C (cl-live): the readout formatter emits a bare number, and a
+      // wired target would otherwise read "21.5" with no unit.
+      return live+`<span class="ro-unit cl-live">°C</span>
+      <span class="cl-dial" data-clctl="target" data-noselectdrag title="Target temperature — the value you want the room to reach">
+        <span class="cl-dial-val" data-cldialval>${esc(climateFmtTarget(v))}</span><span class="ro-unit">°C</span>
+        <span class="cl-rock">
+          <button type="button" class="cl-step" data-clstep="1" title="Warmer (+${CLIMATE_TARGET_STEP} °C)" aria-label="Increase target temperature"><i data-lucide="chevron-up"></i></button>
+          <button type="button" class="cl-step" data-clstep="-1" title="Cooler (−${CLIMATE_TARGET_STEP} °C)" aria-label="Decrease target temperature"><i data-lucide="chevron-down"></i></button>
+        </span>
+      </span>`;
     }
+    // The enable control says which state it is IN, in words — a switch whose
+    // only cue is its own position is exactly how a running loop came to look
+    // like a stopped one.
     if(p.id==='enable'){
       const on=climatePropVal(n,'enabled',true)===true;
-      return live+`<button type="button" class="sh-sw cl-sw${on?' on':''}" data-clctl="enable" data-noselectdrag
-        title="Switch the loop on/off"><span class="sh-track"><span class="sh-thumb"></span></span></button>`;
+      return live+`<span class="cl-en">
+        <span class="cl-en-state${on?' on':''}" data-clenstate>${on?'ON':'OFF'}</span>
+        <button type="button" class="sh-sw cl-sw${on?' on':''}" data-clctl="enable" data-noselectdrag
+          title="Switch the control loop on/off"><span class="sh-track"><span class="sh-thumb"></span></span></button>
+      </span>`;
     }
     return live;
   };

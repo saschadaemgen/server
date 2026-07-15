@@ -75,9 +75,9 @@ const mideaControlLoopHelp = "Climate control loop. Compares the room temperatur
 	"sensor with the target temperature and drives this device's setpoint, mode and fan whenever the " +
 	"decision actually changes. It reads the device's built-in return-air sensor by itself — that needs " +
 	"no wire.\n\n" +
-	"Minimal setup: wire an external room sensor into \"Room temperature\", set the target in the field on " +
-	"the block, and switch Enable on. No constant blocks needed. Enable off does not merely stop the loop — " +
-	"it switches the device off.\n\n" +
+	"Minimal setup: wire an external room sensor into \"Room temperature\", dial the target in with the " +
+	"up/down rocker on the block (17–30 °C, half-degree steps), and switch Enable to ON. No constant blocks " +
+	"needed. Enable off does not merely stop the loop — it switches the device off.\n\n" +
 	"Wire \"Target temperature\" or \"Enable\" only if the graph should own them: a wired port always wins " +
 	"and the matching control on the block goes inert. The ports on the right are read-only readouts.\n\n" +
 	"Advanced profile only — switching the device back to Standard stops the drive (the readouts keep " +

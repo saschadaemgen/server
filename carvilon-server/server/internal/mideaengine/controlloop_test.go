@@ -143,11 +143,22 @@ func TestManualTargetAndEnable(t *testing.T) {
 		t.Errorf("deviation with manual target 20 = %v, want 6 (target ignored)", got)
 	}
 
-	// A target outside the sane range is refused; the loop keeps its default.
-	p = baseParams()
-	p[ParamTargetTemp] = engine.FloatVal(500)
-	if got := deviationAfterTick(t, 26, p, nil); got != 1 {
-		t.Errorf("deviation with out-of-range target = %v, want 1 (fell back to %v)", got, defaultTarget)
+	// A target outside the device's range is refused; the loop keeps its
+	// default. Both ends, since the rocker cannot produce either.
+	for _, bad := range []float64{500, minTarget - 0.5, maxTarget + 0.5, 0} {
+		p = baseParams()
+		p[ParamTargetTemp] = engine.FloatVal(bad)
+		if got := deviationAfterTick(t, 26, p, nil); got != 1 {
+			t.Errorf("deviation with out-of-range target %v = %v, want 1 (fall back to %v)", bad, got, defaultTarget)
+		}
+	}
+	// The ends of the range themselves are legitimate.
+	for _, ok := range []float64{minTarget, maxTarget} {
+		p = baseParams()
+		p[ParamTargetTemp] = engine.FloatVal(ok)
+		if got := deviationAfterTick(t, 26, p, nil); got != 26-ok {
+			t.Errorf("deviation with target %v = %v, want %v (range ends must be usable)", ok, got, 26-ok)
+		}
 	}
 
 	// The enable switch off means "stop conditioning this room": the loop sends
@@ -208,15 +219,17 @@ func TestSetExternalLive(t *testing.T) {
 	// SetInput panics for a node the engine does not recognise as an external
 	// setter; the handler's recover turns that into an HTTP 400 that the editor
 	// silently swallows, so assert it does NOT panic here.
-	e.SetInput("loop", inTarget, engine.FloatVal(21))
-	if cl.manTarget != 21 {
-		t.Errorf("manTarget after a live target set = %v, want 21", cl.manTarget)
+	e.SetInput("loop", inTarget, engine.FloatVal(21.5))
+	if cl.manTarget != 21.5 {
+		t.Errorf("manTarget after a live target set = %v, want 21.5", cl.manTarget)
 	}
-	// Out-of-range values are refused server-side, so a stale or hand-made
-	// request cannot command a nonsense setpoint.
-	e.SetInput("loop", inTarget, engine.FloatVal(999))
-	if cl.manTarget != 21 {
-		t.Errorf("manTarget after an out-of-range set = %v, want 21 (unchanged)", cl.manTarget)
+	// Values outside the device's range are refused server-side, so a stale or
+	// hand-made request cannot command it somewhere it cannot go.
+	for _, bad := range []float64{999, minTarget - 0.5, maxTarget + 0.5} {
+		e.SetInput("loop", inTarget, engine.FloatVal(bad))
+		if cl.manTarget != 21.5 {
+			t.Errorf("manTarget after an out-of-range set (%v) = %v, want 21.5 (unchanged)", bad, cl.manTarget)
+		}
 	}
 	e.SetInput("loop", inEnable, engine.BoolVal(false))
 	if cl.manEnable {

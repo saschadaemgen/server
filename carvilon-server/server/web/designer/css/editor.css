@@ -381,11 +381,25 @@ select.si-i{cursor:pointer}
 .ro-row + .cl-grp{margin-top:11px}
 .cl-grp + .ro-row{border-top:0}
 .cl-w{flex:none;display:flex;align-items:center;gap:4px}
-/* the on-block target field: used while the target port is unwired */
-.cl-num{width:58px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,.05);
-  color:#eef4fb;font:800 13px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums}
-.cl-num:focus{outline:none;border-color:var(--cyan-bright)}
-.cl-num:disabled{opacity:.4;cursor:not-allowed}
+/* The on-block target: a thermostat — the set value with an up/down rocker,
+   used while the target port is unwired. A setter only; the measuring belongs
+   to the external sensor on the port above. */
+.cl-dial{flex:none;display:flex;align-items:center;gap:5px;padding:2px 3px 2px 8px;border-radius:8px;
+  border:1px solid var(--border);background:rgba(255,255,255,.05)}
+.cl-dial-val{font:800 15px/1 var(--mono);color:#eef4fb;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.cl-rock{display:flex;flex-direction:column;gap:1px}
+.cl-step{display:flex;align-items:center;justify-content:center;width:20px;height:13px;padding:0;
+  border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,.06);color:var(--muted);cursor:pointer;transition:.12s}
+.cl-step:hover:not(:disabled){background:rgba(255,255,255,.14);color:#eef4fb;border-color:var(--border-bright)}
+.cl-step:active:not(:disabled){transform:translateY(.5px)}
+.cl-step:disabled{opacity:.4;cursor:not-allowed}
+/* lucide REPLACES the <i> with a 24px <svg>, so the icon must be sized on the
+   svg — an `i` rule here is dead and the chevron overflows the button. */
+.cl-step svg{width:10px;height:10px}
+/* the enable control states which state it is in, in words */
+.cl-en{flex:none;display:flex;align-items:center;gap:7px}
+.cl-en-state{font:800 9px/1 var(--mono);letter-spacing:.1em;color:var(--muted);min-width:22px;text-align:right}
+.cl-en-state.on{color:#43E08A}
 .cl-sw{flex:none}
 /* The switch's ON look. The Shelly rules are .sh-row.on-scoped and this button
    lives in a .ro-row, so without these it would render OFF in every state —
@@ -399,13 +413,13 @@ select.si-i{cursor:pointer}
    place — never a stale manual number sitting next to a live wire. */
 .cl-live{display:none}
 .ro-row.cl-wired .cl-live{display:inline-block}
-.ro-row.cl-wired .cl-num,.ro-row.cl-wired .cl-sw{display:none}
+.ro-row.cl-wired .cl-dial,.ro-row.cl-wired .cl-en{display:none}
 /* the block's help affordance — .port[data-tip] is port-scoped, so a
    non-port tooltip needs its own rule; the text is a paragraph, not a label. */
 .cl-help{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;margin-right:6px;
   border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:help;position:relative;transition:.15s}
 .cl-help:hover{color:var(--cyan-bright);background:rgba(255,255,255,.06)}
-.cl-help i{width:14px;height:14px}
+.cl-help svg{width:14px;height:14px}
 .cl-help[data-tip]::after{content:attr(data-tip);position:absolute;top:130%;right:0;z-index:8;
   font:500 10px/1.45 var(--font);letter-spacing:0;color:#dbe7f2;background:rgba(8,12,16,.98);border:1px solid var(--border);
   padding:9px 11px;border-radius:7px;white-space:pre-line;width:280px;text-align:left;opacity:0;pointer-events:none;transition:.15s}

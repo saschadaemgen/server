@@ -51,12 +51,15 @@ const (
 	// defaultTarget matches the module manifest's target default (used when the
 	// target input is left unwired and the block carries no target of its own).
 	defaultTarget = 25.0
-	// minTarget / maxTarget bound the manual target. The faceplate field clamps
-	// to the same range; this is the server-side guard, so a bogus value from a
-	// stale or hand-made request cannot command the device to an absurd
-	// setpoint. A wired target port is the graph's business and is not clamped.
-	minTarget = 5.0
-	maxTarget = 35.0
+	// minTarget / maxTarget bound the manual target: the device's own setpoint
+	// range, the same window the controller clamps its output to
+	// (mideaclimate.Tick -> clamp(setp, 17, 30)). The faceplate's thermostat
+	// rocker steps within exactly this range; this is the server-side guard, so
+	// a bogus value from a stale or hand-made request cannot command the device
+	// somewhere it cannot go. A wired target port is the graph's business and is
+	// not clamped here.
+	minTarget = 17.0
+	maxTarget = 30.0
 )
 
 // Device is the seam the node uses to reach the bound Midea device. Implemented

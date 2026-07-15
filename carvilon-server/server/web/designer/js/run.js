@@ -7,6 +7,7 @@
 // closes the stream and returns the editor to its idle state.
 
 import { GRAPH, nodes, wires, world, markDirty } from './store.js';
+import { climateStepTarget, climateFmtTarget } from './nodes.js';
 import { findWireTo } from './wires.js';
 import { firePulse, setNodeOn } from './sim.js';
 import { engineLine, focusEngine } from './dock.js';
@@ -519,21 +520,28 @@ function climateCtl(ev,sel){
   return {w,nodeId,def};
 }
 function climateProp(def,param){ return (def.props||[]).find(p=>p.param===param); }
-if(world) world.addEventListener('change', ev=>{
+// The thermostat rocker: each press steps the target half a degree within the
+// device's range, updates the display, persists it, and (while running) sends
+// it live.
+if(world) world.addEventListener('click', ev=>{
+  const step=ev.target.closest('[data-clstep]'); if(!step) return;
   const c=climateCtl(ev,'target'); if(!c) return;
   const p=climateProp(c.def,'target_temp'); if(!p) return;
-  const num=Number(c.w.value);
-  // An empty or out-of-range field reverts to the stored value rather than
-  // commanding a nonsense setpoint.
-  if(!Number.isFinite(num)||num<Number(c.w.min)||num>Number(c.w.max)){ c.w.value=p.v; return; }
-  p.v=num; markDirty();
-  sendInput(c.nodeId,'target',num,'float');
+  const next=climateStepTarget(p.v, Number(step.dataset.clstep));
+  if(next===p.v) return;                       // already at the end of the range
+  p.v=next; markDirty();
+  const disp=c.w.querySelector('[data-cldialval]'); if(disp) disp.textContent=climateFmtTarget(next);
+  sendInput(c.nodeId,'target',next,'float');
 });
 if(world) world.addEventListener('click', ev=>{
   const c=climateCtl(ev,'enable'); if(!c) return;
   const p=climateProp(c.def,'enabled'); if(!p) return;
   const on=!(p.v===true);
   p.v=on; c.w.classList.toggle('on',on); markDirty();
+  // The word, not just the switch position, is what tells the user whether the
+  // loop is running.
+  const st=c.w.closest('.cl-en'); const lbl=st&&st.querySelector('[data-clenstate]');
+  if(lbl){ lbl.textContent=on?'ON':'OFF'; lbl.classList.toggle('on',on); }
   sendInput(c.nodeId,'enable',on,'bool');
 });
 // The faceplate's clickable relay switch drives the real device over MQTT
