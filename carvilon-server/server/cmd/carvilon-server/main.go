@@ -311,13 +311,38 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	if err := shellyStore.ResetStaleProvisioning(ctx); err != nil {
 		log.Warn("shelly: reset stale provisioning state failed", "err", err)
 	}
+	// Sensor History H1 - the STORED path. The recorder taps each vendor's
+	// reading stream and averages readings into interval buckets in SQLite
+	// (migration 041), pruning each sensor's retention. It is strictly
+	// decoupled from the LIVE path: Record is a non-blocking hand-off, so
+	// recording never delays the real-time output the editor block + cockpit
+	// + climate loop consume. Constructed here, ahead of the monitors that
+	// tap it (Midea below, Protect further down).
+	sensorHistStore := sensorhistory.New(database.DB)
+	sensorHistCfg := sensorhistory.NewConfigStore(database.DB)
+	if err := sensorHistCfg.Load(ctx); err != nil {
+		log.Warn("sensor history: recording config load failed (using defaults)", "err", err)
+	}
+	sensorHistRec := sensorhistory.NewRecorder(sensorhistory.RecorderConfig{
+		Store:  sensorHistStore,
+		Config: sensorHistCfg,
+		Log:    log,
+	})
+	go sensorHistRec.Run(ctx)
+
 	// Midea Climate Controller (Etappe 1): the persistent device set +
 	// AES-256-GCM credentials (migration 042) and the monitor that keeps
 	// adopted devices connected + polled and proxies standard-profile control.
 	// The monitor re-provisions the persisted active set on startup, so an
 	// adopted device survives a server restart.
+	//
+	// Sensor History H2: the climate controller's own fühler (return air +
+	// outdoor) are readings like any other, so the monitor feeds the same
+	// recorder Protect does. That makes the history path capability-driven
+	// rather than UniFi-only - a second family, charted through the same
+	// query API and the same chart component.
 	mideaStore := mideastore.New(database.DB, secretsSvc)
-	mideaMonitor := mideamonitor.New(mideaStore, log)
+	mideaMonitor := mideamonitor.New(mideaStore, log, mideamonitor.WithOnReading(sensorHistRec.Record))
 	// Midea Climate Controller (Etappe 2): register the control_loop editor node
 	// in the engine default registry so the designer catalog can offer it, and
 	// install the device seam so a running loop reads the device fühler + drives
@@ -494,24 +519,6 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 	// client from platform_config each cycle (see protectSensorSource), so a
 	// credential change or a disable takes effect without a restart and it
 	// never races the server's hot-swapped protect client. Stops on ctx.
-	// Sensor History H1 - the STORED path. The recorder taps the reading
-	// stream (protectMonitor.OnReading below) and averages readings into
-	// interval buckets in SQLite (migration 041), pruning each sensor's
-	// retention. It is strictly decoupled from the LIVE path: Record is a
-	// non-blocking hand-off, so recording never delays the real-time output
-	// the editor block + cockpit + climate loop consume.
-	sensorHistStore := sensorhistory.New(database.DB)
-	sensorHistCfg := sensorhistory.NewConfigStore(database.DB)
-	if err := sensorHistCfg.Load(ctx); err != nil {
-		log.Warn("sensor history: recording config load failed (using defaults)", "err", err)
-	}
-	sensorHistRec := sensorhistory.NewRecorder(sensorhistory.RecorderConfig{
-		Store:  sensorHistStore,
-		Config: sensorHistCfg,
-		Log:    log,
-	})
-	go sensorHistRec.Run(ctx)
-
 	protectMonitor := protectmonitor.New(protectmonitor.Config{
 		Source:    protectSensorSource(platformCfg),
 		Log:       log,

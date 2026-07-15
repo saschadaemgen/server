@@ -6,6 +6,12 @@
 <title>CARVILON · Logik-Editor</title>
 <link href="./vendor/fonts.css" rel="stylesheet" />
 <link href="./css/editor.css" rel="stylesheet" />
+<!-- Sensor history charts (H2). Absolute /static/ paths, not the ./ the rest
+     of the editor uses: this is the ONE chart component the devices cockpit
+     mounts too, and it lives in the shared design-library rather than being
+     implemented a second time here. Same origin, so the admin session applies
+     to its fetches. -->
+<link href="/static/sensor-chart.css" rel="stylesheet" />
 </head>
 <body class="signals-on">
 <canvas id="bg"></canvas>
@@ -121,6 +127,10 @@
 
 <div class="hint"><b>Drag nodes</b> · Shift-click to multi-select · Shift-drag to box-select <kbd>Scroll</kbd> Zoom</div>
 <script src="./vendor/lucide.min.js"></script>
+<!-- Classic script, like lucide above: it exposes window.CarvilonSensorChart,
+     so it is usable both here and from the cockpit's classic page script.
+     Must load before main.js, whose inspector mounts it. -->
+<script src="/static/sensor-chart.js"></script>
 <script type="module" src="./js/main.js"></script>
 </body>
 </html>

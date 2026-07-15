@@ -157,3 +157,75 @@ func TestNilSafety(t *testing.T) {
 		t.Errorf("empty Snapshot = %v, want empty", got)
 	}
 }
+
+// The climate controller's own fühler feed the sensor-history recorder, which
+// is what makes the stored-history path capability-driven rather than
+// UniFi-only. The tap must fire only for PRESENT readings, must never run with
+// the monitor lock held (the recorder is free to be slow), and must be a no-op
+// when no tap is installed.
+func TestEmitReadings_TapsPresentReadoutsOnly(t *testing.T) {
+	type got struct {
+		id, metric string
+		value      float64
+	}
+	var mu sync.Mutex
+	var seen []got
+	var m *Monitor
+	m = New(&fakeStore{}, nil, WithOnReading(func(id, metric string, v float64, at time.Time) {
+		// Re-enter the monitor from inside the callback: if emitReadings held
+		// the lock while calling out, this would deadlock the test.
+		_ = m.Snapshot()
+		mu.Lock()
+		seen = append(seen, got{id, metric, v})
+		mu.Unlock()
+	}))
+
+	// Both readouts present.
+	m.devs["dev-a"] = &devState{
+		id:         "dev-a",
+		hasState:   true,
+		last:       mideaclimate.State{DeviceTempC: 21.5, HasTemp: true, OutdoorC: 8.25, HasOutdoor: true},
+		lastPollMS: 1700000000000,
+	}
+	m.emitReadings("dev-a")
+
+	mu.Lock()
+	n := len(seen)
+	mu.Unlock()
+	if n != 2 {
+		t.Fatalf("present readouts emitted %d readings, want 2: %+v", n, seen)
+	}
+	if seen[0].metric != chDeviceTemp || seen[0].value != 21.5 || seen[0].id != "dev-a" {
+		t.Errorf("first reading = %+v, want dev-a %s 21.5", seen[0], chDeviceTemp)
+	}
+	if seen[1].metric != chOutdoor || seen[1].value != 8.25 {
+		t.Errorf("second reading = %+v, want %s 8.25", seen[1], chOutdoor)
+	}
+
+	// An ABSENT outdoor sensor must not be recorded as a value.
+	seen = nil
+	m.devs["dev-b"] = &devState{
+		id: "dev-b", hasState: true,
+		last:       mideaclimate.State{DeviceTempC: 19, HasTemp: true},
+		lastPollMS: 1700000000000,
+	}
+	m.emitReadings("dev-b")
+	if len(seen) != 1 || seen[0].metric != chDeviceTemp {
+		t.Errorf("absent outdoor should emit nothing: %+v", seen)
+	}
+
+	// A device that has never polled has nothing to record.
+	seen = nil
+	m.devs["dev-c"] = &devState{id: "dev-c"}
+	m.emitReadings("dev-c")
+	m.emitReadings("missing")
+	if len(seen) != 0 {
+		t.Errorf("no state should emit nothing: %+v", seen)
+	}
+}
+
+func TestEmitReadings_NoTapIsNoop(t *testing.T) {
+	m := New(&fakeStore{}, nil)
+	m.devs["d"] = &devState{id: "d", hasState: true, last: mideaclimate.State{DeviceTempC: 20, HasTemp: true}}
+	m.emitReadings("d") // must not panic on a nil onReading
+}

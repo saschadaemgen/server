@@ -2,6 +2,7 @@
 
 {{define "head-extra"}}
 {{template "dc-styles"}}
+<link rel="stylesheet" href="{{asset "/static/sensor-chart.css"}}">
 <style>
   /* Device Center columns: No. | Name | Type | Status | Model | IP |
      Firmware | MAC. The shared shell (dc-styles) reads --dc-grid; the
@@ -555,6 +556,7 @@
 
 {{define "scripts"}}
 {{template "dc-core-js"}}
+<script src="{{asset "/static/sensor-chart.js"}}"></script>
 <script>
   // Device Center - read-only. The shared shell (dc-core-js) drives
   // search + faceted filtering + column sort + the slide-out panel;
@@ -567,6 +569,11 @@
   (function () {
     function fillRight(row, rightCol) {
       var kind = row.getAttribute('data-kind');
+      // Every row switch lands here, but onClose only fires when the panel
+      // actually closes - so a sensor -> camera switch would leave the old
+      // chart's fetches and ResizeObserver running against a column that has
+      // just been innerHTML'd away. Tear it down before anything else.
+      destroySensorChart();
       // a local reader gets its pre-rendered controls (its registry
       // data is already complete - nothing to fetch), everything else
       // its lazy UA/Protect sections.
@@ -596,11 +603,18 @@
         cockpit.mountSettingsSkeleton(row, rightCol);
         return;
       }
-      // Sensor cockpit: the recording-settings form (pre-rendered, prefilled)
-      // on top, then the lazily-fetched readings detail in its own sub-block
-      // below (so loadDetail's innerHTML swap never clobbers the form).
+      // Sensor cockpit: the recorded HISTORY charts (H2) on top - the stored
+      // path is what this panel is for - then the recording-settings form that
+      // configures them, then the lazily-fetched readings detail in its own
+      // sub-block (so loadDetail's innerHTML swap never clobbers either).
+      // The chart host is filled in afterSlide: the panel has no width until
+      // it has slid in, and an svg sized against a zero-width column is wrong.
       if (kind === 'sensor') {
         rightCol.innerHTML = '';
+        var shist = document.createElement('div');
+        shist.setAttribute('data-sensor-history', '');
+        shist.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>';
+        rightCol.appendChild(shist);
         var sact = dc.tbody.querySelector('[data-dc-actions="' + row.getAttribute('data-idx') + '"]');
         if (sact && sact.content) rightCol.appendChild(sact.content.cloneNode(true));
         var sdet = document.createElement('div');
@@ -615,13 +629,33 @@
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
     }
 
+    // The mounted history charts of the open panel, so switching rows or
+    // closing the panel aborts their in-flight fetches instead of leaving them
+    // to paint into a detached column.
+    var sensorChart = null;
+    function destroySensorChart() {
+      if (sensorChart) { try { sensorChart.destroy(); } catch (e) {} sensorChart = null; }
+    }
+    function mountSensorChart(row, rightCol) {
+      destroySensorChart();
+      var hostEl = rightCol.querySelector('[data-sensor-history]');
+      if (!hostEl || !window.CarvilonSensorChart) return;
+      // title:'' - the section already has its own dc-sec-head, so the
+      // component contributes only its range switcher and the charts.
+      sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: row.getAttribute('data-id'), title: '' });
+    }
+
     function afterSlide(row, rightCol) {
       var kind = row.getAttribute('data-kind');
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
       if (kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') return;
       if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
-      if (kind === 'sensor') { loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row); return; }
+      if (kind === 'sensor') {
+        mountSensorChart(row, rightCol);
+        loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row);
+        return;
+      }
       loadDetail(kind, row.getAttribute('data-id'), rightCol, row);
     }
 
@@ -635,7 +669,7 @@
       fillRight: fillRight,
       afterSlide: afterSlide,
       fillLeft: function (row, leftCol) { return cockpit.fillLeft(row, leftCol); },
-      onClose: function () { cockpit.teardown(); }
+      onClose: function () { destroySensorChart(); cockpit.teardown(); }
     });
     if (!dc) return;
     var esc = dc.esc;

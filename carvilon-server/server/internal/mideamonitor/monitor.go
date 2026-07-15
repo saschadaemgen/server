@@ -90,6 +90,10 @@ type Monitor struct {
 	// control_loop run driver to a worker, so the engine tick never blocks on
 	// device I/O.
 	applyQueue chan queuedApply
+
+	// onReading taps the poll stream for the STORED history path. Never called
+	// with mu held, and always after the live push - see emitReadings.
+	onReading func(deviceID, metric string, value float64, at time.Time)
 }
 
 type queuedApply struct {
@@ -105,6 +109,15 @@ func WithInterval(d time.Duration) Option { return func(m *Monitor) { m.interval
 
 // WithClock injects a test clock.
 func WithClock(now func() time.Time) Option { return func(m *Monitor) { m.now = now } }
+
+// WithOnReading taps the poll stream for the stored-history path (Sensor
+// History): every present readout of a successful poll, delivered AFTER the
+// live push to the run bindings, so recording can never delay or throttle the
+// live values. The callback must not block - sensorhistory.Recorder.Record
+// drops rather than block, which is exactly the contract this expects.
+func WithOnReading(fn func(deviceID, metric string, value float64, at time.Time)) Option {
+	return func(m *Monitor) { m.onReading = fn }
+}
 
 // New constructs a Monitor.
 func New(store Store, log *slog.Logger, opts ...Option) *Monitor {
@@ -312,6 +325,35 @@ func (m *Monitor) pollOne(ctx context.Context, ds *devState) {
 	m.mu.Unlock()
 	// Feed the fresh readouts to any Logic-Editor run drivers.
 	m.pushReadouts(ds.id)
+	// ...then, and only then, to the history recorder. pushReadouts is the
+	// live path and returns early when no run is bound; recording must happen
+	// either way, so it gets its own emit rather than a hook inside it.
+	m.emitReadings(ds.id)
+}
+
+// emitReadings hands a device's fresh readouts to the history tap - one call
+// per PRESENT metric, mirroring protectmonitor's contract so the recorder sees
+// one uniform reading stream regardless of vendor. The cached state is copied
+// under the lock and the callback runs unlocked, so a slow or re-entrant tap
+// can never stall the poll loop.
+func (m *Monitor) emitReadings(id string) {
+	if m.onReading == nil {
+		return
+	}
+	m.mu.Lock()
+	ds := m.devs[id]
+	if ds == nil || !ds.hasState {
+		m.mu.Unlock()
+		return
+	}
+	st, at := ds.last, time.UnixMilli(ds.lastPollMS)
+	m.mu.Unlock()
+	if st.HasTemp {
+		m.onReading(id, chDeviceTemp, st.DeviceTempC, at)
+	}
+	if st.HasOutdoor {
+		m.onReading(id, chOutdoor, st.OutdoorC, at)
+	}
 }
 
 // Snapshot returns the cached status of every adopted device.

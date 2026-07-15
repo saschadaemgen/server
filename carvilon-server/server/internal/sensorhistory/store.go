@@ -74,13 +74,21 @@ func (s *Store) Query(ctx context.Context, deviceID, metric string, fromMs, toMs
 	}
 	if maxPoints > 0 {
 		var raw int
+		var minTS, maxTS sql.NullInt64
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sensor_samples WHERE device_id=? AND metric=? AND ts BETWEEN ? AND ?`,
-			deviceID, metric, fromMs, toMs).Scan(&raw); err != nil {
+			`SELECT COUNT(*), MIN(ts), MAX(ts) FROM sensor_samples WHERE device_id=? AND metric=? AND ts BETWEEN ? AND ?`,
+			deviceID, metric, fromMs, toMs).Scan(&raw, &minTS, &maxTS); err != nil {
 			return nil, fmt.Errorf("sensorhistory: count: %w", err)
 		}
 		if raw > maxPoints {
-			bucketMs := (toMs - fromMs) / int64(maxPoints)
+			// The bucket width follows the span of the DATA, not of the
+			// requested window. An "all time" chart asks from=0, and deriving
+			// the width from that would spread maxPoints buckets across five
+			// decades of empty epoch and collapse a month of samples into a
+			// handful of points. The rows are keyed by (device, metric, ts),
+			// so raw > maxPoints implies at least maxPoints distinct
+			// milliseconds and the width stays >= 1.
+			bucketMs := (maxTS.Int64 - minTS.Int64) / int64(maxPoints)
 			if bucketMs < 1 {
 				bucketMs = 1
 			}
@@ -137,6 +145,43 @@ func (s *Store) Prune(ctx context.Context, deviceID string, cutoffMs int64) (int
 		return 0, fmt.Errorf("sensorhistory: prune: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+// MetricSpan is one metric a device actually has stored, with the extent of
+// what survives retention: First/Last are bucket-start milliseconds and N is
+// the stored bucket count (not the reading count - each bucket already
+// averages N readings of its own).
+type MetricSpan struct {
+	Metric string `json:"metric"`
+	First  int64  `json:"first"`
+	Last   int64  `json:"last"`
+	N      int64  `json:"n"`
+}
+
+// Metrics lists the metrics a device has stored samples for, each with its
+// retained extent. It is the discovery half the charts (H2) need: the
+// capability catalog says what a device *can* report, this says what was
+// actually *recorded*, so a chart can tell "no data yet" from "never
+// recorded" instead of drawing an empty axis. The (device_id, metric, ts)
+// primary key serves the grouping directly.
+func (s *Store) Metrics(ctx context.Context, deviceID string) ([]MetricSpan, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT metric, MIN(ts), MAX(ts), COUNT(*)
+		FROM sensor_samples WHERE device_id=?
+		GROUP BY metric ORDER BY metric`, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("sensorhistory: metrics: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []MetricSpan
+	for rows.Next() {
+		var m MetricSpan
+		if err := rows.Scan(&m.Metric, &m.First, &m.Last, &m.N); err != nil {
+			return nil, fmt.Errorf("sensorhistory: metrics scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // Devices returns the distinct device ids that have stored samples, for the

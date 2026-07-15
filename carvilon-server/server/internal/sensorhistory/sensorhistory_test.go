@@ -97,6 +97,94 @@ func TestStore_QueryDownsampleWeightedMean(t *testing.T) {
 	}
 }
 
+// The "all time" chart range asks from=0, so the downsample bucket width must
+// follow the span of the DATA, not of the requested window. Deriving it from
+// the window spread maxPoints buckets across five decades of empty epoch and
+// collapsed a month of samples into a handful of points - the range rendered
+// nearly empty.
+func TestStore_QueryDownsampleFromEpochKeepsResolution(t *testing.T) {
+	ctx := context.Background()
+	st := New(newTestDB(t).DB)
+	// A realistic month of minute-averaged data, ending at a PINNED "now".
+	// The clock must not come from time.Now(): bucket starts are anchored to
+	// the epoch (bts = (ts/bucketMs)*bucketMs), so the first bucket start
+	// drifts by up to a full bucket width depending on the calendar minute the
+	// suite happens to run in - a wall clock makes the bounds below pass or
+	// fail at random.
+	const n = 3000
+	const now = int64(1784150000000)
+	const start = now - 30*24*int64(time.Hour/time.Millisecond)
+	const step = (now - start) / n
+	samples := make([]Sample, n)
+	for i := range samples {
+		samples[i] = Sample{DeviceID: "s", Metric: "m", TS: start + int64(i)*step, Value: float64(i % 50), N: 1}
+	}
+	if err := st.Insert(ctx, samples...); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// Exactly what the "all" button sends: from=0 (epoch), to=now.
+	got, err := st.Query(ctx, "s", "m", 0, now, 300)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	// Before the fix this returned ~2 points (bucket ~= 5.8 billion ms).
+	if len(got) < 150 {
+		t.Fatalf("from=epoch downsample returned %d points, want ~300: the bucket width is following the requested window, not the data", len(got))
+	}
+	if len(got) > 320 {
+		t.Fatalf("from=epoch downsample returned %d points, want at most ~300", len(got))
+	}
+	// Weight is still conserved, and the series still spans the real data.
+	var totN int
+	for _, s := range got {
+		totN += s.N
+	}
+	if totN != n {
+		t.Errorf("total n = %d, want %d", totN, n)
+	}
+	// The series still spans the real data. Bucket starts are epoch-anchored,
+	// so the FIRST one legitimately sits up to one bucket width before the
+	// first sample - the tolerance is that width, not one sample step.
+	bucket := (int64(n-1) * step) / 300
+	if got[0].TS < start-bucket || got[0].TS > start {
+		t.Errorf("first bucket start %d outside [%d, %d]", got[0].TS, start-bucket, start)
+	}
+	if got[len(got)-1].TS > now {
+		t.Errorf("last sample %d is after the window end %d", got[len(got)-1].TS, now)
+	}
+}
+
+func TestStore_Metrics(t *testing.T) {
+	ctx := context.Background()
+	st := New(newTestDB(t).DB)
+	if err := st.Insert(ctx,
+		Sample{DeviceID: "s1", Metric: "temperature", TS: 1000, Value: 21, N: 2},
+		Sample{DeviceID: "s1", Metric: "temperature", TS: 3000, Value: 22, N: 4},
+		Sample{DeviceID: "s1", Metric: "humidity", TS: 2000, Value: 50, N: 1},
+		Sample{DeviceID: "s2", Metric: "battery", TS: 1000, Value: 90, N: 1},
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, err := st.Metrics(ctx, "s1")
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("s1 metrics = %+v, want humidity + temperature", got)
+	}
+	// Ordered by metric name: humidity, temperature.
+	if got[0].Metric != "humidity" || got[0].N != 1 || got[0].First != 2000 || got[0].Last != 2000 {
+		t.Errorf("humidity span wrong: %+v", got[0])
+	}
+	if got[1].Metric != "temperature" || got[1].N != 2 || got[1].First != 1000 || got[1].Last != 3000 {
+		t.Errorf("temperature span wrong: %+v", got[1])
+	}
+	// A device with no samples is an empty list, not an error.
+	if none, err := st.Metrics(ctx, "nope"); err != nil || len(none) != 0 {
+		t.Errorf("unknown device: got %+v err %v, want empty", none, err)
+	}
+}
+
 func TestStore_Prune(t *testing.T) {
 	ctx := context.Background()
 	st := New(newTestDB(t).DB)

@@ -1,0 +1,256 @@
+/* Sensor history charts (H2) - the stored, interval-averaged path rendered
+   as line charts. ONE stylesheet for BOTH homes: the devices cockpit and the
+   Logic Editor's sensor block.
+
+   The two homes have separate token systems and never load each other's CSS
+   (the editor runs in an iframe with only editor.css). So the component does
+   not hardcode either palette and takes no per-host shim: every private
+   --ch-* token resolves through a FALLBACK CHAIN - the admin token first, the
+   editor token second, a literal last. In the admin, --text-primary is
+   defined and --text is not; inside the editor, exactly the reverse. The same
+   declaration is therefore correct in both, and a home that changes its own
+   tokens carries the chart with it.
+
+   The series colours are the deliberate exception: they are fixed hexes, not
+   accent-derived, so a metric keeps its identity across both homes and across
+   an accent change. They were picked by running the palette validator against
+   BOTH chart surfaces (worst all-pairs CVD dE 10.3, contrast >= 3:1 on each);
+   the floor band is legal here because every chart carries its metric name +
+   unit as a permanent visible label, never colour alone. */
+
+.cvchart {
+  /* Ink + chrome: admin token, else editor token, else literal. */
+  --ch-text: var(--text-primary, var(--text, #eaf1f5));
+  --ch-text-2: var(--text-secondary, var(--muted, #8a97a6));
+  --ch-muted: var(--text-tertiary, var(--faint, #52606e));
+  --ch-surface: var(--surface-panel, var(--bg-1, #0e1013));
+  --ch-field: var(--field-bg, var(--bg-0, #0a0c0f));
+  --ch-grid: var(--divider, var(--border, rgba(255, 255, 255, 0.07)));
+  --ch-axis: var(--border-strong, var(--border-bright, rgba(255, 255, 255, 0.16)));
+  --ch-accent: var(--acc, var(--accent, #3d7bff));
+  --ch-font: var(--font-sans, var(--font, system-ui, sans-serif));
+  --ch-mono: var(--font-mono, var(--mono, ui-monospace, monospace));
+
+  /* Metric series hues - validated, fixed, never accent-derived. */
+  --ch-s-temp: #d95926;
+  --ch-s-humidity: #3987e5;
+  --ch-s-light: #c98500;
+  --ch-s-battery: #008300;
+  --ch-s-state: #d55181;
+
+  --ch-series: var(--ch-s-humidity);
+
+  display: block;
+  font-family: var(--ch-font);
+}
+
+/* ---- filter row: one row, above every chart it scopes ---- */
+
+.cvchart-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cvchart-headline {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ch-muted);
+  white-space: nowrap;
+}
+
+.cvchart-spacer { flex: 1; }
+
+.cvchart-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  background: var(--ch-field);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.cvchart-seg label {
+  position: relative;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ch-text-2);
+  transition: background 110ms cubic-bezier(0.22, 0.8, 0.28, 1), color 110ms;
+}
+
+.cvchart-seg label:hover { background: rgba(255, 255, 255, 0.05); color: var(--ch-text); }
+
+.cvchart-seg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* The selected chip tints with the accent instead of filling with it: the
+   admin accent is runtime-injected and can be any of ten hues, so a fixed ink
+   colour on a filled chip would be unreadable for some of them. A tint + ring
+   + primary ink stays legible whatever the accent is, and the editor (which
+   has no --text-on-accent at all) gets the same treatment for free. */
+.cvchart-seg label:has(input:checked) {
+  background: color-mix(in srgb, var(--ch-accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ch-accent) 45%, transparent);
+  color: var(--ch-text);
+  font-weight: 600;
+}
+
+.cvchart-seg label:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--ch-accent) 70%, transparent);
+  outline-offset: 1px;
+}
+
+/* ---- one figure per metric ---- */
+
+.cvchart-body { display: flex; flex-direction: column; gap: 12px; }
+
+.cvchart-fig { margin: 0; }
+
+.cvchart-cap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 2px;
+  line-height: 1.3;
+}
+
+/* The mark beside the text carries identity; the text itself never wears the
+   series colour. */
+.cvchart-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ch-series);
+  flex: none;
+  align-self: center;
+}
+
+.cvchart-name { font-size: 12px; font-weight: 500; color: var(--ch-text); }
+.cvchart-unit { font-size: 11px; color: var(--ch-muted); }
+
+/* The endpoint value: the one direct label a line chart gets, always visible
+   so no value is gated behind a hover. */
+.cvchart-last {
+  margin-left: auto;
+  font-family: var(--ch-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ch-text);
+  white-space: nowrap;
+}
+
+.cvchart-plot { position: relative; }
+.cvchart-plot svg { display: block; width: 100%; touch-action: pan-y; }
+
+/* Refetch holds the previous render at reduced opacity - no skeleton, no
+   layout jump, no flash. */
+.cvchart-body.is-loading .cvchart-plot { opacity: 0.45; transition: opacity 170ms; }
+
+.cvchart-gridline { stroke: var(--ch-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.cvchart-axis { stroke: var(--ch-axis); stroke-width: 1; shape-rendering: crispEdges; }
+
+.cvchart-tick {
+  fill: var(--ch-muted);
+  font-family: var(--ch-mono);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cvchart-line {
+  fill: none;
+  stroke: var(--ch-series);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* No fill declaration here on purpose: the fill is the gradient set as a
+   presentation attribute (url(#...)), and ANY css fill declaration would
+   override it - an undefined var() here silently painted the wash black. */
+.cvchart-area { stroke: none; }
+
+/* The gradient stops must be styled in CSS, not set as attributes: var() is
+   only valid in a css property value, never in a presentation attribute. The
+   wash fades the series hue out downward - a soft fill under the line, well
+   below the weight of the stroke itself. */
+.cvchart-grad-top { stop-color: var(--ch-series); stop-opacity: 0.18; }
+.cvchart-grad-bottom { stop-color: var(--ch-series); stop-opacity: 0; }
+
+/* The end marker keeps a surface-coloured ring so it stays legible where it
+   crosses the line or the axis. */
+.cvchart-end {
+  fill: var(--ch-series);
+  stroke: var(--ch-surface);
+  stroke-width: 2;
+}
+
+.cvchart-cross { stroke: var(--ch-axis); stroke-width: 1; shape-rendering: crispEdges; }
+
+.cvchart-hit { fill: transparent; cursor: crosshair; outline: none; }
+.cvchart-plot svg:focus-visible .cvchart-hit { outline: 2px solid color-mix(in srgb, var(--ch-accent) 70%, transparent); }
+
+/* ---- tooltip: value leads, label follows ---- */
+
+.cvchart-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--ch-field);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 6px 18px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+}
+
+.cvchart-tip[hidden] { display: none; }
+
+.cvchart-tip-v {
+  display: block;
+  font-family: var(--ch-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ch-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cvchart-tip-t { display: block; font-size: 10px; color: var(--ch-text-2); margin-top: 1px; }
+.cvchart-tip-n { display: block; font-size: 9.5px; color: var(--ch-muted); margin-top: 1px; }
+
+/* ---- honest empty / error states ---- */
+
+.cvchart-note {
+  padding: 10px 0 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ch-muted);
+}
+
+.cvchart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 54px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ch-field) 60%, transparent);
+  font-size: 11px;
+  color: var(--ch-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cvchart-seg label,
+  .cvchart-body.is-loading .cvchart-plot { transition: none; }
+}

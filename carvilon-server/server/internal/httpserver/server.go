@@ -721,6 +721,7 @@ func (s *Server) routes() {
 	// Sensor History H1: the stored-path query API (H2 charts consume it) and
 	// the per-sensor recording-settings save (interval + retention).
 	s.mux.Handle("GET /a/devices/sensors/history", s.requireAdminSession(http.HandlerFunc(s.handleSensorHistory)))
+	s.mux.Handle("GET /a/devices/sensors/metrics", s.requireAdminSession(http.HandlerFunc(s.handleSensorMetrics)))
 	s.mux.Handle("POST /a/devices/sensors/recording", s.requireAdminSession(http.HandlerFunc(s.handleSensorRecordingSave)))
 	// Shelly Etappe 1: lazy live channel detail for the same page. The
 	// {id} is the configured device address; the handler only ever

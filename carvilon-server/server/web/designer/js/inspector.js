@@ -11,6 +11,7 @@ import { loadLines, claimedLines } from './gpiolines.js';
 import { loadChats } from './telegramchats.js';
 import { makeDropdown } from './dropdown.js';
 import { renderShellyInspector } from './shellysettings.js';
+import { renderReadoutInspector, destroyReadoutHistory } from './readouthistory.js';
 
 // Custom dropdowns created for the current inspector render; destroyed on
 // the next render so none leaves a document listener dangling.
@@ -47,6 +48,9 @@ function renderInspHelp(n,beforeSec){
 }
 
 export function openInspector(id){
+  // Any chart the previous selection mounted dies here: its fetches and its
+  // ResizeObserver must not outlive the panel render that owned them.
+  destroyReadoutHistory();
   const n=nodes[id].def;document.getElementById('insp-cat').textContent=CAT[n.cat].label.toUpperCase();
   document.getElementById('insp-cat').style.color=n.color;
   const ti=document.getElementById('insp-title');ti.value=n.title;
@@ -65,13 +69,17 @@ export function openInspector(id){
   // target VPD. The Shelly device panel would show it an empty channel list and
   // "Device not linked.", leaving those settings unreachable, so it falls
   // through to the generic property list below.
+  // A readout DEVICE block is a faceplate node too, and hit the same wall for
+  // the same reason (no def.shelly ⇒ "Device not linked."). Its panel is its
+  // recorded history (Sensor History H2), so it routes to its own renderer.
   if(n.faceplate&&n.type!=='midea.control_loop'){
     colorsSec.style.display=''; wiresSec.style.display='';
     if(propsLabel) propsLabel.style.display='none';
     renderInspColors(id,n);
     pc0.innerHTML='';
     liveDropdowns.forEach(d=>{try{d.destroy();}catch(e){}});liveDropdowns=[];
-    renderShellyInspector(pc0,id);
+    if(n.type==='readout.device') renderReadoutInspector(pc0,id);
+    else renderShellyInspector(pc0,id);
     renderInspWires(id,n);
     return;
   }
