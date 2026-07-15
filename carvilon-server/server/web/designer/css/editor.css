@@ -348,6 +348,73 @@ select.si-i{cursor:pointer}
 .ro-po .socket::before{inset:-2px;border-width:1px}
 .ro-po[data-tip]::after{white-space:normal;text-transform:none;width:180px;text-align:center;left:auto;right:0}
 
+/* Midea climate control loop — the smart controller, deliberately NOT the
+   device card (which is the raw remote): its own rose accent + gauge badge,
+   grouped Inputs / Readouts, and its own target + enable controls for the
+   ports left unwired. Everything is scoped to .node-climate-loop / .cl-*, so
+   the Shelly and Protect faceplates that share .node-shelly / .ro-* are
+   untouched. */
+.node-climate-loop{width:344px}
+/* the loop's port names are full phrases ("Room temperature (external
+   sensor)") — they must read, not ellipsize into a shout. */
+.node-climate-loop .ro-label{white-space:normal;overflow:visible;text-overflow:clip;text-transform:none;
+  letter-spacing:0;font:600 11px/1.3 var(--font);color:var(--text-secondary,#b9c6d4)}
+.node-climate-loop .ro-disp{align-items:center;gap:8px}
+/* The port tips are full sentences (they carry "wire your external room sensor
+   here" — ticket item 1's payload), so they must wrap, sit ON the card and beat
+   the inherited max-width. Anchoring with left/right REQUIRES clearing the
+   inherited translateX(-50%) in both the base and :hover rules — .port[data-tip]
+   re-applies it on hover at equal specificity, where source order decides. */
+.node-climate-loop .ro-pi[data-tip]::after,.node-climate-loop .ro-po[data-tip]::after{
+  white-space:normal;text-transform:none;width:230px;max-width:none;text-align:left;line-height:1.35}
+.node-climate-loop .ro-pi[data-tip]::after{left:0;transform:translateY(4px)}
+.node-climate-loop .ro-pi[data-tip]:hover::after{transform:translateY(0)}
+.node-climate-loop .ro-po[data-tip]::after{left:auto;right:0;transform:translateY(4px)}
+.node-climate-loop .ro-po[data-tip]:hover::after{transform:translateY(0)}
+/* .sh-head and .sh-rows are sibling stacking contexts at z-index:1, so the
+   later one (.sh-rows) paints over anything escaping the header — including the
+   help tooltip, which would be ~93% buried. Neutral z-index on this card only
+   lets the tip's own z-index apply; Shelly/Protect chrome keeps its stacking. */
+.node-climate-loop .sh-head,.node-climate-loop .sh-rows{z-index:auto}
+/* group headers: the one visual cue that says inputs live left, readouts right */
+.cl-grp{margin:9px 0 1px;font:700 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);opacity:.8}
+.ro-row + .cl-grp{margin-top:11px}
+.cl-grp + .ro-row{border-top:0}
+.cl-w{flex:none;display:flex;align-items:center;gap:4px}
+/* the on-block target field: used while the target port is unwired */
+.cl-num{width:58px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,.05);
+  color:#eef4fb;font:800 13px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.cl-num:focus{outline:none;border-color:var(--cyan-bright)}
+.cl-num:disabled{opacity:.4;cursor:not-allowed}
+.cl-sw{flex:none}
+/* The switch's ON look. The Shelly rules are .sh-row.on-scoped and this button
+   lives in a .ro-row, so without these it would render OFF in every state —
+   while the loop, which defaults to enabled, quietly drove the device. Scoped
+   to .cl-sw rather than widening the Shelly selector. */
+.cl-sw.on .sh-track{background:color-mix(in srgb,#43E08A 62%,transparent);border-color:transparent}
+.cl-sw.on .sh-thumb{left:21px;background:#fff;box-shadow:0 0 10px #43E08A}
+/* wired = the graph owns the value: the block's own control goes inert */
+.cl-locked{opacity:.4;cursor:not-allowed;pointer-events:none}
+/* ...and the row shows the live value the graph is feeding, in the widget's
+   place — never a stale manual number sitting next to a live wire. */
+.cl-live{display:none}
+.ro-row.cl-wired .cl-live{display:inline-block}
+.ro-row.cl-wired .cl-num,.ro-row.cl-wired .cl-sw{display:none}
+/* the block's help affordance — .port[data-tip] is port-scoped, so a
+   non-port tooltip needs its own rule; the text is a paragraph, not a label. */
+.cl-help{flex:none;display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;margin-right:6px;
+  border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:help;position:relative;transition:.15s}
+.cl-help:hover{color:var(--cyan-bright);background:rgba(255,255,255,.06)}
+.cl-help i{width:14px;height:14px}
+.cl-help[data-tip]::after{content:attr(data-tip);position:absolute;top:130%;right:0;z-index:8;
+  font:500 10px/1.45 var(--font);letter-spacing:0;color:#dbe7f2;background:rgba(8,12,16,.98);border:1px solid var(--border);
+  padding:9px 11px;border-radius:7px;white-space:pre-line;width:280px;text-align:left;opacity:0;pointer-events:none;transition:.15s}
+.cl-help:hover::after{opacity:1}
+
+/* inspector: the module's own description, so a block explains itself where
+   it is configured and not only on hover. */
+.insp-help{font:400 11px/1.55 var(--font);color:var(--muted);white-space:pre-line}
+
 /* top bar */
 .topbar{position:fixed;top:0;left:0;right:0;height:54px;z-index:20;display:flex;align-items:center;gap:14px;padding:0 16px;
   background:rgba(11,12,15,.93);border-bottom:1px solid var(--border);backdrop-filter:blur(16px)}

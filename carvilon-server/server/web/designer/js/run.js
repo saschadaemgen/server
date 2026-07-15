@@ -6,7 +6,7 @@
 // engine (input endpoint) instead of the client-side demo sim. Stop
 // closes the stream and returns the editor to its idle state.
 
-import { GRAPH, nodes, wires, world } from './store.js';
+import { GRAPH, nodes, wires, world, markDirty } from './store.js';
 import { findWireTo } from './wires.js';
 import { firePulse, setNodeOn } from './sim.js';
 import { engineLine, focusEngine } from './dock.js';
@@ -135,6 +135,12 @@ function serializeGraph(){
         const vk=p.vkind||'float';
         v = vk==='bool' ? (p.v===true||p.v==='true') : (vk==='text' ? String(p.v==null?'':p.v) : (Number(p.v)||0));
       }
+      // pkind types a plain param so it survives the engine's coerceValue: a
+      // Float param handed the inspector's string falls back to its default
+      // instead. Opt-in per prop — a ChannelConfig like debounce_ms is an
+      // opaque string and must stay one.
+      else if(p.pkind==='float') v=Number(p.v)||0;
+      else if(p.pkind==='bool') v=(p.v===true||p.v==='true');
       params[p.param]=v;
     }
     // MQTT selector: fold the source's JSON field or the sink's RPC target
@@ -244,9 +250,18 @@ function shellyPort(node,port){ const r=shellyMap[node]||readoutMap[node]; retur
 
 function outPortOf(nodeId){ const def=nodes[nodeId]&&nodes[nodeId].def; if(!def||!def.ports.out.length) return null; return def.ports.out[0].id; }
 
-function sendInput(node, port, value){
+// sendInput injects a value into the running engine. kind types it ('bool' when
+// omitted — the press/toggle path). No run = no-op, so a faceplate control that
+// also persists its value simply saves while the graph is stopped.
+function sendInput(node, port, value, kind){
   if(!running) return;
-  fetch('run/input',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({node,port,value})}).catch(()=>{});
+  fetch('run/input',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({node,port,value,kind:kind||'bool'})})
+    // A rejected input is a real fault (the node refuses external values, the
+    // run is gone): report it instead of swallowing it. fetch only rejects on a
+    // network error, so a 4xx has to be checked explicitly — silence here once
+    // hid a control that never reached the engine at all.
+    .then(r=>{ if(!r.ok) engineLine(`input rejected: ${node}.${port} (HTTP ${r.status})`); })
+    .catch(()=>{});
 }
 
 // pressNode pulses an input.manual node's output (momentary button).
@@ -488,6 +503,39 @@ function paintReadout(nd,port,v){
     crow.classList.toggle('on',active);
   }
 }
+// The control_loop faceplate's target field + enable switch feed the node's OWN
+// manual value: live into a running engine (run/input → the node's setExternal)
+// AND into the prop, so the value persists and the next Build starts from it.
+// Both go inert while the matching port is wired — the wire owns the value. The
+// wire is re-checked here rather than trusting the CSS lock, so the keyboard
+// cannot do what the mouse cannot (the Shelly handlers reason the same way).
+// The node ignores a manual value for a wired port anyway, server-side.
+function climateCtl(ev,sel){
+  const w=ev.target.closest(`[data-clctl="${sel}"]`); if(!w) return null;
+  const nodeEl=w.closest('.node'); if(!nodeEl) return null;
+  const nodeId=nodeEl.dataset.id, def=nodes[nodeId]&&nodes[nodeId].def;
+  if(!def||def.type!=='midea.control_loop') return null;
+  if(wires.some(o=>o.to===nodeId+':'+sel)) return null; // wired: the graph owns it
+  return {w,nodeId,def};
+}
+function climateProp(def,param){ return (def.props||[]).find(p=>p.param===param); }
+if(world) world.addEventListener('change', ev=>{
+  const c=climateCtl(ev,'target'); if(!c) return;
+  const p=climateProp(c.def,'target_temp'); if(!p) return;
+  const num=Number(c.w.value);
+  // An empty or out-of-range field reverts to the stored value rather than
+  // commanding a nonsense setpoint.
+  if(!Number.isFinite(num)||num<Number(c.w.min)||num>Number(c.w.max)){ c.w.value=p.v; return; }
+  p.v=num; markDirty();
+  sendInput(c.nodeId,'target',num,'float');
+});
+if(world) world.addEventListener('click', ev=>{
+  const c=climateCtl(ev,'enable'); if(!c) return;
+  const p=climateProp(c.def,'enabled'); if(!p) return;
+  const on=!(p.v===true);
+  p.v=on; c.w.classList.toggle('on',on); markDirty();
+  sendInput(c.nodeId,'enable',on,'bool');
+});
 // The faceplate's clickable relay switch drives the real device over MQTT
 // (Switch.Set), independent of any run — but only when the relay is NOT
 // graph-driven (output exclusivity: a wired relay is owned by the graph,

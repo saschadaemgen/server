@@ -112,7 +112,7 @@ func (e *Engine) Add(id string, n Node) {
 	// and no upstream, so mark it dirty at insertion time: the first Tick
 	// then evaluates it once and its held value settles (and propagates)
 	// like any other change. Nodes without the marker stay event-driven.
-	if _, ok := n.(selfStarter); ok {
+	if isSelfStarter(n) {
 		e.markDirty(id)
 	}
 }
@@ -187,7 +187,7 @@ func (e *Engine) EnqueueInput(nodeID, port string, v Value) {
 	if !ok {
 		panic("engine: EnqueueInput on unknown node " + nodeID)
 	}
-	if _, ok := n.(externalSetter); !ok {
+	if _, ok := acceptsExternal(n); !ok {
 		panic("engine: node " + nodeID + " does not accept external input")
 	}
 	e.pending = append(e.pending, inputEvent{node: nodeID, port: port, v: v})
@@ -201,18 +201,43 @@ func (e *Engine) applyExternal(nodeID, port string, v Value) {
 	if !ok {
 		panic("engine: external input on unknown node " + nodeID)
 	}
-	if es, ok := n.(externalSetter); ok {
-		es.setExternal(port, v)
-	} else {
+	set, ok := acceptsExternal(n)
+	if !ok {
 		panic("engine: node " + nodeID + " does not accept external input")
 	}
+	set(port, v)
 	e.markDirty(nodeID)
 }
 
 // externalSetter is implemented by source nodes that can be driven
 // from outside the graph via Engine.SetInput.
+//
+// Its method is unexported, which in Go means package-qualified: ONLY a
+// node declared inside package engine can ever satisfy it. Nodes living in
+// their own package (a vendor's control loop, say) must implement the
+// exported ExternalSetter instead - see acceptsExternal.
 type externalSetter interface {
 	setExternal(port string, v Value)
+}
+
+// ExternalSetter is the same contract for nodes declared OUTSIDE package
+// engine, which cannot implement an unexported method. A node that accepts
+// values from beyond the graph (an editor faceplate control, a driver)
+// implements this; the port name means whatever the node decides it means.
+type ExternalSetter interface {
+	SetExternal(port string, v Value)
+}
+
+// acceptsExternal resolves either form to one setter, so both the in-package
+// and out-of-package contracts flow through a single apply path.
+func acceptsExternal(n Node) (func(string, Value), bool) {
+	switch s := n.(type) {
+	case externalSetter:
+		return s.setExternal, true
+	case ExternalSetter:
+		return s.SetExternal, true
+	}
+	return nil, false
 }
 
 // selfStarter is implemented by nodes that must be evaluated once at
@@ -220,7 +245,23 @@ type externalSetter interface {
 // held output is established on the first Tick (e.g. input.constant).
 // Add marks them dirty at insertion time; the marker method is never
 // called - its presence is the whole contract.
+//
+// Unexported = package-qualified: see externalSetter. Out-of-package nodes
+// use SelfStarter.
 type selfStarter interface{ selfStart() }
+
+// SelfStarter is the self-start marker for nodes declared outside package
+// engine. Same contract as selfStarter; the method is never called.
+type SelfStarter interface{ SelfStart() }
+
+// isSelfStarter accepts either form of the marker.
+func isSelfStarter(n Node) bool {
+	switch n.(type) {
+	case selfStarter, SelfStarter:
+		return true
+	}
+	return false
+}
 
 func (e *Engine) markDirty(id string) { e.dirty[id] = true }
 

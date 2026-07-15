@@ -430,7 +430,7 @@
                     <label style="display:flex;align-items:center;gap:8px;margin:4px 0;"><input type="radio" name="profile" value="standard"{{if ne $r.MideaProfile "advanced"}} checked{{end}}> Standard &mdash; device-side, remote-like</label>
                     <label style="display:flex;align-items:center;gap:8px;margin:4px 0;"><input type="radio" name="profile" value="advanced"{{if eq $r.MideaProfile "advanced"}} checked{{end}}> Advanced &mdash; server-side control loop (Logic Editor block)</label>
                     <div class="dc-act-row"><button class="dc-act-btn" type="submit">Save profile</button></div>
-                    <p class="dc-act-hint">Advanced enables the server-side control loop: a &ldquo;Midea Climate Controller - control loop&rdquo; block appears in the Logic Editor for this device. Wire an external room sensor into it and run the graph; while it runs, the manual controls above are locked. Standard is the safe device-side default.</p>
+                    <p class="dc-act-hint">Advanced enables the server-side control loop: a &ldquo;Control loop&rdquo; block appears in the Logic Editor for this device (rose &ldquo;Climate control&rdquo; group, gauge icon &mdash; not the cyan device block). Wire an external room sensor into its &ldquo;Room temperature&rdquo; input, set the target and switch Enable on directly on the block, then run the graph; while it runs, the manual controls above are locked. The block carries its own help. Standard is the safe device-side default.</p>
                   </form>
 
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Credentials &amp; removal</span><span class="dc-hr"></span></div>

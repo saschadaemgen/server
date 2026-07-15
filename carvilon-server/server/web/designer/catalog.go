@@ -41,6 +41,11 @@ type CatalogBlock struct {
 	Params        []CatalogParam `json:"params"`
 	DelayBoundary bool           `json:"delay_boundary"`
 	Implemented   bool           `json:"implemented"`
+	// Description is the block's plain-language help: what it does and how
+	// to wire it. The editor shows it on the block (help icon) and in the
+	// node inspector, so a module explains itself where it is used. Set it
+	// on any block whose wiring is not self-evident. Omitted elsewhere.
+	Description string `json:"description,omitempty"`
 	// Channel and Unit are set on the data-driven system blocks: Channel
 	// is the fixed physical ref (e.g. "sys:cpu_temp") the editor bakes into
 	// the dropped node, Unit the display suffix (°C, %). Omitted elsewhere.

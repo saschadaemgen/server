@@ -68,6 +68,21 @@ func (s *Server) handleDesignerCatalog(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"blocks": blocks})
 }
 
+// mideaControlLoopHelp is the block's plain-language help, shown on the block
+// (help icon) and in the node inspector. It is deliberately the ONE source for
+// both surfaces, so the editor cannot drift from what the loop really does.
+const mideaControlLoopHelp = "Climate control loop. Compares the room temperature from your own external " +
+	"sensor with the target temperature and drives this device's setpoint, mode and fan whenever the " +
+	"decision actually changes. It reads the device's built-in return-air sensor by itself — that needs " +
+	"no wire.\n\n" +
+	"Minimal setup: wire an external room sensor into \"Room temperature\", set the target in the field on " +
+	"the block, and switch Enable on. No constant blocks needed. Enable off does not merely stop the loop — " +
+	"it switches the device off.\n\n" +
+	"Wire \"Target temperature\" or \"Enable\" only if the graph should own them: a wired port always wins " +
+	"and the matching control on the block goes inert. The ports on the right are read-only readouts.\n\n" +
+	"Advanced profile only — switching the device back to Standard stops the drive (the readouts keep " +
+	"computing). While this loop runs it is the single driver: the device's manual controls are locked."
+
 // mideaControlLoopBlocks emits one "control loop" editor block per adopted Midea
 // device that is in the ADVANCED profile (E2). The block is the registered
 // midea.control_loop engine node (ports from its descriptor); the device id is
@@ -88,12 +103,16 @@ func (s *Server) mideaControlLoopBlocks(ctx context.Context) []designer.CatalogB
 			continue
 		}
 		out = append(out, designer.CatalogBlock{
-			Type:        mideaengine.TypeControlLoop,
-			Category:    "climate",
+			Type: mideaengine.TypeControlLoop,
+			// Its own category + icon: the control loop must not be mistaken
+			// for the device block (which is the raw remote — category
+			// "climate", snowflake). This one is the controller.
+			Category:    "climate-loop",
 			Title:       "Control loop · " + mideaDisplayName(d),
-			Icon:        "snowflake",
+			Icon:        "gauge",
 			Channel:     d.ID, // baked device id → the node's "device" param
 			Implemented: true,
+			Description: mideaControlLoopHelp,
 		})
 	}
 	return out

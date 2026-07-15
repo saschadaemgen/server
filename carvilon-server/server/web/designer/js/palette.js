@@ -13,6 +13,10 @@ import { attachDrag, moveGhost, dropNew } from './nodes.js';
 import { renderMinimap } from './minimap.js';
 
 export const NAME_ICON={},NAME_CAT={},NAME_TYPE={},NAME_CHANNEL={},NAME_UNIT={};
+// NAME_DESC: the block's plain-language help, straight from the catalog's
+// description. The editor shows it on the block and in the inspector, so Go
+// stays the single source for what a module does.
+export const NAME_DESC={};
 // The catalog's real port metadata per block title (name/kind/optional),
 // so the editor can build labeled, typed ports from the single source of
 // truth instead of inventing generic ones. Read by nodes.js on drop.
@@ -32,7 +36,7 @@ export const NAME_READOUT={};
 // host, "system" where telemetry is readable, "nfc" when a tag reader is
 // detected, "telegram" while the bot runs. Their display metadata lives
 // here; CAT carries the base five.
-const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'},sensor:{color:'#F87171',label:'Sensors',icon:'thermometer'},climate:{color:'#5EC8E5',label:'Climate',icon:'snowflake'}};
+const EXTRA_CATS={gpio:{color:'#5BE0C8',label:'GPIO',icon:'cpu'},system:{color:'#F2A65A',label:'System',icon:'activity'},telegram:{color:'#2AABEE',label:'Telegram',icon:'send'},nfc:{color:'#B18CFF',label:'NFC',icon:'nfc'},shelly:{color:'#38BDF8',label:'Shelly',icon:'toggle-right'},sensor:{color:'#F87171',label:'Sensors',icon:'thermometer'},climate:{color:'#5EC8E5',label:'Climate',icon:'snowflake'},'climate-loop':{color:'#FF6B8B',label:'Climate control',icon:'gauge'}};
 
 export async function initPalette(){
  /* library — sourced from the Go block catalog (the single source of
@@ -54,6 +58,7 @@ export async function initPalette(){
      if(b.unit)NAME_UNIT[b.title]=b.unit;
      if(b.shelly)NAME_SHELLY[b.title]=b.shelly;
      if(b.readout)NAME_READOUT[b.title]=b.readout;
+     if(b.description)NAME_DESC[b.title]=b.description;
      (LIBRARY[b.category]||(LIBRARY[b.category]=[])).push([b.title,b.icon,!!b.implemented]);
    }
  }catch(err){console.error('designer: block catalog load failed',err);}

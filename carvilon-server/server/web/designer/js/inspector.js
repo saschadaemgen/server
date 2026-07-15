@@ -26,6 +26,26 @@ function retypePortKind(id,side,kind){
   if(sock){sock.classList.remove('k-bool','k-float','k-text');sock.classList.add('k-'+kind);}
 }
 
+// renderInspHelp shows the module's own description at the top of its settings
+// panel: a module has to explain itself where it is configured, not only in a
+// hover on the card. The section is built on demand (and reused) so it needs no
+// markup of its own, and it renders for every node kind — faceplate modules
+// included, which is exactly where the panel is otherwise thinnest. Blocks
+// without a description simply don't show it.
+function renderInspHelp(n,beforeSec){
+  let sec=document.getElementById('insp-help-sec');
+  if(!sec){
+    sec=document.createElement('div');sec.className='insp-sec';sec.id='insp-help-sec';
+    sec.innerHTML='<label>About this module</label><div class="insp-help" id="insp-help"></div>';
+    beforeSec.parentNode.insertBefore(sec,beforeSec);
+  }
+  const body=sec.querySelector('#insp-help');
+  // textContent, never innerHTML: the text comes from the catalog and stays
+  // inert markup-wise. CSS (white-space:pre-line) keeps the paragraph breaks.
+  body.textContent=n.help||'';
+  sec.style.display=n.help?'':'none';
+}
+
 export function openInspector(id){
   const n=nodes[id].def;document.getElementById('insp-cat').textContent=CAT[n.cat].label.toUpperCase();
   document.getElementById('insp-cat').style.color=n.color;
@@ -35,11 +55,17 @@ export function openInspector(id){
   const colorsSec=document.getElementById('insp-colors').closest('.insp-sec');
   const propsSec=pc0.closest('.insp-sec'), propsLabel=propsSec.querySelector('label');
   const wiresSec=document.getElementById('insp-wires-sec');
+  renderInspHelp(n,colorsSec);
   // Shelly module is a FIRST-CLASS node: it keeps every standard behaviour
   // (module colour + per-connection wire colours). ONLY the property LIST is
   // replaced by the device/channel settings, which live here in the sidebar
   // (not a modal).
-  if(n.faceplate){
+  // The climate control loop is the exception: it is a faceplate node, but its
+  // device is baked (nothing to pick) and it has REAL settings — profile and
+  // target VPD. The Shelly device panel would show it an empty channel list and
+  // "Device not linked.", leaving those settings unreachable, so it falls
+  // through to the generic property list below.
+  if(n.faceplate&&n.type!=='midea.control_loop'){
     colorsSec.style.display=''; wiresSec.style.display='';
     if(propsLabel) propsLabel.style.display='none';
     renderInspColors(id,n);
@@ -59,6 +85,10 @@ export function openInspector(id){
   pc.innerHTML='';
   let bodyIdx=-1;
   n.props.forEach(p=>{
+    // cardOnly props are edited on the block itself (the climate loop's target
+    // field / enable switch). An inspector copy would drift from the widget and
+    // skip its live send, so they are not listed here.
+    if(p.cardOnly)return;
     if(!p.inspectorOnly)bodyIdx++;
     const myBody=p.inspectorOnly?-1:bodyIdx;
     const row=document.createElement('div');row.className='iprop';row.innerHTML=`<label>${esc(p.k)}</label>`;

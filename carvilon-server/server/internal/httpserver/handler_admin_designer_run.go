@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -665,9 +666,13 @@ func (s *Server) handleDesignerRunMonitor(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// handleDesignerRunInput injects the editor's button press into the
-// running engine (SetInput on the input.manual node), driving real
-// evaluation. A press is a true/false pulse the editor sends.
+// handleDesignerRunInput injects an editor-side value into the running
+// engine (SetInput on a node that accepts external input), driving real
+// evaluation. A button press is a true/false pulse; a faceplate control
+// such as the climate loop's target sends its own kind, so the body
+// carries an optional "kind" alongside the value. An absent kind means
+// bool — the button/switch path predates typed values and still posts
+// {node, port, value:true}.
 func (s *Server) handleDesignerRunInput(w http.ResponseWriter, r *http.Request) {
 	user := AdminUserFromContext(r.Context())
 	run := s.designerRuns.get(user)
@@ -676,9 +681,10 @@ func (s *Server) handleDesignerRunInput(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var in struct {
-		Node  string `json:"node"`
-		Port  string `json:"port"`
-		Value bool   `json:"value"`
+		Node  string          `json:"node"`
+		Port  string          `json:"port"`
+		Kind  string          `json:"kind"`
+		Value json.RawMessage `json:"value"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
 		http.Error(w, "bad input body", http.StatusBadRequest)
@@ -688,11 +694,43 @@ func (s *Server) handleDesignerRunInput(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "node and port are required", http.StatusBadRequest)
 		return
 	}
-	if !run.setInput(in.Node, in.Port, engine.BoolVal(in.Value)) {
+	v, ok := decodeRunInputValue(in.Kind, in.Value)
+	if !ok {
+		http.Error(w, "bad input value for kind "+in.Kind, http.StatusBadRequest)
+		return
+	}
+	if !run.setInput(in.Node, in.Port, v) {
 		http.Error(w, "node does not accept input", http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// decodeRunInputValue turns the request's kind + raw JSON value into a
+// typed engine Value. The empty kind is bool, keeping the long-standing
+// press/toggle payload working unchanged.
+func decodeRunInputValue(kind string, raw json.RawMessage) (engine.Value, bool) {
+	switch kind {
+	case "", "bool":
+		var b bool
+		if json.Unmarshal(raw, &b) != nil {
+			return engine.Value{}, false
+		}
+		return engine.BoolVal(b), true
+	case "float":
+		var f float64
+		if json.Unmarshal(raw, &f) != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return engine.Value{}, false
+		}
+		return engine.FloatVal(f), true
+	case "text":
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return engine.Value{}, false
+		}
+		return engine.TextVal(s), true
+	}
+	return engine.Value{}, false
 }
 
 // handleDesignerRunStop stops the user's run (idempotent).

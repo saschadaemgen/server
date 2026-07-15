@@ -264,3 +264,41 @@ func TestDesignerRunViewerGraceReaper(t *testing.T) {
 		t.Fatal("live run lost its mapping")
 	}
 }
+
+// TestDecodeRunInputValue pins the run/input value contract. The kind-less
+// bool payload is the long-standing press/toggle path and must keep working
+// byte-for-byte; the typed kinds are what let a faceplate control (the climate
+// loop's target field) reach its node live.
+func TestDecodeRunInputValue(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		raw  string
+		want engine.Value
+		ok   bool
+	}{
+		{"legacy bool, no kind", "", `true`, engine.BoolVal(true), true},
+		{"legacy bool false", "", `false`, engine.BoolVal(false), true},
+		{"explicit bool", "bool", `true`, engine.BoolVal(true), true},
+		{"float", "float", `21.5`, engine.FloatVal(21.5), true},
+		{"float integer", "float", `22`, engine.FloatVal(22), true},
+		{"text", "text", `"auto"`, engine.TextVal("auto"), true},
+		{"kind/value mismatch", "float", `true`, engine.Value{}, false},
+		{"bool given a number", "", `1`, engine.Value{}, false},
+		{"unknown kind", "colour", `"red"`, engine.Value{}, false},
+		// NaN/Inf would poison the engine's comparable Value; JSON cannot
+		// carry them literally, so the guard is against a crafted body.
+		{"garbage float", "float", `"NaN"`, engine.Value{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := decodeRunInputValue(tc.kind, json.RawMessage(tc.raw))
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if ok && got != tc.want {
+				t.Errorf("value = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

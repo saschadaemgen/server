@@ -7,7 +7,7 @@ import { CAT, GRAPH, nodes, wires, wireByEdge, world, dragghost, S, snap, reduce
 import { selectOnly, clearSel } from './selection.js';
 import { renderMinimap } from './minimap.js';
 import { recomputeEndpoints } from './wires.js';
-import { NAME_ICON, NAME_CAT, NAME_TYPE, NAME_CHANNEL, NAME_UNIT, NAME_INPUTS, NAME_OUTPUTS, NAME_SHELLY, NAME_READOUT } from './palette.js';
+import { NAME_ICON, NAME_CAT, NAME_TYPE, NAME_CHANNEL, NAME_UNIT, NAME_INPUTS, NAME_OUTPUTS, NAME_SHELLY, NAME_READOUT, NAME_DESC } from './palette.js';
 
 let idc=0;
 
@@ -60,10 +60,11 @@ export function buildNode(n){
   // A stored graph can carry a category this host's catalog does not
   // expose (e.g. gpio saved on a Pi, opened elsewhere) - register a
   // neutral fallback instead of crashing the load.
+  upgradeClimateDef(n);
   const c=CAT[n.cat]||(CAT[n.cat]={color:'#7f8c99',label:String(n.cat||'?').toUpperCase(),icon:'box'});
   if(n.color==null)n.color=c.color;normPorts(n);
   const el=document.createElement('div');
-  el.className='node'+(n.faceplate?' node-shelly':'')+(n.readout?' node-readout':'');el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
+  el.className='node'+(n.faceplate?' node-shelly':'')+(n.readout?' node-readout':'')+(n.type==='midea.control_loop'?' node-climate-loop':'');el.dataset.id=n.id;el.style.left=n.ui.x+'px';el.style.top=n.ui.y+'px';el.style.setProperty('--cat',n.color);
   if(n.faceplate){
     el.innerHTML=`<div class="node-accent"></div>`+(n.type==='midea.control_loop'?climateFaceplateHTML(n):(n.readout?readoutFaceplateHTML(n):shellyFaceplateHTML(n)));
   }else{
@@ -327,6 +328,17 @@ export function markRequiredPorts(nodeId){
       }
       // a graph-driven gain input dims that row's manual gain/colour too.
       if(p.srole==='gain'){const row=nd.el.querySelector(`.sh-lrow[data-ch="${p.ch}"]`);if(row)row.classList.toggle('sh-gaindriven',wired);}
+      // control_loop: a wired target/enable owns the value, so the block's own
+      // field/switch goes inert — the same rule as a graph-driven Shelly relay.
+      // cl-wired on the row swaps the widget for the live value, so the row
+      // shows what the graph feeds rather than a stale manual number.
+      // Only the loop emits data-clctl, so this is inert for every other block.
+      const w=nd.el.querySelector(`[data-clctl="${cssAttr(p.id)}"]`);
+      if(w){
+        w.classList.toggle('cl-locked',wired);
+        if(w.tagName==='INPUT')w.disabled=wired;
+        const row=w.closest('.ro-row'); if(row)row.classList.toggle('cl-wired',wired);
+      }
     }
   }
 }
@@ -572,55 +584,144 @@ function readoutFaceplateHTML(n){
 // device id (baked into NAME_CHANNEL) rides in the "device" param, profile +
 // target VPD are inspector params. faceplate + readout:{climate} routes the live
 // output values through paintReadout onto the faceplate rows.
+// CLIMATE_PTIP: the hover sentence for every control_loop port. The labels say
+// WHAT a port is, these say what to wire into it — the room sensor vs the target
+// is the distinction users get wrong, so both tips name it explicitly.
+const CLIMATE_PTIP={
+  room_temp:'Measured room temperature — wire your external room sensor here. This is the value the loop controls. The device\'s own built-in sensor is read automatically and needs no wire.',
+  room_hum:'Measured room humidity in % — optional. Needed for the dew point and VPD readouts.',
+  target:'The temperature you WANT, in °C — not a sensor. Leave unwired and set it in the field on this block; wire it only if the graph should own it (then the wire wins).',
+  enable:'Runs the loop. Leave unwired and use the switch on this block; wire it only if the graph should own it (then the wire wins). Off does not just stop controlling — it switches the device OFF.',
+  light_on:'Grow light on/off, fed forward into the decision. Only used by the Cultivation (VPD) profile.',
+  light_in_s:'Seconds until the grow light switches, fed forward into the decision. Only used by the Cultivation (VPD) profile.',
+};
+// CLIMATE_TARGET_MIN/MAX bound the on-block target field. The node clamps to the
+// same range server-side (mideaengine: minTarget/maxTarget) — this is only the
+// convenience half of the guard.
+const CLIMATE_TARGET_MIN=5, CLIMATE_TARGET_MAX=35;
 function climateLoopDef(name){
   const dev=NAME_CHANNEL[name]||'';
+  // optional:false on room_temp is load-bearing: markRequiredPorts tests
+  // `p.optional===false`, so an absent key would leave the one mandatory input
+  // unmarked. srole:'control' on target/enable buys the single-driver
+  // exclusivity (io-driven + a refused second wire) the Shelly relay uses.
   const inp=[
-    {id:'room_temp',label:'Room temp (sensor)',kind:'float'},
+    {id:'room_temp',label:'Room temperature (external sensor)',kind:'float',optional:false},
     {id:'room_hum',label:'Humidity',kind:'float',optional:true},
-    {id:'target',label:'Target',kind:'float',optional:true},
-    {id:'enable',label:'Enable',kind:'bool',optional:true},
-    {id:'light_on',label:'Light on (FF)',kind:'bool',optional:true},
-    {id:'light_in_s',label:'Sec to light (FF)',kind:'float',optional:true},
+    {id:'target',label:'Target temperature',kind:'float',optional:true,srole:'control'},
+    {id:'enable',label:'Enable',kind:'bool',optional:true,srole:'control'},
+    {id:'light_on',label:'Grow light on (feedforward)',kind:'bool',optional:true},
+    {id:'light_in_s',label:'Seconds to light change (feedforward)',kind:'float',optional:true},
   ];
   const outp=[
-    {id:'status',label:'Gear',kind:'text'},
-    {id:'deviation',label:'Deviation',kind:'float',unit:'°C'},
-    {id:'tendency',label:'Tendency',kind:'float',unit:'°C/min'},
-    {id:'dewpoint',label:'Dewpoint',kind:'float',unit:'°C'},
+    {id:'status',label:'Control stage',kind:'text'},
+    {id:'deviation',label:'Deviation from target',kind:'float',unit:'°C'},
+    {id:'tendency',label:'Trend',kind:'float',unit:'°C/min'},
+    {id:'dewpoint',label:'Dew point',kind:'float',unit:'°C'},
     {id:'vpd',label:'VPD',kind:'float',unit:'kPa'},
-    {id:'cool_rate',label:'Cool rate',kind:'float',unit:'°C/min'},
+    {id:'cool_rate',label:'Cooling rate',kind:'float',unit:'°C/min'},
     {id:'alarm',label:'Alarm',kind:'text'},
   ];
-  return {cat:'climate',icon:NAME_ICON[name]||'snowflake',title:name,type:'midea.control_loop',implemented:true,live:false,faceplate:true,
+  // cardOnly props back the two on-block widgets: they live on the faceplate,
+  // not in the inspector (an inspector copy would desync the widget and skip
+  // the live send). pkind makes serializeGraph emit a real float/bool — a
+  // string would fail the engine's coerceValue and silently fall back to the
+  // param default.
+  return {cat:'climate-loop',icon:NAME_ICON[name]||'gauge',title:name,type:'midea.control_loop',implemented:true,live:false,faceplate:true,
     readout:{climate:true},
+    help:NAME_DESC[name]||'',
     props:[
       {k:'Device',v:dev,param:'device',inspectorOnly:true},
       {k:'Profile',v:'komfort',param:'profile',kind:'enum',opts:[{v:'komfort',l:'Comfort'},{v:'kultivierung',l:'Cultivation (VPD)'},{v:'buero',l:'Office'},{v:'heizen',l:'Heating'}]},
-      {k:'Target VPD (kPa)',v:'0',param:'target_hum',kind:'number'},
+      {k:'Target VPD (kPa)',v:'0',param:'target_hum',kind:'number',pkind:'float'},
+      {k:'Target temperature',v:25,param:'target_temp',pkind:'float',cardOnly:true},
+      {k:'Enable',v:true,param:'enabled',pkind:'bool',cardOnly:true},
     ],
     ports:{in:inp,out:outp}};
+}
+// climatePropVal reads a param-tagged prop's current value off the def.
+function climatePropVal(n,param,dflt){
+  const p=(n.props||[]).find(p=>p.param===param);
+  return p?p.v:dflt;
+}
+// upgradeClimateDef re-derives a stored control_loop's ports/props/help from the
+// current climateLoopDef. A graph persists the WHOLE def and replays it verbatim
+// on load, so without this an already-saved loop block would keep its old
+// ambiguous labels forever and — worse — carry no target_temp/enabled prop, so
+// the on-block field and switch would render with nothing behind them. The
+// user's own values (profile, target VPD, target, enable, the bound device) are
+// carried across by param name; only the presentation is refreshed. buildNode is
+// the single choke point for both load and drop, so this runs exactly once per
+// card build. No-op for every other node type.
+function upgradeClimateDef(n){
+  if(!n||n.type!=='midea.control_loop')return;
+  const fresh=climateLoopDef(n.title);
+  const old=n.props||[];
+  for(const fp of fresh.props){
+    const sp=old.find(p=>p.param===fp.param);
+    if(!sp||sp.v==null)continue;
+    // An empty stored device must not clobber the id freshly baked from the
+    // catalog; a non-empty one wins, so a device that has since left the
+    // catalog (switched to standard, removed) keeps its binding.
+    if(fp.param==='device'&&sp.v==='')continue;
+    fp.v=sp.v;
+  }
+  n.ports=fresh.ports;n.props=fresh.props;n.cat=fresh.cat;n.icon=fresh.icon;
+  n.readout=fresh.readout;n.faceplate=true;
+  n.help=fresh.help||n.help||'';
+  // Recolour only a card the user never touched: the loop moved from the cyan
+  // Climate category to its own rose one, and an untouched card should follow.
+  if(n.color==null||n.color==='#5EC8E5')n.color=(CAT['climate-loop']||{}).color||'#FF6B8B';
 }
 // climateFaceplateHTML renders the control_loop faceplate: the wired control
 // inputs (sockets left) then the live readout rows (paintReadout writes each
 // value into data-roval by the output port name). Reuses the readout classes.
 function climateFaceplateHTML(n){
-  const inrows=(n.ports.in||[]).map(p=>`<div class="ro-row ro-ctl">
-      <div class="port io-in ro-pi" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' input')}"><span class="socket${kindClass(p.kind)}"></span></div>
-      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span></div>
+  // Each input row carries data-roctl + a data-roctlval slot so a wired port's
+  // live value actually paints (paintReadout queries exactly that pair).
+  // target/enable additionally carry their own widget, used while the port is
+  // unwired; markRequiredPorts dims it the moment a wire lands.
+  // A control port carries BOTH its widget and a live-value slot: while the
+  // port is unwired the widget is shown and drives the value; once wired, CSS
+  // swaps in the slot so the row shows what the GRAPH is actually feeding the
+  // loop. Showing a dimmed, stale manual number next to a live wire is exactly
+  // the ambiguity this block is being fixed for.
+  const live=`<span class="ro-val cl-live" data-roctlval>—</span>`;
+  const widget=(p)=>{
+    if(p.id==='target'){
+      const v=climatePropVal(n,'target_temp',25);
+      return live+`<input type="number" class="cl-num" data-clctl="target" data-noselectdrag
+        step="0.5" min="${CLIMATE_TARGET_MIN}" max="${CLIMATE_TARGET_MAX}" value="${escAttr(v)}"
+        title="Target temperature — the value you want"><span class="ro-unit">°C</span>`;
+    }
+    if(p.id==='enable'){
+      const on=climatePropVal(n,'enabled',true)===true;
+      return live+`<button type="button" class="sh-sw cl-sw${on?' on':''}" data-clctl="enable" data-noselectdrag
+        title="Switch the loop on/off"><span class="sh-track"><span class="sh-thumb"></span></span></button>`;
+    }
+    return live;
+  };
+  const inrows=(n.ports.in||[]).map(p=>`<div class="ro-row ro-ctl" data-roctl="${escAttr(p.id)}">
+      <div class="port io-in ro-pi" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr(CLIMATE_PTIP[p.id]||((p.label||p.id)+' input'))}"><span class="socket${kindClass(p.kind)}"></span></div>
+      <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span><span class="ro-metric cl-w">${widget(p)}</span></div>
     </div>`).join('');
   const outrows=(n.ports.out||[]).map(p=>{
     const unit=p.unit?`<span class="ro-unit">${esc(p.unit)}</span>`:'';
     return `<div class="ro-row" data-ro="${escAttr(p.id)}">
       <div class="ro-disp"><span class="ro-label">${esc(p.label||p.id)}</span><span class="ro-metric"><span class="ro-val" data-roval>—</span>${unit}</span></div>
-      <div class="port io-out ro-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' readout')}"><span class="socket${kindClass(p.kind)}"></span></div>
+      <div class="port io-out ro-po" data-port="${escAttr(n.id+':'+p.id)}" data-tip="${escAttr((p.label||p.id)+' · read-only readout')}"><span class="socket${kindClass(p.kind)}"></span></div>
     </div>`;
   }).join('');
+  const help=n.help?`<button type="button" class="cl-help" data-clhelp data-noselectdrag data-tip="${escAttr(n.help)}"><i data-lucide="help-circle"></i></button>`:'';
   return `<div class="sh-head ro-head">
-      <div class="sh-badge"><i data-lucide="${escAttr(n.icon||'snowflake')}"></i></div>
-      <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">control loop</div></div>
-      <div class="sh-meta"><div class="sh-online ro-online" data-roonline title="Loop status"></div></div>
+      <div class="sh-badge"><i data-lucide="${escAttr(n.icon||'gauge')}"></i></div>
+      <div class="sh-id"><div class="sh-name" data-titletext>${esc(n.title)}</div><div class="sh-model">control loop · smart controller</div></div>
+      <div class="sh-meta">${help}<div class="sh-online ro-online" data-roonline title="Loop status"></div></div>
     </div>
-    <div class="sh-rows ro-rows">${inrows}${outrows}</div>`;
+    <div class="sh-rows ro-rows">
+      <div class="cl-grp">Inputs — wire your sensor here</div>${inrows}
+      <div class="cl-grp">Readouts — read-only</div>${outrows}
+    </div>`;
 }
 function constantDef(name,t){
   const seed=t.slice('input.constant.'.length); // bool | float | text
@@ -643,6 +744,15 @@ function createNode(name,wx,wy,cat){const t=defFor(name,cat);if(!t)return;
   // would reject it). Refuse the drop and select the existing module.
   if(t.type==='readout.device'&&t.readout){
     for(const id in nodes){const d=nodes[id].def;if(d.readout&&d.readout.id===t.readout.id){selectOnly(id);return;}}
+  }
+  // One control loop per device per graph: the loop is the device's single
+  // driver (the monitor takes an exclusive automatic lock while it runs), so a
+  // second one would fight the first over the same unit. Refuse the drop and
+  // select the loop already on the canvas.
+  if(t.type==='midea.control_loop'){
+    const dev=climatePropVal(t,'device','');
+    for(const id in nodes){const d=nodes[id].def;
+      if(d.type==='midea.control_loop'&&dev&&climatePropVal(d,'device','')===dev){selectOnly(id);return;}}
   }
   const def=JSON.parse(JSON.stringify(t)),slug=name.toLowerCase().replace(/[^a-z0-9]/g,'');
   // idc restarts at 0 per page load, so skip ids a loaded graph occupies.
