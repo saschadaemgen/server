@@ -31,12 +31,29 @@
   --ch-font: var(--font-sans, var(--font, system-ui, sans-serif));
   --ch-mono: var(--font-mono, var(--mono, ui-monospace, monospace));
 
-  /* Metric series hues - validated, fixed, never accent-derived. */
+  /* Metric series hues - validated, fixed, never accent-derived.
+
+     Colour follows the QUANTITY, so a temperature is orange on a UP-Sense and
+     on a Shelly alike. There are more quantities than the palette has slots,
+     so two hues do double duty across families that can never co-occur: a
+     Shelly reports no humidity and a UP-Sense no voltage, and the CVD check is
+     about marks that can sit side by side. The two sets were each validated
+     against both chart surfaces (contrast >= 3:1; worst all-pairs dE 10.3 and
+     11.4, the floor band, which the per-chart title + unit legitimise):
+       sensor  - temp, humidity, light, battery, state
+       metered - temp, power, voltage, current, freq
+     Current wears the CATEGORICAL red (#e66767), not the reserved status red:
+     it is identity, not a warning. Two greens for current+frequency validated
+     too, but read as one hue stacked in a panel. */
   --ch-s-temp: #d95926;
   --ch-s-humidity: #3987e5;
   --ch-s-light: #c98500;
   --ch-s-battery: #008300;
   --ch-s-state: #d55181;
+  --ch-s-power: #c98500;
+  --ch-s-voltage: #3987e5;
+  --ch-s-current: #e66767;
+  --ch-s-freq: #d55181;
 
   --ch-series: var(--ch-s-humidity);
 

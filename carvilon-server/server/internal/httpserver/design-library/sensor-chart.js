@@ -42,6 +42,10 @@
      themselves are defined (and validated) in sensor-chart.css. */
   function seriesVar(metric, kind) {
     if (/temp/i.test(metric)) return '--ch-s-temp';
+    if (/_power$/.test(metric)) return '--ch-s-power';
+    if (/_voltage$/.test(metric)) return '--ch-s-voltage';
+    if (/_current$/.test(metric)) return '--ch-s-current';
+    if (/_freq$/.test(metric)) return '--ch-s-freq';
     if (metric === 'humidity') return '--ch-s-humidity';
     if (metric === 'illuminance') return '--ch-s-light';
     if (metric === 'battery') return '--ch-s-battery';

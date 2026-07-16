@@ -527,7 +527,7 @@ function shellyDef(name){
   return {cat:'shelly',icon:NAME_ICON[name]||'toggle-right',title:name,type:'shelly.device',implemented:true,live:false,props:[],faceplate:true,
     // gen rides along so the run expansion emits the right topic/payload
     // grammar (0/absent = Gen2, the pre-Gen1 catalogs).
-    shelly:{id:s.id,mac:s.mac,prefix:s.prefix,model:s.model,name:s.name,gen:s.gen||0,channels:chans},
+    shelly:{id:s.id,mac:s.mac,histId:s.histId||'',prefix:s.prefix,model:s.model,name:s.name,gen:s.gen||0,channels:chans},
     ports:{in:inp,out:outp}};
 }
 // readoutDef builds a generic readout/sensor module from its catalog

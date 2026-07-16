@@ -292,7 +292,7 @@
                    data-model="{{$r.Model}}" data-search="{{$r.Search}}"
                    data-name="{{$r.Name}}" data-type="{{$r.TypeLabel}}"
                    data-ip="{{$r.IP}}" data-fw="{{$r.Firmware}}" data-mac="{{$r.MAC}}"
-                   data-kind="{{$r.Kind}}" data-id="{{$r.ID}}"
+                   data-kind="{{$r.Kind}}" data-id="{{$r.ID}}" data-recid="{{$r.RecID}}"
                    {{- if eq $r.Kind "shelly"}} data-shelly-id="{{$r.ShellyID}}" data-gen="{{$r.ShellyGen}}" data-prefix="{{$r.ShellyPrefix}}" data-channels="{{$r.ChannelsJSON}}" data-mqtt="{{$r.MQTTState}}"{{end}}>
                 <div class="dc-cell num">{{printf "%02d" $r.Index}}</div>
                 <div class="dc-cell">
@@ -509,14 +509,21 @@
                 </form>
               </template>
               {{end}}
-              {{/* Sensor recording settings (Sensor History H1): the
-                   averaging interval + retention, per sensor. The LIVE
-                   reading is unaffected - only the stored history. */}}
-              {{if eq $r.Kind "sensor"}}
-              <template data-dc-actions="{{$r.Index}}">
+              {{/* Recorded history + its recording settings (Sensor History).
+                   Rendered for ANY row that records - a Protect sensor and a
+                   metered Shelly alike - so the two are one surface, not a
+                   per-vendor special case. RecID is the row's history key: for
+                   a sensor that is its own id, for a Shelly its MAC-derived id
+                   (row.ID there is the address, which DHCP can move). The LIVE
+                   reading is unaffected by any of this - only the stored
+                   history is averaged and pruned. */}}
+              {{if $r.RecID}}
+              <template data-dc-rec="{{$r.Index}}">
+                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>
+                <div data-sensor-history></div>
                 <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Recording</span><span class="dc-hr"></span></div>
                 <form class="dc-act-form" method="post" action="/a/devices/sensors/recording">
-                  <input type="hidden" name="device" value="{{$r.ID}}">
+                  <input type="hidden" name="device" value="{{$r.RecID}}">
                   <span class="dc-act-label">Averaging interval</span>
                   <select class="dc-act-input" name="interval_sec" aria-label="Averaging interval">
                     <option value="0"{{if eq $r.RecIntervalSec 0}} selected{{end}}>Default ({{$r.RecDefaultIntervalLabel}})</option>
@@ -537,7 +544,7 @@
                   <div class="dc-act-row">
                     <button class="dc-act-btn" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save recording</button>
                   </div>
-                  <p class="dc-act-hint">The live reading stays real-time and is unaffected by this - only the stored history is averaged over the interval, then auto-deleted after the retention age.</p>
+                  <p class="dc-act-hint">The live reading stays real-time and is unaffected by this - only the stored history is averaged over the interval, then auto-deleted after the retention age.{{if $r.RecNeedsBroker}} This device is recorded from what it publishes to the MQTT broker, and the broker is currently switched off - the history above stays readable, but nothing new is recorded until it runs.{{end}}</p>
                 </form>
               </template>
               {{end}}
@@ -567,6 +574,16 @@
   // panel fresh. A per-row detail-fetch failure is shown inline in the
   // panel and never breaks the page.
   (function () {
+    // appendRecSection clones the row's History + Recording block (the chart
+    // host and the interval/retention form) into the panel. The template is
+    // rendered only for rows that actually record - a Protect sensor, a
+    // metered Shelly - so a row without one simply gets nothing here, and
+    // neither branch has to know which kinds those are.
+    function appendRecSection(row, rightCol) {
+      var rec = dc.tbody.querySelector('[data-dc-rec="' + row.getAttribute('data-idx') + '"]');
+      if (rec && rec.content) rightCol.appendChild(rec.content.cloneNode(true));
+    }
+
     function fillRight(row, rightCol) {
       var kind = row.getAttribute('data-kind');
       // Every row switch lands here, but onClose only fires when the panel
@@ -600,6 +617,10 @@
         rightCol.innerHTML = '';
         var det = dc.tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
         if (det && det.content) rightCol.appendChild(det.content.cloneNode(true));
+        // A metered Shelly records its channels off the broker stream, so it
+        // gets the same History + Recording surface a sensor has (the template
+        // only exists for rows that record).
+        appendRecSection(row, rightCol);
         cockpit.mountSettingsSkeleton(row, rightCol);
         return;
       }
@@ -611,12 +632,7 @@
       // it has slid in, and an svg sized against a zero-width column is wrong.
       if (kind === 'sensor') {
         rightCol.innerHTML = '';
-        var shist = document.createElement('div');
-        shist.setAttribute('data-sensor-history', '');
-        shist.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>';
-        rightCol.appendChild(shist);
-        var sact = dc.tbody.querySelector('[data-dc-actions="' + row.getAttribute('data-idx') + '"]');
-        if (sact && sact.content) rightCol.appendChild(sact.content.cloneNode(true));
+        appendRecSection(row, rightCol);
         var sdet = document.createElement('div');
         sdet.setAttribute('data-sensor-detail', '');
         sdet.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Sensor readings</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
@@ -639,10 +655,14 @@
     function mountSensorChart(row, rightCol) {
       destroySensorChart();
       var hostEl = rightCol.querySelector('[data-sensor-history]');
-      if (!hostEl || !window.CarvilonSensorChart) return;
+      // data-recid, NOT data-id: a Shelly row's id is its address, while its
+      // history is keyed on the durable MAC-derived id. Empty = the row
+      // records nothing and has no chart host either.
+      var recID = row.getAttribute('data-recid');
+      if (!hostEl || !recID || !window.CarvilonSensorChart) return;
       // title:'' - the section already has its own dc-sec-head, so the
       // component contributes only its range switcher and the charts.
-      sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: row.getAttribute('data-id'), title: '' });
+      sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: recID, title: '' });
     }
 
     function afterSlide(row, rightCol) {
@@ -650,7 +670,7 @@
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
       if (kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') return;
-      if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
+      if (kind === 'shelly') { mountSensorChart(row, rightCol); cockpit.afterSlide(row, rightCol); return; }
       if (kind === 'sensor') {
         mountSensorChart(row, rightCol);
         loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row);

@@ -59,6 +59,7 @@ import (
 	"carvilon.local/server/internal/readerstore"
 	"carvilon.local/server/internal/secrets"
 	"carvilon.local/server/internal/sensorhistory"
+	"carvilon.local/server/internal/shellyhistory"
 	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/sidechannel"
 	"carvilon.local/server/internal/streampublish"
@@ -329,6 +330,22 @@ func runEdge(ctx context.Context, log *slog.Logger, logBuf *logbuf.Buffer, cfg c
 		Log:    log,
 	})
 	go sensorHistRec.Run(ctx)
+
+	// Sensor History: Shelly records by TAPPING the stream its devices already
+	// publish to the embedded broker - no second poll, no device connection.
+	// The tap is installed after the broker is started (it needs the device
+	// store and the recorder, both built later than the broker); the hook
+	// behind it reads the tap atomically and is re-added on every broker
+	// start, so neither the ordering nor a live reconfigure can strand it.
+	// The broker being off simply means no publishes and so no recording -
+	// the same condition that already hides Shelly from the editor catalog.
+	shellyHist := shellyhistory.New(shellyhistory.Config{
+		Store:  shellyStore,
+		Record: sensorHistRec.Record,
+		Log:    log,
+	})
+	go shellyHist.Run(ctx)
+	mqttBroker.SetReadingTap(shellyHist.Handle)
 
 	// Midea Climate Controller (Etappe 1): the persistent device set +
 	// AES-256-GCM credentials (migration 042) and the monitor that keeps

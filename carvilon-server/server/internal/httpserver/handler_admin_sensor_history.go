@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"carvilon.local/server/internal/sensorhistory"
+	"carvilon.local/server/internal/shellycaps"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/web/designer"
 )
 
@@ -74,6 +77,61 @@ type sensorMetricRow struct {
 	N        int64  `json:"n,omitempty"`
 }
 
+// metricCapabilities is the capability view the history charts label from. It
+// is deliberately NOT readoutDevicesForCatalog: that function's job is to
+// generate the editor's capability-driven readout BLOCKS, and a family listed
+// there gets one. Shelly already has its own richer block (relays, inputs,
+// lights) from shellyDevicesForCatalog, so declaring it there would give every
+// Shelly a second, duplicate block on the canvas. Recording capabilities and
+// block generation are two jobs; this is the first one.
+func (s *Server) metricCapabilities(ctx context.Context) []designer.ReadoutDevice {
+	out := s.readoutDevicesForCatalog(ctx) // Protect + Midea (they own blocks too)
+	return append(out, s.shellyMetricCaps(ctx)...)
+}
+
+// shellyMetricCaps declares what an adopted Shelly records, per channel, from
+// its model - the same derivation the editor's module uses, so the two agree
+// on what the device reports. Metrics only: no block comes from this.
+//
+// Unlike the designer catalog this does NOT gate on the broker running: the
+// samples already recorded stay queryable and chartable while the broker is
+// off, and hiding their labels then would only make a real chart go anonymous.
+func (s *Server) shellyMetricCaps(ctx context.Context) []designer.ReadoutDevice {
+	if s.shellystore == nil {
+		return nil
+	}
+	devs, err := s.shellystore.ListActive(ctx)
+	if err != nil {
+		s.log.Error("shelly metric capabilities", "err", err)
+		return nil
+	}
+	var out []designer.ReadoutDevice
+	for _, d := range devs {
+		id := shellystore.HistoryID(d.MAC)
+		if id == "" {
+			continue // no MAC, no durable history key
+		}
+		ros := shellycaps.Readouts(d.Model, d.Gen == shellystore.Gen1, "")
+		if len(ros) == 0 {
+			continue // nothing metered to record
+		}
+		rd := designer.ReadoutDevice{
+			ID:    id,
+			Class: "switch",
+			Name:  shellyDisplayName(d),
+			Model: shellyCatalogModel(d),
+			Icon:  "zap",
+		}
+		for _, ro := range ros {
+			rd.Readouts = append(rd.Readouts, designer.ReadoutPort{
+				Key: ro.Token, Label: ro.Label, Unit: ro.Unit, Kind: "float",
+			})
+		}
+		out = append(out, rd)
+	}
+	return out
+}
+
 // handleSensorMetrics serves the metric list for one device: which metrics
 // are chartable and which of them have stored history. Both chart homes (the
 // devices cockpit and the Logic Editor's sensor block) read this, so neither
@@ -114,7 +172,7 @@ func (s *Server) handleSensorMetrics(w http.ResponseWriter, r *http.Request) {
 	caps := map[string]designer.ReadoutPort{}
 	var order []string
 	var name, class string
-	for _, d := range s.readoutDevicesForCatalog(r.Context()) {
+	for _, d := range s.metricCapabilities(r.Context()) {
 		if d.ID != device {
 			continue
 		}

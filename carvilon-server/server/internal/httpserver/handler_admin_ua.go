@@ -45,6 +45,8 @@ import (
 
 	"carvilon.local/server/internal/protectapi"
 	"carvilon.local/server/internal/readerstore"
+	"carvilon.local/server/internal/shellycaps"
+	"carvilon.local/server/internal/shellystore"
 	"carvilon.local/server/internal/uaapi"
 )
 
@@ -228,14 +230,28 @@ type uaRow struct {
 	MideaProfile   string
 	MideaAutomatic bool // a Logic-Editor control loop is driving this device
 
-	// Sensor History H1: the per-sensor recording knobs prefilled into the
+	// Sensor History H1: the per-device recording knobs prefilled into the
 	// cockpit form. RecIntervalSec/RecRetentionSec are the stored OVERRIDE
 	// seconds (0 = inherit the global default); the Default*Label pair names
-	// what "Default" resolves to so the form can show it. Empty for non-sensors.
+	// what "Default" resolves to so the form can show it. Empty for rows that
+	// record nothing.
+	//
+	// RecID is the row's key in the sensor-history keyspace, and is NOT always
+	// row.ID: a Protect sensor's id is already durable, but a Shelly row's ID
+	// is its ADDRESS (the provision/remove forms post it), which DHCP can move
+	// - so a Shelly keys on its MAC-derived id instead. Anything recording
+	// must set this; empty means the row has no history and its cockpit shows
+	// no recording form or chart.
+	RecID                    string
 	RecIntervalSec           int64
 	RecRetentionSec          int64
 	RecDefaultIntervalLabel  string
 	RecDefaultRetentionLabel string
+	// RecNeedsBroker marks a row whose recording rides the MQTT broker's
+	// stream (Shelly) while the broker is off: the form and the already
+	// recorded history stay, but the cockpit says plainly why nothing new
+	// arrives instead of showing a chart that silently never fills.
+	RecNeedsBroker bool
 
 	// Lowercased "name model ip mac" for the client search box.
 	Search string
@@ -395,7 +411,7 @@ func (s *Server) buildUAOverview(ctx context.Context, data *uaOverviewData, read
 		}
 	}
 
-	s.buildRows(data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx), mideaActive, pendingRows, ignoredRows)
+	s.buildRows(ctx, data, devices, doors, cams, sens, readers, <-shellyCh, s.shellyRowInfoByAddr(ctx), s.viewerMACSet(ctx), mideaActive, pendingRows, ignoredRows)
 }
 
 // shellyRowInfo carries the store-side facts a Shelly row shows beyond the
@@ -443,7 +459,7 @@ func (s *Server) shellyRowInfoByAddr(ctx context.Context) map[string]shellyRowIn
 // buildRows turns devices + doors + Protect cameras/sensors + local
 // readers + Shelly devices into the flat, pre-sorted row list and
 // computes the facet counts.
-func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool, mideaActive, pendingRows, ignoredRows []uaRow) {
+func (s *Server) buildRows(ctx context.Context, data *uaOverviewData, devices []uaapi.Device, doors []uaapi.Door, cams []protectapi.Camera, sens []protectapi.Sensor, readers []readerstore.Reader, shellies []shellyProbe, shellyInfo map[string]shellyRowInfo, mockMACs map[string]bool, mideaActive, pendingRows, ignoredRows []uaRow) {
 	catCount := map[string]int{}
 	modelCount := map[string]int{}
 
@@ -472,14 +488,38 @@ func (s *Server) buildRows(data *uaOverviewData, devices []uaapi.Device, doors [
 	}
 	for _, sn := range sens {
 		row := makeSensorRow(sn, now)
-		s.fillSensorRecording(&row)
+		// A Protect sensor's row ID is already the durable id the recorder
+		// stores under.
+		s.fillSensorRecording(&row, row.ID)
 		addDeviceRow(row, sn.IsOnline())
 	}
 	for _, rd := range readers {
 		addDeviceRow(makeReaderRow(rd), rd.Online)
 	}
+	recorded := s.recordedDeviceSet(ctx)
 	for _, p := range shellies {
-		addDeviceRow(makeShellyRow(p, shellyInfo[p.client.Address()]), p.err == nil)
+		info := shellyInfo[p.client.Address()]
+		row := makeShellyRow(p, info)
+		// A Shelly records its metered channels (power/voltage/current/...)
+		// off the broker stream, so its cockpit gets the same recording form
+		// the sensors have - keyed on the MAC-derived id, never on row.ID
+		// (the address).
+		//
+		// The section shows when the model DECLARES metered channels, OR when
+		// the device has already recorded something. The second half is not
+		// belt-and-braces: the declaration is a heuristic over the model string
+		// while the tap records whatever the device actually publishes, and the
+		// two disagree for real hardware (a Plus Plug S meters but matches none
+		// of the heuristic's markers). Gating on the declaration alone let such
+		// a device fill the store with samples that no chart offered and no
+		// form could configure.
+		hist := shellystore.HistoryID(info.MAC)
+		declares := len(shellycaps.Readouts(info.Model, info.Gen == shellystore.Gen1, "")) > 0
+		if hist != "" && (declares || recorded[hist]) {
+			s.fillSensorRecording(&row, hist)
+			row.RecNeedsBroker = row.RecID != "" && !s.mqttBrokerRunning()
+		}
+		addDeviceRow(row, p.err == nil)
 	}
 	// Midea Climate Controllers (adopted): their live status comes from the
 	// monitor snapshot the row already carries, so they fold in like any other
@@ -758,16 +798,37 @@ func makeSensorRow(sn protectapi.Sensor, now time.Time) uaRow {
 	return row
 }
 
+// recordedDeviceSet is the set of device ids that already have stored samples.
+// One query for the whole page rather than a lookup per row, so a device whose
+// model the capability heuristic misclassifies still gets its history surfaced
+// once real samples exist. Empty when history is unavailable.
+func (s *Server) recordedDeviceSet(ctx context.Context) map[string]bool {
+	if s.sensorHistory == nil {
+		return nil
+	}
+	ids, err := s.sensorHistory.Devices(ctx)
+	if err != nil {
+		s.log.Error("sensor history: device set", "err", err)
+		return nil
+	}
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
+
 // fillSensorRecording prefills a sensor row's recording-settings fields
 // (Sensor History H1) from the per-sensor config: the stored override
 // seconds (0 = inherit) so the form selects the right option, plus the
 // human labels of what "Default" resolves to. A nil config store (history
 // disabled) leaves the zero values and the form shows only its defaults.
-func (s *Server) fillSensorRecording(row *uaRow) {
-	if s.sensorHistCfg == nil {
+func (s *Server) fillSensorRecording(row *uaRow, id string) {
+	if s.sensorHistCfg == nil || id == "" {
 		return
 	}
-	row.RecIntervalSec, row.RecRetentionSec = s.sensorHistCfg.Raw(row.ID)
+	row.RecID = id
+	row.RecIntervalSec, row.RecRetentionSec = s.sensorHistCfg.Raw(id)
 	def := s.sensorHistCfg.Defaults()
 	row.RecDefaultIntervalLabel = recordingIntervalLabel(int64(def.Interval.Seconds()))
 	row.RecDefaultRetentionLabel = recordingRetentionLabel(int64(def.Retention.Seconds()))

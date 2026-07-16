@@ -82,8 +82,15 @@ type ShellyChannel struct {
 // topic. Gen tells the expansion which topic/payload grammar to emit
 // (2 when absent - every pre-Gen1 catalog was Gen2-only).
 type ShellyDevice struct {
-	ID       int64           `json:"id"`
-	MAC      string          `json:"mac"`
+	ID  int64  `json:"id"`
+	MAC string `json:"mac"`
+	// HistID is the device's key in the sensor-history keyspace, so the
+	// module's inspector can chart its recorded metrics. It is neither ID (a
+	// rowid a re-adopt changes) nor the cockpit row's address - the server
+	// mints it from the MAC (shellystore.HistoryID), and the editor must not
+	// re-derive that convention client-side. Empty when the device has no MAC
+	// and so records nothing.
+	HistID   string          `json:"histId,omitempty"`
 	Name     string          `json:"name"`
 	Model    string          `json:"model"`
 	Gen      int             `json:"gen,omitempty"`

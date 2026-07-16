@@ -51,6 +51,28 @@ const (
 	Gen2       = 2
 )
 
+// HistoryID returns a device's stable key in the sensor-history keyspace
+// (sensor_samples.device_id and the per-device recording config), or "" when
+// the device has no MAC and therefore no durable identity.
+//
+// It is the MAC and not the other two ids on purpose. The row id is a rowid
+// that a remove + re-adopt changes, and the Device Center row's ID is the
+// device's ADDRESS, which DHCP can move - either would silently orphan a
+// device's recorded history and its recording settings. The MAC is the one
+// durable identity (it is already the table's unique index and the editor
+// block's type).
+//
+// The value is qualified with a "shelly-" prefix because the keyspace is flat
+// and shared with other vendors' ids; it matches the broker account the
+// provisioner mints for the same device, so the two read the same.
+func HistoryID(mac string) string {
+	m := strings.ToLower(strings.TrimSpace(mac))
+	if m == "" {
+		return ""
+	}
+	return "shelly-" + m
+}
+
 // Origins and states as stored in the table.
 const (
 	OriginManual     = "manual"

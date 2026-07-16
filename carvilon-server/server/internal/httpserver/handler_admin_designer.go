@@ -242,6 +242,7 @@ func (s *Server) shellyDevicesForCatalog(ctx context.Context) []designer.ShellyD
 		out = append(out, designer.ShellyDevice{
 			ID:       d.ID,
 			MAC:      d.MAC,
+			HistID:   shellystore.HistoryID(d.MAC),
 			Name:     shellyDisplayName(d),
 			Model:    shellyCatalogModel(d),
 			Gen:      gen,

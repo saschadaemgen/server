@@ -27,7 +27,14 @@ func Channels(model string) []Channel {
 	// Metered when the model marks it: "PM" (app slug, e.g. Pro4PM) or the
 	// "…PE…" Pro-switch raw code (SPSW-x0YPE16EU). A non-metered relay
 	// (plain switch) reports no power - the faceplate then hides the meter.
-	meter := strings.Contains(m, "PM") || strings.Contains(m, "PE") || strings.Contains(m, "EM")
+	//
+	// "PLUG" is metered too and carries no such marker: a Plus Plug S reports
+	// as "Shelly PlusPlugS" and matches none of the above, so it read as a
+	// plain switch and its power/voltage/current went unmodelled - the Gen1
+	// table has always marked every SHPLG-* plug metered, and the Gen2 plugs
+	// meter the same way.
+	meter := strings.Contains(m, "PM") || strings.Contains(m, "PE") ||
+		strings.Contains(m, "EM") || strings.Contains(m, "PLUG")
 	out := make([]Channel, 0, n)
 	for i := 0; i < n; i++ {
 		out = append(out, Channel{ID: i, Meter: meter})

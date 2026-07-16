@@ -28,12 +28,19 @@ export function destroyReadoutHistory() {
   }
 }
 
-export function renderReadoutInspector(container, nodeId) {
+const HINT = 'Stored history, averaged over the recording interval. The block’s live output stays real-time and is not affected by this.';
+
+// historySection builds a "Recorded history" section for a device id and
+// mounts the shared chart component into it. The caller places the returned
+// element, so the same section serves a readout block's whole panel and a
+// Shelly module's device view alike. Returns null for a device with no
+// history key (nothing to chart, so no empty section).
+//
+// Mounting destroys any previously mounted chart: only one node is inspected
+// at a time, and its chart must not outlive the panel render that owned it.
+export function historySection(deviceID, note) {
   destroyReadoutHistory();
-  const nd = nodes[nodeId];
-  if (!nd) return;
-  const ro = nd.def.readout || {};
-  container.textContent = '';
+  if (!deviceID) return null;
 
   const sec = document.createElement('div');
   sec.className = 'si-sec';
@@ -42,36 +49,52 @@ export function renderReadoutInspector(container, nodeId) {
   h.textContent = 'Recorded history';
   sec.appendChild(h);
 
-  // ro.id is the PLAIN device id, which is exactly what the history API keys
-  // on - the same id the recorder stores under. The prefixed channel ref
-  // ("protect:<id>:temperature") is the engine's namespace and must not be
-  // used here.
-  if (!ro.id) {
-    const none = document.createElement('div');
-    none.className = 'si-none';
-    none.textContent = 'Device not linked.';
-    sec.appendChild(none);
-    container.appendChild(sec);
-    return;
-  }
-
   const hint = document.createElement('div');
   hint.className = 'si-hint';
-  hint.textContent = 'Stored history, averaged over the recording interval. The block’s live output stays real-time and is not affected by this.';
+  hint.textContent = note || HINT;
   sec.appendChild(hint);
 
   const host = document.createElement('div');
   sec.appendChild(host);
-  container.appendChild(sec);
 
   if (!window.CarvilonSensorChart) {
     const err = document.createElement('div');
     err.className = 'si-none';
     err.textContent = 'Chart component unavailable.';
     sec.appendChild(err);
-    return;
+    return sec;
   }
   // title:'' - the si-h above is the section heading; the component adds only
   // its range switcher and the per-metric charts.
-  live = window.CarvilonSensorChart.mount(host, { device: ro.id, title: '' });
+  live = window.CarvilonSensorChart.mount(host, { device: deviceID, title: '' });
+  return sec;
+}
+
+export function renderReadoutInspector(container, nodeId) {
+  destroyReadoutHistory();
+  const nd = nodes[nodeId];
+  if (!nd) return;
+  const ro = nd.def.readout || {};
+  container.textContent = '';
+
+  // ro.id is the PLAIN device id, which is exactly what the history API keys
+  // on - the same id the recorder stores under. The prefixed channel ref
+  // ("protect:<id>:temperature") is the engine's namespace and must not be
+  // used here.
+  const sec = historySection(ro.id);
+  if (!sec) {
+    const wrap = document.createElement('div');
+    wrap.className = 'si-sec';
+    const h = document.createElement('div');
+    h.className = 'si-h';
+    h.textContent = 'Recorded history';
+    const none = document.createElement('div');
+    none.className = 'si-none';
+    none.textContent = 'Device not linked.';
+    wrap.appendChild(h);
+    wrap.appendChild(none);
+    container.appendChild(wrap);
+    return;
+  }
+  container.appendChild(sec);
 }

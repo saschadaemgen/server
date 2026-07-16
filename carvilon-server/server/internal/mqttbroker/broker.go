@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/listeners"
@@ -79,6 +80,11 @@ type Manager struct {
 	monitor  *Monitor
 	log      *slog.Logger
 	stateDir string // base dir for the generated self-signed cert
+
+	// readingTap is the sensor-history observer (see readings.go). Atomic,
+	// not mu-guarded: it is read on the broker's publish path, and it is
+	// installed after Start (the stores it needs are built later in main).
+	readingTap atomic.Pointer[ReadingTap]
 
 	mu       sync.Mutex
 	settings Settings
@@ -238,6 +244,14 @@ func (m *Manager) startLocked(ctx context.Context) error {
 	// so a reconfigure keeps the stream alive.
 	if err := srv.AddHook(&monitorHook{monitor: m.monitor}, nil); err != nil {
 		return m.fail(fmt.Errorf("add monitor hook: %w", err))
+	}
+	// Sensor-history fan-out: the same device publishes, RAW and untruncated,
+	// to the recording tap. It cannot ride the monitor hub above - that one
+	// bounds and stringifies payloads for display, which would hand a
+	// half-JSON status to a parser. Re-added on every start for the same
+	// reason, and a no-op until a tap is installed (SetReadingTap).
+	if err := srv.AddHook(&readingsHook{m: m}, nil); err != nil {
+		return m.fail(fmt.Errorf("add readings hook: %w", err))
 	}
 
 	// --- plaintext listener: LAN-only, never 0.0.0.0 ---

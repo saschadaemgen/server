@@ -11,6 +11,7 @@
 
 import { nodes, esc, escAttr } from './store.js';
 import { selectOnly } from './selection.js';
+import { historySection } from './readouthistory.js';
 
 // channelView tracks which channel the inspector is focused on. node===null
 // means the device view. `pending` is set ONLY by a channel click, so the
@@ -58,6 +59,16 @@ function renderDevice(container, nodeId){
   if(window.lucide) lucide.createIcons();
   const sid = def.shelly && def.shelly.id;
   const host = container.querySelector('.si-devsecs');
+  // Recorded history (Sensor History): a metered Shelly's channels are taped
+  // off the broker stream into the history store, so the module charts them
+  // here - the SAME component the devices cockpit and the readout blocks
+  // mount, never a second implementation. Mounted after the innerHTML above
+  // (which would wipe it) and before the async device sections, which only
+  // ever replace .si-devsecs. histId is the server-minted history key: the
+  // module must not re-derive it from the MAC.
+  const hsec = historySection(def.shelly && def.shelly.histId,
+    'Recorded from what the device publishes to the broker, averaged over the recording interval. The module’s live values are unaffected.');
+  if(hsec) container.insertBefore(hsec, host);
   if(!sid){ host.innerHTML='<div class="si-note">Device not linked.</div>'; return; }
   // Gen1 modules read the frozen REST surface, not the Gen2 RPC tree -
   // fetching the Gen2 endpoint would 404 into a false "unreachable".
