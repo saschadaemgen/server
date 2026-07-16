@@ -313,8 +313,17 @@
               </div>
 
               <template data-dc-detail="{{$r.Index}}">
-                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Overview</span><span class="dc-hr"></span></div>
-                {{range $r.Detail}}<div class="dc-kv"><span class="dc-k">{{.Key}}</span><span class="dc-v">{{.Value}}</span></div>{{end}}
+                {{/* The overview belongs in the LEFT column for every family:
+                     it is the widest one, so its facts lay out in two tracks
+                     instead of one tall stack of text, and it keeps the
+                     identity block out of the narrow column that carries the
+                     settings. Most families' detail is cloned there anyway and
+                     this is a no-op; a Shelly's is cloned into the RIGHT
+                     column, and dc-split-sides moves it across. */}}
+                <div data-dc-side="left">
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Overview</span><span class="dc-hr"></span></div>
+                  <div class="dc-kv-cols">{{range $r.Detail}}<div class="dc-kv"><span class="dc-k">{{.Key}}</span><span class="dc-v">{{.Value}}</span></div>{{end}}</div>
+                </div>
                 {{if $r.Capabilities}}
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Capabilities</span><span class="dc-hr"></span></div>
                   <div class="dc-caps">{{range $r.Capabilities}}<span class="dc-cap">{{.}}</span>{{end}}</div>
@@ -425,6 +434,15 @@
                   </div>
                   {{end}}
 
+                  {{/* Everything below moves into the panel's RIGHT column
+                       (see dc-split-sides): an adopted Midea renders entirely
+                       from this one template, which the shell clones into the
+                       LEFT column - so the settings stacked up to a scrolling
+                       1073px there while the right column stayed completely
+                       empty. Split across both, each side fits without
+                       scrolling. Overview + Controls stay left (what you came
+                       for); the profile + credentials settings go right. */}}
+                  <div data-dc-side="right">
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Profile</span><span class="dc-hr"></span></div>
                   <form class="dc-act-form" method="post" action="/a/devices/midea/profile">
                     <input type="hidden" name="id" value="{{$r.ID}}">
@@ -445,6 +463,7 @@
                     </div>
                     <p class="dc-act-hint">Export saves this device&rsquo;s permanent V3 token/key so you can re-adopt it even if Midea shuts the cloud token service down - keep the file safe. Removing forgets the device and drops its stored credentials here; the device itself is not changed.</p>
                   </div>
+                  </div>{{/* /data-dc-side="right" */}}
                 {{end}}
                 {{/* Midea pending (discovered, not contacted): adopt (cloud
                      region + optional imported-key fallback) or ignore. */}}
@@ -574,6 +593,41 @@
   // panel fresh. A per-row detail-fetch failure is shown inline in the
   // panel and never breaks the page.
   (function () {
+    // splitDetailSides distributes the sections a row's detail template marked
+    // with data-dc-side, wherever the shell's clone happened to put them: the
+    // whole template lands in ONE column (the left by default, the right for a
+    // Shelly cockpit), which is what left one column scrolling while the other
+    // stayed empty. A row that marks nothing is untouched, so the split is a
+    // property of the row's markup rather than a per-family branch here.
+    //
+    // The marker WRAPPER never survives: its sections end up as direct children
+    // of a column, exactly as an unmarked section is, so borders and padding
+    // land identically on both sides.
+    // unwrapInto empties a marker into col: at the top when prepend, else at
+    // the end. Passing the marker's own parent unwraps it where it already
+    // stands (anchored on the marker, so the sections keep their position -
+    // appending would drop the overview below everything else).
+    function unwrapInto(marker, col, prepend) {
+      var anchor = col === marker.parentNode ? marker : (prepend ? col.firstChild : null);
+      while (marker.firstChild) col.insertBefore(marker.firstChild, anchor);
+      marker.parentNode.removeChild(marker);
+    }
+    function splitDetailSides(rightCol) {
+      var leftCol = rightCol.parentNode && rightCol.parentNode.querySelector('[data-dc-left]');
+      if (!leftCol) return;
+      var toRight = leftCol.querySelector('[data-dc-side="right"]');
+      if (toRight) unwrapInto(toRight, rightCol, false);
+      // The overview leads its column, hence prepend.
+      var toLeft = rightCol.querySelector('[data-dc-side="left"]');
+      if (toLeft) unwrapInto(toLeft, leftCol, true);
+      // A section already sitting in the column it asked for just loses its
+      // wrapper, in place.
+      var inLeft = leftCol.querySelector('[data-dc-side="left"]');
+      if (inLeft) unwrapInto(inLeft, leftCol, false);
+      var inRight = rightCol.querySelector('[data-dc-side="right"]');
+      if (inRight) unwrapInto(inRight, rightCol, false);
+    }
+
     // appendRecSection clones the row's History + Recording block (the chart
     // host and the interval/retention form) into the panel. The template is
     // rendered only for rows that actually record - a Protect sensor, a
@@ -598,16 +652,19 @@
         rightCol.innerHTML = '';
         var act = dc.tbody.querySelector('[data-dc-actions="' + row.getAttribute('data-idx') + '"]');
         if (act && act.content) rightCol.appendChild(act.content.cloneNode(true));
+        splitDetailSides(rightCol);
         return;
       }
       // Pending / ignored Shelly + all Midea kinds: rendered entirely from the
       // pre-rendered detail template (overview + control/approve/release forms),
       // no cockpit and no lazy fetch. fillLeft returns false for these, so
-      // dcInit's default clones that template into the LEFT column; keep the
-      // right empty so the panel is not rendered twice.
+      // dcInit's default clones that template into the LEFT column - which left
+      // one column scrolling and the other blank. Anything the template marked
+      // for the right column moves across now.
       if (kind === 'shelly-pending' || kind === 'shelly-ignored'
           || kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') {
         rightCol.innerHTML = '';
+        splitDetailSides(rightCol);
         return;
       }
       // Shelly Gen2 cockpit: the right column is information (the
@@ -617,6 +674,11 @@
         rightCol.innerHTML = '';
         var det = dc.tbody.querySelector('[data-dc-detail="' + row.getAttribute('data-idx') + '"]');
         if (det && det.content) rightCol.appendChild(det.content.cloneNode(true));
+        // The Shelly cockpit clones its detail into the RIGHT column, so the
+        // overview travels the other way: out of the narrow settings column
+        // and up to the top of the wide one, where cockpit.fillLeft has
+        // already put the channel functions.
+        splitDetailSides(rightCol);
         // A metered Shelly records its channels off the broker stream, so it
         // gets the same History + Recording surface a sensor has (the template
         // only exists for rows that record).
@@ -632,6 +694,9 @@
       // it has slid in, and an svg sized against a zero-width column is wrong.
       if (kind === 'sensor') {
         rightCol.innerHTML = '';
+        // The overview is cloned into the left column by the shell; unwrap its
+        // side marker there so it renders like any other section.
+        splitDetailSides(rightCol);
         appendRecSection(row, rightCol);
         var sdet = document.createElement('div');
         sdet.setAttribute('data-sensor-detail', '');
@@ -643,6 +708,7 @@
       rightCol.innerHTML = '<div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">'
         + lazyTitle
         + '</span><span class="dc-hr"></span></div><div class="dc-lazy-hint">Loading&hellip;</div>';
+      splitDetailSides(rightCol);
     }
 
     // The mounted history charts of the open panel, so switching rows or
