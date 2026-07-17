@@ -150,3 +150,41 @@ func TestHandleSensorHistory_Unavailable(t *testing.T) {
 		t.Fatalf("status = %d, want 503 when history is not wired", rr.Code)
 	}
 }
+
+// Regression (Midea charts vanished after the Shelly work): the metrics
+// endpoint must still surface a Midea device's recorded metrics. Midea keys on
+// its own device id (not a shelly-<mac> id), and even with no live monitor to
+// supply labels, a recorded metric must come back recorded:true so the chart
+// renders it.
+func TestHandleSensorMetrics_MideaRecordedMetricsStillSurface(t *testing.T) {
+	s, st := newSensorHistServer(t)
+	ctx := context.Background()
+	const mid = "1122334455667788" // a Midea device id (placeholder)
+	if err := st.Insert(ctx,
+		sensorhistory.Sample{DeviceID: mid, Metric: "device_temp", TS: 1000, Value: 23.4, N: 3},
+		sensorhistory.Sample{DeviceID: mid, Metric: "device_temp", TS: 61000, Value: 23.6, N: 4},
+		sensorhistory.Sample{DeviceID: mid, Metric: "outdoor_temp", TS: 1000, Value: 31.2, N: 3},
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	s.handleSensorMetrics(rr, httptest.NewRequest(http.MethodGet, "/a/devices/sensors/metrics?device="+mid, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Metrics []sensorMetricRow `json:"metrics"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	rec := map[string]bool{}
+	for _, m := range got.Metrics {
+		if m.Recorded {
+			rec[m.Metric] = true
+		}
+	}
+	if !rec["device_temp"] || !rec["outdoor_temp"] {
+		t.Fatalf("Midea recorded metrics not surfaced as recorded: %+v", got.Metrics)
+	}
+}

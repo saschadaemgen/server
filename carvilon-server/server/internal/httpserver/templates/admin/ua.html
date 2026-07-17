@@ -441,8 +441,17 @@
                        1073px there while the right column stayed completely
                        empty. Split across both, each side fits without
                        scrolling. Overview + Controls stay left (what you came
-                       for); the profile + credentials settings go right. */}}
+                       for); the recorded history + the profile/credentials
+                       settings go right. */}}
                   <div data-dc-side="right">
+                  {{/* Recorded history (H2): the Midea's own return-air +
+                       outdoor temperatures are recorded like any sensor, so the
+                       controller charts here too. Chart only - the averaging
+                       interval keeps the sensor default; the chart JS mounts
+                       into this host in afterSlide (the panel needs its width
+                       first). */}}
+                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>
+                  <div data-sensor-history></div>
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Profile</span><span class="dc-hr"></span></div>
                   <form class="dc-act-form" method="post" action="/a/devices/midea/profile">
                     <input type="hidden" name="id" value="{{$r.ID}}">
@@ -718,24 +727,29 @@
     function destroySensorChart() {
       if (sensorChart) { try { sensorChart.destroy(); } catch (e) {} sensorChart = null; }
     }
-    function mountSensorChart(row, rightCol) {
+    function mountSensorChart(row, rightCol, deviceID) {
       destroySensorChart();
       var hostEl = rightCol.querySelector('[data-sensor-history]');
-      // data-recid, NOT data-id: a Shelly row's id is its address, while its
-      // history is keyed on the durable MAC-derived id. Empty = the row
-      // records nothing and has no chart host either.
-      var recID = row.getAttribute('data-recid');
-      if (!hostEl || !recID || !window.CarvilonSensorChart) return;
+      // The history key defaults to data-recid, NOT data-id: a Shelly row's id
+      // is its address, while its history is keyed on the durable MAC-derived
+      // id. A caller may pass the id explicitly (Midea, whose row id already IS
+      // its durable device id). Empty = the row records nothing / no host.
+      var id = deviceID || row.getAttribute('data-recid');
+      if (!hostEl || !id || !window.CarvilonSensorChart) return;
       // title:'' - the section already has its own dc-sec-head, so the
       // component contributes only its range switcher and the charts.
-      sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: recID, title: '' });
+      sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: id, title: '' });
     }
 
     function afterSlide(row, rightCol) {
       var kind = row.getAttribute('data-kind');
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
-      if (kind === 'midea' || kind === 'midea-pending' || kind === 'midea-ignored') return;
+      if (kind === 'midea-pending' || kind === 'midea-ignored') return;
+      // An adopted Midea records its return-air + outdoor temperatures off its
+      // own poll, so it charts in the cockpit too - keyed on the row id, which
+      // for a Midea already IS the durable device id the recorder stores under.
+      if (kind === 'midea') { mountSensorChart(row, rightCol, row.getAttribute('data-id')); return; }
       if (kind === 'shelly') { mountSensorChart(row, rightCol); cockpit.afterSlide(row, rightCol); return; }
       if (kind === 'sensor') {
         mountSensorChart(row, rightCol);
