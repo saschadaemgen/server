@@ -441,17 +441,11 @@
                        1073px there while the right column stayed completely
                        empty. Split across both, each side fits without
                        scrolling. Overview + Controls stay left (what you came
-                       for); the recorded history + the profile/credentials
-                       settings go right. */}}
+                       for); the profile/credentials settings go right. The
+                       recorded-history charts are NOT here - they render in the
+                       panel's full-width region above this grid (mountCockpitChart),
+                       where they have room to read. */}}
                   <div data-dc-side="right">
-                  {{/* Recorded history (H2): the Midea's own return-air +
-                       outdoor temperatures are recorded like any sensor, so the
-                       controller charts here too. Chart only - the averaging
-                       interval keeps the sensor default; the chart JS mounts
-                       into this host in afterSlide (the panel needs its width
-                       first). */}}
-                  <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>
-                  <div data-sensor-history></div>
                   <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Profile</span><span class="dc-hr"></span></div>
                   <form class="dc-act-form" method="post" action="/a/devices/midea/profile">
                     <input type="hidden" name="id" value="{{$r.ID}}">
@@ -547,8 +541,9 @@
                    history is averaged and pruned. */}}
               {{if $r.RecID}}
               <template data-dc-rec="{{$r.Index}}">
-                <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span></div>
-                <div data-sensor-history></div>
+                {{/* Recording settings only - the interval + retention form.
+                     The recorded-history CHARTS live in the panel's full-width
+                     region (mountCockpitChart), not here in a column. */}}
                 <div class="dc-sec-head"><span class="dc-sec-dot"></span><span class="dc-sec-title">Recording</span><span class="dc-hr"></span></div>
                 <form class="dc-act-form" method="post" action="/a/devices/sensors/recording">
                   <input type="hidden" name="device" value="{{$r.RecID}}">
@@ -695,12 +690,11 @@
         cockpit.mountSettingsSkeleton(row, rightCol);
         return;
       }
-      // Sensor cockpit: the recorded HISTORY charts (H2) on top - the stored
-      // path is what this panel is for - then the recording-settings form that
-      // configures them, then the lazily-fetched readings detail in its own
-      // sub-block (so loadDetail's innerHTML swap never clobbers either).
-      // The chart host is filled in afterSlide: the panel has no width until
-      // it has slid in, and an svg sized against a zero-width column is wrong.
+      // Sensor cockpit: the right column carries the recording-settings form
+      // and the lazily-fetched readings detail (in its own sub-block, so
+      // loadDetail's innerHTML swap never clobbers the form). The recorded
+      // HISTORY charts render in the panel's full-width region above the grid
+      // (mountCockpitChart in afterSlide - the panel needs its width first).
       if (kind === 'sensor') {
         rightCol.innerHTML = '';
         // The overview is cloned into the left column by the shell; unwrap its
@@ -720,39 +714,54 @@
       splitDetailSides(rightCol);
     }
 
-    // The mounted history charts of the open panel, so switching rows or
-    // closing the panel aborts their in-flight fetches instead of leaving them
-    // to paint into a detached column.
+    // The recorded-history charts of the open panel, so switching rows or
+    // closing the panel aborts their in-flight fetches and clears the shared
+    // full-width chart region instead of leaving a stale chart behind.
     var sensorChart = null;
+    function chartsRegion() { return document.querySelector('.dc-panel [data-dc-charts]'); }
     function destroySensorChart() {
       if (sensorChart) { try { sensorChart.destroy(); } catch (e) {} sensorChart = null; }
+      var reg = chartsRegion();
+      if (reg) { reg.innerHTML = ''; reg.hidden = true; }
     }
-    function mountSensorChart(row, rightCol, deviceID) {
+    // recordingId returns the row's key in the sensor-history keyspace, or ''
+    // when the row records nothing. It is NOT always data-id: a Shelly row's id
+    // is its address, so it carries data-recid (the durable MAC-derived id); a
+    // Midea's row id already IS its durable device id, so it uses data-id.
+    function recordingId(row) {
+      return row.getAttribute('data-recid') ||
+        (row.getAttribute('data-kind') === 'midea' ? row.getAttribute('data-id') : '');
+    }
+    // mountCockpitChart puts the history chart in the panel's FULL-WIDTH region
+    // above the info/controls grid - charts need width to read, and the narrow
+    // right column is far too small. The component flows its per-metric charts
+    // into as many columns as that width affords.
+    function mountCockpitChart(row) {
       destroySensorChart();
-      var hostEl = rightCol.querySelector('[data-sensor-history]');
-      // The history key defaults to data-recid, NOT data-id: a Shelly row's id
-      // is its address, while its history is keyed on the durable MAC-derived
-      // id. A caller may pass the id explicitly (Midea, whose row id already IS
-      // its durable device id). Empty = the row records nothing / no host.
-      var id = deviceID || row.getAttribute('data-recid');
-      if (!hostEl || !id || !window.CarvilonSensorChart) return;
-      // title:'' - the section already has its own dc-sec-head, so the
-      // component contributes only its range switcher and the charts.
+      var id = recordingId(row);
+      var reg = chartsRegion();
+      if (!id || !reg || !window.CarvilonSensorChart) return;
+      reg.hidden = false;
+      var head = document.createElement('div');
+      head.className = 'dc-sec-head';
+      head.innerHTML = '<span class="dc-sec-dot"></span><span class="dc-sec-title">History</span><span class="dc-hr"></span>';
+      reg.appendChild(head);
+      var hostEl = document.createElement('div');
+      reg.appendChild(hostEl);
+      // title:'' - the region already has its own dc-sec-head, so the component
+      // contributes only its range switcher and the charts.
       sensorChart = window.CarvilonSensorChart.mount(hostEl, { device: id, title: '' });
     }
 
     function afterSlide(row, rightCol) {
       var kind = row.getAttribute('data-kind');
+      // Any recording device charts in the full-width region above the grid.
+      mountCockpitChart(row);
       if (kind === 'rpi-reader') return;
       if (kind === 'shelly-pending' || kind === 'shelly-ignored') return;
-      if (kind === 'midea-pending' || kind === 'midea-ignored') return;
-      // An adopted Midea records its return-air + outdoor temperatures off its
-      // own poll, so it charts in the cockpit too - keyed on the row id, which
-      // for a Midea already IS the durable device id the recorder stores under.
-      if (kind === 'midea') { mountSensorChart(row, rightCol, row.getAttribute('data-id')); return; }
-      if (kind === 'shelly') { mountSensorChart(row, rightCol); cockpit.afterSlide(row, rightCol); return; }
+      if (kind === 'midea-pending' || kind === 'midea-ignored' || kind === 'midea') return;
+      if (kind === 'shelly') { cockpit.afterSlide(row, rightCol); return; }
       if (kind === 'sensor') {
-        mountSensorChart(row, rightCol);
         loadDetail(kind, row.getAttribute('data-id'), rightCol.querySelector('[data-sensor-detail]') || rightCol, row);
         return;
       }

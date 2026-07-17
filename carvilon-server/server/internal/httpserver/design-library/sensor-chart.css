@@ -131,9 +131,20 @@
 
 /* ---- one figure per metric ---- */
 
-.cvchart-body { display: flex; flex-direction: column; gap: 12px; }
+/* The figures flow into as many columns as the width affords: a single column
+   in the editor's narrow inspector, two or more when mounted in the cockpit's
+   full-width chart area, so each chart gets real width instead of being
+   squeezed into a sidebar. min(320px,100%) keeps a narrow container to one
+   column instead of overflowing it. Each figure's SVG is measured and drawn to
+   its own cell width (see the component's per-figure redraw). */
+.cvchart-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 14px 22px;
+  align-items: start;
+}
 
-.cvchart-fig { margin: 0; }
+.cvchart-fig { margin: 0; min-width: 0; }
 
 .cvchart-cap {
   display: flex;

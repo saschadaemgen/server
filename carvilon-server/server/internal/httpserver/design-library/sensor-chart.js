@@ -467,9 +467,16 @@
       return body.clientWidth || host.clientWidth || 320;
     }
 
+    // Each figure is drawn to its OWN cell width, not the shared body width:
+    // the body is a responsive grid, so a figure in a two-column layout is
+    // half the body wide. Measuring the body would size every SVG to full
+    // width and overflow its cell.
+    function figWidth(f) {
+      return Math.round(f.plot.getBoundingClientRect().width) || widthNow();
+    }
+
     function redrawAll() {
-      var w = widthNow();
-      figs.forEach(function (f) { if (f.samples) draw(f, w); });
+      figs.forEach(function (f) { if (f.samples) draw(f, figWidth(f)); });
     }
 
     function load() {
